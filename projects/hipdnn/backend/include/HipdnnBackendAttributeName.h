@@ -49,6 +49,9 @@
  * - 2500-2599: Matmul operation attributes
  * - 2600-2699: SDPA forward propagation operation attributes
  * - 2700-2799: Layernorm operation attributes
+ * - 2800-2899: Block scale quantize operation attributes
+ * - 2807-2899: Block scale dequantize operation attributes
+ * - 2900-2913: Batchnorm training forward operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -155,10 +158,10 @@ typedef enum
      */
 
     /** @brief Type of the knob */
-    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE = 500,
+    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT = 500,
 
     /** @brief Selected value for the knob */
-    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE = 501,
+    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT = 501,
 
     /** @} */
 
@@ -191,6 +194,9 @@ typedef enum
 
     /** @brief Preferred engine ID for execution plan selection (int64_t, extension) */
     HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT = 607,
+
+    /** @brief Name of the operation graph (HIPDNN_TYPE_CHAR, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT = 608,
 
     /** @} */
 
@@ -235,16 +241,45 @@ typedef enum
      */
 
     /** @brief Type identifier of the knob */
-    HIPDNN_ATTR_KNOB_INFO_TYPE = 900,
+    HIPDNN_ATTR_KNOB_INFO_TYPE_EXT = 900,
 
     /** @brief Maximum allowed value for the knob */
-    HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE = 901,
+    HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT = 901,
 
     /** @brief Minimum allowed value for the knob */
-    HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE = 902,
+    HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT = 902,
 
     /** @brief Step size for valid knob values */
-    HIPDNN_ATTR_KNOB_INFO_STRIDE = 903,
+    HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT = 903,
+
+    /** @brief Human-readable description of the knob */
+    HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT = 904,
+
+    /** @brief Default value for the knob (INT64, DOUBLE, or CHAR) */
+    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT = 905,
+
+    /** @brief Whether this knob is deprecated */
+    HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT = 906,
+
+    /** @brief Explicit list of valid integer values (INT64 array) */
+    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT = 907,
+
+    /** @brief Explicit list of valid string values (CHAR, flat null-separated buffer) */
+    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT = 908,
+
+    /** @brief Maximum string length for string knobs (INT32) */
+    HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT = 909,
+
+    /**
+     * @brief Type discriminator for the default value attribute (read-only, INT64)
+     *
+     * Returns the hipdnnBackendAttributeType_t value that should be used when
+     * calling getAttribute() for HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT.
+     * Possible values: HIPDNN_TYPE_INT64, HIPDNN_TYPE_DOUBLE, HIPDNN_TYPE_CHAR.
+     * This eliminates the need to probe multiple types to discover the default
+     * value type after reading a KnobDescriptor.
+     */
+    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT = 910,
 
     /** @} */
 
@@ -797,6 +832,110 @@ typedef enum
 
     /** @brief Math precision (compute data type) for layernorm */
     HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT = 2708,
+    /** @} */
+
+    /**
+     * @name Block Scale Quantize Operation Attributes (2800-2899)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor (X) for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT = 2800,
+
+    /** @brief Output tensor (Y) for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT = 2801,
+
+    /** @brief Scale tensor for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT = 2802,
+
+    /** @brief Block size parameter for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT = 2803,
+
+    /** @brief Axis parameter for block scale quantize (optional) */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT = 2804,
+
+    /** @brief Transpose parameter for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT = 2805,
+
+    /** @brief Math precision for block scale quantize */
+    HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT = 2806,
+
+    /** @} */
+
+    /**
+     * @name BlockScaleDequantize Operation Attributes (2807-2899)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor for block scale dequantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT = 2807,
+
+    /** @brief Scale tensor for block scale dequantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_EXT = 2808,
+
+    /** @brief Output tensor for block scale dequantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_Y_EXT = 2809,
+
+    /** @brief Block sizes for each dimension */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT = 2810,
+
+    /** @brief Whether scale is negative */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT = 2811,
+
+    /** @brief Math precision for block scale dequantize */
+    HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT = 2812,
+
+    /** @} */
+
+    /**
+     * @name Batchnorm Training Forward Operation Attributes (2900-2913)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor (X) for batchnorm training forward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_X_EXT = 2900,
+
+    /** @brief Scale tensor for batchnorm training forward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_SCALE_EXT = 2901,
+
+    /** @brief Bias tensor for batchnorm training forward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BIAS_EXT = 2902,
+
+    /** @brief Epsilon tensor for batchnorm training forward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_EPSILON_EXT = 2903,
+
+    /** @brief Output tensor (Y) for batchnorm training forward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_Y_EXT = 2904,
+
+    /** @brief Previous running mean tensor (optional) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_PREV_RUNNING_MEAN_EXT = 2905,
+
+    /** @brief Previous running variance tensor (optional) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_PREV_RUNNING_VARIANCE_EXT = 2906,
+
+    /** @brief Momentum tensor (optional, required if running stats provided) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_MOMENTUM_EXT = 2907,
+
+    /** @brief Batch mean output tensor (optional) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_MEAN_EXT = 2908,
+
+    /** @brief Batch inverse variance output tensor (optional) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INV_VARIANCE_EXT = 2909,
+
+    /** @brief Next running mean output tensor (optional) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_NEXT_RUNNING_MEAN_EXT = 2910,
+
+    /** @brief Next running variance output tensor (optional) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_NEXT_RUNNING_VARIANCE_EXT = 2911,
+
+    /** @brief Math precision (compute data type) for batchnorm training forward */
+    HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT = 2912,
+
+    /** @brief Peer statistics tensor array for multi-GPU batchnorm training forward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT = 2913,
 
     /** @} */
 
@@ -821,6 +960,24 @@ typedef enum
      * Type: HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT
      */
     HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT = 60100,
+
+    /**
+     * @brief Operation type of an operation descriptor (read-only extension)
+     *
+     * Returns the hipdnnOperationType_t of an operation descriptor, enabling
+     * type-based dispatch without trial-and-error probing.
+     * Type: HIPDNN_TYPE_OPERATION_TYPE_EXT
+     */
+    HIPDNN_ATTR_OPERATION_TYPE_EXT = 60200,
+
+    /**
+     * @brief Name of an operation descriptor (extension)
+     *
+     * Gets or sets a human-readable name for an operation node, useful for
+     * debugging, logging, and round-tripping through serialized graphs.
+     * Type: HIPDNN_TYPE_CHAR
+     */
+    HIPDNN_ATTR_OPERATION_NAME_EXT = 60300,
 
     /** @} */
 

@@ -8,11 +8,13 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/BlockScaleQuantizePacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class BlockScaleQuantizeNode : public BaseNode<BlockScaleQuantizeNode>
+class BlockScaleQuantizeNode
+    : public BaseNode<BlockScaleQuantizeNode, NodeType::BLOCK_SCALE_QUANTIZE>
 {
 public:
     BlockScaleQuantizeAttributes attributes;
@@ -58,7 +60,7 @@ public:
         {
             HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 1, "Input tensor (x)"));
 
-            auto const& xDims = x->get_dim();
+            const auto& xDims = x->get_dim();
 
             // Validate axis is within tensor rank
             auto axis = attributes.get_axis();
@@ -77,7 +79,7 @@ public:
             }
 
             // Validate divisibility of the target dimension by block_size
-            size_t targetAxis
+            const size_t targetAxis
                 = axis.has_value() ? static_cast<size_t>(axis.value()) : xDims.size() - 1;
             if(targetAxis < xDims.size() && xDims[targetAxis] > 0)
             {
@@ -158,7 +160,7 @@ public:
             if(blockSize.has_value() && blockSize.value() > 0)
             {
                 auto scaleDims = x->get_dim();
-                size_t scaleAxis
+                const size_t scaleAxis
                     = axis.has_value() ? static_cast<size_t>(axis.value()) : scaleDims.size() - 1;
 
                 if(scaleAxis < scaleDims.size())
@@ -200,6 +202,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createBlockScaleQuantizeOperation(attributes, tensorDescs, operations);
     }
 };
 } // namespace hipdnn_frontend::graph

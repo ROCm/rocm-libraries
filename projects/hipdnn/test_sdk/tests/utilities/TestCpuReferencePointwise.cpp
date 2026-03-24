@@ -8,12 +8,14 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::types;
+using hipdnn_test_sdk::detail::safeTestTypeCast;
 
 namespace
 {
@@ -71,14 +73,14 @@ protected:
         Tensor<Input2Type> input2({1, 3, 2, 2});
         Tensor<OutputType> output({1, 3, 2, 2});
 
-        input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_1));
-        input2.fillWithValue(static_cast<Input2Type>(TEST_VALUE_2));
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1));
+        input2.fillWithValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2));
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
         Tensor<OutputType> expected({1, 3, 2, 2});
-        expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
+        expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_3));
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -91,14 +93,14 @@ protected:
         Tensor<Input2Type> input2({1, 3, 2, 2});
         Tensor<OutputType> output({1, 3, 2, 2});
 
-        input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_5));
-        input2.fillWithValue(static_cast<Input2Type>(TEST_VALUE_2));
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5));
+        input2.fillWithValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2));
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
 
         Tensor<OutputType> expected({1, 3, 2, 2});
-        expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
+        expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_3));
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -116,55 +118,56 @@ protected:
 
         if constexpr(std::is_integral_v<Input1Type> || std::is_integral_v<Input2Type>)
         {
-            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
-            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
-            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 0);
-            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_4), 0, 0, 1, 1);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 0);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_4), 0, 0, 1, 1);
 
-            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_4), 0, 0, 0, 0);
-            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_3), 0, 0, 0, 1);
-            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_2), 0, 0, 1, 0);
-            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_1), 0, 0, 1, 1);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_4), 0, 0, 0, 0);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_3), 0, 0, 0, 1);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_2), 0, 0, 1, 0);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_1), 0, 0, 1, 1);
 
             expected.setHostValue(
-                static_cast<OutputType>(TEST_VALUE_1 + (-TEST_VALUE_4)), 0, 0, 0, 0);
+                safeTestTypeCast<OutputType>(TEST_VALUE_1 + (-TEST_VALUE_4)), 0, 0, 0, 0);
             expected.setHostValue(
-                static_cast<OutputType>(TEST_VALUE_2 + (-TEST_VALUE_3)), 0, 0, 0, 1);
+                safeTestTypeCast<OutputType>(TEST_VALUE_2 + (-TEST_VALUE_3)), 0, 0, 0, 1);
             expected.setHostValue(
-                static_cast<OutputType>(TEST_VALUE_3 + (-TEST_VALUE_2)), 0, 0, 1, 0);
+                safeTestTypeCast<OutputType>(TEST_VALUE_3 + (-TEST_VALUE_2)), 0, 0, 1, 0);
             expected.setHostValue(
-                static_cast<OutputType>(TEST_VALUE_4 + (-TEST_VALUE_1)), 0, 0, 1, 1);
+                safeTestTypeCast<OutputType>(TEST_VALUE_4 + (-TEST_VALUE_1)), 0, 0, 1, 1);
         }
         else
         {
-            input1.setHostValue(static_cast<Input1Type>(PI), 0, 0, 0, 0); // π
-            input1.setHostValue(static_cast<Input1Type>(E), 0, 0, 0, 1); // e
-            input1.setHostValue(static_cast<Input1Type>(SQRT_2), 0, 0, 1, 0); // √2
+            input1.setHostValue(safeTestTypeCast<Input1Type>(PI), 0, 0, 0, 0); // π
+            input1.setHostValue(safeTestTypeCast<Input1Type>(E), 0, 0, 0, 1); // e
+            input1.setHostValue(safeTestTypeCast<Input1Type>(SQRT_2), 0, 0, 1, 0); // √2
             input1.setHostValue(
-                static_cast<Input1Type>(GOLDEN_RATIO), 0, 0, 1, 1); // φ (golden ratio)
+                safeTestTypeCast<Input1Type>(GOLDEN_RATIO), 0, 0, 1, 1); // φ (golden ratio)
 
-            input2.setHostValue(static_cast<Input2Type>(LN_2), 0, 0, 0, 0); // ln(2)
+            input2.setHostValue(safeTestTypeCast<Input2Type>(LN_2), 0, 0, 0, 0); // ln(2)
             input2.setHostValue(
-                static_cast<Input2Type>(hipdnn_data_sdk::types::sin(1.0f)), 0, 0, 0, 1);
+                safeTestTypeCast<Input2Type>(hipdnn_data_sdk::types::sin(1.0f)), 0, 0, 0, 1);
             input2.setHostValue(
-                static_cast<Input2Type>(hipdnn_data_sdk::types::cos(1.0f)), 0, 0, 1, 0);
+                safeTestTypeCast<Input2Type>(hipdnn_data_sdk::types::cos(1.0f)), 0, 0, 1, 0);
             input2.setHostValue(
-                static_cast<Input2Type>(hipdnn_data_sdk::types::tan(1.0f)), 0, 0, 1, 1);
+                safeTestTypeCast<Input2Type>(hipdnn_data_sdk::types::tan(1.0f)), 0, 0, 1, 1);
 
-            expected.setHostValue(static_cast<OutputType>(PI + LN_2), 0, 0, 0, 0); // π + ln(2)
-            expected.setHostValue(static_cast<OutputType>(E + hipdnn_data_sdk::types::sin(1.0f)),
-                                  0,
-                                  0,
-                                  0,
-                                  1); // e + sin(1)
+            expected.setHostValue(safeTestTypeCast<OutputType>(PI + LN_2), 0, 0, 0, 0); // π + ln(2)
             expected.setHostValue(
-                static_cast<OutputType>(SQRT_2 + hipdnn_data_sdk::types::cos(1.0f)),
+                safeTestTypeCast<OutputType>(E + hipdnn_data_sdk::types::sin(1.0f)),
+                0,
+                0,
+                0,
+                1); // e + sin(1)
+            expected.setHostValue(
+                safeTestTypeCast<OutputType>(SQRT_2 + hipdnn_data_sdk::types::cos(1.0f)),
                 0,
                 0,
                 1,
                 0); // √2 + cos(1)
             expected.setHostValue(
-                static_cast<OutputType>(GOLDEN_RATIO + hipdnn_data_sdk::types::tan(1.0f)),
+                safeTestTypeCast<OutputType>(GOLDEN_RATIO + hipdnn_data_sdk::types::tan(1.0f)),
                 0,
                 0,
                 1,
@@ -190,50 +193,51 @@ protected:
 
         if constexpr(std::is_integral_v<Input1Type> || std::is_integral_v<Input2Type>)
         {
-            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
-            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
-            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 0);
-            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_4), 0, 0, 1, 1);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 0);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_4), 0, 0, 1, 1);
 
-            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_4), 0, 0, 0, 0);
-            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_3), 0, 0, 0, 1);
-            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_2), 0, 0, 1, 0);
-            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_1), 0, 0, 1, 1);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_4), 0, 0, 0, 0);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_3), 0, 0, 0, 1);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_2), 0, 0, 1, 0);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(-TEST_VALUE_1), 0, 0, 1, 1);
 
             expected.setHostValue(
-                static_cast<OutputType>(TEST_VALUE_1 - (-TEST_VALUE_4)), 0, 0, 0, 0);
+                safeTestTypeCast<OutputType>(TEST_VALUE_1 - (-TEST_VALUE_4)), 0, 0, 0, 0);
             expected.setHostValue(
-                static_cast<OutputType>(TEST_VALUE_2 - (-TEST_VALUE_3)), 0, 0, 0, 1);
+                safeTestTypeCast<OutputType>(TEST_VALUE_2 - (-TEST_VALUE_3)), 0, 0, 0, 1);
             expected.setHostValue(
-                static_cast<OutputType>(TEST_VALUE_3 - (-TEST_VALUE_2)), 0, 0, 1, 0);
+                safeTestTypeCast<OutputType>(TEST_VALUE_3 - (-TEST_VALUE_2)), 0, 0, 1, 0);
             expected.setHostValue(
-                static_cast<OutputType>(TEST_VALUE_4 - (-TEST_VALUE_1)), 0, 0, 1, 1);
+                safeTestTypeCast<OutputType>(TEST_VALUE_4 - (-TEST_VALUE_1)), 0, 0, 1, 1);
         }
         else
         {
-            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2 * PI), 0, 0, 0, 0); // 2π
-            input1.setHostValue(static_cast<Input1Type>(E * E), 0, 0, 0, 1); // e²
-            input1.setHostValue(static_cast<Input1Type>(SQRT_5), 0, 0, 1, 0); // √5
+            input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2 * PI), 0, 0, 0, 0); // 2π
+            input1.setHostValue(safeTestTypeCast<Input1Type>(E * E), 0, 0, 0, 1); // e²
+            input1.setHostValue(safeTestTypeCast<Input1Type>(SQRT_5), 0, 0, 1, 0); // √5
             input1.setHostValue(
-                static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // Simple test value
+                safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // Simple test value
 
-            input2.setHostValue(static_cast<Input2Type>(PI / TEST_VALUE_2), 0, 0, 0, 0); // π/2
-            input2.setHostValue(static_cast<Input2Type>(E), 0, 0, 0, 1); // e
-            input2.setHostValue(static_cast<Input2Type>(SQRT_3), 0, 0, 1, 0); // √3
+            input2.setHostValue(safeTestTypeCast<Input2Type>(PI / TEST_VALUE_2), 0, 0, 0, 0); // π/2
+            input2.setHostValue(safeTestTypeCast<Input2Type>(E), 0, 0, 0, 1); // e
+            input2.setHostValue(safeTestTypeCast<Input2Type>(SQRT_3), 0, 0, 1, 0); // √3
             input2.setHostValue(
-                static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // Simple test value
+                safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // Simple test value
 
             expected.setHostValue(
-                static_cast<OutputType>((TEST_VALUE_2 * PI) - (PI / TEST_VALUE_2)),
+                safeTestTypeCast<OutputType>((TEST_VALUE_2 * PI) - (PI / TEST_VALUE_2)),
                 0,
                 0,
                 0,
                 0); // 2π - π/2 = 3π/2
-            expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
+            expected.setHostValue(safeTestTypeCast<OutputType>((E * E) - E), 0, 0, 0,
                                   1); // e² - e
-            expected.setHostValue(static_cast<OutputType>(SQRT_5 - SQRT_3), 0, 0, 1, 0); // √5 - √3
             expected.setHostValue(
-                static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
+                safeTestTypeCast<OutputType>(SQRT_5 - SQRT_3), 0, 0, 1, 0); // √5 - √3
+            expected.setHostValue(
+                safeTestTypeCast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
         }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
@@ -250,14 +254,14 @@ protected:
         Tensor<Input2Type> input2({2, 3, 10});
         Tensor<OutputType> output({2, 3, 10});
 
-        input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_2_5));
-        input2.fillWithValue(static_cast<Input2Type>(TEST_VALUE_1_5));
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5));
+        input2.fillWithValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5));
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
         Tensor<OutputType> expected({2, 3, 10});
-        expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_4));
+        expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_4));
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -274,17 +278,18 @@ protected:
 
         if constexpr(std::is_integral_v<Input1Type> || std::is_integral_v<Input2Type>)
         {
-            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 0);
-            input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_5), 0, 0, 0, 0);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 0);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_5), 0, 0, 0, 0);
 
-            expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_5), 0, 0, 0, 0);
+            expected.setHostValue(
+                safeTestTypeCast<OutputType>(TEST_VALUE_2 - TEST_VALUE_5), 0, 0, 0, 0);
         }
         else
         {
-            input1.setHostValue(static_cast<Input1Type>(E * E), 0, 0, 0, 0); // e²
-            input2.setHostValue(static_cast<Input2Type>(E), 0, 0, 0, 0); // e
+            input1.setHostValue(safeTestTypeCast<Input1Type>(E * E), 0, 0, 0, 0); // e²
+            input2.setHostValue(safeTestTypeCast<Input2Type>(E), 0, 0, 0, 0); // e
 
-            expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
+            expected.setHostValue(safeTestTypeCast<OutputType>((E * E) - E), 0, 0, 0,
                                   0); // e² - e
         }
 
@@ -302,15 +307,15 @@ protected:
         Tensor<Input2Type> input2({1, 1, 1, 1});
         Tensor<OutputType> output({1, 1, 1, 1});
 
-        input1.setHostValue(static_cast<Input1Type>(PRECISION_TEST_A), 0, 0, 0, 0);
-        input2.setHostValue(static_cast<Input2Type>(PRECISION_TEST_B), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(PRECISION_TEST_A), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(PRECISION_TEST_B), 0, 0, 0, 0);
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
         Tensor<OutputType> expected({1, 1, 1, 1});
         expected.setHostValue(
-            static_cast<OutputType>(PRECISION_TEST_A + PRECISION_TEST_B), 0, 0, 0, 0);
+            safeTestTypeCast<OutputType>(PRECISION_TEST_A + PRECISION_TEST_B), 0, 0, 0, 0);
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -325,8 +330,8 @@ protected:
 
         for(int i = 0; i < 5; ++i)
         {
-            input1.setHostValue(static_cast<Input1Type>(static_cast<float>(i + 1)), i);
-            input2.setHostValue(static_cast<Input2Type>(static_cast<float>(i * 2)), i);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(static_cast<float>(i + 1)), i);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>(i * 2)), i);
         }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
@@ -334,11 +339,11 @@ protected:
 
         // Create expected tensor: [1,2,3,4,5] + [0,2,4,6,8] = [1,4,7,10,13]
         Tensor<OutputType> expected({5});
-        expected.setHostValue(static_cast<OutputType>(static_cast<float>(1)), 0);
-        expected.setHostValue(static_cast<OutputType>(static_cast<float>(4)), 1);
-        expected.setHostValue(static_cast<OutputType>(static_cast<float>(7)), 2);
-        expected.setHostValue(static_cast<OutputType>(static_cast<float>(10)), 3);
-        expected.setHostValue(static_cast<OutputType>(static_cast<float>(13)), 4);
+        expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(1)), 0);
+        expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(4)), 1);
+        expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(7)), 2);
+        expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(10)), 3);
+        expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(13)), 4);
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -357,14 +362,14 @@ protected:
             for(int n = 0; n < 4; ++n)
             {
                 input1.setHostValue(
-                    static_cast<Input1Type>(static_cast<float>((m * 10) + n)), m, n);
+                    safeTestTypeCast<Input1Type>(static_cast<float>((m * 10) + n)), m, n);
             }
         }
 
         // Fill input2 with pattern: [10, 20, 30, 40]
         for(int n = 0; n < 4; ++n)
         {
-            input2.setHostValue(static_cast<Input2Type>(static_cast<float>((n + 1) * 10)), n);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>((n + 1) * 10)), n);
         }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
@@ -378,7 +383,7 @@ protected:
             {
                 auto input1Val = static_cast<float>((m * 10) + n);
                 auto input2Val = static_cast<float>((n + 1) * 10);
-                expected.setHostValue(static_cast<OutputType>(input1Val + input2Val), m, n);
+                expected.setHostValue(safeTestTypeCast<OutputType>(input1Val + input2Val), m, n);
             }
         }
 
@@ -393,11 +398,11 @@ protected:
         Tensor<Input2Type> input2({1, 3, 1}); // [1,3,1] - broadcasts to [2,3,4]
         Tensor<OutputType> output({2, 3, 4}); // Output: [2,3,4]
 
-        input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_5));
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5));
 
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 0); // Channel 0
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2), 0, 1, 0); // Channel 1
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 2, 0); // Channel 2
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0); // Channel 0
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 1, 0); // Channel 1
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 2, 0); // Channel 2
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
@@ -410,9 +415,10 @@ protected:
             {
                 for(int h = 0; h < 4; ++h)
                 {
-                    float input1Val = TEST_VALUE_5;
+                    const float input1Val = TEST_VALUE_5;
                     auto input2Val = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
-                    expected.setHostValue(static_cast<OutputType>(input1Val - input2Val), n, c, h);
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(input1Val - input2Val), n, c, h);
                 }
             }
         }
@@ -429,11 +435,11 @@ protected:
             {3, 1}); // [3,1] - broadcasts to [2,3,4] (implicit leading dimension)
         Tensor<OutputType> output({2, 3, 4}); // Output: [2,3,4]
 
-        input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_5));
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5));
 
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_1), 0, 0); // Channel 0
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2), 1, 0); // Channel 1
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 2, 0); // Channel 2
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0); // Channel 0
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 1, 0); // Channel 1
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 2, 0); // Channel 2
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
@@ -446,9 +452,10 @@ protected:
             {
                 for(int h = 0; h < 4; ++h)
                 {
-                    float input1Val = TEST_VALUE_5;
+                    const float input1Val = TEST_VALUE_5;
                     auto input2Val = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
-                    expected.setHostValue(static_cast<OutputType>(input1Val - input2Val), n, c, h);
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(input1Val - input2Val), n, c, h);
                 }
             }
         }
@@ -465,16 +472,16 @@ protected:
         Tensor<Input2Type> input2({1, 3, 1, 1}); // [1,C,1,1] = [1,3,1,1]
         Tensor<OutputType> output({2, 3, 2, 2}); // Output: [2,3,2,2]
 
-        input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_1));
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1));
 
         input2.setHostValue(
-            static_cast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0); // Channel 0
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
+            safeTestTypeCast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0); // Channel 0
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
                             0,
                             1,
                             0,
                             0); // Channel 1
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
                             0,
                             2,
                             0,
@@ -493,12 +500,12 @@ protected:
                 {
                     for(int w = 0; w < 2; ++w)
                     {
-                        float input1Val = TEST_VALUE_1;
+                        const float input1Val = TEST_VALUE_1;
                         auto input2Val = static_cast<float>(
                             (static_cast<float>(c) + 1.0f)
                             * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
                         expected.setHostValue(
-                            static_cast<OutputType>(input1Val + input2Val), n, c, h, w);
+                            safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, h, w);
                     }
                 }
             }
@@ -521,7 +528,7 @@ protected:
             for(int h = 0; h < 3; ++h)
             {
                 input1.setHostValue(
-                    static_cast<Input1Type>(static_cast<float>((n * 10) + h)), n, 0, h, 0);
+                    safeTestTypeCast<Input1Type>(static_cast<float>((n * 10) + h)), n, 0, h, 0);
             }
         }
 
@@ -530,7 +537,7 @@ protected:
             for(int w = 0; w < 4; ++w)
             {
                 input2.setHostValue(
-                    static_cast<Input2Type>(static_cast<float>((c * 100) + w)), 0, c, 0, w);
+                    safeTestTypeCast<Input2Type>(static_cast<float>((c * 100) + w)), 0, c, 0, w);
             }
         }
 
@@ -552,7 +559,7 @@ protected:
                         // input2[0,c,0,w] broadcasts to input2[n,c,h,w]
                         auto input2Val = static_cast<float>((c * 100) + w);
                         expected.setHostValue(
-                            static_cast<OutputType>(input1Val + input2Val), n, c, h, w);
+                            safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, h, w);
                     }
                 }
             }
@@ -565,30 +572,31 @@ protected:
 
     void testBroadcast5D()
     {
-        std::vector<int64_t> dims1 = {2, 3, 2, 2, 2}; // [N,C,D,H,W] = [2,3,2,2,2]
-        std::vector<int64_t> strides1 = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
+        const std::vector<int64_t> dims1 = {2, 3, 2, 2, 2}; // [N,C,D,H,W] = [2,3,2,2,2]
+        const std::vector<int64_t> strides1 = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
         Tensor<Input1Type> input1(dims1, strides1);
 
-        std::vector<int64_t> dims2 = {1, 3, 1, 1, 1}; // [1,C,1,1,1] = [1,3,1,1,1]
-        std::vector<int64_t> strides2 = {3, 1, 1, 1, 1}; // Row-major strides for [1,3,1,1,1]
+        const std::vector<int64_t> dims2 = {1, 3, 1, 1, 1}; // [1,C,1,1,1] = [1,3,1,1,1]
+        const std::vector<int64_t> strides2 = {3, 1, 1, 1, 1}; // Row-major strides for [1,3,1,1,1]
         Tensor<Input2Type> input2(dims2, strides2);
 
-        std::vector<int64_t> outputDims = {2, 3, 2, 2, 2}; // Output: [2,3,2,2,2]
-        std::vector<int64_t> outputStrides = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
+        const std::vector<int64_t> outputDims = {2, 3, 2, 2, 2}; // Output: [2,3,2,2,2]
+        const std::vector<int64_t> outputStrides
+            = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
         Tensor<OutputType> output(outputDims, outputStrides);
 
-        input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_2));
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2));
 
         // Set channel-specific values in input2
         input2.setHostValue(
-            static_cast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0, 0); // Channel 0
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
+            safeTestTypeCast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0, 0); // Channel 0
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
                             0,
                             1,
                             0,
                             0,
                             0); // Channel 1
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
                             0,
                             2,
                             0,
@@ -615,7 +623,7 @@ protected:
                                 (static_cast<float>(c) + 1.0f)
                                 * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
                             expected.setHostValue(
-                                static_cast<OutputType>(input1Val + input2Val), n, c, d, h, w);
+                                safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, d, h, w);
                         }
                     }
                 }
@@ -635,38 +643,42 @@ protected:
         Tensor<OutputType> output({1, 3, 2, 2});
 
         // Fill with mix of positive and negative values
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 1); // -1.0
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 1, 0, 0); // 0.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1); // 5.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0); // -5.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 1); // 2.5
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1_5), 0, 2, 0, 0); // -1.5
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_4), 0, 2, 0, 1); // 4.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_3), 0, 2, 1, 0); // -3.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 2, 1, 1); // 1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 1); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 1, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1); // 5.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0); // -5.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 1); // 2.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1_5), 0, 2, 0, 0); // -1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_4), 0, 2, 0, 1); // 4.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 2, 1, 0); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 2, 1, 1); // 1.5
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
             PointwiseMode::RELU_FWD, output, input);
 
         // Create expected tensor: ReLU(x) = max(0, x)
         Tensor<OutputType> expected({1, 3, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1), 0, 0, 0, 0); // max(0, 1) = 1
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 0, 0, 1); // max(0, -2) = 0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_3), 0, 0, 1, 0); // max(0, 3) = 3
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 0, 1, 1); // max(0, -1) = 0
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 1, 0, 0); // max(0, 0) = 0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_5), 0, 1, 0, 1); // max(0, 5) = 5
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 1, 1, 0); // max(0, -5) = 0
         expected.setHostValue(
-            static_cast<OutputType>(TEST_VALUE_2_5), 0, 1, 1, 1); // max(0, 2.5) = 2.5
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 2, 0, 0); // max(0, -1.5) = 0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_4), 0, 2, 0, 1); // max(0, 4) = 4
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 2, 1, 0); // max(0, -3) = 0
+            safeTestTypeCast<OutputType>(TEST_VALUE_1), 0, 0, 0, 0); // max(0, 1) = 1
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 0, 0, 0, 1); // max(0, -2) = 0
         expected.setHostValue(
-            static_cast<OutputType>(TEST_VALUE_1_5), 0, 2, 1, 1); // max(0, 1.5) = 1.5
+            safeTestTypeCast<OutputType>(TEST_VALUE_3), 0, 0, 1, 0); // max(0, 3) = 3
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 0, 0, 1, 1); // max(0, -1) = 0
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 0, 1, 0, 0); // max(0, 0) = 0
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_5), 0, 1, 0, 1); // max(0, 5) = 5
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 0, 1, 1, 0); // max(0, -5) = 0
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_2_5), 0, 1, 1, 1); // max(0, 2.5) = 2.5
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 0, 2, 0, 0); // max(0, -1.5) = 0
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_4), 0, 2, 0, 1); // max(0, 4) = 4
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 0, 2, 1, 0); // max(0, -3) = 0
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_1_5), 0, 2, 1, 1); // max(0, 1.5) = 1.5
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -680,66 +692,66 @@ protected:
         Tensor<OutputType> output({1, 2, 2, 2}); // Downstream gradient (dx)
 
         // Fill input with mix of positive and negative values
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 1, 0); // 0.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 1); // 3.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 1, 0, 0); // -1.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2_5), 0, 1, 0, 1); // 2.5
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0); // -5.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 1, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 1); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 1, 0, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 1, 0, 1); // 2.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0); // -5.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
 
         // Fill upstream gradient with test values
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::RELU_BWD, output, input, upstreamGrad);
 
         // Create expected tensor: dx = dy * (x > 0 ? 1 : 0)
         Tensor<OutputType> expected({1, 2, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2 * 1.0f),
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_2 * 1.0f),
                               0,
                               0,
                               0,
                               0); // dy=2.0, x=1.0>0: dx=2.0*1=2.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1_5 * 0.0f),
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_1_5 * 0.0f),
                               0,
                               0,
                               0,
                               1); // dy=1.5, x=-2.0<0: dx=1.5*0=0.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_3 * 0.0f),
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_3 * 0.0f),
                               0,
                               0,
                               1,
                               0); // dy=3.0, x=0.0<=0: dx=3.0*0=0.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1 * 1.0f),
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_1 * 1.0f),
                               0,
                               0,
                               1,
                               1); // dy=1.0, x=3.0>0: dx=1.0*1=1.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2_5 * 0.0f),
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_2_5 * 0.0f),
                               0,
                               1,
                               0,
                               0); // dy=2.5, x=-1.0<0: dx=2.5*0=0.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_4 * 1.0f),
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_4 * 1.0f),
                               0,
                               1,
                               0,
                               1); // dy=4.0, x=2.5>0: dx=4.0*1=4.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1_5 * 0.0f),
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_1_5 * 0.0f),
                               0,
                               1,
                               1,
                               0); // dy=1.5, x=-5.0<0: dx=1.5*0=0.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_3 * 1.0f),
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_3 * 1.0f),
                               0,
                               1,
                               1,
@@ -757,24 +769,24 @@ protected:
 
         // Fill with values that will test all three regions: below lower_clip, between clips, above upper_clip
         input.setHostValue(
-            static_cast<Input1Type>(-TEST_VALUE_5), 0, 0, 0, 0); // -5.0 (below lower_clip)
+            safeTestTypeCast<Input1Type>(-TEST_VALUE_5), 0, 0, 0, 0); // -5.0 (below lower_clip)
         input.setHostValue(
-            static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 1); // -1.0 (between clips)
+            safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 1); // -1.0 (between clips)
         input.setHostValue(
-            static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 0); // 2.0 (between clips)
+            safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 0); // 2.0 (between clips)
         input.setHostValue(
-            static_cast<Input1Type>(TEST_VALUE_5), 0, 0, 1, 1); // 5.0 (above upper_clip)
+            safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 0, 1, 1); // 5.0 (above upper_clip)
         input.setHostValue(
-            static_cast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0 (at lower_clip)
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 1, 0, 1); // 0.0 (between clips)
+            safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0 (at lower_clip)
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 1, 0, 1); // 0.0 (between clips)
         input.setHostValue(
-            static_cast<Input1Type>(TEST_VALUE_4), 0, 1, 1, 0); // 4.0 (at upper_clip)
+            safeTestTypeCast<Input1Type>(TEST_VALUE_4), 0, 1, 1, 0); // 4.0 (at upper_clip)
         input.setHostValue(
-            static_cast<Input1Type>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (between clips)
+            safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (between clips)
 
         // Parameters: lower_clip = -2.0, upper_clip = 4.0, lower_slope = 0.1
-        float lowerClip = -TEST_VALUE_2; // -2.0
-        float upperClip = TEST_VALUE_4; // 4.0
+        const float lowerClip = -TEST_VALUE_2; // -2.0
+        const float upperClip = TEST_VALUE_4; // 4.0
         auto lowerSlope = static_cast<float>(0.1);
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
@@ -786,19 +798,23 @@ protected:
         // For lower_clip <= x <= upper_clip: output = x
         // For x > upper_clip: output = upper_clip
         expected.setHostValue(
-            static_cast<OutputType>(lowerClip + (lowerSlope * (-TEST_VALUE_5 - lowerClip))),
+            safeTestTypeCast<OutputType>(lowerClip + (lowerSlope * (-TEST_VALUE_5 - lowerClip))),
             0,
             0,
             0,
             0); // -2 + 0.1*(-5-(-2)) = -2.3
         expected.setHostValue(
-            static_cast<OutputType>(-TEST_VALUE_1), 0, 0, 0, 1); // -1.0 (in range)
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2), 0, 0, 1, 0); // 2.0 (in range)
-        expected.setHostValue(static_cast<OutputType>(upperClip), 0, 0, 1, 1); // 4.0 (clamped)
-        expected.setHostValue(static_cast<OutputType>(lowerClip), 0, 1, 0, 0); // -2.0 (at boundary)
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 1, 0, 1); // 0.0 (in range)
-        expected.setHostValue(static_cast<OutputType>(upperClip), 0, 1, 1, 0); // 4.0 (at boundary)
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (in range)
+            safeTestTypeCast<OutputType>(-TEST_VALUE_1), 0, 0, 0, 1); // -1.0 (in range)
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_2), 0, 0, 1, 0); // 2.0 (in range)
+        expected.setHostValue(safeTestTypeCast<OutputType>(upperClip), 0, 0, 1, 1); // 4.0 (clamped)
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(lowerClip), 0, 1, 0, 0); // -2.0 (at boundary)
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 0, 1, 0, 1); // 0.0 (in range)
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(upperClip), 0, 1, 1, 0); // 4.0 (at boundary)
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (in range)
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -813,34 +829,34 @@ protected:
 
         // Fill forward input with values that will test all three regions: below lower_clip, between clips, above upper_clip
         input.setHostValue(
-            static_cast<Input1Type>(-TEST_VALUE_5), 0, 0, 0, 0); // -5.0 (below lower_clip)
+            safeTestTypeCast<Input1Type>(-TEST_VALUE_5), 0, 0, 0, 0); // -5.0 (below lower_clip)
         input.setHostValue(
-            static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 1); // -1.0 (between clips)
+            safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 1); // -1.0 (between clips)
         input.setHostValue(
-            static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 0); // 2.0 (between clips)
+            safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 0); // 2.0 (between clips)
         input.setHostValue(
-            static_cast<Input1Type>(TEST_VALUE_5), 0, 0, 1, 1); // 5.0 (above upper_clip)
+            safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 0, 1, 1); // 5.0 (above upper_clip)
         input.setHostValue(
-            static_cast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0 (at lower_clip)
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 1, 0, 1); // 0.0 (between clips)
+            safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0 (at lower_clip)
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 1, 0, 1); // 0.0 (between clips)
         input.setHostValue(
-            static_cast<Input1Type>(TEST_VALUE_4), 0, 1, 1, 0); // 4.0 (at upper_clip)
+            safeTestTypeCast<Input1Type>(TEST_VALUE_4), 0, 1, 1, 0); // 4.0 (at upper_clip)
         input.setHostValue(
-            static_cast<Input1Type>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (between clips)
+            safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (between clips)
 
         // Fill upstream gradient with test values
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
         // Parameters: lower_clip = -2.0, upper_clip = 4.0, lower_slope = 0.1
-        float lowerClip = -TEST_VALUE_2; // -2.0
-        float upperClip = TEST_VALUE_4; // 4.0
+        const float lowerClip = -TEST_VALUE_2; // -2.0
+        const float upperClip = TEST_VALUE_4; // 4.0
         auto lowerSlope = static_cast<float>(0.1);
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
@@ -878,7 +894,8 @@ protected:
                         }
 
                         auto downstreamGrad = upstreamGradVal * localGradient;
-                        expected.setHostValue(static_cast<OutputType>(downstreamGrad), n, c, h, w);
+                        expected.setHostValue(
+                            safeTestTypeCast<OutputType>(downstreamGrad), n, c, h, w);
                     }
                 }
             }
@@ -895,14 +912,14 @@ protected:
         Tensor<OutputType> output({1, 2, 2, 2});
 
         // Fill with values that will test sigmoid function
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1); // 5.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0); // -5.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1); // 5.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0); // -5.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
             PointwiseMode::SIGMOID_FWD, output, input);
@@ -910,53 +927,53 @@ protected:
         // Create expected tensor: sigmoid(x) = 1 / (1 + exp(-x))
         Tensor<OutputType> expected({1, 2, 2, 2});
         expected.setHostValue(
-            static_cast<OutputType>(1.0f / (1.0f + hipdnn_data_sdk::types::exp(-0.0f))),
+            safeTestTypeCast<OutputType>(1.0f / (1.0f + hipdnn_data_sdk::types::exp(-0.0f))),
             0,
             0,
             0,
             0); // sigmoid(0) = 0.5
+        expected.setHostValue(safeTestTypeCast<OutputType>(
+                                  1.0f / (1.0f + hipdnn_data_sdk::types::exp(-TEST_VALUE_1))),
+                              0,
+                              0,
+                              0,
+                              1); // sigmoid(1)
         expected.setHostValue(
-            static_cast<OutputType>(1.0f / (1.0f + hipdnn_data_sdk::types::exp(-TEST_VALUE_1))),
-            0,
-            0,
-            0,
-            1); // sigmoid(1)
-        expected.setHostValue(
-            static_cast<OutputType>(1.0f / (1.0f + hipdnn_data_sdk::types::exp(TEST_VALUE_1))),
+            safeTestTypeCast<OutputType>(1.0f / (1.0f + hipdnn_data_sdk::types::exp(TEST_VALUE_1))),
             0,
             0,
             1,
             0); // sigmoid(-1)
+        expected.setHostValue(safeTestTypeCast<OutputType>(
+                                  1.0f / (1.0f + hipdnn_data_sdk::types::exp(-TEST_VALUE_2))),
+                              0,
+                              0,
+                              1,
+                              1); // sigmoid(2)
         expected.setHostValue(
-            static_cast<OutputType>(1.0f / (1.0f + hipdnn_data_sdk::types::exp(-TEST_VALUE_2))),
-            0,
-            0,
-            1,
-            1); // sigmoid(2)
-        expected.setHostValue(
-            static_cast<OutputType>(1.0f / (1.0f + hipdnn_data_sdk::types::exp(TEST_VALUE_2))),
+            safeTestTypeCast<OutputType>(1.0f / (1.0f + hipdnn_data_sdk::types::exp(TEST_VALUE_2))),
             0,
             1,
             0,
             0); // sigmoid(-2)
+        expected.setHostValue(safeTestTypeCast<OutputType>(
+                                  1.0f / (1.0f + hipdnn_data_sdk::types::exp(-TEST_VALUE_5))),
+                              0,
+                              1,
+                              0,
+                              1); // sigmoid(5)
         expected.setHostValue(
-            static_cast<OutputType>(1.0f / (1.0f + hipdnn_data_sdk::types::exp(-TEST_VALUE_5))),
-            0,
-            1,
-            0,
-            1); // sigmoid(5)
-        expected.setHostValue(
-            static_cast<OutputType>(1.0f / (1.0f + hipdnn_data_sdk::types::exp(TEST_VALUE_5))),
+            safeTestTypeCast<OutputType>(1.0f / (1.0f + hipdnn_data_sdk::types::exp(TEST_VALUE_5))),
             0,
             1,
             1,
             0); // sigmoid(-5)
-        expected.setHostValue(
-            static_cast<OutputType>(1.0f / (1.0f + hipdnn_data_sdk::types::exp(-TEST_VALUE_1_5))),
-            0,
-            1,
-            1,
-            1); // sigmoid(1.5)
+        expected.setHostValue(safeTestTypeCast<OutputType>(
+                                  1.0f / (1.0f + hipdnn_data_sdk::types::exp(-TEST_VALUE_1_5))),
+                              0,
+                              1,
+                              1,
+                              1); // sigmoid(1.5)
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -970,24 +987,24 @@ protected:
         Tensor<OutputType> output({1, 2, 2, 2}); // Downstream gradient (dx)
 
         // Fill forward input with values that will test sigmoid backward function
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
 
         // Fill upstream gradient with test values
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SIGMOID_BWD, output, input, upstreamGrad);
@@ -1011,7 +1028,8 @@ protected:
                                        / (ComputeType{1} + hipdnn_data_sdk::types::exp(-xCompute));
                         auto localGradient = sigmoid * (ComputeType{1} - sigmoid);
                         auto downstreamGrad = dyCompute * localGradient;
-                        expected.setHostValue(static_cast<OutputType>(downstreamGrad), n, c, h, w);
+                        expected.setHostValue(
+                            safeTestTypeCast<OutputType>(downstreamGrad), n, c, h, w);
                     }
                 }
             }
@@ -1028,35 +1046,36 @@ protected:
         Tensor<OutputType> output({1, 2, 2, 2});
 
         // Fill with values that will test tanh function
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
             PointwiseMode::TANH_FWD, output, input);
 
         // Create expected tensor: tanh(x)
         Tensor<OutputType> expected({1, 2, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(std::tanh(0.0f)), 0, 0, 0, 0); // tanh(0) = 0
         expected.setHostValue(
-            static_cast<OutputType>(std::tanh(TEST_VALUE_1)), 0, 0, 0, 1); // tanh(1)
+            safeTestTypeCast<OutputType>(std::tanh(0.0f)), 0, 0, 0, 0); // tanh(0) = 0
         expected.setHostValue(
-            static_cast<OutputType>(std::tanh(-TEST_VALUE_1)), 0, 0, 1, 0); // tanh(-1)
+            safeTestTypeCast<OutputType>(std::tanh(TEST_VALUE_1)), 0, 0, 0, 1); // tanh(1)
         expected.setHostValue(
-            static_cast<OutputType>(std::tanh(TEST_VALUE_2)), 0, 0, 1, 1); // tanh(2)
+            safeTestTypeCast<OutputType>(std::tanh(-TEST_VALUE_1)), 0, 0, 1, 0); // tanh(-1)
         expected.setHostValue(
-            static_cast<OutputType>(std::tanh(-TEST_VALUE_2)), 0, 1, 0, 0); // tanh(-2)
+            safeTestTypeCast<OutputType>(std::tanh(TEST_VALUE_2)), 0, 0, 1, 1); // tanh(2)
         expected.setHostValue(
-            static_cast<OutputType>(std::tanh(TEST_VALUE_3)), 0, 1, 0, 1); // tanh(3)
+            safeTestTypeCast<OutputType>(std::tanh(-TEST_VALUE_2)), 0, 1, 0, 0); // tanh(-2)
         expected.setHostValue(
-            static_cast<OutputType>(std::tanh(-TEST_VALUE_3)), 0, 1, 1, 0); // tanh(-3)
+            safeTestTypeCast<OutputType>(std::tanh(TEST_VALUE_3)), 0, 1, 0, 1); // tanh(3)
         expected.setHostValue(
-            static_cast<OutputType>(std::tanh(TEST_VALUE_1_5)), 0, 1, 1, 1); // tanh(1.5)
+            safeTestTypeCast<OutputType>(std::tanh(-TEST_VALUE_3)), 0, 1, 1, 0); // tanh(-3)
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(std::tanh(TEST_VALUE_1_5)), 0, 1, 1, 1); // tanh(1.5)
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -1070,24 +1089,24 @@ protected:
         Tensor<OutputType> output({1, 2, 2, 2}); // Downstream gradient (dx)
 
         // Fill forward input with values that will test tanh backward function
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 1, 0, 1); // 3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
 
         // Fill upstream gradient with test values
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
-        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
+        upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::TANH_BWD, output, input, upstreamGrad);
@@ -1111,7 +1130,8 @@ protected:
                         auto tanhVal = std::tanh(xCompute);
                         auto localGradient = ComputeType{1} - (tanhVal * tanhVal);
                         auto downstreamGrad = dyCompute * localGradient;
-                        expected.setHostValue(static_cast<OutputType>(downstreamGrad), n, c, h, w);
+                        expected.setHostValue(
+                            safeTestTypeCast<OutputType>(downstreamGrad), n, c, h, w);
                     }
                 }
             }
@@ -1128,57 +1148,64 @@ protected:
         Tensor<OutputType> output({1, 2, 2, 2});
 
         // Fill with mix of positive, negative, and zero values
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 1, 0); // 0.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_3), 0, 0, 1, 1); // -3.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 0); // 5.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1_5), 0, 1, 0, 1); // -1.5
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_4), 0, 1, 1, 1); // -4.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 1, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 0, 1, 1); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 0); // 5.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1_5), 0, 1, 0, 1); // -1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_4), 0, 1, 1, 1); // -4.0
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
             PointwiseMode::ABS, output, input);
 
         // Create expected tensor: abs(x)
         Tensor<OutputType> expected({1, 2, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(hipdnn_data_sdk::types::abs(TEST_VALUE_1)),
-                              0,
-                              0,
-                              0,
-                              0); // |1| = 1
-        expected.setHostValue(static_cast<OutputType>(hipdnn_data_sdk::types::abs(-TEST_VALUE_2)),
-                              0,
-                              0,
-                              0,
-                              1); // |-2| = 2
         expected.setHostValue(
-            static_cast<OutputType>(hipdnn_data_sdk::types::abs(0.0f)), 0, 0, 1, 0); // |0| = 0
-        expected.setHostValue(static_cast<OutputType>(hipdnn_data_sdk::types::abs(-TEST_VALUE_3)),
-                              0,
-                              0,
-                              1,
-                              1); // |-3| = 3
-        expected.setHostValue(static_cast<OutputType>(hipdnn_data_sdk::types::abs(TEST_VALUE_5)),
-                              0,
-                              1,
-                              0,
-                              0); // |5| = 5
-        expected.setHostValue(static_cast<OutputType>(hipdnn_data_sdk::types::abs(-TEST_VALUE_1_5)),
-                              0,
-                              1,
-                              0,
-                              1); // |-1.5| = 1.5
-        expected.setHostValue(static_cast<OutputType>(hipdnn_data_sdk::types::abs(TEST_VALUE_2_5)),
-                              0,
-                              1,
-                              1,
-                              0); // |2.5| = 2.5
-        expected.setHostValue(static_cast<OutputType>(hipdnn_data_sdk::types::abs(-TEST_VALUE_4)),
-                              0,
-                              1,
-                              1,
-                              1); // |-4| = 4
+            safeTestTypeCast<OutputType>(hipdnn_data_sdk::types::abs(TEST_VALUE_1)),
+            0,
+            0,
+            0,
+            0); // |1| = 1
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(hipdnn_data_sdk::types::abs(-TEST_VALUE_2)),
+            0,
+            0,
+            0,
+            1); // |-2| = 2
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(hipdnn_data_sdk::types::abs(0.0f)), 0, 0, 1, 0); // |0| = 0
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(hipdnn_data_sdk::types::abs(-TEST_VALUE_3)),
+            0,
+            0,
+            1,
+            1); // |-3| = 3
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(hipdnn_data_sdk::types::abs(TEST_VALUE_5)),
+            0,
+            1,
+            0,
+            0); // |5| = 5
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(hipdnn_data_sdk::types::abs(-TEST_VALUE_1_5)),
+            0,
+            1,
+            0,
+            1); // |-1.5| = 1.5
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(hipdnn_data_sdk::types::abs(TEST_VALUE_2_5)),
+            0,
+            1,
+            1,
+            0); // |2.5| = 2.5
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(hipdnn_data_sdk::types::abs(-TEST_VALUE_4)),
+            0,
+            1,
+            1,
+            1); // |-4| = 4
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -1191,28 +1218,29 @@ protected:
         Tensor<OutputType> output({1, 2, 2, 2});
 
         // Fill with mix of positive, negative, and zero values
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 1, 0); // 0.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_3), 0, 0, 1, 1); // -3.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 0); // 5.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1_5), 0, 1, 0, 1); // -1.5
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_4), 0, 1, 1, 1); // -4.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 1, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 0, 1, 1); // -3.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 0); // 5.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1_5), 0, 1, 0, 1); // -1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_4), 0, 1, 1, 1); // -4.0
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
             PointwiseMode::NEG, output, input);
 
         // Create expected tensor: -x
         Tensor<OutputType> expected({1, 2, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(-TEST_VALUE_1), 0, 0, 0, 0); // -1
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2), 0, 0, 0, 1); // -(-2) = 2
-        expected.setHostValue(static_cast<OutputType>(-0.0f), 0, 0, 1, 0); // -0 = 0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_3), 0, 0, 1, 1); // -(-3) = 3
-        expected.setHostValue(static_cast<OutputType>(-TEST_VALUE_5), 0, 1, 0, 0); // -5
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1_5), 0, 1, 0, 1); // -(-1.5) = 1.5
-        expected.setHostValue(static_cast<OutputType>(-TEST_VALUE_2_5), 0, 1, 1, 0); // -2.5
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_4), 0, 1, 1, 1); // -(-4) = 4
+        expected.setHostValue(safeTestTypeCast<OutputType>(-TEST_VALUE_1), 0, 0, 0, 0); // -1
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_2), 0, 0, 0, 1); // -(-2) = 2
+        expected.setHostValue(safeTestTypeCast<OutputType>(-0.0f), 0, 0, 1, 0); // -0 = 0
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_3), 0, 0, 1, 1); // -(-3) = 3
+        expected.setHostValue(safeTestTypeCast<OutputType>(-TEST_VALUE_5), 0, 1, 0, 0); // -5
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_1_5), 0, 1, 0, 1); // -(-1.5) = 1.5
+        expected.setHostValue(safeTestTypeCast<OutputType>(-TEST_VALUE_2_5), 0, 1, 1, 0); // -2.5
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_4), 0, 1, 1, 1); // -(-4) = 4
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -1225,62 +1253,62 @@ protected:
         Tensor<OutputType> output({1, 2, 2, 2});
 
         // Fill with values that will test gelu function
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1); // 5.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0); // -5.0
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1); // 5.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0); // -5.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
             PointwiseMode::GELU_FWD, output, input);
 
         // Create expected tensor: gelu_erf(x) = 0.5 * x * (1 + erf(x / sqrt(2)))
         auto geluErf = [](float x) {
-            auto xCompute = static_cast<ComputeType>(static_cast<Input1Type>(x));
+            auto xCompute = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(x));
             ComputeType sqrt2 = hipdnn_data_sdk::types::sqrt(ComputeType{2});
             return ComputeType{0.5} * xCompute
                    * (ComputeType{1.0} + hipdnn_data_sdk::types::erf(xCompute / sqrt2));
         };
         Tensor<OutputType> expected({1, 2, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(geluErf(0.0f)),
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluErf(0.0f)),
                               0,
                               0,
                               0,
                               0); // gelu_erf(0) = 0.5
-        expected.setHostValue(static_cast<OutputType>(geluErf(TEST_VALUE_1)),
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluErf(TEST_VALUE_1)),
                               0,
                               0,
                               0,
                               1); // gelu_erf(1)
-        expected.setHostValue(static_cast<OutputType>(geluErf(-TEST_VALUE_1)),
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluErf(-TEST_VALUE_1)),
                               0,
                               0,
                               1,
                               0); // gelu_erf(-1)
-        expected.setHostValue(static_cast<OutputType>(geluErf(TEST_VALUE_2)),
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluErf(TEST_VALUE_2)),
                               0,
                               0,
                               1,
                               1); // gelu_erf(2)
-        expected.setHostValue(static_cast<OutputType>(geluErf(-TEST_VALUE_2)),
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluErf(-TEST_VALUE_2)),
                               0,
                               1,
                               0,
                               0); // gelu_erf(-2)
-        expected.setHostValue(static_cast<OutputType>(geluErf(TEST_VALUE_5)),
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluErf(TEST_VALUE_5)),
                               0,
                               1,
                               0,
                               1); // gelu_erf(5)
-        expected.setHostValue(static_cast<OutputType>(geluErf(-TEST_VALUE_5)),
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluErf(-TEST_VALUE_5)),
                               0,
                               1,
                               1,
                               0); // gelu_erf(-5)
-        expected.setHostValue(static_cast<OutputType>(geluErf(TEST_VALUE_1_5)),
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluErf(TEST_VALUE_1_5)),
                               0,
                               1,
                               1,
@@ -1296,21 +1324,21 @@ protected:
         Tensor<Input1Type> input({1, 2, 2, 2});
         Tensor<OutputType> output({1, 2, 2, 2});
 
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0);
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0);
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1);
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0);
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1);
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0);
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1);
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
             PointwiseMode::GELU_APPROX_TANH_FWD, output, input);
 
         // gelu_tanh(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
         auto geluTanh = [](float x) {
-            auto xCompute = static_cast<ComputeType>(static_cast<Input1Type>(x));
+            auto xCompute = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(x));
             const auto sqrt2OverPi = static_cast<ComputeType>(
                 hipdnn_data_sdk::types::sqrt(ComputeType{2} / static_cast<ComputeType>(PI)));
             static const auto s_kCoeff = ComputeType{0.044715};
@@ -1319,14 +1347,14 @@ protected:
                    * (ComputeType{1.0} + hipdnn_data_sdk::types::tanh(inner));
         };
         Tensor<OutputType> expected({1, 2, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(geluTanh(0.0f)), 0, 0, 0, 0);
-        expected.setHostValue(static_cast<OutputType>(geluTanh(TEST_VALUE_1)), 0, 0, 0, 1);
-        expected.setHostValue(static_cast<OutputType>(geluTanh(-TEST_VALUE_1)), 0, 0, 1, 0);
-        expected.setHostValue(static_cast<OutputType>(geluTanh(TEST_VALUE_2)), 0, 0, 1, 1);
-        expected.setHostValue(static_cast<OutputType>(geluTanh(-TEST_VALUE_2)), 0, 1, 0, 0);
-        expected.setHostValue(static_cast<OutputType>(geluTanh(TEST_VALUE_5)), 0, 1, 0, 1);
-        expected.setHostValue(static_cast<OutputType>(geluTanh(-TEST_VALUE_5)), 0, 1, 1, 0);
-        expected.setHostValue(static_cast<OutputType>(geluTanh(TEST_VALUE_1_5)), 0, 1, 1, 1);
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(0.0f)), 0, 0, 0, 0);
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(TEST_VALUE_1)), 0, 0, 0, 1);
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(-TEST_VALUE_1)), 0, 0, 1, 0);
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(TEST_VALUE_2)), 0, 0, 1, 1);
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(-TEST_VALUE_2)), 0, 1, 0, 0);
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(TEST_VALUE_5)), 0, 1, 0, 1);
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(-TEST_VALUE_5)), 0, 1, 1, 0);
+        expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(TEST_VALUE_1_5)), 0, 1, 1, 1);
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -1338,33 +1366,33 @@ protected:
         Tensor<Input1Type> input({1, 2, 2, 2});
         Tensor<OutputType> output({1, 2, 2, 2});
 
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0);
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0);
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1);
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0);
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1);
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0);
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1);
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0);
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1);
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
             PointwiseMode::SWISH_FWD, output, input);
 
         // swish(x) = x * sigmoid(x) = x / (1 + exp(-x))
         auto swish = [](float x) {
-            auto xCompute = static_cast<ComputeType>(static_cast<Input1Type>(x));
+            auto xCompute = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(x));
             auto exp = hipdnn_data_sdk::types::exp(-xCompute);
             return xCompute / (ComputeType{1} + exp);
         };
         Tensor<OutputType> expected({1, 2, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(swish(0.0f)), 0, 0, 0, 0);
-        expected.setHostValue(static_cast<OutputType>(swish(TEST_VALUE_1)), 0, 0, 0, 1);
-        expected.setHostValue(static_cast<OutputType>(swish(-TEST_VALUE_1)), 0, 0, 1, 0);
-        expected.setHostValue(static_cast<OutputType>(swish(TEST_VALUE_2)), 0, 0, 1, 1);
-        expected.setHostValue(static_cast<OutputType>(swish(-TEST_VALUE_2)), 0, 1, 0, 0);
-        expected.setHostValue(static_cast<OutputType>(swish(TEST_VALUE_5)), 0, 1, 0, 1);
-        expected.setHostValue(static_cast<OutputType>(swish(-TEST_VALUE_5)), 0, 1, 1, 0);
-        expected.setHostValue(static_cast<OutputType>(swish(TEST_VALUE_1_5)), 0, 1, 1, 1);
+        expected.setHostValue(safeTestTypeCast<OutputType>(swish(0.0f)), 0, 0, 0, 0);
+        expected.setHostValue(safeTestTypeCast<OutputType>(swish(TEST_VALUE_1)), 0, 0, 0, 1);
+        expected.setHostValue(safeTestTypeCast<OutputType>(swish(-TEST_VALUE_1)), 0, 0, 1, 0);
+        expected.setHostValue(safeTestTypeCast<OutputType>(swish(TEST_VALUE_2)), 0, 0, 1, 1);
+        expected.setHostValue(safeTestTypeCast<OutputType>(swish(-TEST_VALUE_2)), 0, 1, 0, 0);
+        expected.setHostValue(safeTestTypeCast<OutputType>(swish(TEST_VALUE_5)), 0, 1, 0, 1);
+        expected.setHostValue(safeTestTypeCast<OutputType>(swish(-TEST_VALUE_5)), 0, 1, 1, 0);
+        expected.setHostValue(safeTestTypeCast<OutputType>(swish(TEST_VALUE_1_5)), 0, 1, 1, 1);
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -1379,7 +1407,7 @@ protected:
         // Fill with simple values for 1D testing
         for(int i = 0; i < 5; ++i)
         {
-            input.setHostValue(static_cast<Input1Type>(static_cast<float>(i - 2)),
+            input.setHostValue(safeTestTypeCast<Input1Type>(static_cast<float>(i - 2)),
                                i); // [-2, -1, 0, 1, 2]
         }
 
@@ -1388,11 +1416,11 @@ protected:
 
         // Create expected tensor: ReLU applied to [-2, -1, 0, 1, 2] = [0, 0, 0, 1, 2]
         Tensor<OutputType> expected({5});
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0); // max(0, -2) = 0
-        expected.setHostValue(static_cast<OutputType>(0.0f), 1); // max(0, -1) = 0
-        expected.setHostValue(static_cast<OutputType>(0.0f), 2); // max(0, 0) = 0
-        expected.setHostValue(static_cast<OutputType>(1.0f), 3); // max(0, 1) = 1
-        expected.setHostValue(static_cast<OutputType>(2.0f), 4); // max(0, 2) = 2
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 0); // max(0, -2) = 0
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 1); // max(0, -1) = 0
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 2); // max(0, 0) = 0
+        expected.setHostValue(safeTestTypeCast<OutputType>(1.0f), 3); // max(0, 1) = 1
+        expected.setHostValue(safeTestTypeCast<OutputType>(2.0f), 4); // max(0, 2) = 2
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -1410,7 +1438,7 @@ protected:
             for(int n = 0; n < 4; ++n)
             {
                 input.setHostValue(
-                    static_cast<Input1Type>(static_cast<float>((m - 1) + (n - 2))), m, n);
+                    safeTestTypeCast<Input1Type>(static_cast<float>((m - 1) + (n - 2))), m, n);
             }
         }
 
@@ -1425,7 +1453,7 @@ protected:
             {
                 auto val = static_cast<float>((m - 1) + (n - 2));
                 expected.setHostValue(
-                    static_cast<OutputType>(hipdnn_data_sdk::types::abs(val)), m, n);
+                    safeTestTypeCast<OutputType>(hipdnn_data_sdk::types::abs(val)), m, n);
             }
         }
 
@@ -1439,14 +1467,14 @@ protected:
         Tensor<Input1Type> input({2, 3, 4});
         Tensor<OutputType> output({2, 3, 4});
 
-        input.fillWithValue(static_cast<Input1Type>(-TEST_VALUE_2_5));
+        input.fillWithValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2_5));
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
             PointwiseMode::NEG, output, input);
 
         // Create expected tensor: negation of -2.5 = 2.5
         Tensor<OutputType> expected({2, 3, 4});
-        expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_2_5));
+        expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_2_5));
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -1458,14 +1486,14 @@ protected:
         Tensor<Input1Type> input({1, 1, 1, 1});
         Tensor<OutputType> output({1, 1, 1, 1});
 
-        input.setHostValue(static_cast<Input1Type>(E), 0, 0, 0, 0); // e
+        input.setHostValue(safeTestTypeCast<Input1Type>(E), 0, 0, 0, 0); // e
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
             PointwiseMode::TANH_FWD, output, input);
 
         // Create expected tensor: tanh(e)
         Tensor<OutputType> expected({1, 1, 1, 1});
-        expected.setHostValue(static_cast<OutputType>(std::tanh(E)), 0, 0, 0, 0);
+        expected.setHostValue(safeTestTypeCast<OutputType>(std::tanh(E)), 0, 0, 0, 0);
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -1478,28 +1506,28 @@ protected:
         Tensor<OutputType> output({1, 2, 2, 2});
 
         // Fill with mix of positive, negative, and zero values
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 1, 0); // 0.0
-        input.setHostValue(static_cast<Input1Type>(PI), 0, 0, 1, 1); // π
-        input.setHostValue(static_cast<Input1Type>(E), 0, 1, 0, 0); // e
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1_5), 0, 1, 0, 1); // -1.5
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
-        input.setHostValue(static_cast<Input1Type>(SQRT_2), 0, 1, 1, 1); // √2
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(0.0f), 0, 0, 1, 0); // 0.0
+        input.setHostValue(safeTestTypeCast<Input1Type>(PI), 0, 0, 1, 1); // π
+        input.setHostValue(safeTestTypeCast<Input1Type>(E), 0, 1, 0, 0); // e
+        input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1_5), 0, 1, 0, 1); // -1.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
+        input.setHostValue(safeTestTypeCast<Input1Type>(SQRT_2), 0, 1, 1, 1); // √2
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
             PointwiseMode::IDENTITY, output, input);
 
         // Create expected tensor: identity(x) = x
         Tensor<OutputType> expected({1, 2, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
-        expected.setHostValue(static_cast<OutputType>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 0, 1, 0); // 0.0
-        expected.setHostValue(static_cast<OutputType>(PI), 0, 0, 1, 1); // π
-        expected.setHostValue(static_cast<OutputType>(E), 0, 1, 0, 0); // e
-        expected.setHostValue(static_cast<OutputType>(-TEST_VALUE_1_5), 0, 1, 0, 1); // -1.5
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
-        expected.setHostValue(static_cast<OutputType>(SQRT_2), 0, 1, 1, 1); // √2
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
+        expected.setHostValue(safeTestTypeCast<OutputType>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 0, 0, 1, 0); // 0.0
+        expected.setHostValue(safeTestTypeCast<OutputType>(PI), 0, 0, 1, 1); // π
+        expected.setHostValue(safeTestTypeCast<OutputType>(E), 0, 1, 0, 0); // e
+        expected.setHostValue(safeTestTypeCast<OutputType>(-TEST_VALUE_1_5), 0, 1, 0, 1); // -1.5
+        expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
+        expected.setHostValue(safeTestTypeCast<OutputType>(SQRT_2), 0, 1, 1, 1); // √2
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);

@@ -36,17 +36,11 @@
 #include <miopen/solver/ck_utility_common.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
-#if MIOPEN_ENABLE_AI_KERNEL_TUNING
-#include <miopen/conv/heuristics/ai_candidate_selection.hpp>
-#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
-#endif
-#ifdef CK_EXPERIMENTAL_BUILDER
-#include <miopen/ck_builder/factories/grouped_convolution_forward.hpp>
-#endif
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_DEFAULT_KERNELS)
 
 namespace miopen {
 namespace solver {
@@ -71,41 +65,11 @@ using DeviceOpGFwd = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleA
     ck::tensor_operation::element_wise::PassThrough,
     ComputeType>;
 
-#ifdef CK_EXPERIMENTAL_BUILDER
-template <typename DataType, typename ComputeType = DataType>
-using DeviceOpGFwdPtrs = miopen::conv::ck_builder::instance::DeviceOperationInstanceFactory<
-    DeviceOpGFwd<DataType, ComputeType>>;
-#else
 template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGFwdPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
     DeviceOpGFwd<DataType, ComputeType>>;
-#endif
 
 namespace {
-
-// ============================================================================
-// Solver Configuration for Forward 2D Grouped Convolution
-// ============================================================================
-
-/**
- * @brief Configuration for the 2D Forward grouped convolution solver
- *
- * This solver does not use split_k parameter.
- * Supports both Candidate Selection (gfx942/gfx950) and KTN (gfx90a) heuristics.
- */
-// clang-format off
-constexpr SolverHeuristicConfig kFwdSolverConfig = {
-    /* solver_name                 */ "ConvHipImplicitGemmGroupFwdXdlops",
-    /* solver_name_ktn             */ "ConvHipIgemmGroupFwdXdlops",
-    /* spatial_dims                */ 2,
-    /* uses_split_k                */ false,
-    /* split_k_min                 */ 0,
-    /* split_k_max                 */ 0,
-    /* supports_split_k_autodeduce */ false,
-    /* supports_ktn                */ true,
-};
-// clang-format on
-
 struct CKArgs
 {
     CKArgs(const ProblemDescription& problem)
@@ -218,58 +182,33 @@ struct CKArgs
 
 } // namespace
 
-template <typename DataType, typename ComputeType>
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::Init(const ProblemDescription& problem)
+template <typename DataType>
+void PerformanceConfigHipImplicitGemmGroupFwdXdlops::Init(
+    const ProblemDescription& problem) // should be parameterized with execution context
 {
     if(valid_kernels.empty())
     {
-        valid_kernels =
-            FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType, ComputeType>, CKArgs>(problem);
-    }
-    if(!valid_kernels.empty())
-    {
-        index     = 0;
-        kernel_id = valid_kernels[index];
-    }
-}
-
-template <typename DataType>
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::Init(const ProblemDescription& problem)
-{
-    Init<DataType, DataType>(problem);
-}
-
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitValidKernels(
-    const ProblemDescription& problem)
-{
-    switch(problem.GetInDataType())
-    {
-    case miopenHalf: Init<ck::half_t>(problem); break;
-    case miopenFloat:
-        if(problem.UseTF32())
+        if constexpr(std::is_same_v<DataType, float>)
         {
-            use_tf32 = true;
-            Init<float, ck::tf32_t>(problem);
+            if(problem.UseTF32())
+            {
+                use_tf32 = true;
+                valid_kernels =
+                    FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType, ck::tf32_t>, CKArgs>(problem);
+            }
             if(valid_kernels.empty())
             {
-                use_tf32 = false;
-                Init<float>(problem);
+                use_tf32      = false;
+                valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem);
             }
         }
         else
         {
-            use_tf32 = false;
-            Init<float>(problem);
+            valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem);
         }
-        break;
-    case miopenInt8: Init<int8_t>(problem); break;
-    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
-    case miopenInt64:
-    case miopenInt32:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenDouble: break;
     }
+    index     = 0;
+    kernel_id = valid_kernels[index];
 }
 
 template <typename DataType>
@@ -305,11 +244,7 @@ bool ConvHipImplicitGemmGroupFwdXdlops::CheckCKApplicability(
 }
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-// ============================================================================
-// OLD KTN functions (kept for gfx90a backward compatibility)
-// ============================================================================
-
-static std::vector<std::string> GetKernelAsTokensKTN(const std::string& kernel)
+static std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
 {
     std::vector<std::string> tokens;
     std::string token;
@@ -324,22 +259,21 @@ static std::vector<std::string> GetKernelAsTokensKTN(const std::string& kernel)
     return tokens;
 }
 
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDsKTN(
-    const std::string& type)
+void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDs(const std::string& type)
 {
     for(int i = 0; i < valid_kernels.size(); i++)
     {
         if(valid_kernels[i].find(type) != std::string::npos)
         {
             heuristic_indexes.push_back(i);
-            heuristic_kernels[i] = GetKernelAsTokensKTN(valid_kernels[i]);
+            heuristic_kernels[i] = GetKernelAsTokens(valid_kernels[i]);
         }
     }
 }
 
-bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::ModelApplyTokenKTN(int idx,
-                                                                        std::string value,
-                                                                        const std::string& arch)
+bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::ModelApplyToken(int idx,
+                                                                     std::string value,
+                                                                     const std::string& arch)
 {
     if(arch == "gfx90a")
     {
@@ -350,7 +284,7 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::ModelApplyTokenKTN(int idx,
     }
     if(idx == 0 && (arch == "gfx942" || arch == "gfx950"))
     {
-        InitHeuristicKernelIDsKTN(value);
+        InitHeuristicKernelIDs(value);
         if(!heuristic_indexes.empty())
             return true;
         return false;
@@ -371,7 +305,7 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::ModelApplyTokenKTN(int idx,
 }
 
 static std::vector<float>
-GetFeaturesKTN(const ProblemDescription& problem, std::size_t num_cu, const std::string& arch)
+GetFeatures(const ProblemDescription& problem, std::size_t num_cu, const std::string& arch)
 {
     if(arch == "gfx90a")
     {
@@ -428,9 +362,10 @@ GetFeaturesKTN(const ProblemDescription& problem, std::size_t num_cu, const std:
 }
 
 template <typename DataType>
-bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::RunParameterPredictionModelKTN(
+bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::RunParameterPredictionModel(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
+    // filter valid_kernel ID's
     if constexpr(std::is_same_v<DataType, float>)
     {
         if(problem.UseTF32())
@@ -443,33 +378,28 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::RunParameterPredictionModel
     {
         valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem);
     }
-
     static const std::string& arch = ctx.GetStream().GetDeviceName();
     if(arch == "gfx90a")
-        InitHeuristicKernelIDsKTN("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle");
-    // Use the centralized config to get the solver name for this architecture
-    static const std::string solver = kFwdSolverConfig.GetSolverNameForArch(arch);
-
-    std::vector<float> features =
-        GetFeaturesKTN(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
-    bool transform = arch == "gfx90a";
+        InitHeuristicKernelIDs("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle");
+    static const std::string solver = "ConvHipIgemmGroupFwdXdlops";
+    std::vector<float> features = GetFeatures(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+    bool transform              = (arch == "gfx90a") ? false : true;
     if(ai::tuning::ModelSetParams(arch,
                                   solver,
                                   problem.GetDirection(),
                                   features,
                                   transform,
                                   [&](int idx, const std::string& value) {
-                                      return this->ModelApplyTokenKTN(idx, value, arch);
+                                      return this->ModelApplyToken(idx, value, arch);
                                   }))
     {
         index     = heuristic_indexes[0];
         kernel_id = valid_kernels[index];
-        MIOPEN_LOG_I("Params set by KTN: " << ToString());
+        MIOPEN_LOG_I("Params set by AI: " << ToString());
         return true;
     }
     return false;
 }
-
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
@@ -487,40 +417,143 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsModelApplicable(
     return true;
 }
 
+// clang-format off
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
+static const std::vector<std::string> ranked_gemm_grp_fwd = {
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 16, 32, Filter3x3, 16, 16, 4, 1, 4, 1, 1, 1, 1, 16>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 16, 32, Default, 16, 16, 4, 1, 4, 1, 1, 1, 1, 8>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 16, 16, Filter3x3, 16, 16, 4, 1, 4, 1, 1, 1, 1, 16>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 16, 16, Default, 16, 16, 4, 1, 4, 1, 1, 1, 1, 8>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 64, 128, 64, Filter1x1Pad0, 32, 32, 1, 2, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 128, 128, 32, Filter1x1Stride1Pad0, 32, 32, 2, 2, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v4>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 64, 64, 64, Default, 32, 32, 1, 1, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 256, 128, 32, Filter1x1Stride1Pad0, 32, 32, 4, 2, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 32, 16, 64, Filter1x1Stride1Pad0, 16, 16, 1, 1, 4, 4, 2, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 16, 32, 64, Filter1x1Pad0, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 32, 16, Filter1x1Pad0, 32, 32, 2, 1, 4, 4, 4, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 32, 16, Filter1x1Pad0, 32, 32, 2, 1, 4, 4, 1, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 64, 16, Filter1x1Pad0, 32, 32, 2, 2, 1, 1, 1, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 128, 128, 64, OddC, 32, 32, 2, 2, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v4>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_DirectLoad<256, 64, 64, 64, Default, 16, 16, 2, 2, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 64, 64, 32, Filter1x1Pad0, 16, 16, 2, 2, 4, 4, 4, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 32, 32, Filter1x1Stride1Pad0, 32, 32, 2, 1, 8, 8, 1, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 64, 64, 32, Filter1x1Pad0, 16, 16, 2, 2, 2, 1, 2, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 64, 32, Filter1x1Stride1Pad0, 32, 32, 2, 2, 1, 1, 1, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_DirectLoad<128, 16, 32, 64, Default, 16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v4>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 32, 16, 64, Default, 16, 16, 1, 1, 4, 4, 2, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 32, 16, Default, 32, 32, 2, 1, 4, 4, 1, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 64, 64, 32, Default, 16, 16, 2, 2, 4, 4, 4, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 128, 128, 32, Default, 32, 32, 2, 2, 1, 1, 8, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 128, 128, 16, OddC, 32, 32, 2, 2, 1, 1, 4, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor<64, 64, 64, 16, Default, 32, 32, 2, 2, 1, 1, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 64, 64, 32, Default, 16, 16, 2, 2, 2, 1, 2, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 64, 32, Default, 32, 32, 2, 2, 1, 1, 1, 1, 1, 1>"
+};
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
+static const std::vector<std::string> ranked_gemm_grp_fwd_navi = {
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 128, 64, Filter1x1Stride1Pad0, 16, 16, 2, 4, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 256, 64, Filter1x1Stride1Pad0, 16, 16, 4, 4, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 64, 256, 32, Filter1x1Stride1Pad0, 16, 16, 4, 4, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 128, 64, 64, Filter1x1Stride1Pad0, 16, 16, 2, 4, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 32, 64, 64, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 32, 64, 64, Default, 32, 32, 1, 1, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 128, 32, OddC, 16, 16, 4, 2, 1, 1, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 16, 64, Filter1x1Pad0, 16, 16, 2, 1, 8, 8, 2, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 16, 64, OddC, 16, 16, 2, 1, 8, 8, 2, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 64, 64, 64, Filter1x1Pad0, 16, 16, 2, 2, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<64, 64, 16, 16, Filter3x3, 16, 16, 4, 1, 4, 1, 1, 1, 1, 8>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<32, 16, 16, 32, Filter1x1Pad0, 8, 16, 16, 1, 1> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 8, BBlockTransferSrcScalarPerVector: 8",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<64, 64, 32, 32, Filter1x1Pad0, 8, 16, 16, 2, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 8, BBlockTransferSrcScalarPerVector: 8",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 16, 64, Default, 16, 16, 2, 1, 8, 8, 2, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 16, 64, Filter1x1Stride1Pad0, 16, 16, 2, 1, 8, 8, 2, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 32, 64, 64, Default, 32, 32, 1, 1, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 32, 128, 64, Default, 32, 32, 1, 2, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor<128, 64, 64, Default, 16, 16, 2, 2, 8, 8, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 128, 48, 64, Default, 16, 16, 2, 3, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 128, 32, 64, Default, 32, 32, 2, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<128, 128, 32, 32, Default, 32, 32, 2, 1, 8, 8, 8, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 64, 192, 32, Filter1x1Stride1Pad0, 16, 16, 2, 6, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 64, 64, 64, Default, 16, 16, 2, 2, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 64, 64, 64, Default, 16, 16, 2, 1, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 64, 64, 64, OddC, 16, 16, 2, 1, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<64, 64, 16, 16, Default, 16, 16, 4, 1, 4, 1, 1, 1, 1, 8>",
+"DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor_WmmaPorted<64, 64, 64, 32, Default, 32, 32, 2, 2, 1, 1, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 16, 64, Filter1x1Pad0, 16, 16, 2, 1, 8, 8, 2, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<64, 32, 32, 128, OddC, 16, 16, 16, 1, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 16, BBlockTransferSrcScalarPerVector: 16",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<64, 64, 32, 64, OddC, 16, 16, 16, 2, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 16, BBlockTransferSrcScalarPerVector: 16"
+};
+// clang-format on
+
+void PerformanceConfigHipImplicitGemmGroupFwdXdlops::DefaultKernelFromList(
+    const ExecutionContext& ctx)
+{
+    const auto dev_name = ctx.GetStream().GetDeviceName();
+    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
+    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+
+    auto* ranked_p = &ranked_gemm_grp_fwd;
+    if(is_gfx11 || is_gfx12)
+        ranked_p = &ranked_gemm_grp_fwd_navi;
+
+    const auto ranked_1st_applicable = *ranked_p;
+
+    for(const auto& kernel_str : ranked_1st_applicable)
+    {
+        auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_str);
+        if(it != valid_kernels.end())
+        {
+            index     = it - valid_kernels.begin();
+            kernel_id = valid_kernels[index];
+            return;
+        }
+    }
+}
+
 void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem)
 {
-    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
-    state.Reset(kFwdSolverConfig.uses_split_k);
+    index     = 0;
+    kernel_id = "";
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    // Try AI heuristics using centralized function
-    if(&ctx != &GetDummyCtx() && IsModelApplicable(ctx, problem))
+    if(IsModelApplicable(ctx, problem))
     {
-        auto fill_valid_kernels = [&](const ProblemDescription& p) {
-            return FillValidKernelsGeneric<DeviceOpGFwdPtrs, CKArgs>(p);
-        };
-
-        auto ktn_runner = [&](const ExecutionContext& c, const ProblemDescription& p) {
-            return RunKTNGeneric(*this, c, p);
-        };
-
-        if(RunAIHeuristics(
-               kFwdSolverConfig, state, ctx, problem, false, fill_valid_kernels, ktn_runner))
+        if(problem.GetInDataType() == miopenFloat)
         {
-            return;
+            if(RunParameterPredictionModel<float>(ctx, problem))
+                return;
+        }
+        else if(problem.GetInDataType() == miopenBFloat16)
+        {
+            if(RunParameterPredictionModel<ck::bhalf_t>(ctx, problem))
+                return;
+        }
+        else
+        {
+            if(RunParameterPredictionModel<ck::half_t>(ctx, problem))
+                return;
         }
     }
-#endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
+#endif
+    switch(problem.GetInDataType())
+    {
+    case miopenHalf: Init<ck::half_t>(problem); break;
+    case miopenFloat: Init<float>(problem); break;
+    case miopenInt8: Init<int8_t>(problem); break;
+    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
+    case miopenInt64:
+    case miopenInt32:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenDouble: break;
+    }
 
-    // Fallback to default initialization
-    MIOPEN_LOG_I2("Using default initialization");
-    InitValidKernels(problem);
-    state.SetResult(0, 0, kFwdSolverConfig.uses_split_k);
-
-#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
+        DefaultKernelFromList(ctx);
+#endif
 }
 
 bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemDescription& problem)
@@ -528,7 +561,18 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemD
 #if MIOPEN_USE_COMPOSABLEKERNEL
     if(valid_kernels.empty())
     {
-        InitValidKernels(problem);
+        switch(problem.GetInDataType())
+        {
+        case miopenHalf: Init<ck::half_t>(problem); break;
+        case miopenFloat: Init<float>(problem); break;
+        case miopenInt8: Init<int8_t>(problem); break;
+        case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
+        case miopenInt64:
+        case miopenInt32:
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
+        case miopenDouble: break;
+        }
         assert(!valid_kernels.empty());
         return true;
     }

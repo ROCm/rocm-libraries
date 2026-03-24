@@ -17,7 +17,7 @@ using namespace hipdnn_test_sdk::utilities;
 
 TEST(TestUtilities, FindCommonShapeValid)
 {
-    std::vector<std::vector<int64_t>> inputShapes = {{1, 2, 3}, {1, 2, 1}, {1, 1, 3}};
+    const std::vector<std::vector<int64_t>> inputShapes = {{1, 2, 3}, {1, 2, 1}, {1, 1, 3}};
     std::vector<int64_t> commonShape;
 
     auto error = findCommonShape(inputShapes, commonShape);
@@ -27,7 +27,7 @@ TEST(TestUtilities, FindCommonShapeValid)
 
 TEST(TestUtilities, FindCommonShapeEmptyInput)
 {
-    std::vector<std::vector<int64_t>> inputShapes = {};
+    const std::vector<std::vector<int64_t>> inputShapes = {};
     std::vector<int64_t> commonShape;
 
     auto error = findCommonShape(inputShapes, commonShape);
@@ -36,7 +36,7 @@ TEST(TestUtilities, FindCommonShapeEmptyInput)
 
 TEST(TestUtilities, FindCommonShapeIncompatibleShapes)
 {
-    std::vector<std::vector<int64_t>> inputShapes = {{1, 2, 3}, {1, 2, 4}, {1, 2}};
+    const std::vector<std::vector<int64_t>> inputShapes = {{1, 2, 3}, {1, 2, 4}, {1, 2}};
     std::vector<int64_t> commonShape;
 
     auto error = findCommonShape(inputShapes, commonShape);
@@ -45,7 +45,7 @@ TEST(TestUtilities, FindCommonShapeIncompatibleShapes)
 
 TEST(TestUtilities, FindCommonShapeSingleInput)
 {
-    std::vector<std::vector<int64_t>> inputShapes = {{1, 2, 3}};
+    const std::vector<std::vector<int64_t>> inputShapes = {{1, 2, 3}};
     std::vector<int64_t> commonShape;
 
     auto error = findCommonShape(inputShapes, commonShape);
@@ -60,7 +60,7 @@ TEST(TestUtilities, FindCommonShapeSingleInput)
 // Tests for isBatchNormSpatialMode()
 TEST(TestUtilities, IsBatchNormSpatialModeNullTensor)
 {
-    std::shared_ptr<TensorAttributes> nullScale = nullptr;
+    const std::shared_ptr<TensorAttributes> nullScale = nullptr;
     EXPECT_TRUE(isBatchNormSpatialMode(nullScale));
 }
 
@@ -144,7 +144,7 @@ TEST(TestUtilities, IsBatchNormSpatialModePerActivation3DMultipleSpatialDims)
 // Tests for validateBatchNormTrainingSpatialDimensions()
 TEST(TestUtilities, ValidateBNTrainingSpatialDimsNullXTensor)
 {
-    std::shared_ptr<TensorAttributes> nullX = nullptr;
+    const std::shared_ptr<TensorAttributes> nullX = nullptr;
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 3, 1, 1});
 
@@ -157,7 +157,7 @@ TEST(TestUtilities, ValidateBNTrainingSpatialDimsNullScaleTensor)
 {
     auto x = std::make_shared<TensorAttributes>();
     x->set_dim({2, 3, 14, 14});
-    std::shared_ptr<TensorAttributes> nullScale = nullptr;
+    const std::shared_ptr<TensorAttributes> nullScale = nullptr;
 
     auto error = validateBatchNormTrainingSpatialDimensions(x, nullScale);
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -329,7 +329,7 @@ TEST(TestUtilities, ValidateBNTrainingSpatialDimsNDhwcInvalid)
 
 TEST(TestUtilities, ValidateMinimumTensorDimensionsNullTensor)
 {
-    std::shared_ptr<TensorAttributes> nullTensor = nullptr;
+    const std::shared_ptr<TensorAttributes> nullTensor = nullptr;
     auto error = validateMinimumTensorDimensions(nullTensor, 2, "TestTensor");
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
     EXPECT_TRUE(error.get_message().find("TestTensor is not set") != std::string::npos);
@@ -387,7 +387,7 @@ TEST(TestUtilities, ValidateMinimumTensorDimensionsInvalid2DRequires4D)
 
 TEST(TestUtilities, ValidateTensorShapesMatchNullTensor1)
 {
-    std::shared_ptr<TensorAttributes> nullTensor = nullptr;
+    const std::shared_ptr<TensorAttributes> nullTensor = nullptr;
     auto tensor2 = std::make_shared<TensorAttributes>();
     tensor2->set_dim({2, 64});
 
@@ -400,7 +400,7 @@ TEST(TestUtilities, ValidateTensorShapesMatchNullTensor2)
 {
     auto tensor1 = std::make_shared<TensorAttributes>();
     tensor1->set_dim({2, 64});
-    std::shared_ptr<TensorAttributes> nullTensor = nullptr;
+    const std::shared_ptr<TensorAttributes> nullTensor = nullptr;
 
     auto error = validateTensorShapesMatch(tensor1, nullTensor, "Tensor1", "Tensor2");
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -476,7 +476,7 @@ TEST(TestUtilities, ValidateTensorShapesMatchDifferentDimValues)
 
 TEST(TestUtilities, ValidateChannelOnlyTensorShapeNullTensor)
 {
-    std::shared_ptr<TensorAttributes> nullTensor = nullptr;
+    const std::shared_ptr<TensorAttributes> nullTensor = nullptr;
     auto error = validateChannelOnlyTensorShape(nullTensor, 64, "TestTensor");
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
     EXPECT_TRUE(error.get_message().find("TestTensor is not set") != std::string::npos);
@@ -548,7 +548,7 @@ TEST(TestUtilities, ValidateChannelOnlyTensorShapeInvalidLessThan2D)
 
 TEST(TestUtilities, ValidateScalarParameterNullTensor)
 {
-    std::shared_ptr<TensorAttributes> nullParam = nullptr;
+    const std::shared_ptr<TensorAttributes> nullParam = nullptr;
     auto error = validateScalarParameter(nullParam, "TestParameter");
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
     EXPECT_TRUE(error.get_message().find("TestParameter parameter is not set")
