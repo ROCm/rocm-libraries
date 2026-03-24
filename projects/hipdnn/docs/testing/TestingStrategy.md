@@ -128,7 +128,7 @@ Integration tests validate end-to-end functionality across components.
   - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
 ### Graph Validation
-We use reference implementations via the CPU Graph Executor to validate correctness of graph execution in integration tests. See the [CPU Graph Executor Design Document](./CpuGraphExecutorDesign.md) for more details.
+We use reference implementations via the CPU Graph Executor to validate correctness of graph execution in integration tests. See the [CPU Graph Executor Design Document](../rfcs/0001_CpuGraphExecutorDesign.md) for more details.
 
 ---
 

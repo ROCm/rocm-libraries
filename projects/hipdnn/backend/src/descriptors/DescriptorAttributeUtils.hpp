@@ -15,6 +15,7 @@
 #include <cstring>
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
@@ -55,12 +56,73 @@ void setString(std::string& target,
                const void* arrayOfElements,
                const char* errorPrefix);
 
+void setBoundedString(std::string& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* errorPrefix,
+                      int64_t maxLength,
+                      int64_t minLength = 0);
+
 void getString(const std::string& source,
                hipdnnBackendAttributeType_t attributeType,
                int64_t requestedElementCount,
                int64_t* elementCount,
                void* arrayOfElements,
                const char* errorPrefix);
+
+template <typename T>
+void setScalarVector(std::vector<T>& target,
+                     hipdnnBackendAttributeType_t expectedType,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t elementCount,
+                     const void* arrayOfElements,
+                     const char* errorPrefix)
+{
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "setScalarVector requires a trivially copyable type");
+    checkSetArgs(expectedType, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount > 0,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount must be positive");
+    target.resize(static_cast<size_t>(elementCount));
+    std::memcpy(target.data(), arrayOfElements, static_cast<size_t>(elementCount) * sizeof(T));
+}
+
+template <typename T>
+void getScalarVector(const std::vector<T>& source,
+                     hipdnnBackendAttributeType_t expectedType,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t requestedElementCount,
+                     int64_t* elementCount,
+                     void* arrayOfElements,
+                     const char* errorPrefix)
+{
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "getScalarVector requires a trivially copyable type");
+    checkGetArgs(expectedType, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = static_cast<int64_t>(source.size());
+        return;
+    }
+
+    THROW_IF_LT(requestedElementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string(errorPrefix) + ": requestedElementCount is negative");
+
+    auto copyCount = std::min<size_t>(static_cast<size_t>(requestedElementCount), source.size());
+    if(elementCount != nullptr)
+    {
+        *elementCount = static_cast<int64_t>(copyCount);
+    }
+    std::memcpy(arrayOfElements, source.data(), copyCount * sizeof(T));
+}
 
 template <typename T>
 void setScalar(T& target,
@@ -155,6 +217,15 @@ void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
                       int64_t* elementCount,
                       void* arrayOfElements,
                       const char* errorPrefix);
+
+// setOptionalScalar/getOptionalScalar are templated on flatbuffers::Optional<T>.
+// This works with std::optional<T> members because flatbuffers aliases Optional to
+// std::optional when FLATBUFFERS_USE_STD_OPTIONAL is defined. If a FlatBuffers upgrade
+// changes this, the static_assert below will fire with a clear message.
+static_assert(std::is_same_v<flatbuffers::Optional<int>, std::optional<int>>,
+              "flatbuffers::Optional must alias std::optional for these overloads "
+              "to work with std::optional members; add explicit std::optional overloads "
+              "if this changes");
 
 template <hipdnnBackendAttributeType_t ExpectedType, typename T>
 void setOptionalScalar(flatbuffers::Optional<T>& target,
@@ -305,5 +376,29 @@ void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
                                 int64_t* elementCount,
                                 void* arrayOfElements,
                                 const char* errorPrefix);
+
+/// Deep-copy a KnobValueUnion into another KnobValueUnion.
+/// Used by both KnobDescriptor::toKnobT() and KnobSettingDescriptor::toKnobSettingT().
+void copyKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& src,
+                        hipdnn_data_sdk::data_objects::KnobValueUnion& dst,
+                        const char* errorPrefix);
+
+/// Set a KnobValueUnion from C-API setAttribute parameters.
+/// Switches on attributeType to store an int64, double, or bounded string.
+void setKnobValueUnion(hipdnn_data_sdk::data_objects::KnobValueUnion& target,
+                       hipdnnBackendAttributeType_t attributeType,
+                       int64_t elementCount,
+                       const void* arrayOfElements,
+                       const char* errorPrefix,
+                       int64_t maxStringLength);
+
+/// Get a KnobValueUnion into C-API getAttribute output parameters.
+/// Switches on source.type to retrieve an int64, double, or string.
+void getKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& source,
+                       hipdnnBackendAttributeType_t attributeType,
+                       int64_t requestedElementCount,
+                       int64_t* elementCount,
+                       void* arrayOfElements,
+                       const char* errorPrefix);
 
 } // namespace hipdnn_backend

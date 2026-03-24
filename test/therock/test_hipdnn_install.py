@@ -21,7 +21,9 @@ from pathlib import Path
 
 OUTPUT_ARTIFACTS_DIR = os.getenv("OUTPUT_ARTIFACTS_DIR")
 SCRIPT_DIR = Path(__file__).resolve().parent
-THEROCK_DIR = SCRIPT_DIR.parent.parent.parent
+THEROCK_DIR = Path(
+    os.environ.get("THEROCK_DIR") or SCRIPT_DIR.parent.parent.parent
+).resolve()
 TEST_PROJECT_DIR = SCRIPT_DIR / "hipdnn_install_tests"
 
 logging.basicConfig(level=logging.INFO)

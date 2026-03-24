@@ -49,7 +49,14 @@ struct BatchnormTrainSignatureKey
         }
 
         auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
+
+        if(!nodeAttributes->mean_tensor_uid().has_value())
+        {
+            throw std::runtime_error(
+                "Mean tensor uid is not set in the node attributes, failed to construct key");
+        }
         auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
+
         auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
         auto yTensorAttr = tensorMap.at(nodeAttributes->y_tensor_uid());
 
