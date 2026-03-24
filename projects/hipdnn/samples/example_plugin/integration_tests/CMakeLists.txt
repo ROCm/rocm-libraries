@@ -41,15 +41,8 @@ target_link_libraries(
         hip::host
 )
 
-# Set HIPDNN_PLUGIN_DIR so the hipDNN backend discovers the example plugin
-# shared library from the build output directory at test runtime.
-set(PLUGIN_DIR "$<TARGET_FILE_DIR:example_plugin>")
-
-# The test reads HIPDNN_PLUGIN_DIR from the environment at runtime.
-# gtest_discover_tests sets the ENVIRONMENT property on each discovered test.
+# The test auto-discovers the plugin from its own executable directory.
+# No HIPDNN_PLUGIN_DIR environment variable is needed when the plugin
+# shared library is co-located with the test executable.
 include(GoogleTest)
-gtest_discover_tests(
-    example_plugin_integration_tests
-    PROPERTIES
-        ENVIRONMENT "HIPDNN_PLUGIN_DIR=${PLUGIN_DIR}"
-)
+gtest_discover_tests(example_plugin_integration_tests)

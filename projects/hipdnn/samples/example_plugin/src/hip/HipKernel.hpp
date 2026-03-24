@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include "HipProgram.hpp"
 #include "IRunnableKernel.hpp"
 
 #include <hip/hip_runtime_api.h>
+#include <string>
 
 namespace example_plugin
 {
@@ -17,7 +19,7 @@ namespace example_plugin
 class HipKernel : public IRunnableKernel
 {
 public:
-    explicit HipKernel(hipFunction_t function);
+    HipKernel(const HipProgram& program, const std::string& kernelName);
 
     void setBlockSize(unsigned int x, unsigned int y, unsigned int z) override;
     void setGridSize(unsigned int x, unsigned int y, unsigned int z) override;
@@ -27,7 +29,8 @@ protected:
     void launchImpl(hipStream_t stream, void** kernelParams) const override;
 
 private:
-    hipFunction_t _function;
+    std::string _kernelName;
+    hipFunction_t _kernel;
     unsigned int _blockX = 1;
     unsigned int _blockY = 1;
     unsigned int _blockZ = 1;

@@ -12,6 +12,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "ExamplePluginHandle.hpp"
+#include "engines/plans/ConvFwdParams.hpp"
 #include "engines/plans/ConvFwdPlan.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockKernelCompiler.hpp"
@@ -51,24 +52,24 @@ protected:
 
     std::unique_ptr<ConvFwdPlan> createAndCompilePlan()
     {
-        auto plan = std::make_unique<ConvFwdPlan>(kInputUid,
-                                                  kWeightUid,
-                                                  kOutputUid,
-                                                  kN,
-                                                  kC,
-                                                  kH,
-                                                  kW,
-                                                  kK,
-                                                  kR,
-                                                  kS,
-                                                  kOutH,
-                                                  kOutW,
-                                                  kPadH,
-                                                  kPadW,
-                                                  kStrideH,
-                                                  kStrideW,
-                                                  kBlockSize,
-                                                  mockCompiler);
+        ConvFwdParams params{kInputUid,
+                             kWeightUid,
+                             kOutputUid,
+                             kN,
+                             kC,
+                             kH,
+                             kW,
+                             kK,
+                             kR,
+                             kS,
+                             kOutH,
+                             kOutW,
+                             kPadH,
+                             kPadW,
+                             kStrideH,
+                             kStrideW,
+                             kBlockSize};
+        auto plan = std::make_unique<ConvFwdPlan>(std::move(params));
 
         auto compiledProgram = std::make_unique<MockCompiledProgram>();
         rawCompiledProgram = compiledProgram.get();
@@ -85,54 +86,54 @@ protected:
         hipDeviceProp_t props = {};
         snprintf(props.gcnArchName, sizeof(props.gcnArchName), "%s", "gfx90a:sramecc+:xnack-");
 
-        plan->compile(props);
+        plan->compile(mockCompiler, props);
         return plan;
     }
 };
 
 TEST_F(ConvFwdPlanTest, GetWorkspaceSize_ReturnsZero)
 {
-    ConvFwdPlan plan{kInputUid,
-                     kWeightUid,
-                     kOutputUid,
-                     kN,
-                     kC,
-                     kH,
-                     kW,
-                     kK,
-                     kR,
-                     kS,
-                     kOutH,
-                     kOutW,
-                     kPadH,
-                     kPadW,
-                     kStrideH,
-                     kStrideW,
-                     kBlockSize,
-                     mockCompiler};
+    ConvFwdParams params{kInputUid,
+                         kWeightUid,
+                         kOutputUid,
+                         kN,
+                         kC,
+                         kH,
+                         kW,
+                         kK,
+                         kR,
+                         kS,
+                         kOutH,
+                         kOutW,
+                         kPadH,
+                         kPadW,
+                         kStrideH,
+                         kStrideW,
+                         kBlockSize};
+    ConvFwdPlan plan{std::move(params)};
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
 TEST_F(ConvFwdPlanTest, Compile_CallsCompilerWithCorrectArchitecture)
 {
-    auto plan = std::make_unique<ConvFwdPlan>(kInputUid,
-                                              kWeightUid,
-                                              kOutputUid,
-                                              kN,
-                                              kC,
-                                              kH,
-                                              kW,
-                                              kK,
-                                              kR,
-                                              kS,
-                                              kOutH,
-                                              kOutW,
-                                              kPadH,
-                                              kPadW,
-                                              kStrideH,
-                                              kStrideW,
-                                              kBlockSize,
-                                              mockCompiler);
+    ConvFwdParams params{kInputUid,
+                         kWeightUid,
+                         kOutputUid,
+                         kN,
+                         kC,
+                         kH,
+                         kW,
+                         kK,
+                         kR,
+                         kS,
+                         kOutH,
+                         kOutW,
+                         kPadH,
+                         kPadW,
+                         kStrideH,
+                         kStrideW,
+                         kBlockSize};
+    auto plan = std::make_unique<ConvFwdPlan>(std::move(params));
 
     auto compiledProgram = std::make_unique<MockCompiledProgram>();
     auto* rawProgram = compiledProgram.get();
@@ -148,7 +149,7 @@ TEST_F(ConvFwdPlanTest, Compile_CallsCompilerWithCorrectArchitecture)
     hipDeviceProp_t props = {};
     snprintf(props.gcnArchName, sizeof(props.gcnArchName), "%s", "gfx90a:sramecc+:xnack-");
 
-    plan->compile(props);
+    plan->compile(mockCompiler, props);
 }
 
 TEST_F(ConvFwdPlanTest, Execute_SetsGridAndBlockSizeAndLaunches)

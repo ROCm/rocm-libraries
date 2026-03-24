@@ -19,19 +19,18 @@ namespace example_plugin
 class HipCompiledProgram : public ICompiledProgram
 {
 public:
-    explicit HipCompiledProgram(std::unique_ptr<HipProgram> program)
+    explicit HipCompiledProgram(std::shared_ptr<HipProgram> program)
         : _program(std::move(program))
     {
     }
 
     std::unique_ptr<IRunnableKernel> getKernel(const std::string& kernelName) const override
     {
-        hipFunction_t func = _program->getKernel(kernelName);
-        return std::make_unique<HipKernel>(func);
+        return std::make_unique<HipKernel>(*_program, kernelName);
     }
 
 private:
-    std::unique_ptr<HipProgram> _program;
+    std::shared_ptr<HipProgram> _program;
 };
 
 } // namespace example_plugin

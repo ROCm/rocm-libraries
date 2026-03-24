@@ -3,13 +3,15 @@
 
 #include "HipKernel.hpp"
 
+#include "HipProgram.hpp"
 #include "HipUtils.hpp"
 
 namespace example_plugin
 {
 
-HipKernel::HipKernel(hipFunction_t function)
-    : _function(function)
+HipKernel::HipKernel(const HipProgram& program, const std::string& kernelName)
+    : _kernelName(kernelName)
+    , _kernel(program.getKernel(kernelName))
 {
 }
 
@@ -34,7 +36,7 @@ void HipKernel::setSharedMemBytes(unsigned int bytes)
 
 void HipKernel::launchImpl(hipStream_t stream, void** kernelParams) const
 {
-    HIP_CHECK(hipModuleLaunchKernel(_function,
+    HIP_CHECK(hipModuleLaunchKernel(_kernel,
                                     _gridX,
                                     _gridY,
                                     _gridZ,

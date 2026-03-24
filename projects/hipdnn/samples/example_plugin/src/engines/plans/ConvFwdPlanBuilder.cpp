@@ -8,6 +8,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#include "ConvFwdParams.hpp"
 #include "ConvFwdPlan.hpp"
 
 namespace example_plugin
@@ -198,27 +199,25 @@ void ConvFwdPlanBuilder::buildPlan(
     auto outH = outputDims->Get(2);
     auto outW = outputDims->Get(3);
 
-    auto plan = std::make_unique<ConvFwdPlan>(inputUid,
-                                              weightUid,
-                                              outputUid,
-                                              n,
-                                              c,
-                                              h,
-                                              w,
-                                              k,
-                                              r,
-                                              s,
-                                              outH,
-                                              outW,
-                                              padH,
-                                              padW,
-                                              strideH,
-                                              strideW,
-                                              static_cast<int64_t>(blockSize),
-                                              _compiler);
-
-    auto deviceProps = _devicePropertyProvider.getDeviceProperties();
-    plan->compile(deviceProps);
+    ConvFwdParams params{inputUid,
+                         weightUid,
+                         outputUid,
+                         n,
+                         c,
+                         h,
+                         w,
+                         k,
+                         r,
+                         s,
+                         outH,
+                         outW,
+                         padH,
+                         padW,
+                         strideH,
+                         strideW,
+                         static_cast<int64_t>(blockSize)};
+    auto plan = std::make_unique<ConvFwdPlan>(std::move(params));
+    plan->compile(_compiler, _devicePropertyProvider.getDeviceProperties());
 
     executionContext.setPlan(std::move(plan));
 }

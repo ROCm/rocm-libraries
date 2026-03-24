@@ -28,8 +28,8 @@ public:
 
     HipProgram(const HipProgram&) = delete;
     HipProgram& operator=(const HipProgram&) = delete;
-    HipProgram(HipProgram&&) = delete;
-    HipProgram& operator=(HipProgram&&) = delete;
+    HipProgram(HipProgram&&) = default;
+    HipProgram& operator=(HipProgram&&) = default;
 
     /// Get a kernel function handle from the loaded module.
     /// @param kernelName The name of the kernel function (must match extern "C" name)

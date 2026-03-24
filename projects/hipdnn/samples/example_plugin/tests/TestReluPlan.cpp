@@ -12,6 +12,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "ExamplePluginHandle.hpp"
+#include "engines/plans/ReluParams.hpp"
 #include "engines/plans/ReluPlan.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockKernelCompiler.hpp"
@@ -38,8 +39,8 @@ protected:
 
     std::unique_ptr<ReluPlan> createAndCompilePlan()
     {
-        auto plan = std::make_unique<ReluPlan>(
-            kInputUid, kOutputUid, kNumElements, kNegativeSlope, mockCompiler);
+        ReluParams params{kInputUid, kOutputUid, kNumElements, kNegativeSlope};
+        auto plan = std::make_unique<ReluPlan>(std::move(params));
 
         // Set up mock expectations: compiler returns a compiled program
         auto compiledProgram = std::make_unique<MockCompiledProgram>();
@@ -58,7 +59,7 @@ protected:
         hipDeviceProp_t props = {};
         snprintf(props.gcnArchName, sizeof(props.gcnArchName), "%s", "gfx90a:sramecc+:xnack-");
 
-        plan->compile(props);
+        plan->compile(mockCompiler, props);
         return plan;
     }
 };
@@ -66,14 +67,15 @@ protected:
 TEST_F(ReluPlanTest, GetWorkspaceSize_ReturnsZero)
 {
     // Workspace size can be checked without compiling
-    ReluPlan plan{kInputUid, kOutputUid, kNumElements, kNegativeSlope, mockCompiler};
+    ReluParams params{kInputUid, kOutputUid, kNumElements, kNegativeSlope};
+    ReluPlan plan{std::move(params)};
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
 TEST_F(ReluPlanTest, Compile_CallsCompilerWithCorrectArchitecture)
 {
-    auto plan = std::make_unique<ReluPlan>(
-        kInputUid, kOutputUid, kNumElements, kNegativeSlope, mockCompiler);
+    ReluParams params{kInputUid, kOutputUid, kNumElements, kNegativeSlope};
+    auto plan = std::make_unique<ReluPlan>(std::move(params));
 
     auto compiledProgram = std::make_unique<MockCompiledProgram>();
     auto* rawProgram = compiledProgram.get();
@@ -91,7 +93,7 @@ TEST_F(ReluPlanTest, Compile_CallsCompilerWithCorrectArchitecture)
     hipDeviceProp_t props = {};
     snprintf(props.gcnArchName, sizeof(props.gcnArchName), "%s", "gfx90a:sramecc+:xnack-");
 
-    plan->compile(props);
+    plan->compile(mockCompiler, props);
 }
 
 TEST_F(ReluPlanTest, Execute_SetsGridAndBlockSizeAndLaunches)

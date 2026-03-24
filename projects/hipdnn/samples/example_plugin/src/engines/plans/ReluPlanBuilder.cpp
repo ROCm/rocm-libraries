@@ -9,6 +9,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#include "ReluParams.hpp"
 #include "ReluPlan.hpp"
 
 namespace example_plugin
@@ -135,12 +136,9 @@ void ReluPlanBuilder::buildPlan(
     // Get negative slope from execution settings
     const auto& settings = executionContext.executionSettings();
 
-    auto plan = std::make_unique<ReluPlan>(
-        inputUid, outputUid, numElements, settings.reluNegativeSlope, _compiler);
-
-    // Compile the plan for the current device
-    auto deviceProps = _devicePropertyProvider.getDeviceProperties();
-    plan->compile(deviceProps);
+    ReluParams params{inputUid, outputUid, numElements, settings.reluNegativeSlope};
+    auto plan = std::make_unique<ReluPlan>(std::move(params));
+    plan->compile(_compiler, _devicePropertyProvider.getDeviceProperties());
 
     executionContext.setPlan(std::move(plan));
 }

@@ -100,26 +100,16 @@ void ExamplePluginEngine::initializeExecutionContext(
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     ExamplePluginContext& executionContext) const
 {
-    ExamplePluginSettings executionSettings;
-
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
+            ExamplePluginSettings executionSettings;
             planBuilder->initializeExecutionSettings(
                 handle, opGraph, engineConfig, executionSettings);
-            break;
-        }
-    }
-
-    executionContext.setExecutionSettings(executionSettings);
-
-    for(const auto& planBuilder : _planBuilders)
-    {
-        if(planBuilder->isApplicable(handle, opGraph))
-        {
+            executionContext.setExecutionSettings(executionSettings);
             planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
-            break;
+            return;
         }
     }
 }

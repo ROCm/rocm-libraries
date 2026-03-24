@@ -13,16 +13,20 @@
 //
 // All operations execute on GPU device memory via HIPRTC-compiled kernels.
 //
+// Plugin directory resolution:
+//   1. If a command-line argument is provided, that path is used.
+//   2. Otherwise, if HIPDNN_PLUGIN_DIR is set in the environment, that is used.
+//   3. Otherwise, the directory containing this executable is used as a last resort.
+//
 // Prerequisites:
 //   - hipDNN installed at /opt/rocm
 //   - ROCm with HIPRTC and a compatible GPU
 //   - The example_plugin shared library built in the same CMake project
-//   - Set HIPDNN_PLUGIN_DIR to the directory containing the plugin .so
-//     before running, OR pass the path as the first command-line argument.
 
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -32,7 +36,6 @@
 
 #include <hip/hip_runtime.h>
 
-#include <hipdnn/backend/hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 #include <hipdnn_frontend.hpp>
@@ -184,35 +187,20 @@ static void printMatrix(const std::string& label, const std::vector<float>& m, i
     }
 }
 
-// Query and print loaded plugin paths.
+// Query and print loaded plugin paths via the frontend API.
 static void printLoadedPlugins(hipdnnHandle_t handle)
 {
-    size_t numPaths = 0;
-    size_t maxLen = 0;
-    auto status = hipdnnGetLoadedEnginePluginPaths_ext(handle, &numPaths, nullptr, &maxLen);
-    if(status != HIPDNN_STATUS_SUCCESS || numPaths == 0)
+    std::vector<std::filesystem::path> paths;
+    auto err = hipdnn_frontend::getLoadedEnginePluginPaths(handle, paths);
+    if(err.is_bad() || paths.empty())
     {
         std::cout << "  (no plugins loaded)\n";
         return;
     }
 
-    std::vector<std::vector<char>> buffers(numPaths, std::vector<char>(maxLen, '\0'));
-    std::vector<char*> ptrs(numPaths);
-    for(size_t i = 0; i < numPaths; ++i)
+    for(size_t i = 0; i < paths.size(); ++i)
     {
-        ptrs[i] = buffers[i].data();
-    }
-
-    status = hipdnnGetLoadedEnginePluginPaths_ext(handle, &numPaths, ptrs.data(), &maxLen);
-    if(status != HIPDNN_STATUS_SUCCESS)
-    {
-        std::cout << "  (failed to query plugin paths)\n";
-        return;
-    }
-
-    for(size_t i = 0; i < numPaths; ++i)
-    {
-        std::cout << "  [" << i << "] " << ptrs[i] << "\n";
+        std::cout << "  [" << i << "] " << paths[i] << "\n";
     }
 }
 
@@ -229,8 +217,9 @@ static bool scenario1_EnvVariable()
     std::string pluginDir = hipdnn_data_sdk::utilities::getEnv("HIPDNN_PLUGIN_DIR");
     if(pluginDir.empty())
     {
-        std::cout << "  HIPDNN_PLUGIN_DIR is not set. Skipping this scenario.\n"
-                  << "  Set it to the directory containing the example_plugin .so.\n";
+        std::cout << "  NOTE: Scenario 1 skipped. To run this scenario, set "
+                     "HIPDNN_PLUGIN_DIR=</absolute/path/to/plugin/dir> "
+                     "(the example_plugin library is assumed to be in that folder).\n";
         return true; // Not a failure, just skipped
     }
 
@@ -272,12 +261,11 @@ static bool scenario2_AdditiveMode(const std::string& pluginDir)
     std::cout << "ADDITIVE mode loads the specified plugin directories alongside\n"
               << "any system-installed plugins.  This is the default mode.\n\n";
 
-    const std::array<const char*, 1> paths = {pluginDir.c_str()};
-    auto status = hipdnnSetEnginePluginPaths_ext(
-        paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ADDITIVE);
-    if(status != HIPDNN_STATUS_SUCCESS)
+    std::vector<std::string> pluginPaths = {pluginDir};
+    auto err = hipdnn_frontend::setEnginePluginPaths(pluginPaths, PluginLoadingMode::MODE_ADDITIVE);
+    if(err.is_bad())
     {
-        std::cerr << "  ERROR: hipdnnSetEnginePluginPaths_ext (ADDITIVE) failed\n";
+        std::cerr << "  ERROR: setEnginePluginPaths (ADDITIVE) failed: " << err.err_msg << "\n";
         return false;
     }
 
@@ -317,12 +305,11 @@ static bool scenario3_AbsoluteMode(const std::string& pluginDir)
     std::cout << "ABSOLUTE mode replaces all plugin search paths with only the\n"
               << "specified directories.  System-installed plugins are ignored.\n\n";
 
-    const std::array<const char*, 1> paths = {pluginDir.c_str()};
-    auto status = hipdnnSetEnginePluginPaths_ext(
-        paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE);
-    if(status != HIPDNN_STATUS_SUCCESS)
+    std::vector<std::string> pluginPaths = {pluginDir};
+    auto err = hipdnn_frontend::setEnginePluginPaths(pluginPaths, PluginLoadingMode::MODE_ABSOLUTE);
+    if(err.is_bad())
     {
-        std::cerr << "  ERROR: hipdnnSetEnginePluginPaths_ext (ABSOLUTE) failed\n";
+        std::cerr << "  ERROR: setEnginePluginPaths (ABSOLUTE) failed: " << err.err_msg << "\n";
         return false;
     }
 
@@ -364,8 +351,8 @@ static bool scenario4_EngineSelection(const std::string& pluginDir)
               << "use the named engine if it supports the requested operation.\n\n";
 
     // Use ABSOLUTE mode so we know exactly which plugins are loaded
-    const std::array<const char*, 1> paths = {pluginDir.c_str()};
-    hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+    std::vector<std::string> pluginPaths = {pluginDir};
+    hipdnn_frontend::setEnginePluginPaths(pluginPaths, PluginLoadingMode::MODE_ABSOLUTE);
 
     hipdnnHandle_t handle = nullptr;
     if(hipdnnCreate(&handle) != HIPDNN_STATUS_SUCCESS)
@@ -460,8 +447,8 @@ static bool scenario5_ConvForward(const std::string& pluginDir)
               << "stride=1) to produce a 3x3 output.\n\n";
 
     // Use ABSOLUTE mode
-    const std::array<const char*, 1> paths = {pluginDir.c_str()};
-    hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+    std::vector<std::string> pluginPaths = {pluginDir};
+    hipdnn_frontend::setEnginePluginPaths(pluginPaths, PluginLoadingMode::MODE_ABSOLUTE);
 
     hipdnnHandle_t handle = nullptr;
     if(hipdnnCreate(&handle) != HIPDNN_STATUS_SUCCESS)
@@ -602,7 +589,7 @@ int main(int argc, char* argv[])
     int deviceCount = 0;
     if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
     {
-        std::cerr << "ERROR: No GPU detected. This sample requires a GPU with ROCm.\n";
+        std::cerr << "ERROR: No GPU detected. This sample requires a GPU with ROCm support.\n";
         return 1;
     }
 
@@ -610,7 +597,7 @@ int main(int argc, char* argv[])
     static_cast<void>(hipGetDeviceProperties(&props, 0));
     std::cout << "GPU: " << props.name << " (" << props.gcnArchName << ")\n";
 
-    // Determine plugin directory from command line or environment
+    // Determine plugin directory: CLI argument > HIPDNN_PLUGIN_DIR > executable directory
     std::string pluginDir;
     if(argc > 1)
     {
@@ -626,9 +613,9 @@ int main(int argc, char* argv[])
         }
         else
         {
-            std::cerr << "Usage: " << argv[0] << " <plugin_dir>\n"
-                      << "  Or set the HIPDNN_PLUGIN_DIR environment variable.\n";
-            return 1;
+            auto exeDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
+            pluginDir = std::filesystem::absolute(exeDir).string();
+            std::cout << "Plugin directory (from executable location): " << pluginDir << "\n";
         }
     }
 

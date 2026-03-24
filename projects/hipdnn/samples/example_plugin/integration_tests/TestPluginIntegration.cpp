@@ -12,13 +12,16 @@
 // All operations run on GPU device memory via HIPRTC-compiled kernels.
 // Tests skip gracefully if no GPU is detected at runtime.
 //
+// Plugin auto-discovery: the test fixture checks for the plugin shared
+// library in the same directory as the test executable.  If found and
+// HIPDNN_PLUGIN_DIR is not already set, the fixture sets it automatically
+// via ScopedEnvironmentVariableSetter so that hipDNN discovers the plugin
+// without any manual environment configuration.
+//
 // Prerequisites:
 //   - hipDNN installed at /opt/rocm (frontend + backend)
 //   - ROCm with HIPRTC and a compatible GPU
 //   - The example_plugin shared library built in the same CMake project
-//   - HIPDNN_PLUGIN_DIR environment variable pointing at the directory
-//     containing the example_plugin shared library (set automatically
-//     by CTest via CMakeLists.txt)
 
 #include <gtest/gtest.h>
 
@@ -26,17 +29,19 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include <hip/hip_runtime.h>
 
-#include <hipdnn/backend/hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include <hipdnn_frontend.hpp>
 
@@ -45,6 +50,12 @@ using namespace hipdnn_frontend::graph;
 
 namespace
 {
+
+#ifdef _WIN32
+static constexpr const char* PLUGIN_FILENAME = "example_plugin.dll";
+#else
+static constexpr const char* PLUGIN_FILENAME = "libexample_plugin.so";
+#endif
 
 // ============================================================================
 // Helper: build a pointwise ReLU forward graph
@@ -125,40 +136,17 @@ std::shared_ptr<Graph> createConvFwdGraph(const std::string& graphName,
 }
 
 // ============================================================================
-// Helper: query loaded plugin paths from the backend
+// Helper: query loaded plugin paths via the frontend API
 // ============================================================================
-std::vector<std::string> getLoadedPluginPaths(hipdnnHandle_t handle)
+std::vector<std::filesystem::path> getLoadedPluginPaths(hipdnnHandle_t handle)
 {
-    // First call: query sizes
-    size_t numPaths = 0;
-    size_t maxLen = 0;
-    auto status = hipdnnGetLoadedEnginePluginPaths_ext(handle, &numPaths, nullptr, &maxLen);
-    if(status != HIPDNN_STATUS_SUCCESS || numPaths == 0)
+    std::vector<std::filesystem::path> paths;
+    auto err = hipdnn_frontend::getLoadedEnginePluginPaths(handle, paths);
+    if(err.is_bad())
     {
         return {};
     }
-
-    // Second call: retrieve paths
-    std::vector<std::vector<char>> buffers(numPaths, std::vector<char>(maxLen, '\0'));
-    std::vector<char*> ptrs(numPaths);
-    for(size_t i = 0; i < numPaths; ++i)
-    {
-        ptrs[i] = buffers[i].data();
-    }
-
-    status = hipdnnGetLoadedEnginePluginPaths_ext(handle, &numPaths, ptrs.data(), &maxLen);
-    if(status != HIPDNN_STATUS_SUCCESS)
-    {
-        return {};
-    }
-
-    std::vector<std::string> result;
-    result.reserve(numPaths);
-    for(size_t i = 0; i < numPaths; ++i)
-    {
-        result.emplace_back(ptrs[i]);
-    }
-    return result;
+    return paths;
 }
 
 // ============================================================================
@@ -177,13 +165,22 @@ protected:
             GTEST_SKIP() << "No GPU detected -- skipping integration test";
         }
 
-        // HIPDNN_PLUGIN_DIR should already be set by CTest (see CMakeLists.txt).
-        // If running manually, the user must set it to the build directory
-        // containing the example_plugin shared library.
+        // Auto-discover the plugin from the test executable's directory.
+        // The plugin shared library is expected to be co-located with the
+        // test executable in the build output directory.
+        auto exeDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
+        auto pluginPath = exeDir / PLUGIN_FILENAME;
+        ASSERT_TRUE(std::filesystem::exists(pluginPath))
+            << "Plugin not found alongside test executable: " << pluginPath;
+
+        // If HIPDNN_PLUGIN_DIR is already set, use it; otherwise default
+        // to the executable's directory so hipDNN discovers the plugin.
         std::string pluginDir = hipdnn_data_sdk::utilities::getEnv("HIPDNN_PLUGIN_DIR");
-        ASSERT_FALSE(pluginDir.empty())
-            << "HIPDNN_PLUGIN_DIR must be set to the directory containing "
-               "the example_plugin shared library";
+        if(pluginDir.empty())
+        {
+            pluginDir = std::filesystem::absolute(exeDir).string();
+        }
+        _envSetter.emplace("HIPDNN_PLUGIN_DIR", pluginDir);
 
         ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS)
             << "Failed to create hipDNN handle";
@@ -195,9 +192,11 @@ protected:
         {
             EXPECT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
         }
+        _envSetter.reset();
     }
 
     hipdnnHandle_t _handle = nullptr;
+    std::optional<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _envSetter;
 };
 
 // ============================================================================
@@ -213,7 +212,7 @@ TEST_F(PluginIntegrationTest, PluginIsLoaded)
     bool found = false;
     for(const auto& path : paths)
     {
-        if(path.find("example_plugin") != std::string::npos)
+        if(path.string().find("example_plugin") != std::string::npos)
         {
             found = true;
             break;
@@ -429,14 +428,13 @@ TEST_F(PluginIntegrationTest, AbsoluteLoadingMode)
     ASSERT_FALSE(pluginDir.empty());
 
     // Destroy the fixture handle before changing plugin paths -- the backend
-    // rejects hipdnnSetEnginePluginPaths_ext while any handle is active.
+    // rejects setEnginePluginPaths while any handle is active.
     ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
     _handle = nullptr;
 
-    const std::array<const char*, 1> paths = {pluginDir.c_str()};
-    ASSERT_EQ(
-        hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-        HIPDNN_STATUS_SUCCESS);
+    std::vector<std::string> pluginPaths = {pluginDir};
+    auto err = hipdnn_frontend::setEnginePluginPaths(pluginPaths, PluginLoadingMode::MODE_ABSOLUTE);
+    ASSERT_FALSE(err.is_bad()) << err.err_msg;
 
     // Create a new handle after setting plugin paths
     hipdnnHandle_t handle2 = nullptr;
@@ -487,14 +485,13 @@ TEST_F(PluginIntegrationTest, AdditiveLoadingMode)
     ASSERT_FALSE(pluginDir.empty());
 
     // Destroy the fixture handle before changing plugin paths -- the backend
-    // rejects hipdnnSetEnginePluginPaths_ext while any handle is active.
+    // rejects setEnginePluginPaths while any handle is active.
     ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
     _handle = nullptr;
 
-    const std::array<const char*, 1> paths = {pluginDir.c_str()};
-    ASSERT_EQ(
-        hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ADDITIVE),
-        HIPDNN_STATUS_SUCCESS);
+    std::vector<std::string> pluginPaths = {pluginDir};
+    auto err = hipdnn_frontend::setEnginePluginPaths(pluginPaths, PluginLoadingMode::MODE_ADDITIVE);
+    ASSERT_FALSE(err.is_bad()) << err.err_msg;
 
     hipdnnHandle_t handle2 = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle2), HIPDNN_STATUS_SUCCESS);
@@ -504,7 +501,7 @@ TEST_F(PluginIntegrationTest, AdditiveLoadingMode)
     bool found = false;
     for(const auto& p : loadedPaths)
     {
-        if(p.find("example_plugin") != std::string::npos)
+        if(p.string().find("example_plugin") != std::string::npos)
         {
             found = true;
             break;

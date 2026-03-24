@@ -55,6 +55,5 @@ set_target_properties(example_plugin PROPERTIES
     INSTALL_RPATH "${ROCM_PATH}/lib"
     INSTALL_RPATH_USE_LINK_PATH TRUE
     BUILD_WITH_INSTALL_RPATH TRUE
-    # Output the plugin .so to bin/engine_plugins/
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/engine_plugins
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )

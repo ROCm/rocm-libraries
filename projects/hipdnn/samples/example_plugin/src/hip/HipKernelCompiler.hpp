@@ -25,7 +25,7 @@ public:
         compile(const std::string& kernelFileName,
                 const std::vector<std::string>& options) const override
     {
-        auto program = std::make_unique<HipProgram>(kernelFileName, options);
+        auto program = std::make_shared<HipProgram>(kernelFileName, options);
         return std::make_unique<HipCompiledProgram>(std::move(program));
     }
 };

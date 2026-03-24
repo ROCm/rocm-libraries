@@ -302,7 +302,7 @@ hipDNN supports three ways to load plugins:
 
 ### 1. HIPDNN_PLUGIN_DIR Environment Variable
 
-Set before creating a hipDNN handle.  hipDNN scans this directory for plugin
+Set before creating a hipDNN handle.  hipDNN scans this as the default directory for loading plugin
 shared libraries (`.so` on Linux, `.dll` on Windows).
 
 ```bash
@@ -315,10 +315,12 @@ Load additional plugin directories alongside the system-installed plugins.
 This is the default mode.
 
 ```cpp
-#include <hipdnn/backend/hipdnn_backend.h>
+#include <hipdnn_frontend.hpp>
 
-const char* paths[] = {"/path/to/my/plugins"};
-hipdnnSetEnginePluginPaths_ext(1, paths, HIPDNN_PLUGIN_LOADING_ADDITIVE);
+using namespace hipdnn_frontend;
+
+std::vector<std::string> paths = {"/path/to/my/plugins"};
+auto err = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
 
 hipdnnHandle_t handle;
 hipdnnCreate(&handle);
@@ -330,12 +332,32 @@ Replace all plugin search paths.  Only the specified directories are searched;
 system-installed plugins are ignored.
 
 ```cpp
-const char* paths[] = {"/path/to/my/plugins"};
-hipdnnSetEnginePluginPaths_ext(1, paths, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+std::vector<std::string> paths = {"/path/to/my/plugins"};
+auto err = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ABSOLUTE);
 
 hipdnnHandle_t handle;
 hipdnnCreate(&handle);
 ```
+
+### Path Resolution
+
+hipDNN resolves plugin paths as follows:
+
+**Relative paths** are resolved against the directory containing
+`libhipdnn_backend.so` (NOT the current working directory).  For example, if
+the backend library is loaded from `/opt/rocm/lib/libhipdnn_backend.so`, then
+`HIPDNN_PLUGIN_DIR=my_plugins` resolves to `/opt/rocm/lib/my_plugins/`.
+
+**Absolute paths** are used as-is after canonicalization.
+
+When a **plugin file** (not a directory) is specified:
+
+- If the file has a `.so` (Linux) or `.dll` (Windows) extension, it is loaded
+  directly.
+- If the file has no extension, hipDNN adds the platform-appropriate prefix and
+  extension: `lib` prefix + `.so` suffix on Linux, `.dll` suffix on Windows.
+- If the file has an incorrect extension (e.g., `.so` on Windows or `.dll` on
+  Linux), it is rejected with an error.
 
 ## Engine Selection
 

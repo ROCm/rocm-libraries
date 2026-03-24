@@ -88,7 +88,11 @@ HipProgram::~HipProgram()
 {
     if(_module != nullptr)
     {
-        static_cast<void>(hipModuleUnload(_module));
+        auto result = hipModuleUnload(_module);
+        if(result != hipSuccess)
+        {
+            HIPDNN_PLUGIN_LOG_WARN("hipModuleUnload failed: " << hipGetErrorString(result));
+        }
     }
 }
 
