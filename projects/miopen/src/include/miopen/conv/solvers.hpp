@@ -5033,19 +5033,17 @@ struct ConvWinogradNHWCTransposingTunableSolver
 {
 };
 
-struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinograd3x3U final
-    : ConvWinogradNHWCTransposingSolver<ConvBinWinograd3x3U>
+struct TransposedConvBinWinograd3x3U final : ConvWinogradNHWCTransposingSolver<ConvBinWinograd3x3U>
 {
     const std::string& SolverDbId() const { return GetSolverDbId<TransposedConvBinWinograd3x3U>(); }
 };
 
-struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinogradRxS final
-    : ConvWinogradNHWCTransposingSolver<ConvBinWinogradRxS>
+struct TransposedConvBinWinogradRxS final : ConvWinogradNHWCTransposingSolver<ConvBinWinogradRxS>
 {
     const std::string& SolverDbId() const { return GetSolverDbId<TransposedConvBinWinogradRxS>(); }
 };
 
-struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinogradRxSf2x3g1 final
+struct TransposedConvBinWinogradRxSf2x3g1 final
     : ConvWinogradNHWCTransposingSolver<ConvBinWinogradRxSf2x3g1>
 {
     const std::string& SolverDbId() const
@@ -5065,14 +5063,6 @@ struct TransposedConvMPBidirectWinograd final
     }
 };
 
-#ifndef CONV_MP_BIDIRECTIONAL_WINOGRAD_CPP
-extern template struct TransposedConvMPBidirectWinograd<2, 3>;
-extern template struct TransposedConvMPBidirectWinograd<3, 3>;
-extern template struct TransposedConvMPBidirectWinograd<4, 3>;
-extern template struct TransposedConvMPBidirectWinograd<5, 3>;
-extern template struct TransposedConvMPBidirectWinograd<6, 3>;
-#endif
-
 template <int WinoDataH, int WinoFilterH, int WinoDataW = WinoDataH, int WinoFilterW = WinoFilterH>
 struct TransposedConvWinograd3x3MultipassWrW final
     : ConvWinogradNHWCTransposingSolver<
@@ -5087,22 +5077,6 @@ struct TransposedConvWinograd3x3MultipassWrW final
     }
 };
 
-#ifndef CONV_MULTIPASS_WINO3X3WRW_CPP
-extern template struct TransposedConvWinograd3x3MultipassWrW<3, 2>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<3, 3>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<3, 4>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<3, 5>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<3, 6>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<7, 2>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<7, 3>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 2>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 3>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<7, 2, 1, 1>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<7, 3, 1, 1>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<5, 3>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<5, 4>;
-#endif
-
 template <uint32_t Winodata, uint32_t Winofilter>
 struct TransposedConvWinoFuryRxS final
     : ConvWinogradNHWCTransposingSolver<ConvWinoFuryRxS<Winodata, Winofilter>>
@@ -5112,10 +5086,6 @@ struct TransposedConvWinoFuryRxS final
         return this->template GetSolverDbId<TransposedConvWinoFuryRxS<Winodata, Winofilter>>();
     }
 };
-
-#ifndef CONV_WINO_FURY_RXS_CPP
-extern template struct TransposedConvWinoFuryRxS<2, 3>;
-#endif
 
 template <uint32_t Winodata, uint32_t Winofilter>
 struct TransposedConvWinoRageRxS final
@@ -5127,10 +5097,6 @@ struct TransposedConvWinoRageRxS final
     }
 };
 
-#ifndef CONV_WINO_RAGE_RXS_CPP
-extern template struct TransposedConvWinoRageRxS<2, 3>;
-#endif
-
 // Tunable transposed Winograd solvers for NHWC layout support
 template <int Winodata, int Winofilter>
 struct TransposedConvBinWinoRxS final
@@ -5141,14 +5107,6 @@ struct TransposedConvBinWinoRxS final
         return this->template GetSolverDbId<TransposedConvBinWinoRxS<Winodata, Winofilter>>();
     }
 };
-
-// Suppress misleading clang warnings
-#ifndef CONV_BIN_WINO_RXS_CPP
-
-extern template struct TransposedConvBinWinoRxS<2, 3>;
-extern template struct TransposedConvBinWinoRxS<3, 2>;
-
-#endif
 
 template <int WinoDataH, int WinoFilterH, int WinoDataW = WinoDataH, int WinoFilterW = WinoFilterH>
 struct TransposedConvMPBidirectWinograd_xdlops final
