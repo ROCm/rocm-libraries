@@ -122,12 +122,12 @@ struct HIPBLASLT_EXPORT hipblaslt_f6x16
             {
                 __amd_fp16x32_storage_t fp16x32;
                 __amd_fp16x16_storage_t fp16x16[2];
-            } in;
+            } in = {};
             union
             {
                 hipblaslt_f6x16_storage real[2];
                 __amd_fp6x32_storage_t  fp6x32;
-            } out;
+            } out = {};
             in.fp16x16[0] = fp16x16;
             out.fp6x32 = __amd_cvt_fp16x32_to_fp6x32_sr_scale(in.fp16x32, __AMD_OCP_E2M3, rng, 0);
             data       = out.real[0];
@@ -190,12 +190,12 @@ struct HIPBLASLT_EXPORT hipblaslt_f6x16
             {
                 __amd_floatx32_storage_t fp32x32;
                 __amd_floatx16_storage_t fp32x16[2];
-            } in;
+            } in = {};
             union
             {
                 hipblaslt_f6x16_storage real[2];
                 __amd_fp6x32_storage_t  fp6x32;
-            } out;
+            } out = {};
             in.fp32x16[0] = fp32x16;
             out.fp6x32 = __amd_cvt_floatx32_to_fp6x32_sr_scale(in.fp32x32, __AMD_OCP_E2M3, rng, 0);
             data       = out.real[0];
@@ -258,12 +258,12 @@ struct HIPBLASLT_EXPORT hipblaslt_f6x16
             {
                 __amd_floatx32_storage_t fp32x32;
                 __amd_floatx16_storage_t fp32x16[2];
-            } in;
+            } in = {};
             union
             {
                 hipblaslt_f6x16_storage real[2];
                 __amd_fp6x32_storage_t  fp6x32;
-            } out;
+            } out = {};
             in.fp32x16[0] = fp32x16;
             out.fp6x32 = __amd_cvt_floatx32_to_fp6x32_sr_scale(in.fp32x32, __AMD_OCP_E2M3, rng, 0);
             data       = out.real[0];
@@ -304,7 +304,7 @@ struct HIPBLASLT_EXPORT hipblaslt_f6x16
         {
             hipblaslt_f6x16_storage real[2];
             __amd_fp6x32_storage_t  fp6x32;
-        } in;
+        } in = {};
         in.real[0] = data;
         __amd_floatx32_storage_t fp32x32
             = __amd_cvt_fp6x32_to_floatx32_scale(in.fp6x32, __AMD_OCP_E2M3, 0);
