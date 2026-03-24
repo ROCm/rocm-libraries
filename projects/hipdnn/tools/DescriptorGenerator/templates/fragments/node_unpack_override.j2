@@ -1,0 +1,15 @@
+// Insert into frontend/include/hipdnn_frontend/node/{{ op.frontend.node_class }}.hpp
+
+// Add #include at top:
+// #include "hipdnn_frontend/detail/{{ op.unpacker_filename }}"
+
+// Add method override in {{ op.frontend.node_class }}:
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        {{ op.frontend.attributes_class }} attrs;
+        HIPDNN_CHECK_ERROR(detail::{{ op.frontend.unpacker_function }}(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
+    }
