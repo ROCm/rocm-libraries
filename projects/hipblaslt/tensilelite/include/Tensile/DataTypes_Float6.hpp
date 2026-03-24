@@ -77,7 +77,7 @@ namespace TensileLite
         constexpr static size_t packed_size = 16;
 
         // default constructor
-        HIP_HOST_DEVICE Float6x16();
+        HIP_HOST_DEVICE Float6x16() = default;
 
         // constructor from float
         explicit HIP_HOST_DEVICE Float6x16(float                val,
