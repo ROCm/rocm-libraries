@@ -388,6 +388,11 @@ template <typename T>
         default:
             break;
         }
+
+        // set_value() overwrites _dataType via getDataTypeEnumFromType<T>(),
+        // which is wrong for types that share a C++ type (e.g. INT8, FP8_E4M3,
+        // FP8_E5M2 all use uint8_t → UINT8). Restore the original data type.
+        tensor->set_data_type(dt);
     }
 
     return {};
