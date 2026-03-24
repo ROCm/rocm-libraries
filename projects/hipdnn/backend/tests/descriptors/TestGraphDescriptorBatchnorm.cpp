@@ -384,36 +384,6 @@ TEST_F(TestGraphDescriptorBatchnorm, BuildWithPeerStatsTensorArray)
     EXPECT_EQ(attrs->peer_stats_tensor_uid[1], K_BATCHNORM_TENSOR_PEER_STAT_1_UID);
 }
 
-TEST_F(TestGraphDescriptorBatchnorm, OperationNamePreservedInSerialization)
-{
-    auto opDesc = makeOp(nullptr,
-                         nullptr,
-                         nullptr,
-                         nullptr,
-                         nullptr,
-                         nullptr,
-                         nullptr,
-                         {},
-                         HIPDNN_DATA_FLOAT,
-                         "batchnorm_training_0");
-
-    auto desc = getDescriptor();
-    setHandle();
-
-    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(ops.data()));
-    desc->finalize();
-
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
-
-    ASSERT_EQ(graphT->nodes.size(), 1u);
-    EXPECT_EQ(graphT->nodes[0]->name, "batchnorm_training_0");
-}
-
 TEST_F(TestGraphDescriptorBatchnorm, OperationNameRoundTripThroughLifting)
 {
     auto opDesc = makeOp(_meanDesc.get(),
