@@ -12,6 +12,11 @@ project(hipdnn_samples VERSION 0.1.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 17)
 
+set(HIPDNN_SAMPLE_NO_RTTI_OPTIONS
+    $<$<CXX_COMPILER_ID:MSVC>:/GR->
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-rtti>
+)
+
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -33,27 +38,28 @@ function(add_hipdnn_sample NAME SOURCE)
     # need this package. Linking against hipdnn_frontend would be sufficient for normal users
     # (brings in hipdnn_data_sdk as well).
     target_link_libraries(${NAME} PRIVATE hip::host Threads::Threads hipdnn_frontend hipdnn_test_sdk)
+    target_compile_options(${NAME} PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS})
 endfunction()
 
-add_hipdnn_sample(bn_inference batchnorm/BnInference.cpp)
-add_hipdnn_sample(bn_inference_with_variance batchnorm/BnInferenceWithVariance.cpp)
-add_hipdnn_sample(bn_training batchnorm/BnTraining.cpp)
-add_hipdnn_sample(fused_bn_training_activ batchnorm/FusedBnTrainingActiv.cpp)
-add_hipdnn_sample(bn_backward batchnorm/BnBackward.cpp)
-add_hipdnn_sample(fused_bn_inference_activ batchnorm/FusedBnInferenceActiv.cpp)
-add_hipdnn_sample(fused_bn_inference_variance_activ batchnorm/FusedBnInferenceVarianceActiv.cpp)
-add_hipdnn_sample(fused_bn_inference_drelu_bn_backward batchnorm/FusedBnInfDReluBnBwd.cpp)
+add_hipdnn_sample(hipdnn_sample_bn_inference batchnorm/BnInference.cpp)
+add_hipdnn_sample(hipdnn_sample_bn_inference_with_variance batchnorm/BnInferenceWithVariance.cpp)
+add_hipdnn_sample(hipdnn_sample_bn_training batchnorm/BnTraining.cpp)
+add_hipdnn_sample(hipdnn_sample_fused_bn_training_activ batchnorm/FusedBnTrainingActiv.cpp)
+add_hipdnn_sample(hipdnn_sample_bn_backward batchnorm/BnBackward.cpp)
+add_hipdnn_sample(hipdnn_sample_fused_bn_inference_activ batchnorm/FusedBnInferenceActiv.cpp)
+add_hipdnn_sample(hipdnn_sample_fused_bn_inference_variance_activ batchnorm/FusedBnInferenceVarianceActiv.cpp)
+add_hipdnn_sample(hipdnn_sample_fused_bn_inference_drelu_bn_backward batchnorm/FusedBnInfDReluBnBwd.cpp)
 
-add_hipdnn_sample(conv_dgrad convolution/ConvDgrad.cpp)
-add_hipdnn_sample(conv_fprop convolution/ConvFprop.cpp)
-add_hipdnn_sample(fused_conv_fprop_activ convolution/FusedConvFpropActiv.cpp)
-add_hipdnn_sample(fused_conv_fprop_bias_activ convolution/FusedConvFpropBiasActiv.cpp)
-add_hipdnn_sample(conv_wgrad convolution/ConvWgrad.cpp)
-add_hipdnn_sample(conv_fprop_deterministic convolution/ConvFpropDeterministic.cpp)
+add_hipdnn_sample(hipdnn_sample_conv_dgrad convolution/ConvDgrad.cpp)
+add_hipdnn_sample(hipdnn_sample_conv_fprop convolution/ConvFprop.cpp)
+add_hipdnn_sample(hipdnn_sample_fused_conv_fprop_activ convolution/FusedConvFpropActiv.cpp)
+add_hipdnn_sample(hipdnn_sample_fused_conv_fprop_bias_activ convolution/FusedConvFpropBiasActiv.cpp)
+add_hipdnn_sample(hipdnn_sample_conv_wgrad convolution/ConvWgrad.cpp)
+add_hipdnn_sample(hipdnn_sample_conv_fprop_deterministic convolution/ConvFpropDeterministic.cpp)
 
-add_hipdnn_sample(serialization_roundtrip serialization/SerializationRoundTrip.cpp)
+add_hipdnn_sample(hipdnn_sample_serialization_roundtrip serialization/SerializationRoundTrip.cpp)
 
-add_hipdnn_sample(knobs_usage knobs/KnobsUsage.cpp)
+add_hipdnn_sample(hipdnn_sample_knobs_usage knobs/KnobsUsage.cpp)
 
 # Enable testing and add sample tests
 enable_testing()
@@ -84,33 +90,33 @@ function(add_hipdnn_sample_test TARGET_NAME)
 endfunction()
 
 # Register convolution samples as tests
-add_hipdnn_sample_test(conv_fprop)
-add_hipdnn_sample_test(conv_dgrad)
-add_hipdnn_sample_test(conv_wgrad)
+add_hipdnn_sample_test(hipdnn_sample_conv_fprop)
+add_hipdnn_sample_test(hipdnn_sample_conv_dgrad)
+add_hipdnn_sample_test(hipdnn_sample_conv_wgrad)
 
 if(NOT WIN32)
     # Some fused conv samples are not supported on windows due to lack of CK support
-    add_hipdnn_sample_test(fused_conv_fprop_activ)
-    add_hipdnn_sample_test(fused_conv_fprop_bias_activ)
-    add_hipdnn_sample_test(conv_fprop_deterministic)
+    add_hipdnn_sample_test(hipdnn_sample_fused_conv_fprop_activ)
+    add_hipdnn_sample_test(hipdnn_sample_fused_conv_fprop_bias_activ)
+    add_hipdnn_sample_test(hipdnn_sample_conv_fprop_deterministic)
 endif()
 
 # Register batchnorm samples as tests
-add_hipdnn_sample_test(bn_inference)
-add_hipdnn_sample_test(bn_inference_with_variance)
-add_hipdnn_sample_test(bn_training)
-add_hipdnn_sample_test(fused_bn_training_activ)
-add_hipdnn_sample_test(bn_backward)
-add_hipdnn_sample_test(fused_bn_inference_activ)
-add_hipdnn_sample_test(fused_bn_inference_drelu_bn_backward)
-add_hipdnn_sample_test(fused_bn_inference_variance_activ)
+add_hipdnn_sample_test(hipdnn_sample_bn_inference)
+add_hipdnn_sample_test(hipdnn_sample_bn_inference_with_variance)
+add_hipdnn_sample_test(hipdnn_sample_bn_training)
+add_hipdnn_sample_test(hipdnn_sample_fused_bn_training_activ)
+add_hipdnn_sample_test(hipdnn_sample_bn_backward)
+add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_activ)
+add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_drelu_bn_backward)
+add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_variance_activ)
 
 # Register serialization samples as tests
-add_hipdnn_sample_test(serialization_roundtrip)
+add_hipdnn_sample_test(hipdnn_sample_serialization_roundtrip)
 
 # Register knobs sample
 # Note: knobs_usage is informational/educational, not validation
-install(TARGETS knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # Install the generated CTestTestfile.cmake to HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH
 install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH}

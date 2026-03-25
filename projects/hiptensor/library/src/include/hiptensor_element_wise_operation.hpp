@@ -287,6 +287,19 @@ namespace ck
                     y = ck::type_convert<bhalf_t, float>(tempY);
                 }
 
+                // Generic overload for CK contraction kernels where ComputeDataType differs from DataType (e.g. BF16 data and F32 compute).
+                // CK calls a_element_op(ComputeType& y, const DataType& x) during the global->LDS transfer. 
+                // Without this, bhalf_t (unsigned short) silently integer-promotes to float for op(float& y, const bhalf_t& x), causing incorrect results.
+                // As template is less preferred than the explicit same-type overloads, (float,float), (double,double), etc. still be used firstly.
+                template <typename Y, typename X>
+                __host__ __device__ void operator()(Y& y, const X& x) const
+                {
+                    float tempX = ck::type_convert<float>(x);
+                    float tempY;
+                    switch_op(tempY, tempX);
+                    y = ck::type_convert<Y>(tempY);
+                }
+
             public:
                 hiptensorOperator_t op_type = HIPTENSOR_OP_IDENTITY;
             };

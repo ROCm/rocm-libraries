@@ -11,6 +11,7 @@ table LayernormAttributes {
     bias_tensor_uid:           long;
     epsilon_tensor_uid:        long;
     y_tensor_uid:              long;
+    normalized_dim_count:      long;
     mean_tensor_uid:           long = null;
     inv_variance_tensor_uid:   long = null;
     forward_phase:             NormFwdPhase = NOT_SET;

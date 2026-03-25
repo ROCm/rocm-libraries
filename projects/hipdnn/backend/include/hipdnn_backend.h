@@ -452,6 +452,79 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                                                                           size_t* maxStringLen);
 
 /**
+ * @brief Callback mode (sync vs async).
+ */
+typedef enum
+{
+    HIPDNN_LOG_CALLBACK_SYNC = 0, ///< Callback invoked on logging thread (synchronous)
+    HIPDNN_LOG_CALLBACK_ASYNC = 1 ///< Callback invoked on worker thread (asynchronous)
+} hipdnnLogCallbackMode_t;
+
+/**
+ * @brief Set or update a user log callback.
+ *
+ * This API allows registering multiple user callbacks with individual log levels and sync/async modes.
+ * Each callback is uniquely identified by the composite key (callback, userHandle).
+ *
+ * @note When a synchronous callback is registered, the synchronous callbacks will delay hipDNN
+ *       until the callback returns, regardless of any async log callbacks also being registered.
+ *       Synchronous callbacks are recommended only for debugging or testing purposes due to
+ *       their blocking nature. Use async callbacks for production workloads.
+ *
+ * Behavior:
+ * - If (callback, userHandle) already registered: UPDATES settings (level and/or sync/async mode)
+ * - If (callback, userHandle) new: ADDS new registration
+ * - If minLevel == SEV_OFF: REMOVES registration
+ * - userHandle must be non-null
+ *
+ * Callback Removal (minLevel == SEV_OFF):
+ * - No further logs will be received on the callback.
+ * - Any pending async logs for this callback will be abandoned
+ * - After this function returns, user can safely destroy data referenced by userHandle
+ *
+ * @param[in] callback   The callback function to invoke
+ * @param[in] minLevel   Minimum severity level (SEV_OFF removes the callback). Note that
+ *                        the logs produced on this callback will be limited by the global log
+ *                        level set either by the HIPDNN_LOG_LEVEL environment variable or
+ *                        the setGlobalLogLevel() API function.
+ * @param[in] mode       Sync or async invocation mode
+ * @param[in] userHandle Non-null user data (also serves as unique callback ID)
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           The callback was set/updated/removed successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM         callback is NULL, userHandle is NULL, invalid mode,
+ *                                         or attempting to remove non-existent callback
+ * @retval HIPDNN_STATUS_NOT_INITIALIZED   Logging system not initialized
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetUserLogCallback_ext(hipdnnUserLogCallback_t callback,
+                                 hipdnnSeverity_t minLevel,
+                                 hipdnnLogCallbackMode_t mode,
+                                 hipdnnUserLogCallbackHandle_t userHandle);
+
+/**
+ * @brief Set the global log level for the backend.
+ *
+ * This controls which log messages are output to console/file AND to the global backend log output callback.
+ * Valid levels: HIPDNN_SEV_INFO, HIPDNN_SEV_WARN, HIPDNN_SEV_ERROR, HIPDNN_SEV_FATAL, HIPDNN_SEV_OFF.
+ *
+ * @param[in] level   The severity level to set
+ *
+ * @retval HIPDNN_STATUS_SUCCESS      The log level was set successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM    Invalid log level
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLogLevel_ext(hipdnnSeverity_t level);
+
+/**
+ * @brief Get the global log level for the backend.
+ *
+ * @param[out] level   Pointer to store the current log level
+ *
+ * @retval HIPDNN_STATUS_SUCCESS      The log level was retrieved successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM    level pointer is NULL
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetGlobalLogLevel_ext(hipdnnSeverity_t* level);
+
+/**
  * @brief Gets the number of loaded engines for a given handle.
  *
  * @param[in]  handle       A valid hipDNN handle.
@@ -506,7 +579,24 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
                                                              char* type,
                                                              size_t* typeLen);
 
-HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
+/**
+ * @brief Returns hipdnn backend version string. Returns an error if nullptr is passed
+ *
+ * @deprecated Use hipdnnVersionString_ext instead
+ *
+ * @param[out] version pointer to where version string will be written
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                  Success
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   If version parameter is nullptr
+ */
+HIPDNN_BACKEND_DEPRECATED_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
+
+/**
+ * @brief Returns hipdnn backend version string
+ *
+ * @return A string in the format "MAJOR.MINOR.PATCH.TWEAK". The returned value has a static lifetime
+ */
+HIPDNN_BACKEND_EXPORT const char* hipdnnVersionString_ext();
 
 #ifdef __cplusplus
 }

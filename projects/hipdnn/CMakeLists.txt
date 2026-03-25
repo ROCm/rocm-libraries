@@ -24,13 +24,13 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
 if(NOT CMAKE_TOOLCHAIN_FILE)
-    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
         CACHE FILEPATH "Toolchain file"
     )
 endif()
 set(HIPDNN_VERSION "0.0.1")
 
-project(hipDNN VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
+project(hipdnn VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/CheckPreCommit.cmake)
 
@@ -204,7 +204,15 @@ list(
 add_compile_options(${EXTRA_COMPILE_OPTIONS})
 add_link_options(${EXTRA_LINK_OPTIONS})
 
+# Disable RTTI in production code and RTTI-free test targets.
+# Public headers must not use typeid, dynamic_cast, or dynamic_pointer_cast.
+set(HIPDNN_NO_RTTI_OPTIONS
+    $<$<CXX_COMPILER_ID:MSVC>:/GR->
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-rtti>
+)
+
 add_subdirectory(data_sdk)
+add_subdirectory(flatbuffers_sdk)
 
 if(HIPDNN_BUILD_BACKEND)
     add_subdirectory(backend)
@@ -223,11 +231,37 @@ add_subdirectory(tools)
 if(NOT HIPDNN_SKIP_TESTS)
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets()
+    finalize_test_targets("${PROJECT_NAME}")
 endif()
 
 # keep this after all the targets have been added that could use the HIP language compiler.
 add_clang_tidy_custom_target()
+
+# Doxygen documentation target (standalone builds only to avoid target name
+# collisions with other projects in the superbuild)
+if(PROJECT_IS_TOP_LEVEL)
+    find_package(Doxygen QUIET)
+    if(DOXYGEN_FOUND)
+        add_custom_target(
+            doxygen
+            COMMAND ${DOXYGEN_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Generating Doxygen documentation"
+            VERBATIM
+            USES_TERMINAL
+        )
+    else()
+        add_custom_target(
+            doxygen
+            COMMAND ${CMAKE_COMMAND} -E echo
+                    "Error: Doxygen not found. Please install it (e.g. sudo apt-get install doxygen)."
+            COMMAND ${CMAKE_COMMAND} -E false
+            COMMENT "Doxygen not found"
+            VERBATIM
+            USES_TERMINAL
+        )
+    endif()
+endif()
 
 if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
@@ -243,7 +277,7 @@ if(HIPDNN_ENABLE_COVERAGE)
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
         -object
-        ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_public_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_data_sdk_tests
         -object

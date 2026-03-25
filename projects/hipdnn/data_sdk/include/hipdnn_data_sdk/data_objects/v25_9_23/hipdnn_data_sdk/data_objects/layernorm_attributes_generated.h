@@ -32,6 +32,7 @@ struct LayernormAttributesT : public ::flatbuffers::NativeTable {
   int64_t bias_tensor_uid = 0;
   int64_t epsilon_tensor_uid = 0;
   int64_t y_tensor_uid = 0;
+  int64_t normalized_dim_count = 0;
   ::flatbuffers::Optional<int64_t> mean_tensor_uid = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<int64_t> inv_variance_tensor_uid = ::flatbuffers::nullopt;
   hipdnn_data_sdk::data_objects::NormFwdPhase forward_phase = hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET;
@@ -46,9 +47,10 @@ struct LayernormAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
     VT_BIAS_TENSOR_UID = 8,
     VT_EPSILON_TENSOR_UID = 10,
     VT_Y_TENSOR_UID = 12,
-    VT_MEAN_TENSOR_UID = 14,
-    VT_INV_VARIANCE_TENSOR_UID = 16,
-    VT_FORWARD_PHASE = 18
+    VT_NORMALIZED_DIM_COUNT = 14,
+    VT_MEAN_TENSOR_UID = 16,
+    VT_INV_VARIANCE_TENSOR_UID = 18,
+    VT_FORWARD_PHASE = 20
   };
   int64_t x_tensor_uid() const {
     return GetField<int64_t>(VT_X_TENSOR_UID, 0);
@@ -80,6 +82,12 @@ struct LayernormAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
   bool mutate_y_tensor_uid(int64_t _y_tensor_uid = 0) {
     return SetField<int64_t>(VT_Y_TENSOR_UID, _y_tensor_uid, 0);
   }
+  int64_t normalized_dim_count() const {
+    return GetField<int64_t>(VT_NORMALIZED_DIM_COUNT, 0);
+  }
+  bool mutate_normalized_dim_count(int64_t _normalized_dim_count = 0) {
+    return SetField<int64_t>(VT_NORMALIZED_DIM_COUNT, _normalized_dim_count, 0);
+  }
   ::flatbuffers::Optional<int64_t> mean_tensor_uid() const {
     return GetOptional<int64_t, int64_t>(VT_MEAN_TENSOR_UID);
   }
@@ -105,6 +113,7 @@ struct LayernormAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
            VerifyField<int64_t>(verifier, VT_BIAS_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_EPSILON_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_Y_TENSOR_UID, 8) &&
+           VerifyField<int64_t>(verifier, VT_NORMALIZED_DIM_COUNT, 8) &&
            VerifyField<int64_t>(verifier, VT_MEAN_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_INV_VARIANCE_TENSOR_UID, 8) &&
            VerifyField<int8_t>(verifier, VT_FORWARD_PHASE, 1) &&
@@ -134,6 +143,9 @@ struct LayernormAttributesBuilder {
   void add_y_tensor_uid(int64_t y_tensor_uid) {
     fbb_.AddElement<int64_t>(LayernormAttributes::VT_Y_TENSOR_UID, y_tensor_uid, 0);
   }
+  void add_normalized_dim_count(int64_t normalized_dim_count) {
+    fbb_.AddElement<int64_t>(LayernormAttributes::VT_NORMALIZED_DIM_COUNT, normalized_dim_count, 0);
+  }
   void add_mean_tensor_uid(int64_t mean_tensor_uid) {
     fbb_.AddElement<int64_t>(LayernormAttributes::VT_MEAN_TENSOR_UID, mean_tensor_uid);
   }
@@ -161,12 +173,14 @@ inline ::flatbuffers::Offset<LayernormAttributes> CreateLayernormAttributes(
     int64_t bias_tensor_uid = 0,
     int64_t epsilon_tensor_uid = 0,
     int64_t y_tensor_uid = 0,
+    int64_t normalized_dim_count = 0,
     ::flatbuffers::Optional<int64_t> mean_tensor_uid = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<int64_t> inv_variance_tensor_uid = ::flatbuffers::nullopt,
     hipdnn_data_sdk::data_objects::NormFwdPhase forward_phase = hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET) {
   LayernormAttributesBuilder builder_(_fbb);
   if(inv_variance_tensor_uid) { builder_.add_inv_variance_tensor_uid(*inv_variance_tensor_uid); }
   if(mean_tensor_uid) { builder_.add_mean_tensor_uid(*mean_tensor_uid); }
+  builder_.add_normalized_dim_count(normalized_dim_count);
   builder_.add_y_tensor_uid(y_tensor_uid);
   builder_.add_epsilon_tensor_uid(epsilon_tensor_uid);
   builder_.add_bias_tensor_uid(bias_tensor_uid);
@@ -186,6 +200,7 @@ inline bool operator==(const LayernormAttributesT &lhs, const LayernormAttribute
       (lhs.bias_tensor_uid == rhs.bias_tensor_uid) &&
       (lhs.epsilon_tensor_uid == rhs.epsilon_tensor_uid) &&
       (lhs.y_tensor_uid == rhs.y_tensor_uid) &&
+      (lhs.normalized_dim_count == rhs.normalized_dim_count) &&
       (lhs.mean_tensor_uid == rhs.mean_tensor_uid) &&
       (lhs.inv_variance_tensor_uid == rhs.inv_variance_tensor_uid) &&
       (lhs.forward_phase == rhs.forward_phase);
@@ -210,6 +225,7 @@ inline void LayernormAttributes::UnPackTo(LayernormAttributesT *_o, const ::flat
   { auto _e = bias_tensor_uid(); _o->bias_tensor_uid = _e; }
   { auto _e = epsilon_tensor_uid(); _o->epsilon_tensor_uid = _e; }
   { auto _e = y_tensor_uid(); _o->y_tensor_uid = _e; }
+  { auto _e = normalized_dim_count(); _o->normalized_dim_count = _e; }
   { auto _e = mean_tensor_uid(); _o->mean_tensor_uid = _e; }
   { auto _e = inv_variance_tensor_uid(); _o->inv_variance_tensor_uid = _e; }
   { auto _e = forward_phase(); _o->forward_phase = _e; }
@@ -228,6 +244,7 @@ inline ::flatbuffers::Offset<LayernormAttributes> CreateLayernormAttributes(::fl
   auto _bias_tensor_uid = _o->bias_tensor_uid;
   auto _epsilon_tensor_uid = _o->epsilon_tensor_uid;
   auto _y_tensor_uid = _o->y_tensor_uid;
+  auto _normalized_dim_count = _o->normalized_dim_count;
   auto _mean_tensor_uid = _o->mean_tensor_uid;
   auto _inv_variance_tensor_uid = _o->inv_variance_tensor_uid;
   auto _forward_phase = _o->forward_phase;
@@ -238,6 +255,7 @@ inline ::flatbuffers::Offset<LayernormAttributes> CreateLayernormAttributes(::fl
       _bias_tensor_uid,
       _epsilon_tensor_uid,
       _y_tensor_uid,
+      _normalized_dim_count,
       _mean_tensor_uid,
       _inv_variance_tensor_uid,
       _forward_phase);

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -130,4 +130,10 @@ namespace rocsparse
     // Get xnack mode.
     //
     std::string handle_get_xnack_mode(rocsparse_handle handle);
+
+    //
+    // Get pointer mode.
+    //
+    rocsparse_pointer_mode get_pointer_mode(const void* data);
+
 }
