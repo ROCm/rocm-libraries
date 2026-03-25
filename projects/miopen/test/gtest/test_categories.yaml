@@ -286,7 +286,11 @@ test_categories:
       - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
-    
+      # HIP Graph tests - exclude slow ones, keep only bnorm (test/2)
+      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/0"  # conv_hip_graph - 94.83 sec
+      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/1"  # activ_hip_graph - 4.35 sec
+      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/3"  # no_graph - 10.42s
+
     labels:
       - "full"
       - "weekly"
@@ -321,10 +325,6 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "Full/GPU_Softmax_FP16*" # 11.5 min
   - "Smoke/GPU_Reduce_FP32*"  # 6.5 min
   - "Smoke/GPU_Reduce_FP16*"  # 4.5 min
-  # HIP Graph tests - exclude slow ones, keep only bnorm (test/2)
-  - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/0"  # conv_hip_graph - 94.83 sec
-  - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/1"  # activ_hip_graph - 4.35 sec
-  - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/3"  # no_graph - disabled after testing
 
 exclude_gpu:
   exclude_gpu_gfx120X:
