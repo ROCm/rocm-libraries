@@ -62,7 +62,11 @@ void {{ op.class_name }}::setAttribute(hipdnnBackendAttributeName_t attributeNam
     {
 {% for tf in op.tensor_fields %}
     case {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}:
+{% if tf.required %}
         setTensorDescriptor({{ tf.member_name }},
+{% else %}
+        setOptionalTensorDescriptor({{ tf.member_name }},
+{% endif %}
                             _data.{{ tf.uid_field }},
                             attributeType,
                             elementCount,
@@ -73,7 +77,8 @@ void {{ op.class_name }}::setAttribute(hipdnnBackendAttributeName_t attributeNam
 {% for df in op.data_fields %}
 {% if df.is_vector %}
     case {{ df.attr_name }}:
-        setInt64Vector(_data.{{ df.fbs_field }},
+        setScalarVector<{{ df.cpp_type }}>(_data.{{ df.fbs_field }},
+                       {{ df.backend_type }},
                        attributeType,
                        elementCount,
                        arrayOfElements,
@@ -90,6 +95,14 @@ void {{ op.class_name }}::setAttribute(hipdnnBackendAttributeName_t attributeNam
 {% elif df.is_enum %}
     case {{ df.attr_name }}:
         {{ df.setter_helper_name }}(attributeType, elementCount, arrayOfElements);
+        break;
+{% elif df.is_optional_scalar %}
+    case {{ df.attr_name }}:
+        setOptionalScalar<{{ df.backend_type }}>(_data.{{ df.fbs_field }},
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "{{ op.class_name }}::setAttribute()");
         break;
 {% elif df.is_scalar %}
     case {{ df.attr_name }}:
@@ -158,46 +171,19 @@ void {{ op.class_name }}::setTensorArrayDesc(hipdnnBackendAttributeName_t attrib
                                                             int64_t elementCount,
                                                             const void* arrayOfElements)
 {
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "{{ op.class_name }}::setAttribute(): arrayOfElements is null");
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "{{ op.class_name }}::setAttribute(): attributeType is not "
-                   "BACKEND_DESCRIPTOR");
-    THROW_IF_FALSE(elementCount >= 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "{{ op.class_name }}::setAttribute(): elementCount < 1");
-
-    auto descs = static_cast<HipdnnBackendDescriptor* const*>(arrayOfElements);
-    std::vector<std::shared_ptr<TensorDescriptor>> tensorDescs;
-    std::vector<int64_t> uids;
-
-    for(int64_t i = 0; i < elementCount; ++i)
+    switch(attributeName)
     {
-        auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
-            &descs[i],
-            HIPDNN_STATUS_BAD_PARAM,
-            "{{ op.class_name }}::setAttribute(): Failed to unpack tensor "
-            "descriptor");
-        THROW_IF_FALSE(tensorDesc->isFinalized(),
-                       HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
-                       "{{ op.class_name }}::setAttribute(): Tensor descriptor "
-                       "not finalized");
-        tensorDescs.push_back(tensorDesc);
-        uids.push_back(tensorDesc->getData().uid);
-    }
-
 {% for taf in op.tensor_array_fields %}
-{% if not loop.first %}
-    else {% endif %}{% if loop.first %}    {% endif %}if(attributeName == {{ taf.attr_name }})
-    {
-        _{{ taf.name }}Descs = std::move(tensorDescs);
-        _data.{{ taf.fbs_field }} = std::move(uids);
-    }
+    case {{ taf.attr_name }}:
+        setTensorDescriptorArray(_{{ taf.name }}Descs,
+                                 _data.{{ taf.fbs_field }},
+                                 attributeType,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "{{ op.class_name }}::setAttribute()");
+        break;
 {% endfor %}
-    else
-    {
+    default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                               "{{ op.class_name }}::setTensorArrayDesc(): unsupported "
                               "attribute name");
@@ -223,7 +209,11 @@ void {{ op.class_name }}::getAttribute(hipdnnBackendAttributeName_t attributeNam
     {
 {% for tf in op.tensor_fields %}
     case {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}:
+{% if tf.required %}
         getTensorDescriptor({{ tf.member_name }},
+{% else %}
+        getOptionalTensorDescriptor({{ tf.member_name }},
+{% endif %}
                             attributeType,
                             requestedElementCount,
                             elementCount,
@@ -234,7 +224,8 @@ void {{ op.class_name }}::getAttribute(hipdnnBackendAttributeName_t attributeNam
 {% for df in op.data_fields %}
 {% if df.is_vector %}
     case {{ df.attr_name }}:
-        getInt64Vector(_data.{{ df.fbs_field }},
+        getScalarVector<{{ df.cpp_type }}>(_data.{{ df.fbs_field }},
+                       {{ df.backend_type }},
                        attributeType,
                        requestedElementCount,
                        elementCount,
@@ -253,6 +244,15 @@ void {{ op.class_name }}::getAttribute(hipdnnBackendAttributeName_t attributeNam
 {% elif df.is_enum %}
     case {{ df.attr_name }}:
         {{ df.getter_helper_name }}(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
+{% elif df.is_optional_scalar %}
+    case {{ df.attr_name }}:
+        getOptionalScalar<{{ df.backend_type }}>(_data.{{ df.fbs_field }},
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "{{ op.class_name }}::getAttribute()");
         break;
 {% elif df.is_scalar %}
     case {{ df.attr_name }}:
@@ -344,40 +344,22 @@ void {{ op.class_name }}::getTensorArrayDesc(hipdnnBackendAttributeName_t attrib
                                                             int64_t* elementCount,
                                                             void* arrayOfElements) const
 {
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "{{ op.class_name }}::getAttribute(): arrayOfElements is null");
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "{{ op.class_name }}::getAttribute(): attributeType is not "
-                   "BACKEND_DESCRIPTOR");
-
-    const std::vector<std::shared_ptr<TensorDescriptor>>* descs = nullptr;
+    switch(attributeName)
+    {
 {% for taf in op.tensor_array_fields %}
-{% if not loop.first %}
-    else {% endif %}{% if loop.first %}    {% endif %}if(attributeName == {{ taf.attr_name }})
-    {
-        descs = &_{{ taf.name }}Descs;
-    }
+    case {{ taf.attr_name }}:
+        getTensorDescriptorArray(_{{ taf.name }}Descs,
+                                 attributeType,
+                                 requestedElementCount,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "{{ op.class_name }}::getAttribute()");
+        break;
 {% endfor %}
-    else
-    {
+    default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                               "{{ op.class_name }}::getTensorArrayDesc(): unsupported "
                               "attribute name");
-    }
-
-    auto count = static_cast<int64_t>(descs->size());
-    if(elementCount != nullptr)
-    {
-        *elementCount = count;
-    }
-
-    auto outDescs = static_cast<HipdnnBackendDescriptor**>(arrayOfElements);
-    auto copyCount = std::min(requestedElementCount, count);
-    for(int64_t i = 0; i < copyCount; ++i)
-    {
-        HipdnnBackendDescriptor::packDescriptor((*descs)[static_cast<size_t>(i)], &outDescs[i]);
     }
 }
 {%- endif %}
@@ -390,13 +372,30 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     {{ op.class_name }}::getTensorDescriptors() const
 {
 {% if op.has_tensor_array_fields %}
-    std::vector<std::shared_ptr<TensorDescriptor>> result = {{ '{' }}{% for tf in op.tensor_fields %}{{ tf.member_name }}{% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
+    std::vector<std::shared_ptr<TensorDescriptor>> result = {{ '{' }}{% for tf in op.required_tensor_fields %}{{ tf.member_name }}{% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
+{% for tf in op.optional_tensor_fields %}
+    if({{ tf.member_name }})
+    {
+        result.push_back({{ tf.member_name }});
+    }
+{% endfor %}
 {% for taf in op.tensor_array_fields %}
     result.insert(result.end(), _{{ taf.name }}Descs.begin(), _{{ taf.name }}Descs.end());
 {% endfor %}
     return result;
 {% else %}
+{% if op.optional_tensor_fields %}
+    std::vector<std::shared_ptr<TensorDescriptor>> result = {{ '{' }}{% for tf in op.required_tensor_fields %}{{ tf.member_name }}{% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
+{% for tf in op.optional_tensor_fields %}
+    if({{ tf.member_name }})
+    {
+        result.push_back({{ tf.member_name }});
+    }
+{% endfor %}
+    return result;
+{% else %}
     return {{ '{' }}{% for tf in op.tensor_fields %}{{ tf.member_name }}{% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
+{% endif %}
 {% endif %}
 }
 
@@ -423,7 +422,11 @@ std::string {{ op.class_name }}::toString() const
     std::string str = "{{ op.class_name }}: {";
     str += "name=" + _name;
 {% for tf in op.tensor_fields %}
+{% if tf.required %}
     str += ", {{ tf.name }}_uid=" + std::to_string(_data.{{ tf.uid_field }});
+{% else %}
+    str += ", {{ tf.name }}_uid=" + (_data.{{ tf.uid_field }} ? std::to_string(*_data.{{ tf.uid_field }}) : "nullopt");
+{% endif %}
 {% endfor %}
 {% for df in op.data_fields %}
 {% if df.is_vector %}
@@ -432,6 +435,8 @@ std::string {{ op.class_name }}::toString() const
     str += ", {{ df.name }}=" + std::to_string(static_cast<int>(_data.{{ df.fbs_field }}));
 {% elif df.is_enum %}
     str += ", {{ df.name }}=" + std::to_string(static_cast<int>(_data.{{ df.fbs_field }}));
+{% elif df.is_optional_scalar %}
+    str += ", {{ df.name }}=" + (_data.{{ df.fbs_field }} ? std::to_string(*_data.{{ df.fbs_field }}) : "nullopt");
 {% elif df.is_scalar %}
     str += ", {{ df.name }}=" + std::to_string(_data.{{ df.fbs_field }});
 {% endif %}
@@ -469,7 +474,7 @@ std::shared_ptr<{{ op.class_name }}> {{ op.class_name }}::fromNode(
     if(attrs->{{ tf.uid_field }})
     {
         desc->{{ tf.member_name }} = findTensorInMap(
-            tensorMap, attrs->{{ tf.uid_field }}, "{{ op.class_name }}::fromNode: {{ tf.pascal_name }}");
+            tensorMap, *attrs->{{ tf.uid_field }}, "{{ op.class_name }}::fromNode: {{ tf.pascal_name }}");
     }
 {% endif %}
 {% endfor %}

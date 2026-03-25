@@ -65,7 +65,7 @@ public:
 {% for df in op.data_fields %}
 {% if df.is_vector %}
         desc->setAttribute(
-            {{ df.attr_name }}, HIPDNN_TYPE_INT64, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
+            {{ df.attr_name }}, {{ df.backend_type }}, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
 {% endif %}
 {% endfor %}
 {% else %}
@@ -78,7 +78,7 @@ public:
 {% for df in op.data_fields %}
 {% if df.is_vector %}
         desc->setAttribute(
-            {{ df.attr_name }}, HIPDNN_TYPE_INT64, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
+            {{ df.attr_name }}, {{ df.backend_type }}, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
 {% endif %}
 {% endfor %}
 {% endif %}
@@ -221,7 +221,7 @@ TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ df.name | replace('_', ' 
 
 {% for df2 in op.required_data_fields %}
 {% if df2.name != df.name and df2.is_vector %}
-    desc->setAttribute({{ df2.attr_name }}, HIPDNN_TYPE_INT64, {{ op.test_data.field_values.get(df2.name, [1, 1]) | length }}, {{ df2.camel_name }}.data());
+    desc->setAttribute({{ df2.attr_name }}, {{ df2.backend_type }}, {{ op.test_data.field_values.get(df2.name, [1, 1]) | length }}, {{ df2.camel_name }}.data());
 {% endif %}
 {% endfor %}
 {% else %}
@@ -233,7 +233,7 @@ TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ df.name | replace('_', ' 
 
 {% for df2 in op.required_data_fields %}
 {% if df2.name != df.name and df2.is_vector %}
-    desc->setAttribute({{ df2.attr_name }}, HIPDNN_TYPE_INT64, {{ op.test_data.field_values.get(df2.name, [1, 1]) | length }}, {{ df2.camel_name }}.data());
+    desc->setAttribute({{ df2.attr_name }}, {{ df2.backend_type }}, {{ op.test_data.field_values.get(df2.name, [1, 1]) | length }}, {{ df2.camel_name }}.data());
 {% endif %}
 {% endfor %}
 {% endif %}
@@ -361,7 +361,7 @@ TEST_F(Test{{ op.class_name }}, Set{{ df.test_label }}{{ df.name | replace('_', 
     std::vector<int64_t> {{ df.camel_name }} = {{ '{' }}{{ tv | join(', ') }}{{ '}' }};
 
     ASSERT_NO_THROW(desc->setAttribute(
-        {{ df.attr_name }}, HIPDNN_TYPE_INT64, {{ tv | length }}, {{ df.camel_name }}.data()));
+        {{ df.attr_name }}, {{ df.backend_type }}, {{ tv | length }}, {{ df.camel_name }}.data()));
 
     auto& data = desc->getData();
     ASSERT_EQ(data.{{ df.fbs_field }}.size(), {{ tv | length }});
@@ -529,7 +529,7 @@ TEST_F(Test{{ op.class_name }}, GetAttribute{{ op.effective_error_label | capita
     std::vector<int64_t> {{ vf.camel_name }}({{ tv | length }});
     int64_t {{ vf.camel_name }}Count = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        {{ vf.attr_name }}, HIPDNN_TYPE_INT64, {{ tv | length }}, &{{ vf.camel_name }}Count, {{ vf.camel_name }}.data()));
+        {{ vf.attr_name }}, {{ vf.backend_type }}, {{ tv | length }}, &{{ vf.camel_name }}Count, {{ vf.camel_name }}.data()));
 {% if loop.first %}
 
     ASSERT_EQ({{ vf.camel_name }}Count, {{ tv | length }});
@@ -681,7 +681,7 @@ TEST_F(Test{{ op.class_name }}, GetAttribute{{ op.vector_fields[0].name | replac
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        {{ op.vector_fields[0].attr_name }}, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+        {{ op.vector_fields[0].attr_name }}, {{ op.vector_fields[0].backend_type }}, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, {{ op.test_data.field_values.get(op.vector_fields[0].name, [1, 1]) | length }});
 }
 {% endif %}
@@ -708,7 +708,7 @@ TEST_F(Test{{ op.class_name }}, GetAttribute{{ op.vector_fields[0].name | replac
     // Query: get the element count
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        {{ op.vector_fields[0].attr_name }}, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+        {{ op.vector_fields[0].attr_name }}, {{ op.vector_fields[0].backend_type }}, 0, &elementCount, nullptr));
 {% set fv_len = op.test_data.field_values.get(op.vector_fields[0].name, [1, 1]) | length %}
     ASSERT_EQ(elementCount, {{ fv_len }});
 
@@ -716,7 +716,7 @@ TEST_F(Test{{ op.class_name }}, GetAttribute{{ op.vector_fields[0].name | replac
     std::vector<int64_t> {{ op.vector_fields[0].camel_name }}(static_cast<size_t>(elementCount));
     int64_t retrievedCount = 0;
     ASSERT_NO_THROW(desc->getAttribute({{ op.vector_fields[0].attr_name }},
-                                       HIPDNN_TYPE_INT64,
+                                       {{ op.vector_fields[0].backend_type }},
                                        elementCount,
                                        &retrievedCount,
                                        {{ op.vector_fields[0].camel_name }}.data()));

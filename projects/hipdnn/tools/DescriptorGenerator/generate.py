@@ -162,6 +162,7 @@ def _preview_files(config, mode: str) -> list[str]:
         "fragments/cmake_entries.txt",
         "fragments/node_factory_case.txt",
         "fragments/operation_unpacker_case.txt",
+        "fragments/operation_unpacker_test.txt",
         "fragments/operation_type_enum.txt",
         "fragments/node_unpack_override.txt",
     ]
@@ -193,6 +194,7 @@ def _preview_files(config, mode: str) -> list[str]:
     lift_fragments = [
         "fragments/node_factory_case.txt",
         "fragments/operation_unpacker_case.txt",
+        "fragments/operation_unpacker_test.txt",
         "fragments/operation_type_enum.txt",
         "fragments/node_unpack_override.txt",
         "fragments/descriptor_lifting_additions.txt",
