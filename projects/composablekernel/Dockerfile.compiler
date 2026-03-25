@@ -39,7 +39,7 @@ RUN if ( [ "$compiler_version" = "develop" ] || [ "$compiler_version" = "amd-sta
         -DLLVM_LINK_LLVM_DYLIB=OFF \
         -DCLANG_LINK_CLANG_DYLIB=OFF \
         ../llvm && \
-        make -j 16 ; \
+        ninja -j16 ; \
     else echo "using the release compiler"; \
     fi
 
@@ -73,6 +73,6 @@ RUN if ( [ "$compiler_version" = "develop" ] || [ "$compiler_version" = "amd-sta
         -DLLVM_LINK_LLVM_DYLIB=OFF \
         -DCLANG_LINK_CLANG_DYLIB=OFF \
         ../llvm && \
-        make -j 16 ; \
+        ninja -j16 ; \
     else echo "using the release compiler"; \
     fi
