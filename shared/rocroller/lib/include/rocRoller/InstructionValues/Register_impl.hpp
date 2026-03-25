@@ -540,11 +540,6 @@ namespace rocRoller
             return m_regType == Type::SCC;
         }
 
-        inline constexpr bool Value::isExec() const
-        {
-            return m_regType == Type::EXEC;
-        }
-
         inline ValuePtr Value::placeholder() const
         {
             return Placeholder(

@@ -353,7 +353,7 @@ namespace rocRoller
                         fmt::format("ConditionalBottom_{}_{}", op.conditionName, tag));
 
                     co_yield Instruction::Lock(Scheduling::Dependency::Branch,
-                                               "Lock for Conditional");
+                                               "Lock for Conditional Branch");
 
                     auto expr            = m_fastArith(op.condition);
                     auto conditionResult = m_context->brancher()->resultRegister(expr);
@@ -404,6 +404,68 @@ namespace rocRoller
                     break;
                 }
                 case OpMode::Exec:
+                {
+                    auto const& architecture = m_context->targetArchitecture();
+                    auto const  wavefrontSize
+                        = architecture.GetCapability(GPUCapability::DefaultWavefrontSize);
+                    AssertFatal(wavefrontSize == 32 || wavefrontSize == 64,
+                                ShowValue(wavefrontSize));
+
+                    auto expr = m_fastArith(op.condition);
+                    auto vcc  = m_context->brancher()->resultRegister(expr);
+
+                    auto regType = vcc->regType();
+                    auto varType = vcc->variableType();
+                    AssertFatal((regType == Register::Type::VCC && varType == DataType::Bool64
+                                 && wavefrontSize == 64)
+                                    || (regType == Register::Type::VCC_LO
+                                        && varType == DataType::Bool32 && wavefrontSize == 32),
+                                ShowValue(regType),
+                                ShowValue(varType),
+                                ShowValue(wavefrontSize));
+
+                    co_yield Instruction::Lock(Scheduling::Dependency::Branch,
+                                               "Lock for Conditional EXEC");
+                    co_yield Expression::generate(vcc, expr, m_context);
+
+                    Register::ValuePtr sgpr;
+                    // s_and_saveexec_b{32,64}: Calculate bitwise AND on the scalar input and the EXEC mask,
+                    // store the calculated result into the EXEC mask,
+                    // set SCC iff the calculated result is nonzero and
+                    // store the original value of the EXEC mask into the scalar destination register.
+                    // The original EXEC mask is saved to the destination SGPRs before the
+                    // bitwise operation is performed.
+                    if(wavefrontSize == 64)
+                    {
+                        sgpr = std::make_shared<Register::Value>(
+                            m_context,
+                            Register::Type::Scalar,
+                            DataType::Bool64,
+                            2,
+                            Register::AllocationOptions::FullyContiguous());
+                        co_yield_(Instruction("s_and_saveexec_b64", {sgpr}, {vcc}, {}, ""));
+                    }
+                    else
+                    {
+                        sgpr = std::make_shared<Register::Value>(
+                            m_context,
+                            Register::Type::Scalar,
+                            DataType::Bool32,
+                            1,
+                            Register::AllocationOptions::FullyContiguous());
+                        co_yield_(Instruction("s_and_saveexec_b32", {sgpr}, {vcc}, {}, ""));
+                    }
+
+                    auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                    co_yield generate(trueBody);
+
+                    // restore the original EXEC mask from the scalar destination register.
+                    auto EXEC = m_context->getExec();
+                    co_yield m_context->copier()->copy(EXEC, sgpr, "restore the EXEC mask");
+
+                    co_yield Instruction::Unlock("Unlock Conditional EXEC");
+                    break;
+                }
                 case OpMode::BranchAndExec:
                 default:
                     Throw<FatalError>("Unsupported mode for ConditionalOp: ", ShowValue(op.mode));

@@ -291,8 +291,21 @@ namespace rocRoller
         else if(dest->regType() == Register::Type::Scalar
                 && src->regType() == Register::Type::Vector)
         {
-
             co_yield_(Instruction("v_readfirstlane_b32", {dest}, {src}, {}, comment));
+        }
+        // Scalar -> EXEC
+        else if((src->regType() == Register::Type::Scalar && dest->isExec())
+                && ((src->registerCount() == 2 && context->kernel()->wavefront_size() == 64)
+                    || (src->registerCount() == 1 && context->kernel()->wavefront_size() == 32)))
+        {
+            if(context->kernel()->wavefront_size() == 64)
+            {
+                co_yield_(Instruction("s_mov_b64", {dest}, {src}, {}, comment));
+            }
+            else
+            {
+                co_yield_(Instruction("s_mov_b32", {dest}, {src}, {}, comment));
+            }
         }
         // Catch unhandled copy cases
         else
