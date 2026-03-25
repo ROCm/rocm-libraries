@@ -137,10 +137,11 @@ inline TensorAttributes makeTensorAttributes(const std::string& name, const T va
 /**
  * @brief Allocate a Data SDK ITensor that matches the given attributes
  *
- * Creates an actual tensor object (with host/device storage) from a
- * descriptor. Primarily used in tests and utilities — in production
- * code you typically manage your own device memory and just pass
- * pointers via the variant pack.
+ * Creates an actual tensor object from a descriptor. Host memory is
+ * allocated immediately; device memory is allocated lazily on first
+ * access. Primarily used in tests and utilities — in production code
+ * you typically manage your own device memory and just pass pointers
+ * via the variant pack.
  *
  * @param attribute The tensor descriptor (type, dims, strides)
  * @return Owning pointer to the created ITensor

@@ -52,6 +52,8 @@ class BatchnormInferenceAttributesVarianceExt
     : public Attributes<BatchnormInferenceAttributesVarianceExt>
 {
 public:
+    BatchnormInferenceAttributesVarianceExt() = default;
+
     enum class InputNames
     {
         X = 0,
