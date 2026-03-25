@@ -11,6 +11,7 @@
 #include <hipdnn_frontend/detail/OperationUnpacker.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
+#include <hipdnn_frontend/node/SdpaBpropNode.hpp>
 
 #include "fake_backend/MockHipdnnBackend.hpp"
 
@@ -254,6 +255,16 @@ TEST(TestCreateNodeForType, CreatesConvFpropNode)
     ASSERT_NE(node, nullptr);
     auto convNode = std::dynamic_pointer_cast<ConvolutionFpropNode>(node);
     EXPECT_NE(convNode, nullptr);
+}
+
+TEST(TestCreateNodeForType, CreatesSdpaBpropNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_SDPA_BACKWARD, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto sdpaNode = std::dynamic_pointer_cast<SdpaBpropNode>(node);
+    EXPECT_NE(sdpaNode, nullptr);
 }
 
 TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
