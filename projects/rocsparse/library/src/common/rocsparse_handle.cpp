@@ -150,12 +150,16 @@ try
 }
 catch(...)
 {
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(buffer));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(alpha));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(done));
-    rocsparse::blas_destroy_handle(this->blas_handle);
+    PRINT_IF_HIP_ERROR(rocsparse_hipFree(this->buffer));
+    PRINT_IF_HIP_ERROR(rocsparse_hipFree(this->alpha));
+    PRINT_IF_HIP_ERROR(rocsparse_hipFree(this->beta));
+    PRINT_IF_HIP_ERROR(rocsparse_hipFree(this->sone));
+    PRINT_IF_HIP_ERROR(rocsparse_hipFree(this->done));
+    rocsparse_status status = rocsparse::blas_destroy_handle(this->blas_handle);
+    if(status != rocsparse_status_success)
+    {
+        ROCSPARSE_ERROR_MESSAGE(status, "handle error");
+    }
     throw;
 }
 
