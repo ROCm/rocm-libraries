@@ -29,6 +29,7 @@
 #endif
 
 #include "float_types.h"
+#include "miopen_cstdint.hpp"
 
 template <int N>
 struct log2_floor
@@ -70,7 +71,7 @@ using vec_t = array<T, load_factor<T>>;
 
 template <typename T, unsigned int BOUND = INNER_SIZE, unsigned int I_STRIDE = STRIDE>
 __forceinline__ __device__ static vec_t<T>
-load(unsigned int i, const unsigned int i_offset, const T* __restrict__ src)
+load(uint64_t i, const uint64_t i_offset, const T* __restrict__ src)
 {
     if(I_STRIDE == 1 && i + load_factor<T> < BOUND)
     {
@@ -97,7 +98,7 @@ load(unsigned int i, const unsigned int i_offset, const T* __restrict__ src)
 
 template <typename T, unsigned int BOUND = INNER_SIZE, bool USE_DEFAULT = false>
 __forceinline__ __device__ static vec_t<T> load_contiguous(
-    unsigned int i, const T* __restrict__ src, const T default_value = CVT_FP32_2FLOAT(0.0f))
+    uint64_t i, const T* __restrict__ src, const T default_value = CVT_FP32_2FLOAT(0.0f))
 {
     if(!USE_DEFAULT && i + load_factor<T> < BOUND)
     {
@@ -130,7 +131,7 @@ __forceinline__ __device__ static vec_t<T> load_contiguous(
 
 template <typename T>
 __forceinline__ __device__ static void
-store(unsigned int i, const unsigned int i_offset, T* __restrict__ dst, vec_t<T>& data)
+store(uint64_t i, const uint64_t i_offset, T* __restrict__ dst, vec_t<T>& data)
 {
     if(STRIDE == 1 && i + load_factor<T> < INNER_SIZE)
     {
