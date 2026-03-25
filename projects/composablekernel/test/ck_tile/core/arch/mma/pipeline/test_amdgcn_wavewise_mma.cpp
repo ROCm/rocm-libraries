@@ -36,13 +36,23 @@ __global__ void test_wavewise_pipeline(void* a, void* b, void* c, void* out)
     using BVecType = typename Pipeline::BVecType;
     using CVecType = typename Pipeline::CVecType;
 
-    auto result =
-        Pipeline::exec(*reinterpret_cast<AVecType(*)[Pipeline::FragsM][Pipeline::FragsK]>(a),
-                       *reinterpret_cast<BVecType(*)[Pipeline::FragsN][Pipeline::FragsK]>(b),
-                       *reinterpret_cast<CVecType(*)[Pipeline::FragsM][Pipeline::FragsN]>(c));
+    auto result = Pipeline::exec(*reinterpret_cast<AVecType*>(a),
+                                 *reinterpret_cast<BVecType*>(b),
+                                 *reinterpret_cast<CVecType*>(c));
 
-    // *reinterpret_cast<CVecType(*)[Pipeline::FragsM][Pipeline::FragsN]>(out) = result;
-    memcpy(out, &result, sizeof(result));
+    __builtin_memcpy(
+        out,
+        [&]() {
+            if constexpr(std::is_pointer_v<decltype(result)>)
+            {
+                return static_cast<const void*>(result);
+            }
+            else
+            {
+                return static_cast<const void*>(std::addressof(result));
+            }
+        }(),
+        sizeof(CVecType));
 }
 
 namespace {

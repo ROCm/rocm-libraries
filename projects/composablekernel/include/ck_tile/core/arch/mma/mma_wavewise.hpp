@@ -94,14 +94,14 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipeline
     constexpr static uint32_t FragsC = FragsM * FragsN;
 
     // Vector types for packed registers in each fragment
-    using AVecType = typename MmaOp::AVecType;
-    using BVecType = typename MmaOp::BVecType;
-    using CVecType = typename MmaOp::CVecType;
+    using InternalAVecT = typename MmaOp::AVecType;
+    using InternalBVecT = typename MmaOp::BVecType;
+    using InternalCVecT = typename MmaOp::CVecType;
 
     // Buffer types for WaveTiles
-    using InternalAVecT = AVecType[FragsM][FragsK];
-    using InternalBVecT = BVecType[FragsN][FragsK];
-    using InternalCVecT = CVecType[FragsM][FragsN];
+    using AVecType = InternalAVecT[FragsM][FragsK];
+    using BVecType = InternalBVecT[FragsN][FragsK];
+    using CVecType = InternalCVecT[FragsM][FragsN];
 
     // Transforms
     using ATransform = typename MmaTransforms::ATransform;
@@ -116,38 +116,6 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipeline
     static_assert(WaveTileM % FragM == 0u, "WaveTileM must be a multiple of FragM");
     static_assert(WaveTileN % FragN == 0u, "WaveTileN must be a multiple of FragN");
     static_assert(WaveTileK % FragK == 0u, "WaveTileK must be a multiple of FragK");
-
-    // template <MmaPipelineOptionFlags::Type Flags, typename VecTA, typename VecTB, typename VecTC>
-    // CK_TILE_DEVICE static decltype(auto) preApply(VecTA&& a, VecTB&& b, VecTC&& accum)
-    // {
-    //     static_assert(Flags == MmaPipelineOptionFlags(), "No special flags implemented yet.");
-
-    //     // We implement an example wave-tile pipeline here.
-    //     // First, we apply the necessary transforms to the input fragments,
-    //     // then we convert the result into buffers of native vector formats
-    //     // that we can easily index. Native vector formats are necessary inputs
-    //     // to the given MmaOp exec function.
-    //     auto a_frag =
-    //         Base::template preApplyTransform<ABufferType, ATransform>(std::forward<VecTA>(a));
-    //     auto b_frag =
-    //         Base::template preApplyTransform<BBufferType, BTransform>(std::forward<VecTB>(b));
-    //     auto c_frag =
-    //         Base::template preApplyTransform<CBufferType,
-    //         CTransform>(std::forward<VecTC>(accum));
-
-    //     return std::make_tuple(std::move(a_frag), std::move(b_frag), std::move(c_frag));
-    // }
-
-    // template <MmaPipelineOptionFlags::Type Flags, typename VecTA, typename VecTB, typename VecTC>
-    // CK_TILE_DEVICE static decltype(auto) postApply(std::tuple<VecTA, VecTB, VecTC>&& vecs)
-    // {
-    //     static_assert(Flags == MmaPipelineOptionFlags(), "No special flags implemented yet.");
-
-    //     auto& [a_frag, b_frag, c_frag] = vecs;
-    //     // Convert native vector results back to the output WaveTile format
-    //     // and then return after we apply the final output transform.
-    //     return Base::template postApplyTransform<std::decay_t<VecTC>, DTransform>(c_frag);
-    // }
 
     template <typename VecTA, typename VecTB, typename VecTC>
     CK_TILE_DEVICE static void execImpl(std::tuple<VecTA, VecTB, VecTC>& vecs)
