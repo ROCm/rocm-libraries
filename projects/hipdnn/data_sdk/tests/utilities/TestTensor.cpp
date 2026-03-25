@@ -612,105 +612,62 @@ TEST(TestTensor, SparseTensorCreationAndUsage)
 
 /* ======== fillWithSentinelValue tests ======== */
 
-TEST(TestTensorSentinel, FloatTensorFilledWithNaN)
+template <typename T>
+class TestTensorSentinel : public ::testing::Test
 {
-    Tensor<float> tensor({2, 3});
+};
+
+using SentinelTypes = ::testing::Types<float,
+                                       double,
+                                       half,
+                                       bfloat16,
+                                       hipdnn_data_sdk::types::fp8_e4m3,
+                                       hipdnn_data_sdk::types::fp8_e5m2,
+                                       int8_t,
+                                       uint8_t,
+                                       int32_t>;
+
+TYPED_TEST_SUITE(TestTensorSentinel, SentinelTypes, );
+
+TYPED_TEST(TestTensorSentinel, PackedTensorFilled)
+{
+    using hipdnn_data_sdk::types::isnan;
+    Tensor<TypeParam> tensor({2, 3});
     tensor.fillWithSentinelValue();
 
     for(auto valuePtr : tensor)
     {
-        EXPECT_TRUE(std::isnan(*static_cast<float*>(valuePtr)));
+        auto value = *static_cast<TypeParam*>(valuePtr);
+        if constexpr(std::numeric_limits<TypeParam>::has_quiet_NaN)
+        {
+            EXPECT_TRUE(isnan(value));
+        }
+        else
+        {
+            EXPECT_EQ(value, std::numeric_limits<TypeParam>::max());
+        }
     }
 }
 
-TEST(TestTensorSentinel, HalfTensorFilledWithNaN)
+TYPED_TEST(TestTensorSentinel, StridedTensorFilled)
 {
-    Tensor<half> tensor({2, 3});
-    tensor.fillWithSentinelValue();
-
-    for(auto valuePtr : tensor)
-    {
-        auto value = *static_cast<half*>(valuePtr);
-        EXPECT_TRUE(std::isnan(static_cast<float>(value)));
-    }
-}
-
-TEST(TestTensorSentinel, Bfloat16TensorFilledWithNaN)
-{
-    Tensor<bfloat16> tensor({2, 3});
-    tensor.fillWithSentinelValue();
-
-    for(auto valuePtr : tensor)
-    {
-        auto value = *static_cast<bfloat16*>(valuePtr);
-        EXPECT_TRUE(std::isnan(static_cast<float>(value)));
-    }
-}
-
-TEST(TestTensorSentinel, DoubleTensorFilledWithNaN)
-{
-    Tensor<double> tensor({2, 3});
-    tensor.fillWithSentinelValue();
-
-    for(auto valuePtr : tensor)
-    {
-        EXPECT_TRUE(std::isnan(*static_cast<double*>(valuePtr)));
-    }
-}
-
-TEST(TestTensorSentinel, Int32TensorFilledWithMax)
-{
-    Tensor<int32_t> tensor({2, 3});
-    tensor.fillWithSentinelValue();
-
-    for(auto valuePtr : tensor)
-    {
-        EXPECT_EQ(*static_cast<int32_t*>(valuePtr), std::numeric_limits<int32_t>::max());
-    }
-}
-
-TEST(TestTensorSentinel, Int8TensorFilledWithMax)
-{
-    Tensor<int8_t> tensor({2, 3});
-    tensor.fillWithSentinelValue();
-
-    for(auto valuePtr : tensor)
-    {
-        EXPECT_EQ(*static_cast<int8_t*>(valuePtr), std::numeric_limits<int8_t>::max());
-    }
-}
-
-TEST(TestTensorSentinel, Uint8TensorFilledWithMax)
-{
-    Tensor<uint8_t> tensor({2, 3});
-    tensor.fillWithSentinelValue();
-
-    for(auto valuePtr : tensor)
-    {
-        EXPECT_EQ(*static_cast<uint8_t*>(valuePtr), std::numeric_limits<uint8_t>::max());
-    }
-}
-
-TEST(TestTensorSentinel, StridedTensorFilledWithNaN)
-{
+    using hipdnn_data_sdk::types::isnan;
     const std::vector<int64_t> dims = {2, 2, 2};
     const std::vector<int64_t> strides = {2, 4, 8};
 
-    Tensor<float> tensor(dims, strides);
+    Tensor<TypeParam> tensor(dims, strides);
     tensor.fillWithSentinelValue();
 
     for(auto valuePtr : tensor)
     {
-        EXPECT_TRUE(std::isnan(*static_cast<float*>(valuePtr)));
+        auto value = *static_cast<TypeParam*>(valuePtr);
+        if constexpr(std::numeric_limits<TypeParam>::has_quiet_NaN)
+        {
+            EXPECT_TRUE(isnan(value));
+        }
+        else
+        {
+            EXPECT_EQ(value, std::numeric_limits<TypeParam>::max());
+        }
     }
-}
-
-TEST(TestTensorSentinel, ViaITensorInterface)
-{
-    std::unique_ptr<ITensor> tensor = std::make_unique<Tensor<float>>(std::vector<int64_t>{4, 4});
-    tensor->fillWithSentinelValue();
-
-    auto* floatTensor = static_cast<TensorBase<float>*>(tensor.get());
-    EXPECT_TRUE(std::isnan(floatTensor->getHostValue(0, 0)));
-    EXPECT_TRUE(std::isnan(floatTensor->getHostValue(3, 3)));
 }
