@@ -32,13 +32,13 @@ struct TransposeProblem
 {
     TensorDescriptor input;
     const char* layout;
-    const char* target_layout;
+    std::string target_layout;
 
     TensorDescriptor GetOutputDescriptor() const
     {
         const auto labels    = tensor_layout_get_default(input.GetNumDims());
         auto derived_strides = std::vector<size_t>{};
-        auto target          = std::string(target_layout);
+        auto target          = target_layout;
         if(strlen(layout) < 5)
             target = ReplaceString(target, "D", "");
         tensor_layout_to_strides(input.GetLengths(), labels, target, derived_strides);
@@ -361,7 +361,9 @@ struct VectorizedTransposeSolver : TransposePseudoSolver
         const auto& lens        = problem.input.GetLengths();
         const auto out_desc     = problem.GetOutputDescriptor();
         const auto& out_strides = out_desc.GetStrides();
-
+    const auto type = problem.input.GetType();
+    if(type != miopenFloat && type != miopenHalf && type != miopenBFloat16)
+        return false;
         if(in_strides.empty() || lens.empty())
             return false;
 
@@ -511,7 +513,7 @@ struct BatchedTransposeSolverImpl : TransposePseudoSolver
 
     bool IsApplicable(const TransposeProblem& problem) const override
     {
-        auto pair = std::string(problem.layout) + "-" + std::string(problem.target_layout);
+        auto pair = std::string(problem.layout) + "-" + problem.target_layout;
         if(pair != BatchedTransposeTraits<TransposeSolution>::layout_transform)
             return false;
 
@@ -922,7 +924,7 @@ struct TransposingSolver : TransposingSolverGetSolution<Derived, Base, Problem, 
 
             any_difference = true;
 
-            const auto transpose_problem = TransposeProblem{descriptor, layout.c_str(), to.c_str()};
+            const auto transpose_problem = TransposeProblem{descriptor, layout.c_str(), to};
             if(FindApplicableSolver(transpose_problem, transpose_solvers) == nullptr)
                 return false;
         }
@@ -1008,9 +1010,12 @@ struct TransposingSolver : TransposingSolverGetSolution<Derived, Base, Problem, 
             }
 
             const auto transpose_problem =
-                TransposeProblem{src_descriptor, layout.c_str(), to.c_str()};
+                TransposeProblem{src_descriptor, layout.c_str(), to};
             const auto* solver = FindApplicableSolver(transpose_problem, transpose_solvers);
-            assert(solver != nullptr);
+const auto* solver = FindApplicableSolver(transpose_problem, transpose_solvers);
+if(solver == nullptr)
+    MIOPEN_THROW("No applicable transpose solver found for layout transformation: " +
+                 std::string(layout) + " -> " + std::string(to));
 
             auto transpose_sln = (*solver)->GetSolution(ctx, transpose_problem);
 

@@ -43,8 +43,8 @@ __launch_bounds__(BLOCK_SIZE) void UniversalTranspose(const FLOAT* __restrict__ 
                                                       index_t out_strides_h,
                                                       index_t out_strides_w)
 {
-    const index_t global_size = static_cast<index_t>(gridDim.x * blockDim.x);
-    const index_t global_id   = static_cast<index_t>(blockIdx.x * blockDim.x + threadIdx.x);
+    const index_t global_size = static_cast<index_t>(gridDim.x) * static_cast<index_t>(blockDim.x);
+    const index_t global_id   = static_cast<index_t>(blockIdx.x ) * static_cast<index_t>(blockDim.x) + threadIdx.x;
 
     const index_t lens_wh    = lens_w * lens_h;
     const index_t lens_whd   = lens_wh * lens_d;
@@ -159,6 +159,7 @@ __launch_bounds__(BLOCK_SIZE) void TiledTranspose(const FLOAT* __restrict__ in,
                 const index_t w       = w_base + local_w;
                 const index_t out_idx = out_base + c * out_strides_c + w * out_strides_w;
                 out[out_idx]          = tile[local_c][local_w];
+        __syncthreads(); // Ensure all threads finish reading before next iteration overwrites tile
             }
         }
     }
@@ -198,7 +199,8 @@ constexpr index_t kBlockSize  = BLOCK_SIZE;
 template <typename VecType, typename ScalarType>
 __device__ __forceinline__ VecType load_vector(const ScalarType* ptr)
 {
-    return *reinterpret_cast<const VecType*>(ptr);
+    return *reinterpret_cast<const VecType*>(
+        __builtin_assume_aligned(ptr, sizeof(VecType)));
 }
 
 template <typename VecType, typename ScalarType>
@@ -228,8 +230,8 @@ __launch_bounds__(BLOCK_SIZE) void VectorizedTranspose(const FLOAT* __restrict__
                                                        bool vectorize_in,
                                                        bool vectorize_out)
 {
-    const index_t global_size = static_cast<index_t>(gridDim.x * blockDim.x);
-    const index_t global_id   = static_cast<index_t>(blockIdx.x * blockDim.x + threadIdx.x);
+    const index_t global_size = static_cast<index_t>(gridDim.x) * static_cast<index_t>(blockDim.x);
+    const index_t global_id   = static_cast<index_t>(blockIdx.x ) * static_cast<index_t>(blockDim.x) + threadIdx.x;
 
     const index_t lens_wh    = lens_w * lens_h;
     const index_t lens_whd   = lens_wh * lens_d;
