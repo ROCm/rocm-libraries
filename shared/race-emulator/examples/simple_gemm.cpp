@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <hip/hip_runtime.h>
 
 extern "C" __global__ void SimpleGemm(float *D, const float *A, const float *B,

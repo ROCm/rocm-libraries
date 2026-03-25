@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "race-emulator/IntervalSet.h"
 #include <gtest/gtest.h>
 

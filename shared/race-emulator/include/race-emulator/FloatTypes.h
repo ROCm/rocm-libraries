@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #ifndef RACE_EMULATOR_FLOAT_TYPES_H
 #define RACE_EMULATOR_FLOAT_TYPES_H
 

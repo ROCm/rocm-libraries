@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 // Profiler implementation: Profiler::ScopedStopwatch RAII timing and report
 // formatting. See Profiler.h for class documentation and usage examples.
 

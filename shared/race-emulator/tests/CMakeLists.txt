@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # Try to find an installed GTest first. QUIET suppresses the "not found" message
 # so we can fall back to FetchContent without noisy warnings.
 find_package(GTest 1.12.1 QUIET)

@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 // Compile for a target architecture with:
 //   hipcc --cuda-device-only -S --offload-arch=<arch> -O2 f16_round_trip.cpp
 //   -o ../<arch>/f16_round_trip.s

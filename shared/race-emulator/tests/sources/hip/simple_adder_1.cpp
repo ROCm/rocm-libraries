@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 // Compile for a target architecture with:
 //   hipcc --cuda-device-only -S --offload-arch=<arch> -O2 simple_adder_1.cpp -o
 //   ../<arch>/simple_adder_1.s

@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 // GPU hardware validation for gfx1151: dual-issue instruction execution.
 //
 // Runs a hand-crafted kernel on real gfx1151 hardware and through the

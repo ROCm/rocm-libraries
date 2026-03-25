@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "race-emulator/Util.h"
 #include <cstring>
 #include <gtest/gtest.h>

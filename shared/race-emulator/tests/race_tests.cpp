@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "race-emulator/Emulator.h"
 #include "race-emulator/IntervalSet.h"
 #include <cstring> // For std::memcpy

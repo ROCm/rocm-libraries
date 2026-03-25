@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 // Workgroup implementation: hybrid LDS race validation.
 // Per-byte counts provide O(1) fast-path checks. When counts are non-zero,
 // falls back to scanning live event intervals with binary search.

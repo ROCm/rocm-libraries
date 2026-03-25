@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 // GPU-validated instruction test for the race-emulator on gfx942 (CDNA3).
 //
 // This file requires a gfx942 GPU to build and run. It validates that the

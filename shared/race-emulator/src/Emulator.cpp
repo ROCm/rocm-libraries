@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "race-emulator/Emulator.h"
 #include "race-emulator/EmulatorException.h"
 #include "race-emulator/Parsing.h"

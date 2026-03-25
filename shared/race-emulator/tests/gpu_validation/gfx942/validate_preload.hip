@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 // GPU validation test for kernarg preloading on gfx942.
 //
 // Loads the preload_add_one.co code object (assembled at build time from

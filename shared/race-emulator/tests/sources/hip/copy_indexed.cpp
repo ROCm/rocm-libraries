@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 // Compile for a target architecture with:
 //   hipcc --cuda-device-only -S --offload-arch=<arch> -O2 copy_indexed.cpp -o
 //   ../<arch>/copy_indexed.s
