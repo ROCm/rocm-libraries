@@ -45,6 +45,7 @@ namespace
     // (only when both endpoints are inside the region).
     static void scheduleRegionWithMovableSideEffects(IRList::iterator                 regionStart,
                                                      IRList::iterator                 regionEnd,
+                                                     IRList::iterator                 blockBegin,
                                                      std::vector<StinkyInstruction*>& scheduled,
                                                      ReadyQueue&                      readyQueue)
     {
@@ -151,7 +152,7 @@ namespace
 
         PASS_DEBUG(dumpDAGGraph(dagGraph, dagNodes));
 
-        readyQueue.onInitRegion(regionStart, regionEnd);
+        readyQueue.onInitRegion(regionStart, regionEnd, blockBegin);
 
         // Kahn's algorithm with stable pick (by original order)
 
@@ -235,7 +236,7 @@ namespace
             // Only break regions on non-movable side effects
             if(hasSideEffect(inst) && !isMovableSideEffect(inst))
             {
-                scheduleRegionWithMovableSideEffects(regionStart, it, scheduled, readyQueue);
+                scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue);
 
                 scheduled.push_back(&inst);
 
@@ -248,7 +249,7 @@ namespace
             }
         }
         // Flush the last region if it has not been flushed yet.
-        scheduleRegionWithMovableSideEffects(regionStart, endIt, scheduled, readyQueue);
+        scheduleRegionWithMovableSideEffects(regionStart, endIt, beginIt, scheduled, readyQueue);
 
         assert(scheduled.size() == bb.size()
                && "Scheduled instructions size must match original instructions size");

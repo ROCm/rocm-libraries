@@ -333,7 +333,11 @@ namespace stinkytofu
 
         void dump() const;
 
-        // Implicit register: SCC, VCC, EXEC, etc.
+        // Scalar condition code (SCC): the architectural SALU status register. Instructions may
+        // use SCC implicitly without listing it in the textual operands; lowering represents
+        // those implicit reads/writes as explicit src/dst SCC operands so def-use and scheduling
+        // see the dependency. When emitting GPU assembly text, SCC is not printed—it is IR-only
+        // for dependency modeling (see isImplicitRegister).
         static StinkyRegister getSCCRegister()
         {
             return StinkyRegister(RegType::SCC, 0, 1);
