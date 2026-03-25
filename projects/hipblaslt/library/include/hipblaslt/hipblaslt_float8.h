@@ -136,16 +136,10 @@ struct HIPBLASLT_EXPORT hipblaslt_f8: public __hip_fp8_e4m3
         return __x == 0x00;
     }
 
-    // check for nan
+    // check for nan (OCP E4M3: exp and mantissa all 1s; no infinities)
     inline HIP_HOST_DEVICE bool is_nan() const
     {
-        return __x == 0x80;
-    }
-
-    // check for inf
-    inline HIP_HOST_DEVICE bool is_inf() const
-    {
-        return __x == 0x80;
+        return (__x & 0x7f) == 0x7f;
     }
 
     // assignment overloading only from the same F8 types
