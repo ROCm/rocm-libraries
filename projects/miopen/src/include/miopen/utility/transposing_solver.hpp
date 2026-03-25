@@ -361,9 +361,9 @@ struct VectorizedTransposeSolver : TransposePseudoSolver
         const auto& lens        = problem.input.GetLengths();
         const auto out_desc     = problem.GetOutputDescriptor();
         const auto& out_strides = out_desc.GetStrides();
-    const auto type = problem.input.GetType();
-    if(type != miopenFloat && type != miopenHalf && type != miopenBFloat16)
-        return false;
+        const auto type         = problem.input.GetType();
+        if(type != miopenFloat && type != miopenHalf && type != miopenBFloat16)
+            return false;
         if(in_strides.empty() || lens.empty())
             return false;
 
@@ -1009,13 +1009,12 @@ struct TransposingSolver : TransposingSolverGetSolution<Derived, Base, Problem, 
                 continue;
             }
 
-            const auto transpose_problem =
-                TransposeProblem{src_descriptor, layout.c_str(), to};
+            const auto transpose_problem = TransposeProblem{src_descriptor, layout.c_str(), to};
             const auto* solver = FindApplicableSolver(transpose_problem, transpose_solvers);
-const auto* solver = FindApplicableSolver(transpose_problem, transpose_solvers);
-if(solver == nullptr)
-    MIOPEN_THROW("No applicable transpose solver found for layout transformation: " +
-                 std::string(layout) + " -> " + std::string(to));
+            const auto* solver = FindApplicableSolver(transpose_problem, transpose_solvers);
+            if(solver == nullptr)
+                MIOPEN_THROW("No applicable transpose solver found for layout transformation: " +
+                             std::string(layout) + " -> " + std::string(to));
 
             auto transpose_sln = (*solver)->GetSolution(ctx, transpose_problem);
 
