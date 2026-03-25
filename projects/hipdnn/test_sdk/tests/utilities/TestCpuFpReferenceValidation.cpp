@@ -707,49 +707,70 @@ TYPED_TEST(CpuFpReferenceValidationNanInf, PassesForFiniteValues)
 
 /* ================================================= */
 
-/* ======== Integer sentinel detection tests ======== */
+/* ======== Integer sentinel detection tests (TYPED_TEST across int types) ======== */
 
-TEST(TestCpuIntReferenceValidationInt32, FailsWhenReferenceHasSentinel)
+template <typename T>
+class CpuIntReferenceValidationSentinel : public ::testing::Test
 {
-    const CpuIntReferenceValidation<int32_t> refValidation;
+};
+
+using IntValidationTypes = ::testing::Types<int32_t, int8_t, uint8_t>;
+TYPED_TEST_SUITE(CpuIntReferenceValidationSentinel, IntValidationTypes, );
+
+TYPED_TEST(CpuIntReferenceValidationSentinel, FailsWhenReferenceHasSentinel)
+{
+    const CpuIntReferenceValidation<TypeParam> refValidation;
     const std::vector<int64_t> dims = {2, 2};
 
-    Tensor<int32_t> tensor1(dims);
-    Tensor<int32_t> tensor2(dims);
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
     tensor1.fillTensorWithValue(1);
     tensor2.fillTensorWithValue(1);
 
-    tensor1.setHostValue(std::numeric_limits<int32_t>::max(), 0, 0);
+    tensor1.setHostValue(std::numeric_limits<TypeParam>::max(), 0, 0);
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuIntReferenceValidationInt32, FailsWhenImplementationHasSentinel)
+TYPED_TEST(CpuIntReferenceValidationSentinel, FailsWhenImplementationHasSentinel)
 {
-    const CpuIntReferenceValidation<int32_t> refValidation;
+    const CpuIntReferenceValidation<TypeParam> refValidation;
     const std::vector<int64_t> dims = {2, 2};
 
-    Tensor<int32_t> tensor1(dims);
-    Tensor<int32_t> tensor2(dims);
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
     tensor1.fillTensorWithValue(1);
     tensor2.fillTensorWithValue(1);
 
-    tensor2.setHostValue(std::numeric_limits<int32_t>::max(), 0, 0);
+    tensor2.setHostValue(std::numeric_limits<TypeParam>::max(), 0, 0);
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuIntReferenceValidationInt32, FailsWhenBothHaveSentinel)
+TYPED_TEST(CpuIntReferenceValidationSentinel, FailsWhenBothHaveSentinel)
 {
-    const CpuIntReferenceValidation<int32_t> refValidation;
+    const CpuIntReferenceValidation<TypeParam> refValidation;
     const std::vector<int64_t> dims = {2, 2};
 
-    Tensor<int32_t> tensor1(dims);
-    Tensor<int32_t> tensor2(dims);
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
     tensor1.fillWithSentinelValue();
     tensor2.fillWithSentinelValue();
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuIntReferenceValidationSentinel, PassesForNonSentinelValues)
+{
+    const CpuIntReferenceValidation<TypeParam> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1);
+    tensor2.fillTensorWithValue(1);
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
 /* ================================================= */
