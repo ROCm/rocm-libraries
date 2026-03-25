@@ -54,6 +54,8 @@ public:
                 ());
     MOCK_METHOD(const char*, getErrorString, (hipdnnStatus_t status), ());
     MOCK_METHOD(void, getLastErrorString, (char* message, size_t max_size), ());
+    MOCK_METHOD(hipdnn_data_sdk::utilities::Version, version, ());
+    MOCK_METHOD(const char*, versionString, ());
     MOCK_METHOD(hipdnnStatus_t,
                 backendCreateAndDeserializeGraphExt,
                 (hipdnnBackendDescriptor_t * descriptor,
@@ -67,6 +69,11 @@ public:
                  const char* const* plugin_paths,
                  hipdnnPluginLoadingMode_ext_t mode),
                 ());
+    MOCK_METHOD(
+        hipdnnStatus_t,
+        getLoadedEnginePluginPathsExt,
+        (hipdnnHandle_t handle, size_t* numPluginPaths, char** pluginPaths, size_t* maxStringLen),
+        ());
 };
 
 // NOLINTEND

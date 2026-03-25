@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 find_package(GTest REQUIRED)
-find_package(Boost REQUIRED COMPONENTS filesystem)
 
 add_executable(tensilelite-tests)
 add_subdirectory(configs)
@@ -20,6 +19,7 @@ endforeach()
 target_sources(tensilelite-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AlmostEqual_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
@@ -30,22 +30,15 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestData.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestUtils.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
 )
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-
-if(HIPBLASLT_ENABLE_LLVM OR HIPBLASLT_ENABLE_MSGPACK)
-    target_sources(tensilelite-tests
-        PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
-    )
-endif()
-
+target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/include")
 
 target_link_libraries(tensilelite-tests
     PUBLIC
         tensilelite::tensilelite-host
-        Boost::filesystem
     PRIVATE
         hip::device
         ${CMAKE_DL_LIBS}

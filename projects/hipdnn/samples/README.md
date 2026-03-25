@@ -4,6 +4,7 @@
 
 1. **Prerequisites:**
 
+   - If you're new to hipDNN, see the [Consumer Quick Start](../docs/ConsumerQuickStart.md) for project setup basics.
    - Follow the instructions in [Building.md](../docs/Building.md) to install the needed dependencies, compilers, and libraries for building hipDNN projects. Specifically:
      * CMake
      * Ninja
@@ -59,6 +60,15 @@ All samples are templated for mixed-precision execution with Fp32, Fp16, and Bfp
 
 The current samples include:
 
+
+### [**`BnInference`**](./batchnorm/BnInference.cpp)
+
+Executes a single-node batch normalization inference graph on a 4D input tensor using inverse variance.
+
+- It normalizes each dimension of the input tensor `x` of shape `(N, C, H, W)`, using pre-calculated population statistics (mean and inverse variance). The result is then transformed by the learned parameters `scale` and `bias`, each with shape `(1, C, 1, 1)`:
+    ```python
+    y = scale * ((x - mean) * inv_variance) + bias
+    ```
 
 ### [**`BnInferenceWithVariance`**](./batchnorm/BnInferenceWithVariance.cpp)
 
@@ -284,6 +294,22 @@ Executes the backward pass (filter gradient) of a 2D convolution operation to co
     - `C` = number of input channels per filter
     - `R, S` = filter spatial dimensions (height, width)
 
+### [**`ConvFpropDeterministic`**](./convolution/ConvFpropDeterministic.cpp)
+
+Executes a deterministic forward pass of a 2D convolution operation. This sample specifically targets the deterministic engine variant (`MIOPEN_ENGINE_DETERMINISTIC`), which guarantees bit-reproducible results across runs at a potential performance cost. This is useful for debugging and validation scenarios where exact reproducibility is required.
+
+### [**`FusedConvFpropBiasActiv`**](./convolution/FusedConvFpropBiasActiv.cpp)
+
+Executes a fused convolution forward pass with bias addition and activation function in a single graph.
+
+The fused graph consists of three operations:
+
+1. **Convolution Forward**: Performs standard 2D convolution
+2. **Pointwise Add (Bias)**: Adds a per-channel bias vector to the convolution output
+3. **Activation**: Applies an activation function (clamped ReLU) to the result
+
+This demonstrates a common deep learning pattern where convolution, bias, and activation are fused into a single graph for improved performance.
+
 ### [**`FusedConvFpropActiv`**](./convolution/FusedConvFpropActiv.cpp)
 
 Executes a fused convolution forward pass with activation function in a single graph.
@@ -321,3 +347,53 @@ Output: y (activated convolution result)
 - Reduces memory bandwidth by avoiding intermediate tensor writes/reads
 - Eliminates kernel launch overhead between operations
 - Enables better cache utilization by processing data in a single pass
+
+### [**`SerializationRoundTrip`**](./serialization/SerializationRoundTrip.cpp)
+
+Demonstrates graph serialization and deserialization (round-trip) using hipDNN's FlatBuffer-based serialization format. The sample builds a convolution forward graph, serializes it to a binary format, deserializes it back, and then executes the deserialized graph to verify correctness. This shows how graphs can be saved, transmitted, and restored for deployment or caching scenarios.
+
+### [**`KnobsUsage`**](./knobs/KnobsUsage.cpp)
+
+Demonstrates how to use hipDNN's engine configuration knobs system for runtime parameter tuning.
+
+**What This Sample Shows:**
+1. **Querying Available Knobs**: How to discover what knobs an engine supports
+2. **Knob Metadata**: Understanding knob types, constraints, and default values
+3. **Setting Knob Values**: Creating execution plans with custom knob settings
+4. **Knob Validation**: Validating settings against knob constraints
+5. **Knob Value Types**: Using integer, float, and string knobs
+6. **Real Execution**: Running graphs with different knob configurations
+
+**Common Knobs:**
+- `global.benchmarking` (int64, 0-1): Enable MIOpen kernel benchmarking for optimal performance
+- `global.workspace_size_limit` (int64, dynamic): Limit workspace memory for convolution operations
+
+**Usage:**
+```bash
+./knobs_usage                # Run all demonstrations including graph execution
+./knobs_usage --skip-execution  # Show knob API demonstrations only (faster)
+```
+
+**Key Features:**
+- Comprehensive demonstration of the knobs API
+- Shows both query and configuration workflows
+- Demonstrates validation and error handling
+- Includes real graph execution with different knob configurations
+- Educational sample with detailed console output
+
+**Sample Output Sections:**
+- Section 1: Query available knobs and their metadata
+- Section 2: Use knob lookup map for specific knobs
+- Section 3: Create execution plan with default knobs
+- Section 4: Set custom knob values
+- Section 5: Validate knob settings against constraints
+- Section 6: Demonstrate different knob value types
+- Section 7-8: Execute graphs with different knob configurations
+
+**Related Documentation:**
+- [hipDNN Knobs Documentation](../docs/Knobs.md) - Complete knobs guide
+- [HowTo Guide](../docs/HowTo.md#configuring-engine-knobs) - Quick start
+- [MIOpen Provider Knobs](../../dnn-providers/miopen-provider/docs/Knobs.md) - Provider-specific knobs
+
+> [!NOTE]
+> This sample is educational and demonstrates the knobs API. It is not a performance benchmark or validation test.

@@ -111,7 +111,7 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     for(const auto& pair : fdb_record)
     {
         const auto algo = static_cast<miopenConvAlgorithm_t>(algo_resolver(pair.second.algorithm));
-        if(conv::IsAlgorithmDisabled(algo))
+        if(conv::IsAlgorithmDisabled(algo, problem))
             continue;
 
         const auto solver_id = solver::Id{pair.first};
@@ -923,9 +923,6 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
     // On regular path (find-db hit) this was checked during Find().
     Problem::ValidateGroupCount(xDesc, weightsDesc, *this);
 
-    const auto& conv    = problem.GetConv();
-    bool immediate_mode = conv.findMode.IsFast(ctx);
-
     auto interim = std::vector<miopenConvSolution_t>{};
     interim.reserve(maxSolutionCount); // For speed. In most cases we have less entries than asked.
 
@@ -959,16 +956,13 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
                 const auto solver_id = solver::Id{kinder};
                 const auto sol       = solver_id.GetSolver();
                 const auto algo      = solver_id.GetAlgo();
-                if(conv::IsAlgorithmDisabled(algo))
+                if(conv::IsAlgorithmDisabled(algo, problem))
                     continue;
                 if(!sol.IsDynamic())
                     continue; // branch should never be taken
                 if(!sol.IsApplicable(ctx, problem))
                     continue;
                 const auto ws = sol.GetWorkspaceSize(ctx, problem);
-                if(!conv::IsEnoughWorkspace(
-                       "GetSolutionsFallback AI", solver_id, ws, invokeParams, !immediate_mode))
-                    continue;
                 interim.emplace_back(
                     miopenConvSolution_t{ai_time(idx), ws, solver_id.Value(), algo});
                 ++idx;
@@ -997,16 +991,13 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
             // solver_id is always valid here, because taken from registry.
             // Validity check is not required.
             const auto algo = solver_id.GetAlgo();
-            if(conv::IsAlgorithmDisabled(algo)) // Algos can be disabled globally.
+            if(conv::IsAlgorithmDisabled(algo, problem)) // Algos can be disabled globally.
                 continue;
             const auto& s = solver_id.GetSolver();
             // Let's allow non-dynamic later, if necessary.
             if(s.IsEmpty() || !s.IsDynamic() || !s.IsApplicable(ctx, problem))
                 continue;
             const auto ws = s.GetWorkspaceSize(ctx, problem);
-            if(!conv::IsEnoughWorkspace(
-                   "GetSolutionsFallback WTI", solver_id, ws, invokeParams, !immediate_mode))
-                continue;
 
             const auto wti = s.GetWti(ctx, problem);
             MIOPEN_LOG_I2(solver_id.ToString() << " Estimated WTI = " << wti);
@@ -1019,10 +1010,28 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
     for(const auto& s : interim)
         MIOPEN_LOG_I2(s);
 
+    /// Similar to GetSolutions() above: when InvokeParams is provided (immediate mode),
+    /// the workspace size is often limited to what the "best" solver needs. To avoid
+    /// false warnings, we check IsEnoughWorkspace only for the top maxSolutionCount
+    /// solutions after sorting by estimated performance. See the detailed explanation
+    /// in GetSolutions() for the full rationale.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
-    interim.resize(std::min(maxSolutionCount, interim.size()));
 
-    return interim;
+    auto out = std::vector<miopenConvSolution_t>{};
+    out.reserve(maxSolutionCount);
+    auto n_copied = 0;
+    for(const auto& s : interim)
+    {
+        const auto solver_id = solver::Id{s.solution_id};
+        if(!conv::IsEnoughWorkspace(
+               "GetSolutionsFallback", solver_id, s.workspace_size, invokeParams, false))
+            continue;
+        out.push_back(s);
+        if(++n_copied >= maxSolutionCount)
+            break;
+    }
+
+    return out;
 }
 
 /// \todo Extend miopenConvSolution_t with an attribute indicating
@@ -1043,10 +1052,14 @@ ConvolutionDescriptor::GetSolutions(const ExecutionContext& ctx,
     {
         if(fallbackPathTaken != nullptr)
             *fallbackPathTaken = FallbackPath::None;
-        return solutions;
+    }
+    else
+    {
+        solutions =
+            GetSolutionsFallback(ctx, problem, maxSolutionCount, fallbackPathTaken, invokeParams);
     }
 
-    return GetSolutionsFallback(ctx, problem, maxSolutionCount, fallbackPathTaken, invokeParams);
+    return solutions;
 }
 
 std::size_t ConvolutionDescriptor::GetForwardSolutionWorkspaceSize(const Handle& handle,

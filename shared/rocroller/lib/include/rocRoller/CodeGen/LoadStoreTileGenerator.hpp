@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2023-2026 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -32,6 +9,8 @@
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 
 #include <rocRoller/Expression_fwd.hpp>
+#include <string>
+#include <vector>
 
 namespace rocRoller
 {
@@ -142,7 +121,11 @@ namespace rocRoller
                 BufferInstructionOptions       bufOpts          = {};
                 bool                           isTransposedTile = false;
                 bool                           isPadded         = false;
+                std::vector<std::string>       comments;
             };
+
+            LoadStoreTileInfo getLoadLDSTileInfo(int tag, ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo getStoreLDSTileInfo(int tag, ControlGraph::StoreLDSTile const& store);
 
         private:
             ContextPtr                       m_context;
@@ -220,12 +203,6 @@ namespace rocRoller
             Generator<Instruction> loadMacroTileVGPR(int                            tag,
                                                      ControlGraph::LoadTiled const& load,
                                                      CoordinateGraph::Transformer   coords);
-            Generator<Instruction> loadMacroTileLDS(int                              tag,
-                                                    ControlGraph::LoadLDSTile const& load,
-                                                    CoordinateGraph::Transformer     coords);
-            Generator<Instruction> loadMacroTileWAVELDS(int                              tag,
-                                                        ControlGraph::LoadLDSTile const& load,
-                                                        CoordinateGraph::Transformer     coords);
             Generator<Instruction> loadMacroTileWAVE(int                            tag,
                                                      ControlGraph::LoadTiled const& load,
                                                      CoordinateGraph::Transformer   coords);
@@ -233,20 +210,21 @@ namespace rocRoller
                                                             ControlGraph::LoadTiled const& load,
                                                             CoordinateGraph::Transformer   coords);
             Generator<Instruction>
-                loadMacroTileDirect2LDS(int                                     tag,
-                                        ControlGraph::LoadTileDirect2LDS const& load,
-                                        CoordinateGraph::Transformer            coords);
+                              loadMacroTileDirect2LDS(int                                     tag,
+                                                      ControlGraph::LoadTileDirect2LDS const& load,
+                                                      CoordinateGraph::Transformer            coords);
+            LoadStoreTileInfo loadMacroTileLDSInfo(int tag, ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo loadMacroTileWAVELDSInfo(int                              tag,
+                                                       ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo storeMacroTileLDSInfo(int                               tag,
+                                                    ControlGraph::StoreLDSTile const& store);
+            LoadStoreTileInfo storeMacroTileWAVELDSInfo(int                               tag,
+                                                        ControlGraph::StoreLDSTile const& store);
 
             // Store Tile Helpers
-            Generator<Instruction> storeMacroTileLDS(int                               tag,
-                                                     ControlGraph::StoreLDSTile const& store,
-                                                     CoordinateGraph::Transformer      coords);
             Generator<Instruction> storeMacroTileVGPR(int                             tag,
                                                       ControlGraph::StoreTiled const& store,
                                                       CoordinateGraph::Transformer    coords);
-            Generator<Instruction> storeMacroTileWAVELDS(int                               tag,
-                                                         ControlGraph::StoreLDSTile const& store,
-                                                         CoordinateGraph::Transformer      coords);
             Generator<Instruction> storeMacroTileWAVE(int                             tag,
                                                       ControlGraph::StoreTiled const& store,
                                                       CoordinateGraph::Transformer    coords);
