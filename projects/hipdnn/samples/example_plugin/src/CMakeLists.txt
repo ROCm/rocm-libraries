@@ -12,7 +12,6 @@ add_library(
     ExamplePluginContainer.cpp
     ExamplePluginPublic.cpp
     engines/ExamplePluginEngine.cpp
-    engines/AdvancedEngineScaffold.cpp
     engines/plans/ReluPlanBuilder.cpp
     engines/plans/ReluPlan.cpp
     engines/plans/ConvFwdPlanBuilder.cpp

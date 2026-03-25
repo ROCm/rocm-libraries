@@ -44,7 +44,6 @@ add_executable(
     TestReluPlan.cpp
     TestConvFwdPlanBuilder.cpp
     TestConvFwdPlan.cpp
-    TestAdvancedEngineScaffold.cpp
 )
 
 target_link_libraries(

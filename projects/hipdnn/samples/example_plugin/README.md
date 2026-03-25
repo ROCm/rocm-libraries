@@ -13,10 +13,6 @@ Runtime Compilation):
 - **Convolution forward** (naive): 2D cross-correlation, NCHW layout, single
   thread per output element
 
-A third engine (`EXAMPLE_PLUGIN_ADVANCED_ENGINE`) is provided as a scaffold
-demonstrating multi-node graph matching patterns, with a placeholder
-`isApplicable()` that always returns `false`.
-
 ## Prerequisites
 
 | Dependency | Purpose | Notes |
@@ -70,7 +66,6 @@ example_plugin/
 │   └── engines/
 │       ├── ExamplePluginEngine.hpp/cpp  # Engine: owns PlanBuilders, delegates isApplicable
 │       ├── ExamplePluginUtils.hpp       # Utility: UID-to-buffer lookup
-│       ├── AdvancedEngineScaffold.hpp/cpp  # Placeholder engine (isApplicable=false)
 │       └── plans/
 │           ├── ReluPlanBuilder.hpp/cpp  # PlanBuilder: graph matching for ReLU_FWD
 │           ├── ReluPlan.hpp/cpp         # Plan: GPU ReLU execution via HIPRTC
@@ -89,8 +84,7 @@ example_plugin/
 │   ├── TestReluPlanBuilder.cpp
 │   ├── TestReluPlan.cpp
 │   ├── TestConvFwdPlanBuilder.cpp
-│   ├── TestConvFwdPlan.cpp
-│   └── TestAdvancedEngineScaffold.cpp
+│   └── TestConvFwdPlan.cpp
 ├── integration_tests/                   # Integration tests (full hipDNN stack, GPU required)
 │   ├── CMakeLists.txt
 │   └── TestPluginIntegration.cpp
@@ -193,10 +187,9 @@ Container
 │   ├── Engine (EXAMPLE_PLUGIN_RELU_ENGINE)
 │   │   └── PlanBuilder (ReluPlanBuilder)
 │   │       └── Plan (ReluPlan) -- HIPRTC-compiled GPU kernel
-│   ├── Engine (EXAMPLE_PLUGIN_CONV_FWD_ENGINE)
-│   │   └── PlanBuilder (ConvFwdPlanBuilder)
-│   │       └── Plan (ConvFwdPlan) -- HIPRTC-compiled GPU kernel
-│   └── Engine (EXAMPLE_PLUGIN_ADVANCED_ENGINE -- scaffold)
+│   └── Engine (EXAMPLE_PLUGIN_CONV_FWD_ENGINE)
+│       └── PlanBuilder (ConvFwdPlanBuilder)
+│           └── Plan (ConvFwdPlan) -- HIPRTC-compiled GPU kernel
 └── copyEngineIds() -- returns registered engine IDs to hipDNN
 
 Handle
@@ -564,8 +557,7 @@ simplicity.  To build a production plugin:
   to expose tuning parameters (e.g., tile sizes, algorithm variants).
 
 - **Support multi-node graphs**: Extend `isApplicable()` to match fused
-  operation patterns (e.g., Conv + BiasAdd + ReLU).  The `AdvancedEngineScaffold`
-  demonstrates the multi-node matching pattern.
+  operation patterns (e.g., Conv + BiasAdd + ReLU).
 
 - **Add Windows support**: The CMake project uses generator expressions for
   cross-platform compiler flags.  Verify with MSVC and adjust as needed.

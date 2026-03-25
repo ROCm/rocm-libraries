@@ -7,7 +7,6 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "CurrentDevicePropertyProvider.hpp"
-#include "engines/AdvancedEngineScaffold.hpp"
 #include "engines/ExamplePluginEngine.hpp"
 #include "engines/plans/ConvFwdPlanBuilder.hpp"
 #include "engines/plans/ReluPlanBuilder.hpp"
@@ -27,7 +26,6 @@ using hipdnn_data_sdk::utilities::engineNameToId;
 using hipdnn_data_sdk::utilities::EngineRegistrar;
 HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_RELU_ENGINE, "EXAMPLE_PLUGIN_RELU_ENGINE")
 HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_CONV_FWD_ENGINE, "EXAMPLE_PLUGIN_CONV_FWD_ENGINE")
-HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_ADVANCED_ENGINE, "EXAMPLE_PLUGIN_ADVANCED_ENGINE")
 
 const std::vector<ExamplePluginContainer::EngineDefinition>&
     ExamplePluginContainer::getEngineDefinitions()
@@ -50,13 +48,6 @@ const std::vector<ExamplePluginContainer::EngineDefinition>&
              auto engine = std::make_unique<ExamplePluginEngine>(EXAMPLE_PLUGIN_CONV_FWD_ENGINE_ID);
              engine->addPlanBuilder(std::make_unique<ConvFwdPlanBuilder>(compiler, deviceProps));
              return engine;
-         }},
-        {EXAMPLE_PLUGIN_ADVANCED_ENGINE_ID,
-         [](const IKernelCompiler& /*compiler*/, const IDevicePropertyProvider& /*deviceProps*/)
-             -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<ExamplePluginHandle,
-                                                           ExamplePluginSettings,
-                                                           ExamplePluginContext>> {
-             return std::make_unique<AdvancedEngineScaffold>(EXAMPLE_PLUGIN_ADVANCED_ENGINE_ID);
          }},
     };
 
