@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "HipdnnOperationType.h"
+#include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/BatchnormInferenceOperationDescriptor.hpp"
 #include "descriptors/NodeFactory.hpp"
@@ -15,7 +16,6 @@
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
 #include <memory>
-#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -96,53 +96,6 @@ protected:
         node.compute_data_type = computeType;
         node.attributes.Set(createStandardBatchnormInferenceAttrs());
         return node;
-    }
-
-    // Verifies that a packed tensor descriptor (retrieved via getAttribute) has the
-    // expected UID, data_type, dimensions, and strides.
-    static void verifyTensorDescriptor(hipdnnBackendDescriptor_t tensorDesc,
-                                       int64_t expectedUid,
-                                       hipdnnDataType_t expectedDataType,
-                                       const std::vector<int64_t>& expectedDims,
-                                       const std::vector<int64_t>& expectedStrides)
-    {
-        int64_t uid = 0;
-        int64_t uidCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uidCount, &uid);
-        EXPECT_EQ(uid, expectedUid);
-
-        hipdnnDataType_t dataType = {};
-        int64_t dtCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &dataType);
-        EXPECT_EQ(dataType, expectedDataType);
-
-        int64_t dimCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, 0, &dimCount, nullptr);
-        ASSERT_EQ(dimCount, static_cast<int64_t>(expectedDims.size()));
-        std::vector<int64_t> dims(static_cast<size_t>(dimCount));
-        int64_t actualDimCount = 0;
-        tensorDesc->getAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS,
-                                 HIPDNN_TYPE_INT64,
-                                 dimCount,
-                                 &actualDimCount,
-                                 dims.data());
-        EXPECT_EQ(dims, expectedDims);
-
-        int64_t strideCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, 0, &strideCount, nullptr);
-        ASSERT_EQ(strideCount, static_cast<int64_t>(expectedStrides.size()));
-        std::vector<int64_t> strides(static_cast<size_t>(strideCount));
-        int64_t actualStrideCount = 0;
-        tensorDesc->getAttribute(HIPDNN_ATTR_TENSOR_STRIDES,
-                                 HIPDNN_TYPE_INT64,
-                                 strideCount,
-                                 &actualStrideCount,
-                                 strides.data());
-        EXPECT_EQ(strides, expectedStrides);
     }
 };
 
@@ -384,7 +337,7 @@ TEST_F(TestBatchnormInferenceOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(xScoped.getPtr()));
     ASSERT_EQ(xCount, 1);
     ASSERT_NE(xScoped.get(), nullptr);
-    verifyTensorDescriptor(
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(
         xScoped.get(), 70, HIPDNN_DATA_FLOAT, {1, 64, 32, 32}, {65536, 1024, 32, 1});
 
     // Verify mean tensor
@@ -397,7 +350,8 @@ TEST_F(TestBatchnormInferenceOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(meanScoped.getPtr()));
     ASSERT_EQ(meanCount, 1);
     ASSERT_NE(meanScoped.get(), nullptr);
-    verifyTensorDescriptor(meanScoped.get(), 71, HIPDNN_DATA_FLOAT, {1, 64, 1, 1}, {64, 1, 1, 1});
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(
+        meanScoped.get(), 71, HIPDNN_DATA_FLOAT, {1, 64, 1, 1}, {64, 1, 1, 1});
 
     // Verify inv_variance tensor
     hipdnn_backend::ScopedDescriptor invVarianceScoped;
@@ -409,7 +363,7 @@ TEST_F(TestBatchnormInferenceOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(invVarianceScoped.getPtr()));
     ASSERT_EQ(invVarianceCount, 1);
     ASSERT_NE(invVarianceScoped.get(), nullptr);
-    verifyTensorDescriptor(
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(
         invVarianceScoped.get(), 72, HIPDNN_DATA_FLOAT, {1, 64, 1, 1}, {64, 1, 1, 1});
 
     // Verify scale tensor
@@ -422,7 +376,8 @@ TEST_F(TestBatchnormInferenceOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(scaleScoped.getPtr()));
     ASSERT_EQ(scaleCount, 1);
     ASSERT_NE(scaleScoped.get(), nullptr);
-    verifyTensorDescriptor(scaleScoped.get(), 73, HIPDNN_DATA_FLOAT, {1, 64, 1, 1}, {64, 1, 1, 1});
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(
+        scaleScoped.get(), 73, HIPDNN_DATA_FLOAT, {1, 64, 1, 1}, {64, 1, 1, 1});
 
     // Verify bias tensor
     hipdnn_backend::ScopedDescriptor biasScoped;
@@ -434,7 +389,8 @@ TEST_F(TestBatchnormInferenceOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(biasScoped.getPtr()));
     ASSERT_EQ(biasCount, 1);
     ASSERT_NE(biasScoped.get(), nullptr);
-    verifyTensorDescriptor(biasScoped.get(), 74, HIPDNN_DATA_FLOAT, {1, 64, 1, 1}, {64, 1, 1, 1});
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(
+        biasScoped.get(), 74, HIPDNN_DATA_FLOAT, {1, 64, 1, 1}, {64, 1, 1, 1});
 
     // Verify y tensor
     hipdnn_backend::ScopedDescriptor yScoped;
@@ -446,7 +402,7 @@ TEST_F(TestBatchnormInferenceOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(yScoped.getPtr()));
     ASSERT_EQ(yCount, 1);
     ASSERT_NE(yScoped.get(), nullptr);
-    verifyTensorDescriptor(
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(
         yScoped.get(), 75, HIPDNN_DATA_FLOAT, {1, 64, 32, 32}, {65536, 1024, 32, 1});
 
     // Verify operation type
@@ -496,4 +452,15 @@ TEST_F(TestBatchnormInferenceOperationFromNode, BuildNodePreservesName)
 
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_build_name");
+}
+
+TEST_F(TestBatchnormInferenceOperationFromNode, ToStringIncludesName)
+{
+    auto node = createStandardNode();
+    node.name = "my_batchnorminference_op";
+
+    auto desc = BatchnormInferenceOperationDescriptor::fromNode(node, _tensorMap);
+    auto str = desc->toString();
+
+    EXPECT_NE(str.find("name=my_batchnorminference_op"), std::string::npos);
 }
