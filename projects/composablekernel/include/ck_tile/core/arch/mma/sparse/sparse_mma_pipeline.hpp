@@ -26,7 +26,7 @@ template <typename ADataType,
           typename CompilerTarget =
               decltype(get_compiler_target()), // TODO: c++20 amdgcn_target_arch_id GfxTargetId =
                                                // get_compiler_target(),
-          typename MmaOp =
+          typename MmaOp_ =
               typename MmaDefaultSelector<ADataType, // TODO: c++20 MmaOpI MmaOp = typename
                                                      // MmaDefaultSelector<ADataType,
                                           BDataType,
@@ -37,14 +37,14 @@ template <typename ADataType,
                                           CompilerTarget,
                                           MmaOpFamily::SPARSE>::SelectedOp,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
-          typename MmaTransformsDefaultSelector<MmaOp, CompilerTarget>::SelectedTransforms>
+          typename MmaTransformsDefaultSelector<MmaOp_, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct SparseMma : public MmaPipelineBase<sparse::detail::getFlags(), SparseMma<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp, MmaTransforms>>
+struct SparseMma : public MmaPipelineBase<sparse::detail::getFlags(), SparseMma<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp_, MmaTransforms>>
 {
-    using Base = MmaPipelineBase<sparse::detail::getFlags(), SparseMma<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp, MmaTransforms>>;
+    using Base = MmaPipelineBase<sparse::detail::getFlags(), SparseMma<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
 
-    using FragWiseMmaOp = MmaOp; // Expose the selected MmaOp
+    using MmaOp = MmaOp_; // Expose the selected MmaOp
 
     // Calculate the uncompressed A vector type
     struct InternalAVecCalculator
@@ -59,51 +59,26 @@ struct SparseMma : public MmaPipelineBase<sparse::detail::getFlags(), SparseMma<
     using BVecType = typename MmaOp::BVecType;
     using CVecType = typename MmaOp::CVecType;
 
+    // Expose internal vector types
+    using InternalAVecT = typename MmaOp::AVecType;
+    using InternalBVecT = typename MmaOp::BVecType;
+    using InternalCVecT = typename MmaOp::CVecType;
+
     // Transforms
     using ATransform = typename MmaTransforms::ATransform;
     using BTransform = typename MmaTransforms::BTransform;
     using CTransform = typename MmaTransforms::CTransform;
     using DTransform = typename MmaTransforms::DTransform;
 
-    template <MmaPipelineOptionFlags::Type Flags, typename VecTA, typename VecTB, typename VecTC>
-    CK_TILE_DEVICE static decltype(auto) preApply(VecTA&& a, VecTB&& b, VecTC&& accum)
+    template <typename ATransformResult, typename BTransformResult, typename CTransformResult>
+    CK_TILE_DEVICE static void
+    execImpl(std::tuple<ATransformResult, BTransformResult, CTransformResult>& vecs)
     {
-        static_assert(MmaPipelineOptionFlags(Flags).testFlag(MmaPipelineOptionFlag::COMPRESS_A));
         static_assert(
-            std::is_same_v<ATransform, SparseCompressTransform<MmaOp::kCompressionRatio>>);
-
-        using InternalAVecT = typename MmaOp::AVecType;
-        using InternalBVecT = typename MmaOp::BVecType;
-        using InternalCVecT = typename MmaOp::CVecType;
-
-        int32_t idx{};
-        auto a_frag = Base::template preApplyTransform<InternalAVecT, ATransform>(
-            std::forward<VecTA>(a), idx);
-        auto b_frag =
-            Base::template preApplyTransform<InternalBVecT, BTransform>(std::forward<VecTB>(b));
-        auto c_frag =
-            Base::template preApplyTransform<InternalCVecT, CTransform>(std::forward<VecTC>(accum));
-
-        return std::make_tuple(
-            std::move(a_frag), std::move(b_frag), std::move(c_frag), std::move(idx));
-    }
-
-    template <MmaPipelineOptionFlags::Type Flags, typename VecTA, typename VecTB, typename VecTC>
-    CK_TILE_DEVICE static decltype(auto) postApply(std::tuple<VecTA, VecTB, VecTC, int32_t>&& vecs)
-    {
-        static_assert(MmaPipelineOptionFlags(Flags).testFlag(MmaPipelineOptionFlag::COMPRESS_A));
-
-        auto& [a_frag, b_frag, c_frag, idx] = vecs;
-        // Convert native vector results back to the output fragment format
-        // and then return after we apply the final output transform.
-        return Base::template postApplyTransform<std::decay_t<VecTC>, DTransform>(c_frag);
-    }
-
-    template <typename VecTA, typename VecTB, typename VecTC>
-    CK_TILE_DEVICE static void execImpl(std::tuple<VecTA, VecTB, VecTC, int32_t>& vecs)
-    {
-        auto& [a_frag, b_frag, c_frag, idx] = vecs;
-        c_frag                              = MmaOp::exec(a_frag, b_frag, c_frag, idx);
+            std::is_same_v<ATransformResult, decltype(ATransform::exec(InternalAVecT{}))>);
+        auto& [a_result, b_vec, c_vec] = vecs;
+        auto& [a_vec, idx]             = a_result;
+        c_vec                          = MmaOp::exec(a_vec, b_vec, c_vec, idx);
     }
 };
 

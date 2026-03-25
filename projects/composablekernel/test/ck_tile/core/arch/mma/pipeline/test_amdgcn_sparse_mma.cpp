@@ -180,7 +180,7 @@ __global__ void test_sparse_accum_over_k(void* a, void* b, void* c, void* out)
     using BVecType = typename Pipeline::BVecType;
     using CVecType = typename Pipeline::CVecType;
 
-    static constexpr uint32_t kIters = WaveTileK / Pipeline::FragWiseMmaOp::kK;
+    static constexpr uint32_t kIters = WaveTileK / Pipeline::MmaOp::kK;
 
     // Initialize the accumulator
     CVecType result = *reinterpret_cast<CVecType*>(c);
@@ -223,10 +223,11 @@ TEST(SparseMMATrait, MmaSelector_Sparse_F16_F16_F32_16x16x32_Real)
 template <uint32_t CompressionRatio, typename Vec>
 __global__ void test_sparse_transform(void* a, void* idx)
 {
-    using ResultT = decltype(SparseCompressTransform<2>::exec(*static_cast<Vec*>(a),
-                                                              *reinterpret_cast<int32_t*>(idx)));
-    *reinterpret_cast<remove_cvref_t<ResultT>*>(a) =
-        SparseCompressTransform<2>::exec(*static_cast<Vec*>(a), *reinterpret_cast<int32_t*>(idx));
+    using ResultT        = decltype(SparseCompressTransform<2>::exec(*static_cast<Vec*>(a)));
+    using FirstT         = std::tuple_element_t<0, ResultT>;
+    const auto& [vec, i] = SparseCompressTransform<2>::exec(*static_cast<Vec*>(a));
+    *reinterpret_cast<remove_cvref_t<FirstT>*>(a) = vec;
+    *reinterpret_cast<int32_t*>(idx)              = i;
 }
 
 // 1. Basic correctness: valid divisible sizes

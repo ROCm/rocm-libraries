@@ -77,6 +77,18 @@ constexpr bool operator==(MmaPipelineOptionFlags::Type lhs, const MmaPipelineOpt
     return rhs == lhs;
 }
 
+namespace {
+template <typename T>
+struct is_tuple : std::false_type
+{
+};
+
+template <typename... Args>
+struct is_tuple<std::tuple<Args...>> : std::true_type
+{
+};
+} // namespace
+
 // TODO: c++20: use MmaPipelineOptionFlags directly
 template <MmaPipelineOptionFlags::Type Flags_, typename Derived>
 struct MmaPipelineBase
@@ -84,19 +96,38 @@ struct MmaPipelineBase
     static constexpr auto Flags = MmaPipelineOptionFlags(Flags_);
 
     private:
+    // Helper to reconstruct a tuple with formatted first element and remaining elements
+    template <typename DstT, typename SrcT, std::size_t... Is>
+    CK_TILE_DEVICE static auto formatBufferTupleImpl(SrcT&& inputBuffer, std::index_sequence<Is...>)
+    {
+        auto&& first_elem = std::get<0>(std::forward<SrcT>(inputBuffer));
+        return std::make_tuple(formatBuffer<DstT>(std::forward<decltype(first_elem)>(first_elem)),
+                               std::get<Is + 1>(std::forward<SrcT>(inputBuffer))...);
+    }
+
     template <typename DstT, typename SrcT>
     CK_TILE_DEVICE static auto formatBuffer(SrcT&& inputBuffer)
     {
-        // TODO: Implement formatting logic as needed.
-        // This is intended to convert input fragments to the native vector types
-        // required by the BlockWiseMma operation for iteration
-        static_assert(sizeof(DstT) == sizeof(std::remove_reference_t<SrcT>),
-                      "Size mismatch in formatBuffer");
+        using DecayedSrcT = std::remove_reference_t<SrcT>;
 
-        using QualifiedDstT =
-            std::conditional_t<std::is_const_v<std::remove_reference_t<SrcT>>, DstT const, DstT>;
+        // If SrcT is a tuple, extract the first element (the vector) and format it
+        // while preserving all remaining elements (metadata)
+        if constexpr(is_tuple<DecayedSrcT>::value)
+        {
+            // Create index sequence for all remaining elements (skip first)
+            constexpr std::size_t tuple_size = std::tuple_size_v<DecayedSrcT>;
+            return formatBufferTupleImpl<DstT>(std::forward<SrcT>(inputBuffer),
+                                               std::make_index_sequence<tuple_size - 1>{});
+        }
+        else
+        {
+            static_assert(sizeof(DstT) == sizeof(DecayedSrcT), "Size mismatch in formatBuffer");
 
-        return reinterpret_cast<QualifiedDstT&>(inputBuffer);
+            using QualifiedDstT =
+                std::conditional_t<std::is_const_v<DecayedSrcT>, DstT const, DstT>;
+
+            return reinterpret_cast<QualifiedDstT&>(inputBuffer);
+        }
     }
 
     protected:
@@ -118,21 +149,52 @@ struct MmaPipelineBase
         return Transform::exec(formatBuffer<DstT>(std::forward<Args>(args)...));
     }
 
+    template <typename ATransformInputs, typename BTransformInputs, typename CTransformInputs>
+    CK_TILE_DEVICE static decltype(auto)
+    applyTransformsToInputs(ATransformInputs&& a, BTransformInputs&& b, CTransformInputs&& accum)
+    {
+        using InternalAVecT = typename Derived::InternalAVecT;
+        using InternalBVecT = typename Derived::InternalBVecT;
+        using InternalCVecT = typename Derived::InternalCVecT;
+
+        using ATransform = typename Derived::ATransform;
+        using BTransform = typename Derived::BTransform;
+        using CTransform = typename Derived::CTransform;
+
+        return std::make_tuple(
+            preApplyTransform<InternalAVecT, ATransform>(std::forward<ATransformInputs>(a)),
+            preApplyTransform<InternalBVecT, BTransform>(std::forward<BTransformInputs>(b)),
+            preApplyTransform<InternalCVecT, CTransform>(std::forward<CTransformInputs>(accum)));
+    }
+
+    template <typename ATransformResult, typename BTransformResult, typename CTransformResult>
+    CK_TILE_DEVICE static decltype(auto)
+    applyTransformToOutput(std::tuple<ATransformResult, BTransformResult, CTransformResult>&& vecs)
+    {
+        auto&& [a_result, b_result, c_result] = vecs;
+        static_assert(!is_tuple<decltype(c_result)>::value,
+                      "If CTransform returns more than the vector, update this function.");
+
+        return postApplyTransform<std::decay_t<CTransformResult>, typename Derived::DTransform>(
+            c_result);
+    }
+
     public:
     template <typename VecTA, typename VecTB, typename VecTC>
     CK_TILE_DEVICE static decltype(auto) exec(VecTA&& a, VecTB&& b, VecTC&& accum)
     {
-        if constexpr(MmaOpTraits<typename Derived::FragWiseMmaOp>::IsSupported)
+        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsSupported)
         {
-            // TODO: c++20: Call template functions with MmaPipelineOptionFlags directly
-            auto pre = Derived::template preApply<Flags_>(
+            auto transformed_inputs = applyTransformsToInputs(
                 hasFlag<MmaPipelineOptionFlag::C_TRANSPOSE>() ? std::forward<VecTB>(b)
                                                               : std::forward<VecTA>(a),
                 hasFlag<MmaPipelineOptionFlag::C_TRANSPOSE>() ? std::forward<VecTA>(a)
                                                               : std::forward<VecTB>(b),
                 std::forward<VecTC>(accum));
-            Derived::execImpl(pre);
-            return Derived::template postApply<Flags_>(std::move(pre));
+
+            Derived::execImpl(transformed_inputs);
+
+            return applyTransformToOutput(std::move(transformed_inputs));
         }
         else
         {
@@ -140,7 +202,7 @@ struct MmaPipelineBase
             // Code should not reach here, but HOST/DEVICE compile passes are
             // weirdly intertwined and instead of having constexpr in the calling
             // site (tests) we do this. See also changes by this commit.
-            return Derived::FragWiseMmaOp::exec({}, {}, {});
+            return Derived::MmaOp::exec({}, {}, {});
         }
     }
 };
