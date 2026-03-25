@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <unordered_set>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -494,11 +495,100 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormWithBiasRoundTrip)
     ASSERT_NE(rmsNode, nullptr);
 
     ASSERT_NE(rmsNode->attributes.get_bias(), nullptr);
-    EXPECT_EQ(rmsNode->attributes.get_bias()->get_uid(),
-              rms_constants::K_RMSNORM_TENSOR_BIAS_UID);
+    EXPECT_EQ(rmsNode->attributes.get_bias()->get_uid(), rms_constants::K_RMSNORM_TENSOR_BIAS_UID);
     ASSERT_NE(rmsNode->attributes.get_inv_rms(), nullptr);
     EXPECT_EQ(rmsNode->attributes.get_inv_rms()->get_uid(),
               rms_constants::K_RMSNORM_TENSOR_INV_RMS_UID);
+}
+
+// Builds a training rmsnorm graph WITHOUT explicit UIDs, lowers,
+// lifts back, and verifies that auto-assigned UIDs are preserved and unique.
+TEST_F(IntegrationRMSNormDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("AutoUidRMSNormLiftingTest")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    // Create tensors WITHOUT setting UIDs
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_X_DIMS))
+        .set_stride(toVec(rms_constants::K_RMSNORM_TENSOR_X_STRIDES));
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_name("SCALE")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_DIMS))
+        .set_stride(toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_STRIDES));
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_name("EPSILON")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_DIMS))
+        .set_stride(toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_STRIDES));
+
+    RMSNormAttributes rmsnormAttrs;
+    rmsnormAttrs.set_name("rmsnorm_auto_uid_op");
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
+    rmsnormAttrs.set_epsilon(epsilon);
+
+    auto [y, invRms] = graph->rmsnorm(x, scale, std::move(rmsnormAttrs));
+    y->set_output(true).set_name("Y");
+    ASSERT_NE(invRms, nullptr);
+    invRms->set_output(true).set_name("INV_RMS");
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    // Lift back into a new graph
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify all auto-assigned UIDs are unique
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 5u); // x, scale, epsilon, y, inv_rms
+
+    std::unordered_set<int64_t> uids;
+    for(const auto& [uid, tensor] : tensorMap)
+    {
+        uids.insert(uid);
+    }
+    EXPECT_EQ(uids.size(), 5u) << "Tensor UIDs are not unique";
+
+    // Verify the lifted node references UIDs that exist in the tensor map
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* rmsNode = dynamic_cast<RMSNormNode*>(subNodes[0].get());
+    ASSERT_NE(rmsNode, nullptr);
+
+    EXPECT_EQ(rmsNode->attributes.get_name(), "rmsnorm_auto_uid_op");
+    EXPECT_EQ(rmsNode->attributes.get_forward_phase(), NormFwdPhase::TRAINING);
+
+    EXPECT_TRUE(uids.count(rmsNode->attributes.get_x()->get_uid()) > 0);
+    EXPECT_TRUE(uids.count(rmsNode->attributes.get_scale()->get_uid()) > 0);
+    EXPECT_TRUE(uids.count(rmsNode->attributes.get_epsilon()->get_uid()) > 0);
+    EXPECT_TRUE(uids.count(rmsNode->attributes.get_y()->get_uid()) > 0);
+    ASSERT_NE(rmsNode->attributes.get_inv_rms(), nullptr);
+    EXPECT_TRUE(uids.count(rmsNode->attributes.get_inv_rms()->get_uid()) > 0);
+
+    // All node tensor UIDs should be distinct
+    std::unordered_set<int64_t> nodeUids = {rmsNode->attributes.get_x()->get_uid(),
+                                            rmsNode->attributes.get_scale()->get_uid(),
+                                            rmsNode->attributes.get_epsilon()->get_uid(),
+                                            rmsNode->attributes.get_y()->get_uid(),
+                                            rmsNode->attributes.get_inv_rms()->get_uid()};
+    EXPECT_EQ(nodeUids.size(), 5u) << "RMSNorm node tensor UIDs are not distinct";
 }
 
 } // namespace

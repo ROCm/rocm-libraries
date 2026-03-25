@@ -11,6 +11,7 @@
 #include <hipdnn_frontend/detail/OperationUnpacker.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
+#include <hipdnn_frontend/node/RMSNormNode.hpp>
 
 #include "fake_backend/MockHipdnnBackend.hpp"
 
@@ -254,6 +255,16 @@ TEST(TestCreateNodeForType, CreatesConvFpropNode)
     ASSERT_NE(node, nullptr);
     auto convNode = std::dynamic_pointer_cast<ConvolutionFpropNode>(node);
     EXPECT_NE(convNode, nullptr);
+}
+
+TEST(TestCreateNodeForType, CreatesRMSNormNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_RMSNORM, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto rmsNode = std::dynamic_pointer_cast<RMSNormNode>(node);
+    EXPECT_NE(rmsNode, nullptr);
 }
 
 TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
