@@ -65,9 +65,12 @@ endmacro()
 #
 # FP32 benchmarks
 #
-# MFMA tiles: 32x32x4, 16x16x4
+# MFMA tiles: 32x32x4, 32x32x8, 16x16x4, 16x16x8, 16x16x16
 add_benchmarks_for_mfma(add_fp32_benchmark 32 32 4)
+add_benchmarks_for_mfma(add_fp32_benchmark 32 32 8)
 add_benchmarks_for_mfma(add_fp32_benchmark 16 16 4)
+add_benchmarks_for_mfma(add_fp32_benchmark 16 16 8)
+add_benchmarks_for_mfma(add_fp32_benchmark 16 16 16)
 
 #
 # FP16 benchmarks
