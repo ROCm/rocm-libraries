@@ -65,7 +65,6 @@ template <class... Params>
 [[noreturn]] void MIOpenThrow(const std::string& file, int line, Params&&... args)
 {
     auto exe = miopen::Exception(std::forward<Params>(args)...);
-    MIOPEN_LOG_E_FROM(file + ":" + std::to_string(line), exe.message);
     throw exe.SetContext(file, line);
 }
 

@@ -219,6 +219,7 @@ TEST_F(IntegrationLayerNormDescriptorLowering, LayerNormGraphRoundTrip)
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(node->name, "layernorm_op");
     EXPECT_EQ(node->attributes.type, NodeAttrType::LayernormAttributes);
 
     auto* layernorm = node->attributes.AsLayernormAttributes();
@@ -234,6 +235,8 @@ TEST_F(IntegrationLayerNormDescriptorLowering, LayerNormGraphRoundTrip)
     EXPECT_TRUE(layernorm->inv_variance_tensor_uid.has_value());
     EXPECT_EQ(layernorm->inv_variance_tensor_uid.value(), K_LAYERNORM_TENSOR_INV_VARIANCE_UID);
     EXPECT_EQ(layernorm->forward_phase, NormFwdPhaseSdk::TRAINING);
+    // X_DIMS={2,64,32,32}, SCALE_DIMS={1,64,32,32}: 3 trailing dims are normalized
+    EXPECT_EQ(layernorm->normalized_dim_count, 3);
 }
 
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved
@@ -334,7 +337,7 @@ TEST_F(IntegrationLayerNormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
         << " not found in graph tensors";
 
     // All tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> const nodeUids = {layernorm->x_tensor_uid,
+    const std::unordered_set<int64_t> nodeUids = {layernorm->x_tensor_uid,
                                                   layernorm->scale_tensor_uid,
                                                   layernorm->bias_tensor_uid,
                                                   layernorm->epsilon_tensor_uid,
@@ -459,6 +462,7 @@ TEST_F(IntegrationLayerNormDescriptorLowering, InferenceModeOmitsMeanAndInvVaria
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(node->name, "layernorm_op");
     EXPECT_EQ(node->attributes.type, NodeAttrType::LayernormAttributes);
 
     auto* layernorm = node->attributes.AsLayernormAttributes();
