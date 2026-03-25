@@ -9,6 +9,7 @@
 #include "ck_tile/host/device_memory.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/numeric/type_convert.hpp"
 
 #include <cstdio>
 #include <vector>
@@ -97,7 +98,7 @@ struct MmaLayoutTestKernel
                 // direction and we just put our "1" in the k / 2 position (rounded down).
                 if(a_coords[0] == m && a_coords[1] == (k / MmaOp::kCompressionRatio))
                 {
-                    a_frag[v] = 1;
+                    a_frag[v] = type_convert<typename MmaOp::ADataType>(1.0f);
 
                     // Calc an appropriate sparse idx value for a single 1 in position k.
                     sparse_idx = 0x88888888 | ((k % 2) << (v * 2));
@@ -109,7 +110,7 @@ struct MmaLayoutTestKernel
                 auto b_coords = BRegMap::calc_matrix_indices_from_lane_vector(lane, v);
                 if(b_coords[0] == n && b_coords[1] == k)
                 {
-                    b_frag[v] = 1;
+                    b_frag[v] = type_convert<typename MmaOp::BDataType>(1.0f);
                 }
             }
 
