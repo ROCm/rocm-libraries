@@ -101,7 +101,7 @@ template <typename KernelType> class TensileGemmRunner {
 public:
   // useF16: when KernelType is uint16_t, use f16 conversion instead of bf16.
   TensileGemmRunner(const std::string &kernel_file,
-                    std::shared_ptr<Architecture> arch, int waveSize,
+                    std::shared_ptr<Architecture> arch, WaveSize waveSize,
                     bool useF16 = false, bool transposeA = false)
       : assembly_(loadKernelFile(kernel_file)), arch_(std::move(arch)),
         waveSize_(waveSize), useF16_(useF16), transposeA_(transposeA) {}
@@ -208,7 +208,7 @@ public:
 private:
   std::string assembly_;
   std::shared_ptr<Architecture> arch_;
-  int waveSize_;
+  WaveSize waveSize_;
   bool useF16_;
   bool transposeA_;
   bool profiling_ = false;
@@ -372,7 +372,7 @@ TEST(Gfx942, MatMul_TensileLite_F32) {
   args.beta = 2.0f;
 
   TensileGemmRunner<float> runner("gfx942/tensilelite_mm_f32_mi300x.s",
-                                  std::make_shared<Gfx942>(), 64);
+                                  std::make_shared<Gfx942>(), WaveSize{64});
   auto optString = runner.run(dims, args, 1);
   if (optString) {
     FAIL() << *optString;
@@ -409,7 +409,7 @@ TEST(Gfx942, MatMul_TensileLite_BF16) {
 
   // Uses uint16_t for KernelType (BF16 storage)
   TensileGemmRunner<uint16_t> runner("gfx942/tensilelite_mm_bf16_mi300x.s",
-                                     std::make_shared<Gfx942>(), 64);
+                                     std::make_shared<Gfx942>(), WaveSize{64});
 
   // numWorkGroups = 4 (from log)
   auto optString = runner.run(dims, args, 1, 4);
@@ -447,7 +447,7 @@ TEST(Gfx942, MatMul_TensileLite_BF16_128x128x1024) {
 
   TensileGemmRunner<uint16_t> runner(
       "gfx942/tensilelite_mm_bf16_128x128x1024.s", std::make_shared<Gfx942>(),
-      64);
+      WaveSize{64});
   runner.enableProfiling(true);
 
   // 16 waves per WG (1024 threads / 64), 1 workgroup
@@ -475,7 +475,7 @@ TEST(Gfx1151, MatMul_TensileLite_F32_MAC) {
   args.beta = 0.0f;
 
   TensileGemmRunner<float> runner("gfx1151/tensilelite_mm_f32_mac.s",
-                                  std::make_shared<Gfx1151>(), 32);
+                                  std::make_shared<Gfx1151>(), WaveSize{32});
   auto optString = runner.run(dims, args, 2);
   if (optString) {
     FAIL() << *optString;
@@ -497,7 +497,7 @@ TEST(Gfx1151, MatMul_TensileLite_F32_MAC_Large) {
   args.beta = 0.0f;
 
   TensileGemmRunner<float> runner("gfx1151/tensilelite_mm_f32_mac_large.s",
-                                  std::make_shared<Gfx1151>(), 32);
+                                  std::make_shared<Gfx1151>(), WaveSize{32});
   runner.enableProfiling(true);
   auto optString = runner.run(dims, args, 2, 32);
   if (optString) {
@@ -520,7 +520,7 @@ TEST(Gfx1151, MatMul_TensileLite_BF16_WMMA) {
   args.beta = 0.0f;
 
   TensileGemmRunner<uint16_t> runner("gfx1151/tensilelite_mm_bf16_wmma_small.s",
-                                     std::make_shared<Gfx1151>(), 32);
+                                     std::make_shared<Gfx1151>(), WaveSize{32});
   auto optString = runner.run(dims, args, 1);
   if (optString) {
     FAIL() << *optString;
@@ -544,7 +544,7 @@ TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_M32N16) {
 
   TensileGemmRunner<uint16_t> runner(
       "gfx1151/tensilelite_mm_f16_wmma_nonsquare.s",
-      std::make_shared<Gfx1151>(), 32,
+      std::make_shared<Gfx1151>(), WaveSize{32},
       /*useF16=*/true);
   auto optString = runner.run(dims, args, 1, 2);
   if (optString) {
@@ -570,7 +570,7 @@ TEST(Gfx1151, MatMul_TensileLite_BF16_WMMA_2Wave_M16N32K512) {
 
   TensileGemmRunner<uint16_t> runner(
       "gfx1151/tensilelite_mm_bf16_wmma_2wave_large.s",
-      std::make_shared<Gfx1151>(), 32);
+      std::make_shared<Gfx1151>(), WaveSize{32});
   auto optString = runner.run(dims, args, 2, 1);
   if (optString) {
     FAIL() << *optString;
@@ -592,7 +592,7 @@ TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_Small) {
 
   TensileGemmRunner<uint16_t> runner(
       "gfx1151/tensilelite_mm_f16_wmma_tn_small.s", std::make_shared<Gfx1151>(),
-      32,
+      WaveSize{32},
       /*useF16=*/true, /*transposeA=*/true);
   auto optString = runner.run(dims, args, 1, 1);
   if (optString) {
@@ -616,7 +616,7 @@ TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_N64_4WG) {
 
   TensileGemmRunner<uint16_t> runner(
       "gfx1151/tensilelite_mm_f16_wmma_tn_small.s", std::make_shared<Gfx1151>(),
-      32,
+      WaveSize{32},
       /*useF16=*/true, /*transposeA=*/true);
   auto optString = runner.run(dims, args, 1, 4);
   if (optString) {
@@ -640,7 +640,7 @@ TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_N64_2WG2W) {
 
   TensileGemmRunner<uint16_t> runner(
       "gfx1151/tensilelite_mm_f16_wmma_tn_n64_2wg2w.s",
-      std::make_shared<Gfx1151>(), 32,
+      std::make_shared<Gfx1151>(), WaveSize{32},
       /*useF16=*/true, /*transposeA=*/true);
   auto optString = runner.run(dims, args, 2, 2);
   if (optString) {
@@ -663,7 +663,7 @@ TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_1024) {
 
   TensileGemmRunner<uint16_t> runner(
       "gfx1151/tensilelite_mm_f16_wmma_tn_1024.s", std::make_shared<Gfx1151>(),
-      32,
+      WaveSize{32},
       /*useF16=*/true, /*transposeA=*/true);
   auto optString = runner.run(dims, args, 1, 1);
   if (optString) {
@@ -686,7 +686,7 @@ TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_4Wave) {
 
   TensileGemmRunner<uint16_t> runner(
       "gfx1151/tensilelite_mm_f16_wmma_tn_4wave.s", std::make_shared<Gfx1151>(),
-      32,
+      WaveSize{32},
       /*useF16=*/true, /*transposeA=*/true);
   auto optString = runner.run(dims, args, 4, 2);
   if (optString) {
@@ -795,7 +795,7 @@ TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_CustomKernel) {
 
   // 4. Run: 4 waves/WG (128 threads, wave32), 2 workgroups
   constexpr int wavesPerWG = 4;
-  constexpr int waveSize = 32;
+  constexpr WaveSize waveSize{32};
   for (int wg = 0; wg < 2; ++wg) {
     emulator.run({wg, 0, 0}, {wavesPerWG * waveSize, 1, 1});
   }
@@ -860,7 +860,7 @@ TEST(Gfx950, MatMul_TensileLite_F16_MFMA_TN_DTL_256x256x128) {
 
   TensileGemmRunner<uint16_t> runner(
       "gfx950/tensilelite_dtl_f16_mfma_tn_m256n256k128.s",
-      std::make_shared<Gfx950>(), 64,
+      std::make_shared<Gfx950>(), WaveSize{64},
       /*useF16=*/true, /*transposeA=*/true);
   runner.enableProfiling(true);
 
@@ -885,7 +885,7 @@ TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_128x128x8192) {
 
   TensileGemmRunner<uint16_t> runner(
       "gfx1151/tensilelite_mm_f16_wmma_tn_128x128.s",
-      std::make_shared<Gfx1151>(), 32,
+      std::make_shared<Gfx1151>(), WaveSize{32},
       /*useF16=*/true, /*transposeA=*/true);
   runner.enableProfiling(true);
 

@@ -64,14 +64,14 @@ class Wave {
 
 public:
   /// Full constructor with all parameters.
-  Wave(int vgprCount, int agprOffset, int sgprCount, int waveSize,
-       WaveId waveId, Workgroup &workgroup,
+  Wave(int vgprCount, int agprOffset, int sgprCount, WaveSize,
+       WaveId, Workgroup &workgroup,
        const std::map<std::string, int> *labels,
        const std::map<std::string, Macro> *macros);
 
   /// Convenience constructor for tests (no accumulators, labels, or macros;
   /// waveId defaults to zero).
-  Wave(int vgprCount, int sgprCount, int waveSize, Workgroup &workgroup);
+  Wave(int vgprCount, int sgprCount, WaveSize, Workgroup &workgroup);
 
   /// Parse a register string (e.g., "s17", "s[16:17]", "v[4:7]", "vcc",
   /// "exec") and return the first register in the range.
@@ -153,7 +153,7 @@ public:
   void setSgpr64(int id, uint64_t value);
   void setVgpr64(int id, int lane, uint64_t value);
 
-  int getWaveSize() const { return waveSize; }
+  WaveSize getWaveSize() const { return waveSize; }
 
   int getSgprCount() const { return sgprCount; }
 
@@ -315,7 +315,7 @@ private:
 
   int agprOffset;
   int sgprCount;
-  int waveSize;
+  WaveSize waveSize;
 
   /// D16 LDS reads: whether to preserve the non-targeted half of the VGPR.
   /// RDNA (wave-32) preserves, CDNA (wave-64) does not (hardware-verified).
@@ -340,7 +340,7 @@ private:
 
   Profiler *profiler = nullptr;
 
-  void retireEventRegisters(EventId eventId);
+  void retireEventRegisters(EventId);
 
   void resolveWaitCnt(int limit,
                       std::function<bool(MemoryEventType)> isTargetType,

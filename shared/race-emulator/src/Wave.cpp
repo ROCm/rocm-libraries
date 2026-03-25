@@ -53,7 +53,7 @@ using LabelMap = std::map<std::string, int>;
 
 } // namespace
 
-Wave::Wave(int vgprCount, int agprOffset, int sgprCount, int waveSize,
+Wave::Wave(int vgprCount, int agprOffset, int sgprCount, WaveSize waveSize,
            WaveId waveId, Workgroup &workgroup,
            const std::map<std::string, int> *labels,
            const std::map<std::string, Macro> *macros)
@@ -452,7 +452,8 @@ const static std::map<std::string, Macro> emptyMacros = {};
 
 // Construct a wave without accumulator registers, labels, or macros.
 // The waveId is set to zero.
-Wave::Wave(int vgprCount, int sgprCount, int waveSize, Workgroup &workgroup)
+Wave::Wave(int vgprCount, int sgprCount, WaveSize waveSize,
+           Workgroup &workgroup)
     : Wave(vgprCount, /* agprOffset= */ vgprCount, sgprCount, waveSize,
            /* waveId= */ WaveId{0}, workgroup, /* labels= */ &emptyLabels,
            /* macros= */ &emptyMacros) {}

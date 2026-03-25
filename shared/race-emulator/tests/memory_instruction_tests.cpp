@@ -30,7 +30,7 @@ void setupSrd(Wave &wave, int srdBase, uintptr_t baseAddr, uint32_t size) {
 
 TEST(Instructions, MemoryRoundTrip) {
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 10, /*sgprCount*/ 10, /*waveSize*/ 1, wg);
+  Wave regs(/*vgprCount*/ 10, /*sgprCount*/ 10, WaveSize{1}, wg);
   regs.setRaceChecks(true);
 
   // 1. Allocate a safe "global memory" buffer on the host
@@ -65,7 +65,7 @@ TEST(Instructions, MemoryRoundTrip) {
 TEST(Instructions, GlobalLoadStore_WithInstructionOffsets) {
   // Setup: 4 VGPRs, 0 SGPRs, WaveSize 1
   Workgroup wg;
-  Wave regs(4, 0, 1, wg);
+  Wave regs(4, 0, WaveSize{1}, wg);
 
   // 1. Setup "Device Memory"
   // Allocate 16 dwords (64 bytes) of host memory to simulate GPU Global Memory
@@ -122,7 +122,7 @@ TEST(Instructions, DS_Write_B32_Direct) {
   //    Assumes Wave(vgpr, sgpr, waveSize, LDS*)
   WaveId id{0};
   std::map<std::string, Macro> macros;
-  Wave regs(4, 4, 0, 1, id, wg, &labels, &macros); // 4 VGPRs, 4 SGPRs
+  Wave regs(4, 4, 0, WaveSize{1}, id, wg, &labels, &macros); // 4 VGPRs, 4 SGPRs
 
   // 3. Setup Operand State
   //    Instruction: ds_write_b32 v0, v1 offset:16
@@ -153,7 +153,7 @@ TEST(Instructions, DS_Write_AllVariants_Combined) {
 
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Wave regs(16, 16, 0, 1, id, wg, &labels,
+  Wave regs(16, 16, 0, WaveSize{1}, id, wg, &labels,
             &macros); // Need enough VGPRs for b128
 
   // --- Test Case A: ds_write_b8 (Truncation) ---
@@ -245,7 +245,7 @@ TEST(Instructions, DS_Read_Variants) {
   WaveId id{0};
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Wave regs(10, 10, 0, 1, id, wg, &labels, &macros);
+  Wave regs(10, 10, 0, WaveSize{1}, id, wg, &labels, &macros);
 
   // Setup Memory
   // Addr 10: 0xFF (Represents -1 in i8, or 255 in u8)
@@ -276,7 +276,7 @@ TEST(Instructions, DS_Read_Variants) {
 
 TEST(Instructions, BufferLoad_Offen_Success) {
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, /*waveSize*/ 1, wg);
+  Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, WaveSize{1}, wg);
 
   // 1. Allocate host memory
   std::vector<uint32_t> hostMem = {17, 0xCAFEBABE, 0x00001111, 0x22223333};
@@ -306,7 +306,7 @@ TEST(Instructions, BufferLoad_Offen_Success) {
 
 TEST(Instructions, BufferLoad_Offen_Extended) {
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, /*waveSize*/ 1, wg);
+  Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, WaveSize{1}, wg);
 
   // 1. Allocate host memory (Increased size to support offsets)
   // Indices:      0           1           2           3           4           5
@@ -363,7 +363,7 @@ TEST(Instructions, BufferLoad_Offen_Extended) {
 
 TEST(Instructions, BufferStore_Offen_Extended) {
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, /*waveSize*/ 1, wg);
+  Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, WaveSize{1}, wg);
 
   // 1. Allocate Host Memory (initialized to zero)
   // Size: 8 elements (32 bytes)
@@ -412,7 +412,7 @@ TEST(Instructions, BufferStore_Offen_Extended) {
 
 TEST(Instructions, BufferLoad_NegativeOffsets) {
   Workgroup wg;
-  Wave regs(10, 32, 64, wg);
+  Wave regs(10, 32, WaveSize{64}, wg);
 
   // 1. Allocate Host Memory
   std::vector<uint32_t> hostMem(256, 0);
@@ -449,7 +449,7 @@ TEST(Instructions, BufferLoad_NegativeOffsets) {
 // zero, and writes and atomics are dropped." CDNA4 §9.1 identical.
 TEST(Instructions, BufferLoad_OutOfBounds_ReturnsZero) {
   Workgroup wg;
-  Wave regs(/*vgprCount=*/10, /*sgprCount=*/10, /*waveSize=*/1, wg);
+  Wave regs(/*vgprCount=*/10, /*sgprCount=*/10, WaveSize{1}, wg);
 
   std::vector<uint32_t> hostMem = {0x11111111, 0x22222222};
   uintptr_t baseAddr = reinterpret_cast<uintptr_t>(hostMem.data());
@@ -480,7 +480,7 @@ TEST(Instructions, DS_Write_B8_D16_HI) {
   WaveId id{0};
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Wave regs(16, 16, 0, 1, id, wg, &labels, &macros);
+  Wave regs(16, 16, 0, WaveSize{1}, id, wg, &labels, &macros);
 
   // --- Test Case: ds_write_b8_d16_hi ---
   // Logic: Write 0x11223344.
@@ -512,7 +512,7 @@ TEST(Instructions, DS_Write_Extended_Features) {
   WaveId id{0};
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Wave regs(16, 16, 0, 1, id, wg, &labels, &macros);
+  Wave regs(16, 16, 0, WaveSize{1}, id, wg, &labels, &macros);
 
   // --- Test Case E: ds_write_b16_d16_hi ---
   // Logic: Write 0xAABBCCDD.
@@ -559,7 +559,7 @@ TEST(Instructions, DS_Read_AllVariants_Extended) {
   WaveId id{0};
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Wave regs(10, 10, 0, 1, id, wg, &labels, &macros);
+  Wave regs(10, 10, 0, WaveSize{1}, id, wg, &labels, &macros);
   regs.setDsPreserve(true); // Test d16 preserve behavior
 
   // --- Setup Memory ---
@@ -635,7 +635,7 @@ TEST(Instructions, DS_Write2_B64) {
   WaveId id{0};
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Wave regs(16, 16, 0, 1, id, wg, &labels, &macros);
+  Wave regs(16, 16, 0, WaveSize{1}, id, wg, &labels, &macros);
 
   // ds_write2_b64 vaddr, v[data0:data0+1], v[data1:data1+1] offset0:N offset1:M
   // Writes 8 bytes from data0 to LDS[vaddr + offset0*8]
@@ -665,7 +665,7 @@ TEST(Instructions, DS_Write2_B64_DefaultOffset0) {
   WaveId id{0};
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Wave regs(16, 16, 0, 1, id, wg, &labels, &macros);
+  Wave regs(16, 16, 0, WaveSize{1}, id, wg, &labels, &macros);
 
   // When offset0 is omitted, it defaults to 0.
   // ds_write2_b64 v0, v[1:2], v[3:4] offset1:1
@@ -690,7 +690,7 @@ TEST(Instructions, DS_Read2_B64) {
   WaveId id{0};
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Wave regs(16, 16, 0, 1, id, wg, &labels, &macros);
+  Wave regs(16, 16, 0, WaveSize{1}, id, wg, &labels, &macros);
 
   // ds_read2_b64 v[dst:dst+3], vaddr offset0:N offset1:M
   // Reads 8 bytes from LDS[vaddr + offset0*8] into v[dst:dst+1]
@@ -719,7 +719,7 @@ TEST(Instructions, DS_Read2_Write2_B64_Roundtrip) {
   WaveId id{0};
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Wave regs(16, 16, 0, 1, id, wg, &labels, &macros);
+  Wave regs(16, 16, 0, WaveSize{1}, id, wg, &labels, &macros);
 
   // Write via ds_write2_b64, then read back via ds_read2_b64
   regs.setVgpr(0, 0, 0); // vaddr = 0
@@ -745,7 +745,7 @@ TEST(Instructions, DS_Store_Load_2addr_B64_RdnaAliases) {
   WaveId id{0};
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Wave regs(16, 16, 0, 1, id, wg, &labels, &macros);
+  Wave regs(16, 16, 0, WaveSize{1}, id, wg, &labels, &macros);
 
   // RDNA aliases: ds_store_2addr_b64 = ds_write2_b64
   //              ds_load_2addr_b64 = ds_read2_b64
@@ -771,7 +771,7 @@ TEST(Instructions, DS_Store_Load_2addr_B64_RdnaAliases) {
 // naming convention used by RDNA architectures (gfx11+).
 TEST(Instructions, RdnaGlobalLoadStoreAliases) {
   Workgroup wg;
-  Wave regs(10, 10, 1, wg);
+  Wave regs(10, 10, WaveSize{1}, wg);
 
   std::vector<uint32_t> mem(16, 0);
   mem[0] = 42;
@@ -798,7 +798,7 @@ TEST(Instructions, RdnaGlobalLoadStoreAliases) {
 
 TEST(Instructions, RdnaSLoadAliases) {
   Workgroup wg;
-  Wave regs(4, 10, 1, wg);
+  Wave regs(4, 10, WaveSize{1}, wg);
 
   std::vector<uint32_t> mem(16, 0);
   mem[0] = 11;
@@ -827,7 +827,7 @@ TEST(Instructions, RdnaSLoadAliases) {
 // Verify that the RDNA-style names work identically to the CDNA names.
 TEST(Instructions, RdnaBufferLoadStoreAliases) {
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, /*waveSize*/ 1, wg);
+  Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, WaveSize{1}, wg);
 
   std::vector<uint32_t> hostMem = {100, 200, 300, 400};
   uintptr_t baseAddr = reinterpret_cast<uintptr_t>(hostMem.data());
@@ -860,7 +860,7 @@ TEST(Instructions, RdnaBufferLoadStoreAliases) {
 // buffer_load_d16_hi_b16: load 16-bit value into VGPR[31:16], preserve [15:0].
 TEST(Instructions, BufferLoadD16) {
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, /*waveSize*/ 1, wg);
+  Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, WaveSize{1}, wg);
 
   uint16_t hostMem[] = {0x1234, 0xABCD};
   uintptr_t baseAddr = reinterpret_cast<uintptr_t>(hostMem);
@@ -899,7 +899,7 @@ TEST(Instructions, DsStoreB16_RDNA3Rename) {
   WaveId id{0};
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Wave regs(16, 16, 0, 1, id, wg, &labels, &macros);
+  Wave regs(16, 16, 0, WaveSize{1}, id, wg, &labels, &macros);
 
   // ds_store_b16: writes low 16 bits of data VGPR.
   regs.setVgpr(0, 0, 200);        // addr
@@ -919,7 +919,7 @@ TEST(Instructions, DsStoreB16_RDNA3Rename) {
 // when only the drained half is subsequently read.
 TEST(Instructions, BufferLoadD16_ByteLevelRace) {
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, /*waveSize*/ 1, wg);
+  Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, WaveSize{1}, wg);
   regs.setRaceChecks(true);
   regs.setCompleteEmulation(true);
 
@@ -970,7 +970,7 @@ TEST(Instructions, BufferLoad_Lds_DirectToLds) {
   Workgroup wg;
   wg.resizeLds(1024);
   // waveSize=2 for manageable test size (2 lanes × 16 bytes = 32 bytes LDS).
-  Wave wave(/*vgprCount=*/4, /*sgprCount=*/10, /*waveSize=*/2, wg);
+  Wave wave(/*vgprCount=*/4, /*sgprCount=*/10, WaveSize{2}, wg);
   wave.setRaceChecks(true);
   wave.setCompleteEmulation(true);
 
@@ -1019,7 +1019,7 @@ TEST(Instructions, BufferLoad_Lds_RaceBeforeVmcnt) {
   Workgroup wg;
   wg.resizeLds(1024);
   wg.setRaceChecks(true);
-  Wave wave(/*vgprCount=*/4, /*sgprCount=*/10, /*waveSize=*/1, wg);
+  Wave wave(/*vgprCount=*/4, /*sgprCount=*/10, WaveSize{1}, wg);
   wave.setRaceChecks(true);
   wave.setCompleteEmulation(true);
 

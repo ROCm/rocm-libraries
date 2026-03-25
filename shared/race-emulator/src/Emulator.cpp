@@ -282,7 +282,7 @@ void Emulator::run(Dim3d wgId, Dim3d blockDim) {
   assert(blockDim.z >= 1 && blockDim.z <= 1024 &&
          "blockDim.z must be in [1, 1024]");
 
-  const int wavefrontSize = parsedAsm->wavefrontSize;
+  const WaveSize wavefrontSize = parsedAsm->wavefrontSize;
   const int totalThreads = blockDim.x * blockDim.y * blockDim.z;
 
   // For early stage development, assert that totalThreads is divisible by

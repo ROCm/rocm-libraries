@@ -24,7 +24,7 @@ void tryExecute(Wave &regs, const std::string &line) {
 
 TEST(Instructions, InstructionTestZero) {
   Workgroup wg;
-  Wave regs(10, 10, 16, wg);
+  Wave regs(10, 10, WaveSize{16}, wg);
   tryExecute(regs, "v_mov_b32_e32 v1, 17");
   EXPECT_EQ(regs.getVgpr(1, 0), 17);
 
@@ -48,7 +48,7 @@ TEST(Instructions, InstructionTestZero) {
 
 TEST(Instructions, MixedOperandMath) {
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 16, /*sgprCount*/ 16, /*waveSize*/ 32, wg);
+  Wave regs(/*vgprCount*/ 16, /*sgprCount*/ 16, WaveSize{32}, wg);
 
   // Setup: s0 = 10.0f (stored as bits), v2 = 5.0f (all lanes)
   uint32_t float10bits = std::bit_cast<uint32_t>(10.0f);
@@ -80,7 +80,7 @@ TEST(Instructions, MixedOperandMath) {
 
 TEST(Instructions, LaneIndependence) {
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 4, /*sgprCount*/ 4, /*waveSize*/ 4, wg);
+  Wave regs(/*vgprCount*/ 4, /*sgprCount*/ 4, WaveSize{4}, wg);
 
   // Set distinct values in v0 for each lane
   regs.setVgpr(0, /*lane*/ 0, 10);
@@ -99,7 +99,7 @@ TEST(Instructions, LaneIndependence) {
 
 TEST(Instructions, Registers64Bit) {
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 4, /*sgprCount*/ 4, /*waveSize*/ 1, wg);
+  Wave regs(/*vgprCount*/ 4, /*sgprCount*/ 4, WaveSize{1}, wg);
 
   uint64_t bigValue = 0x123456789ABCDEF0;
 
@@ -122,7 +122,7 @@ TEST(Instructions, Registers64Bit) {
 
 TEST(Instructions, Conversions) {
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 4, /*sgprCount*/ 4, /*waveSize*/ 1, wg);
+  Wave regs(/*vgprCount*/ 4, /*sgprCount*/ 4, WaveSize{1}, wg);
 
   // Float -> Double
   float input = 3.14159f;
@@ -147,7 +147,7 @@ TEST(Instructions, Conversions) {
 
 TEST(Instructions, VLshlOrB32) {
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 4, /*sgprCount*/ 4, /*waveSize*/ 1, wg);
+  Wave regs(/*vgprCount*/ 4, /*sgprCount*/ 4, WaveSize{1}, wg);
 
   // 1. Basic Operation: (10 << 2) | 5
   // 10 (binary 1010) << 2 = 40 (binary 101000)
@@ -176,7 +176,7 @@ TEST(Instructions, VLshlOrB32) {
 TEST(Instructions, VCmpGtI32E32) {
   // Example: v_cmp_gt_i32_e32 vcc, s5, v0
   Workgroup wg;
-  Wave regs(/*vgprCount*/ 2, /*sgprCount*/ 6, /*waveSize*/ 64, wg);
+  Wave regs(/*vgprCount*/ 2, /*sgprCount*/ 6, WaveSize{64}, wg);
   regs.setSgpr(2, 25); // s2 = 25
   // set v1 iota from 0:
   for (int lane = 0; lane < regs.getWaveSize(); ++lane) {
@@ -201,7 +201,7 @@ TEST(Instructions, VCmpGtI32E32) {
 TEST(Instructions, VReadFirstLane) {
   // Setup: 1 VGPR, 1 SGPR, WaveSize 64
   Workgroup wg;
-  Wave regs(1, 1, 64, wg);
+  Wave regs(1, 1, WaveSize{64}, wg);
 
   // 1. Initialize v0 such that Lane N contains the value N.
   // This acts as our "Lane ID" map.
@@ -249,7 +249,7 @@ TEST(Instructions, VReadFirstLane) {
 
 TEST(Instructions, VAshrRevI32_LLVMExamples) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
 
   // LLVM Example 1: result = ashr i32 4, 1
   // Yields: 2
@@ -286,7 +286,7 @@ TEST(Instructions, VAshrRevI32_LLVMExamples) {
 
 TEST(Instructions, VBfeU32) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
 
   // Data: 0xABCD1234
   // Binary: ... 0001 0010 0011 0100
@@ -312,7 +312,7 @@ TEST(Instructions, VBfeU32) {
 }
 TEST(Instructions, VAdd3U32) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg); // 4 VGPR, 4 SGPRs
+  Wave regs(4, 4, WaveSize{4}, wg); // 4 VGPR, 4 SGPRs
 
   // Case: v0 = v1 + v2 + s0
   // v1 = 10, v2 = 20, s0 = 5
@@ -336,7 +336,7 @@ TEST(Instructions, VAdd3U32) {
 
 TEST(Instructions, VCmpU32Sdwa_Unified) {
   Workgroup wg;
-  Wave regs(4, 2, 1, wg);
+  Wave regs(4, 2, WaveSize{1}, wg);
 
   // Data Setup
   // v1: High=0xAAAA, Low=0x1234 -> 0xAAAA1234
@@ -386,7 +386,7 @@ TEST(Instructions, VCndMask_MultiLane) {
   // 2 SGPRs (s[0:1] for VCC)
   // WaveSize = 2 (We need at least 2 lanes to test bit 0 vs bit 1)
   Workgroup wg;
-  Wave regs(3, 2, 2, wg);
+  Wave regs(3, 2, WaveSize{2}, wg);
 
   // 1. Initialize Inputs per Lane
   // Lane 0: v1=100, v2=200
@@ -419,7 +419,7 @@ TEST(Instructions, VCndMask_MultiLane) {
 
 TEST(Instructions, VCndMask_RespectsExec) {
   Workgroup wg;
-  Wave regs(3, 2, 64, wg); // 64 lanes
+  Wave regs(3, 2, WaveSize{64}, wg); // 64 lanes
 
   // Initial State:
   regs.setVgpr(0, 0, 99);
@@ -454,7 +454,7 @@ TEST(Instructions, VCndMask_RespectsExec) {
 
 TEST(Instructions, VAddLshlU32) {
   Workgroup wg;
-  Wave regs(4, 0, 1, wg); // 4 VGPRs, 0 SGPRs, WaveSize 1
+  Wave regs(4, 0, WaveSize{1}, wg); // 4 VGPRs, 0 SGPRs, WaveSize 1
 
   // Case 1: Simple Address Calculation
   // Result = (10 + 20) << 2
@@ -491,7 +491,7 @@ TEST(Instructions, VAddLshlU32) {
 TEST(Instructions, VOrB32Sdwa_Foundation) {
   // Setup: 4 VGPRs, 4 SGPRs, Wave32
   Workgroup wg;
-  Wave regs(4, 4, 32, wg);
+  Wave regs(4, 4, WaveSize{32}, wg);
 
   // Initial State
   // v1 = 0x11112222
@@ -525,7 +525,7 @@ TEST(Instructions, VOrB32Sdwa_Foundation) {
 
 TEST(Instructions, VOrB32Sdwa_LLVM_Patterns) {
   Workgroup wg;
-  Wave regs(64, 4, 1, wg); // 1 active lane
+  Wave regs(64, 4, WaveSize{1}, wg); // 1 active lane
 
   // Inputs matching HIP test
   // A (v22/v4/v44/v5) = 0x12345678
@@ -601,7 +601,7 @@ void expectPackedFloats(const Wave &regs, int dstIdx, float expectedLo,
 
 TEST(Instructions, V_PK_MUL_F32_OpSel_Logic) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 6, /*sgpr*/ 0, /*wave*/ 2, wg);
+  Wave regs(/*vgpr*/ 6, /*sgpr*/ 0, WaveSize{2}, wg);
 
   // Setup Inputs
   // Src0 (v0:1): Lo = 2.0,  Hi = 10.0
@@ -654,7 +654,7 @@ TEST(Instructions, V_PK_MUL_F32_OpSel_Logic) {
 
 TEST(Instructions, V_PK_MUL_F32_Negation) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 6, /*sgpr*/ 0, /*wave*/ 64, wg);
+  Wave regs(/*vgpr*/ 6, /*sgpr*/ 0, WaveSize{64}, wg);
 
   // Setup Inputs: 2.0 and 3.0 (Packed logic same as above)
   // Src0 (v0:1): 2.0, 2.0
@@ -684,7 +684,7 @@ TEST(Instructions, V_PK_MUL_F32_Negation) {
 
 TEST(Instructions, V_FMAC_F32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 4, /*sgpr*/ 0, /*wave*/ 64, wg);
+  Wave regs(/*vgpr*/ 4, /*sgpr*/ 0, WaveSize{64}, wg);
 
   // Setup Accumulator (Dst/v0) = 10.0
   regs.setVgpr(0, 0, std::bit_cast<uint32_t>(10.0f));
@@ -705,7 +705,7 @@ TEST(Instructions, V_FMAC_F32) {
 
 TEST(Instructions, V_CMPX_EQ_U32_BasicLogic) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 4, /*sgpr*/ 4, /*wave*/ 64, wg);
+  Wave regs(/*vgpr*/ 4, /*sgpr*/ 4, WaveSize{64}, wg);
 
   // Setup: Initialize EXEC to all 1s (all lanes active)
   regs.setExecU64(0xFFFFFFFFFFFFFFFF);
@@ -739,7 +739,7 @@ TEST(Instructions, V_CMPX_EQ_U32_ExecMaskingBehavior) {
   // Verifies v_cmpx ANDs with the current EXEC mask rather than
   // overwriting it (essential for nested control flow).
   Workgroup wg;
-  Wave regs(/*vgpr*/ 4, /*sgpr*/ 4, /*wave*/ 64, wg);
+  Wave regs(/*vgpr*/ 4, /*sgpr*/ 4, WaveSize{64}, wg);
 
   // 2. Setup Inputs: ALL lanes match
   // v0 = 5, v1 = 5
@@ -766,7 +766,7 @@ TEST(Instructions, V_CMPX_EQ_U32_ExecMaskingBehavior) {
 
 TEST(Instructions, V_CMPX_EQ_U32_WithScalars) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 4, /*sgpr*/ 4, /*wave*/ 64, wg);
+  Wave regs(/*vgpr*/ 4, /*sgpr*/ 4, WaveSize{64}, wg);
   regs.setExecU64(0xFFFFFFFFFFFFFFFF);
 
   // Test Scalar Operand: v_cmpx_eq_u32 vcc, s0, v0
@@ -785,7 +785,7 @@ TEST(Instructions, V_CMPX_EQ_U32_WithScalars) {
 
 TEST(Instructions, V_ADD_CO_U32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, /*wave*/ 64, wg);
+  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, WaveSize{64}, wg);
 
   // Lane 0: Simple Addition (10 + 20 = 30)
   regs.setVgpr(0, 0, 10);
@@ -824,7 +824,7 @@ TEST(Instructions, V_ADD_CO_U32) {
 
 TEST(Instructions, V_ADDC_CO_U32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, /*wave*/ 64, wg);
+  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, WaveSize{64}, wg);
 
   // Lane 0: No Carry In, No Carry Out (10 + 20 + 0 = 30)
   regs.setVgpr(0, 0, 10);
@@ -863,7 +863,7 @@ TEST(Instructions, V_ADDC_CO_U32) {
 
 TEST(Instructions, V_LSHL_ADD_U32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 4, /*sgpr*/ 0, /*wave*/ 64, wg);
+  Wave regs(/*vgpr*/ 4, /*sgpr*/ 0, WaveSize{64}, wg);
 
   // Lane 0: Standard case
   // (5 << 2) + 10 = 20 + 10 = 30
@@ -888,7 +888,7 @@ TEST(Instructions, V_LSHL_ADD_U32) {
 
 TEST(Instructions, V_READFIRSTLANE_B32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 1, /*sgpr*/ 1, /*wave*/ 64, wg);
+  Wave regs(/*vgpr*/ 1, /*sgpr*/ 1, WaveSize{64}, wg);
 
   // Setup distinct values in v0 for each lane
   for (int i = 0; i < 64; ++i) {
@@ -967,7 +967,7 @@ void runVectorConvertTest(Wave &regs, std::string opName, InT inputVal,
 
 TEST(Instructions, CVT_F32_U32_FixVerification) {
   Workgroup wg;
-  Wave regs(4, 4, 1, wg);
+  Wave regs(4, 4, WaveSize{1}, wg);
 
   runVectorConvertTest<uint32_t, float>(regs, "v_cvt_f32_u32", 16, 16.0f);
 
@@ -982,7 +982,7 @@ TEST(Instructions, CVT_F32_U32_FixVerification) {
 
 TEST(Instructions, CVT_U32_F32) {
   Workgroup wg;
-  Wave regs(4, 4, 64, wg);
+  Wave regs(4, 4, WaveSize{64}, wg);
 
   // Standard cases
   runVectorConvertTest<float, uint32_t>(regs, "v_cvt_u32_f32", 16.0f, 16);
@@ -995,7 +995,7 @@ TEST(Instructions, CVT_U32_F32) {
 
 TEST(Instructions, CVT_DoublePrecision) {
   Workgroup wg;
-  Wave regs(4, 4, 64, wg);
+  Wave regs(4, 4, WaveSize{64}, wg);
 
   // v_cvt_f64_u32 (u32 -> double)
   runVectorConvertTest<uint32_t, double>(regs, "v_cvt_f64_u32", 1, 1.0);
@@ -1015,7 +1015,7 @@ TEST(Instructions, CVT_DoublePrecision) {
 
 TEST(Instructions, S_MOVK_I32_SignExtension) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
 
   // The source must be a literal in the assembly string.
 
@@ -1040,7 +1040,7 @@ TEST(Instructions, S_MOVK_I32_SignExtension) {
 
 TEST(Instructions, MOV_Ops) {
   Workgroup wg;
-  Wave regs(4, 4, 64, wg);
+  Wave regs(4, 4, WaveSize{64}, wg);
 
   // v_mov_b32
   runVectorConvertTest<uint32_t, uint32_t>(regs, "v_mov_b32", 0xDEADBEEF,
@@ -1053,7 +1053,7 @@ TEST(Instructions, MOV_Ops) {
 
 TEST(Instructions, VMadU64U32) {
   Workgroup wg;
-  Wave regs(10, 10, 10, wg);
+  Wave regs(10, 10, WaveSize{10}, wg);
 
   // Case 1: Simple multiply-add, no overflow
   // 3 * 5 + 10 = 25
@@ -1125,7 +1125,7 @@ TEST(Instructions, VMadU64U32) {
 // setExecU64 writes to the low half.
 TEST(Instructions, ExecU32U64Consistency) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 1, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 1, /*sgpr*/ 0, WaveSize{32}, wg);
 
   // Wave constructor initializes exec to all-ones via setExecU64(~0ULL).
   // On wave-32, getExecU32 should see all 32 bits set.
@@ -1145,11 +1145,11 @@ TEST(Instructions, ExecU32U64Consistency) {
 TEST(Instructions, VccU32U64Consistency) {
   // Use wave-64 to test the 64-bit path, then wave-32 for 32-bit.
   Workgroup wg;
-  Wave regs64(/*vgpr*/ 1, /*sgpr*/ 0, /*wave*/ 64, wg);
+  Wave regs64(/*vgpr*/ 1, /*sgpr*/ 0, WaveSize{64}, wg);
   regs64.setVccU64(0xDEADBEEFCAFEBABEULL);
   EXPECT_EQ(regs64.getVccU64(), 0xDEADBEEFCAFEBABEULL);
 
-  Wave regs32(/*vgpr*/ 1, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs32(/*vgpr*/ 1, /*sgpr*/ 0, WaveSize{32}, wg);
   regs32.setVccU32(0x12345678);
   EXPECT_EQ(regs32.getVccU32(), 0x12345678u);
 }
@@ -1162,7 +1162,7 @@ TEST(Instructions, VccU32U64Consistency) {
 // wave-32). The carry-out is 1 if the 33-bit result overflows 32 bits.
 TEST(Instructions, V_ADD_CO_CI_U32_Wave32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, WaveSize{32}, wg);
 
   // Lane 0: No carry-in, no carry-out (10 + 20 + 0 = 30)
   regs.setVgpr(0, 0, 10);
@@ -1193,7 +1193,7 @@ TEST(Instructions, V_ADD_CO_CI_U32_Wave32) {
 // v_add_co_u32 on wave-32: carry-out written to vcc_lo (32-bit).
 TEST(Instructions, V_ADD_CO_U32_Wave32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, WaveSize{32}, wg);
 
   regs.setVgpr(0, 0, 0xFFFFFFFF);
   regs.setVgpr(1, 0, 1);
@@ -1213,7 +1213,7 @@ TEST(Instructions, V_ADD_CO_U32_Wave32) {
 // Semantics: D.u64 = S0.u32 * S1.u32 + S2.u64; carry discarded.
 TEST(Instructions, V_MAD_U64_U32_NullCarry_Wave32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 6, /*sgpr*/ 2, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 6, /*sgpr*/ 2, WaveSize{32}, wg);
 
   // Lane 0: 3 * 4 + 100 = 112
   regs.setVgpr(0, 0, 3);
@@ -1229,7 +1229,7 @@ TEST(Instructions, V_MAD_U64_U32_NullCarry_Wave32) {
 // They should parse and execute as no-ops.
 TEST(Instructions, SchedulingHintNoOps_Wave32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 2, /*sgpr*/ 4, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 2, /*sgpr*/ 4, WaveSize{32}, wg);
 
   regs.setVgpr(0, 0, 42);
 
@@ -1245,7 +1245,7 @@ TEST(Instructions, SchedulingHintNoOps_Wave32) {
 // v_cvt_f32_i32: convert signed int32 to float32.
 TEST(Instructions, V_CVT_F32_I32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 2, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 2, /*sgpr*/ 0, WaveSize{32}, wg);
 
   regs.setVgpr(0, 0, 42);
   tryExecute(regs, "v_cvt_f32_i32 v1, v0");
@@ -1261,7 +1261,7 @@ TEST(Instructions, V_CVT_F32_I32) {
 // Multiply-add using the low 24 bits of each multiplicand.
 TEST(Instructions, V_MAD_U32_U24) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 4, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 4, /*sgpr*/ 0, WaveSize{32}, wg);
 
   // 3 * 4 + 10 = 22
   regs.setVgpr(0, 0, 3);
@@ -1283,7 +1283,7 @@ TEST(Instructions, V_MAD_U32_U24) {
 // s_mov_b32 s0, exec_lo should read the exec mask into an SGPR.
 TEST(Instructions, ExecLo_Register) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 1, /*sgpr*/ 2, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 1, /*sgpr*/ 2, WaveSize{32}, wg);
 
   // exec is initialized to all-ones. On wave-32, exec_lo = 0xFFFFFFFF.
   tryExecute(regs, "s_mov_b32 s0, exec_lo");
@@ -1295,7 +1295,7 @@ TEST(Instructions, ExecLo_Register) {
 // Tests signed semantics: -1 is NOT > 5.
 TEST(Instructions, V_CMPX_GT_I32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 2, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 2, /*sgpr*/ 0, WaveSize{32}, wg);
 
   // Lane 0: 10 > 5 → true
   regs.setVgpr(0, 0, 10);
@@ -1319,7 +1319,7 @@ TEST(Instructions, V_CMPX_GT_I32) {
 // VOPC_Compare handles both forms by checking operand count.
 TEST(Instructions, V_CMPX_GT_I32_ImplicitExec) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 2, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 2, /*sgpr*/ 0, WaveSize{32}, wg);
 
   // Lane 0: 10 > 5 → true
   regs.setVgpr(0, 0, 10);
@@ -1336,7 +1336,7 @@ TEST(Instructions, V_CMPX_GT_I32_ImplicitExec) {
 // v_add_nc_u32: RDNA name for v_add_u32 (add without carry).
 TEST(Instructions, V_ADD_NC_U32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, WaveSize{32}, wg);
   regs.setVgpr(0, 0, 10);
   regs.setVgpr(1, 0, 7);
   tryExecute(regs, "v_add_nc_u32 v2, v0, v1");
@@ -1346,7 +1346,7 @@ TEST(Instructions, V_ADD_NC_U32) {
 // v_add_nc_i32: signed variant, same bit operation as v_add_nc_u32.
 TEST(Instructions, V_ADD_NC_I32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, WaveSize{32}, wg);
   regs.setVgpr(0, 0, 10);
   regs.setVgpr(1, 0, 7);
   tryExecute(regs, "v_add_nc_i32 v2, v0, v1");
@@ -1362,7 +1362,7 @@ TEST(Instructions, V_ADD_NC_I32) {
 // v_cmp_eq_i32: signed compare equal, sets VCC per-lane.
 TEST(Instructions, V_CMP_EQ_I32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, WaveSize{32}, wg);
 
   // Lane 0: equal
   regs.setVgpr(0, 0, 42);
@@ -1387,7 +1387,7 @@ TEST(Instructions, V_CMP_EQ_I32) {
 // value, shifts right by S2[4:0], returns low 32 bits.
 TEST(Instructions, V_ALIGNBIT_B32) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 4, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 4, /*sgpr*/ 0, WaveSize{32}, wg);
   // {0xDEADBEEF, 0xCAFEBABE} >> 4 = 0xFDEADBEECAFEBAB >> ... low 32 =
   // 0xECAFEBAB
   regs.setVgpr(0, 0, 0xDEADBEEF); // high
@@ -1406,7 +1406,7 @@ TEST(Instructions, V_ALIGNBIT_B32) {
 // The emulator splits on "::" and executes each half sequentially.
 TEST(Instructions, VOPD_DualIssue) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, WaveSize{32}, wg);
   regs.setVgpr(0, 0, 7);
 
   // v_dual_mov_b32 v1, 0 :: v_dual_lshlrev_b32 v2, 2, v0
@@ -1422,7 +1422,7 @@ TEST(Instructions, VOPD_DualIssue) {
 // and v1 remains 42.
 TEST(Instructions, VOPD_DualIssue_PCAdvancement) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 3, /*sgpr*/ 0, WaveSize{32}, wg);
   regs.setVgpr(0, 0, 7);
 
   // Execute dual-issue, then check PC advanced by 1.
@@ -1441,7 +1441,7 @@ TEST(Instructions, VOPD_DualIssue_PCAdvancement) {
 // Writing to vcc_hi should be accessible via getSgpr at vccIndex+1.
 TEST(Instructions, VccHi_Register) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 1, /*sgpr*/ 2, /*wave*/ 64, wg);
+  Wave regs(/*vgpr*/ 1, /*sgpr*/ 2, WaveSize{64}, wg);
 
   // Write a known value to vcc_hi via s_mov_b32
   tryExecute(regs, "s_mov_b32 vcc_hi, 0xABCD0000");
@@ -1454,7 +1454,7 @@ TEST(Instructions, VccHi_Register) {
 // On wave-64, exec is 64 bits and exec_hi is the upper half.
 TEST(Instructions, ExecHi_Register) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 1, /*sgpr*/ 2, /*wave*/ 64, wg);
+  Wave regs(/*vgpr*/ 1, /*sgpr*/ 2, WaveSize{64}, wg);
 
   // exec is initialized to all-ones on wave-64, so exec_hi = 0xFFFFFFFF.
   tryExecute(regs, "s_mov_b32 s0, exec_hi");
@@ -1474,7 +1474,7 @@ TEST(Instructions, ExecHi_Register) {
 //   D[row][col]: vgpr=row/2, lane=col (even rows) or col+16 (odd rows)
 TEST(Instructions, WMMA_F32_16x16x16_BF16) {
   Workgroup wg;
-  Wave regs(/*vgpr*/ 24, /*sgpr*/ 0, /*wave*/ 32, wg);
+  Wave regs(/*vgpr*/ 24, /*sgpr*/ 0, WaveSize{32}, wg);
 
   // bf16 conversion helpers
   auto f32_to_bf16 = [](float f) -> uint16_t {
@@ -1569,7 +1569,7 @@ TEST(Instructions, WMMA_F32_16x16x16_BF16) {
 
 TEST(Instructions, VPermB32_ByteSelect) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
 
   // src0 = 0xDDCCBBAA, src1 = 0x44332211
   // in[0]=0x11, in[1]=0x22, in[2]=0x33, in[3]=0x44
@@ -1600,7 +1600,7 @@ TEST(Instructions, VPermB32_ByteSelect) {
 
 TEST(Instructions, VPermB32_Constants) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
   regs.setVgpr(0, 0, 0xDDCCBBAA);
   regs.setVgpr(1, 0, 0x44332211);
 
@@ -1617,7 +1617,7 @@ TEST(Instructions, VPermB32_Constants) {
 
 TEST(Instructions, VPermB32_SignExtend) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
 
   // src0 = 0x00800000, src1 = 0x00FF0080
   // in[0]=0x80, in[1]=0x00, in[2]=0xFF, in[3]=0x00
@@ -1649,7 +1649,7 @@ TEST(Instructions, VPermB32_SignExtend) {
 
 TEST(Instructions, V_EXP_F32) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
   regs.setVgpr(0, 0, std::bit_cast<uint32_t>(0.0f));
   regs.setVgpr(0, 1, std::bit_cast<uint32_t>(1.0f));
   regs.setVgpr(0, 2, std::bit_cast<uint32_t>(-1.0f));
@@ -1664,7 +1664,7 @@ TEST(Instructions, V_EXP_F32) {
 
 TEST(Instructions, V_RCP_F32) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
   regs.setVgpr(0, 0, std::bit_cast<uint32_t>(1.0f));
   regs.setVgpr(0, 1, std::bit_cast<uint32_t>(2.0f));
   regs.setVgpr(0, 2, std::bit_cast<uint32_t>(0.5f));
@@ -1686,7 +1686,7 @@ TEST(Instructions, V_RCP_F32) {
 
 TEST(Instructions, V_MAX_F32) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
   regs.setVgpr(0, 0, std::bit_cast<uint32_t>(1.0f));
   regs.setVgpr(1, 0, std::bit_cast<uint32_t>(2.0f));
   regs.setVgpr(0, 1, std::bit_cast<uint32_t>(-3.0f));
@@ -1698,7 +1698,7 @@ TEST(Instructions, V_MAX_F32) {
 
 TEST(Instructions, V_MIN_F32) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
   regs.setVgpr(0, 0, std::bit_cast<uint32_t>(1.0f));
   regs.setVgpr(1, 0, std::bit_cast<uint32_t>(2.0f));
   regs.setVgpr(0, 1, std::bit_cast<uint32_t>(-3.0f));
@@ -1710,7 +1710,7 @@ TEST(Instructions, V_MIN_F32) {
 
 TEST(Instructions, V_FMA_F32) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
   // v3 = v0 * v1 + v2 = 2.0 * 3.0 + 10.0 = 16.0
   regs.setVgpr(0, 0, std::bit_cast<uint32_t>(2.0f));
   regs.setVgpr(1, 0, std::bit_cast<uint32_t>(3.0f));
@@ -1728,7 +1728,7 @@ TEST(Instructions, V_FMA_F32) {
 
 TEST(Instructions, V_CVT_U32_F32_Clamping) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
   // Negative -> 0
   regs.setVgpr(0, 0, std::bit_cast<uint32_t>(-1.0f));
   // NaN -> 0
@@ -1749,7 +1749,7 @@ TEST(Instructions, V_CVT_U32_F32_Clamping) {
 // Packs two f16 values into one 32-bit register.
 TEST(Instructions, VPackB32F16) {
   Workgroup wg;
-  Wave regs(4, 4, 4, wg);
+  Wave regs(4, 4, WaveSize{4}, wg);
 
   uint16_t f16_one = raceemulator::floatToF16(1.0f);
   uint16_t f16_neg2 = raceemulator::floatToF16(-2.0f);
@@ -1788,7 +1788,7 @@ TEST(Instructions, VPackB32F16) {
 TEST(Instructions, Mfma_F32_16x16x32_F16) {
   Workgroup wg;
   // 4 input + 4 output VGPRs per operand, plus headroom.
-  Wave wave(/*vgprCount=*/20, /*sgprCount=*/4, /*waveSize=*/64, wg);
+  Wave wave(/*vgprCount=*/20, /*sgprCount=*/4, WaveSize{64}, wg);
 
   // Set up A and B as all-ones in f16. With K=32, each output element
   // should be 1.0 * 1.0 * 32 = 32.0.
@@ -1818,7 +1818,7 @@ TEST(Instructions, Mfma_F32_16x16x32_F16) {
 // specific output elements.
 TEST(Instructions, Mfma_F32_16x16x32_F16_NonTrivial) {
   Workgroup wg;
-  Wave wave(/*vgprCount=*/20, /*sgprCount=*/4, /*waveSize=*/64, wg);
+  Wave wave(/*vgprCount=*/20, /*sgprCount=*/4, WaveSize{64}, wg);
 
   // Zero all inputs first.
   for (int lane = 0; lane < 64; ++lane) {

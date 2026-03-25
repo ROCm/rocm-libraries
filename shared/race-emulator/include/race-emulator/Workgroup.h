@@ -24,6 +24,13 @@ struct WaveId {
   bool operator<(WaveId o) const { return value < o.value; }
 };
 
+/// Number of lanes per wave (32 for RDNA, 64 for CDNA).
+/// Implicitly convertible to int for use in arithmetic and loop bounds.
+struct WaveSize {
+  int value;
+  operator int() const { return value; }
+};
+
 /// Identifies a memory event within a workgroup. Each memory instruction
 /// (LDS read/write, global load/store) creates an event via
 /// Workgroup::allocateEventId(). The event ID is used to track the event
@@ -97,11 +104,11 @@ class Workgroup {
   /// LDS write events (VGPR_TO_LDS, GLOBAL_TO_LDS) overlap
   /// [addr, addr+nBytes). Uses per-byte counts for fast-path, then interval
   /// scanning if counts are non-zero.
-  void validateRead(int addr, WaveId wave, int lane, int nBytes) const;
+  void validateRead(int addr, WaveId, int lane, int nBytes) const;
 
   /// Check for WAR (write-after-read) hazards: confirms no outstanding
   /// LDS_TO_VGPR read events overlap [addr, addr+nBytes).
-  void validateWrite(int addr, WaveId wave, int lane, int nBytes) const;
+  void validateWrite(int addr, WaveId, int lane, int nBytes) const;
 
 public:
   Workgroup() = default;
@@ -144,7 +151,7 @@ public:
   // --- LDS event tracking ---
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
-  void markEventWaveComplete(EventId eventId);
+  void markEventWaveComplete(EventId);
 
   /// Retire an LDS event at s_barrier. Updates two data structures:
   ///   1. Removes eventId from ldsWriteEvents or ldsReadEvents (by type).
@@ -152,7 +159,7 @@ public:
   ///      for each byte in the event's ldsIntervals.
   /// After retirement, the LDS bytes covered by this event are no longer
   /// considered in race validation.
-  void retireLdsEvent(EventId eventId);
+  void retireLdsEvent(EventId);
 
   /// Return the live LDS event IDs (for error reporting).
   const std::vector<EventId> &getLdsWriteEvents() const {

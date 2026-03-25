@@ -300,7 +300,7 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
     } else if (token.key == ".kernarg_segment_size") {
       kernargSegmentSize = getIntFromView<int>(token.value);
     } else if (token.key == ".wavefront_size") {
-      wavefrontSize = getIntFromView<int>(token.value);
+      wavefrontSize = WaveSize{getIntFromView<int>(token.value)};
     }
   };
 

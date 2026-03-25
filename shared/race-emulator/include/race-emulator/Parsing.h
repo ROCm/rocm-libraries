@@ -72,7 +72,7 @@ struct ParsedAsm {
   std::string assembly;
   std::string target;
   int kernargSegmentSize = 0;
-  int wavefrontSize = 0;
+  WaveSize wavefrontSize{0};
   std::vector<KernelArg> args;
   std::vector<ParsedLine> tokens;
   AllocationResult initialRegisterAllocation;

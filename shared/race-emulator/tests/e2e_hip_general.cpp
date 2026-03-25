@@ -40,7 +40,7 @@ std::string load_kernel_file(const std::string &filename) {
 // Architecture parameter for multi-arch tests.
 struct ArchParam {
   std::shared_ptr<Architecture> arch;
-  int waveSize;
+  WaveSize waveSize;
 
   ArchParam(std::string_view target)
       : arch(architectureFromTarget(target)), waveSize(arch->getWaveSize()) {}

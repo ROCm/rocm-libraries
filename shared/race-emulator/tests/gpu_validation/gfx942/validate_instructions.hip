@@ -77,7 +77,7 @@ TEST(GpuValidation, v_exp_f32) {
 
   // --- Run through emulator ---
   LDS lds;
-  Wave wave(4, 4, std::min(N, 64), lds);
+  Wave wave(4, 4, WaveSize{std::min(N, 64)}, lds);
   for (int i = 0; i < N; ++i)
     wave.setVgpr(0, i, std::bit_cast<uint32_t>(vals[i]));
   wave.tryExecute("v_exp_f32_e32 v1, v0", false);

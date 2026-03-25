@@ -1161,9 +1161,9 @@ TEST(GlobalToLds, CrossWaveRace) {
 
   // Create two waves sharing the same workgroup.
   Wave wave0(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4,
-             /*waveSize=*/64, WaveId{0}, wg, &labels, &macros);
+             WaveSize{64}, WaveId{0}, wg, &labels, &macros);
   Wave wave1(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4,
-             /*waveSize=*/64, WaveId{1}, wg, &labels, &macros);
+             WaveSize{64}, WaveId{1}, wg, &labels, &macros);
   wave0.setRaceChecks(true);
   wave1.setRaceChecks(true);
 
@@ -1189,9 +1189,9 @@ TEST(GlobalToLds, CrossWaveSafeAfterBarrier) {
   wg.setRaceChecks(true);
 
   Wave wave0(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4,
-             /*waveSize=*/64, WaveId{0}, wg, &labels, &macros);
+             WaveSize{64}, WaveId{0}, wg, &labels, &macros);
   Wave wave1(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4,
-             /*waveSize=*/64, WaveId{1}, wg, &labels, &macros);
+             WaveSize{64}, WaveId{1}, wg, &labels, &macros);
   wave0.setRaceChecks(true);
   wave1.setRaceChecks(true);
 
