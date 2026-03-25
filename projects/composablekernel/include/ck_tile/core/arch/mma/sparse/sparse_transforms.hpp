@@ -66,7 +66,7 @@ template <index_t CompressionRatio>
 struct SparseCompressTransform
 {
     template <typename VecType>
-    CK_TILE_DEVICE static decltype(auto) exec(VecType&& v, int32_t& idx)
+    CK_TILE_DEVICE static decltype(auto) exec(VecType&& v)
     {
         using VecTraits                         = vector_traits<remove_cvref_t<VecType>>;
         using ScalarT                           = typename VecTraits::scalar_type;
@@ -77,10 +77,10 @@ struct SparseCompressTransform
         static_assert(VecN % CompressionRatio == 0, "VecN must be divisible by CompressionRatio");
         static_assert(CompressedSize > 0, "CompressedSize must be > 0");
 
-        idx = detail::compress_a_impl<ScalarT, CompressedSize>(v);
+        const auto idx = detail::compress_a_impl<ScalarT, CompressedSize>(v);
 
         // TODO c++20: Use bit_cast
-        return *std::launder(reinterpret_cast<VecCompressed*>(&v));
+        return std::make_tuple(*std::launder(reinterpret_cast<VecCompressed*>(&v)), idx);
     }
 };
 
