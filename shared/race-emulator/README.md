@@ -41,9 +41,9 @@ within a workgroup) is required to avoid races.
 Given AMD GPU assembly code, detect all intra-workgroup races. Some
 examples are:
 
-1) A single thread issues a load from global memory to a register, but
+1. A single thread issues a load from global memory to a register, but
    does not wait for the load to complete before using the register.
-2) Two threads in different waves (but the same workgroup) write to the
+2. Two threads in different waves (but the same workgroup) write to the
    same address in LDS, without using a workgroup barrier to specify
    their relative order. The LDS address is subsequently read and used
    by a third thread.
@@ -258,9 +258,9 @@ s_waitcnts, and stream these back to CPU, for every wave. A host program
 would then analyze the recorded accesses, and detect race conditions as
 a post processing step. I suspect that this is the approach taken by
 NVidia's [racecheck](https://docs.nvidia.com/compute-sanitizer/ComputeSanitizer/index.html#racecheck-tool)
-tool. Perhaps
-[this](https://umr.readthedocs.io/en/main/index.html) open source AMD
-tool could serve as a starting point. Pros: Would not need to emulate
+tool. Perhaps one of [omniprobe](https://github.com/AMDResearch/omniprobe) or
+[UMR](https://umr.readthedocs.io/en/main/index.html), two open source AMD
+tools, could serve as starting points. Pros: Would not need to emulate
 the full GPU ISA. Faster runtime than emulation. Can detect races at the
 application level, without any extra effort (if runtime instrumentation
 is used).
