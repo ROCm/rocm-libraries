@@ -107,6 +107,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION
         -Wno-nrvo
         -Wno-unique-object-duplication
         -Wno-lifetime-safety
+        -Wno-lifetime-safety-suggestion
         -Wno-lifetime-safety-intra-tu-suggestions
         -Wno-lifetime-safety-cross-tu-suggestions)
 endif()
