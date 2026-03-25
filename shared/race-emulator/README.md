@@ -68,10 +68,11 @@ examples are:
 ## Current status
 
 The majority of the effort so far has gone into emulating instructions.
-The emulator supports gfx942 (MI300X) and gfx1151 (Strix), and has
-numerically validated runs of
+The emulator supports gfx942 (MI300X), gfx950 (MI350X), and gfx1151
+(Strix), and has numerically validated runs of
 
-- hipBLASLt/TensileLite GEMM kernels (f32, bf16, f16)
+- hipBLASLt/TensileLite GEMM kernels (f32, bf16, f16), including
+  direct-to-LDS (DTL) kernels on gfx950
 - an IREE-generated GEMM kernel (f32)
 - a HipKittens GEMM kernel (bf16 -> f32)
 - a few simple HIP programs.
