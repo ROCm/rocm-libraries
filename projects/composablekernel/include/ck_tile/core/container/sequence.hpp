@@ -144,9 +144,11 @@ struct sequence
         static_assert(MapOld2New::size() == size(),
                       "wrong! reorder map should have the same size as sequence to be rerodered");
 
-        static_assert(is_valid_sequence_map<MapOld2New>::value, "wrong! invalid reorder map");
+        static_assert(is_valid_sequence_map<remove_cvref_t<MapOld2New>>::value,
+                      "wrong! invalid reorder map");
 
-        return reorder_new_to_old(typename sequence_map_inverse<MapOld2New>::type{});
+        return reorder_new_to_old(
+            typename sequence_map_inverse<remove_cvref_t<MapOld2New>>::type{});
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto reverse()
@@ -597,7 +599,7 @@ struct sequence_sort
     static constexpr index_t n = Values::size();
     using idx_seq              = make_index_sequence<n>;
 
-    using helper = detail::sequence_sort_helper<Values, Compare, idx_seq>;
+    using helper = detail::sequence_sort_helper<remove_cvref_t<Values>, Compare, idx_seq>;
 
     using type                = typename helper::sorted_values;
     using sorted2unsorted_map = typename helper::sorted_ids;
