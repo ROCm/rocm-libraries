@@ -1,7 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Auto-generated kernel sources - DO NOT EDIT
+// Auto-generated from kernel_sources.cpp.in by embed_kernel_sources() - DO NOT EDIT
+//
+// Defines the embedded kernel source string literals and the filename-to-source
+// lookup map. See kernel_sources.hpp.in for the full embedding overview.
+
 #include "kernel_sources.hpp"
 #include <cstddef>
 #include <unordered_map>

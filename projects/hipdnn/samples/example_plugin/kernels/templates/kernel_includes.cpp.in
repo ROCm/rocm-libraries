@@ -1,7 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Auto-generated kernel includes - DO NOT EDIT
+// Auto-generated from kernel_includes.cpp.in by embed_kernel_sources() - DO NOT EDIT
+//
+// Defines the embedded kernel header string literals, the filename-to-header
+// lookup map, and getKernelIncList() which provides all headers to HIPRTC in
+// bulk. If the kernel source files do not #include any header files then the
+// s_data{} structure will be empty. See kernel_sources.hpp.in for the full
+// embedding overview.
+
 #include "kernel_includes.hpp"
 #include <cstddef>
 #include <unordered_map>
