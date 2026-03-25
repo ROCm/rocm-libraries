@@ -680,7 +680,6 @@ struct generator_log_normal_double : public generator_type
 template<typename Engine>
 struct generator_poisson : public generator_type
 {
-    // TODO: REMOVE!
     generator_poisson(double l) : lambda(l) {}
 
     typedef unsigned int data_type;
@@ -697,7 +696,6 @@ struct generator_poisson : public generator_type
 template<typename Engine>
 struct generator_discrete_poisson : public generator_type
 {
-    // TODO: REMOVE!
     generator_discrete_poisson(double l) : lambda(l) {}
 
     typedef unsigned int data_type;
@@ -760,22 +758,20 @@ struct generator_discrete_custom : public generator_type
 template<typename Generator, typename State, typename T, distribution Distribution>
 struct rocrand_device_api_benchmark : public primbench::benchmark_interface
 {
-    rocrand_device_api_benchmark(Generator             generator, // TODO: REMOVE!
+    rocrand_device_api_benchmark(Generator             generator,
                                  rocrand_rng_type      engine,
                                  size_t                blocks,
                                  size_t                threads,
                                  size_t                dimensions,
                                  size_t                offset,
                                  std::optional<double> poisson_lambda = std::nullopt)
-        : m_generator(generator) // TODO: REMOVE!
+        : m_generator(generator)
         , m_engine(engine)
         , m_blocks(blocks)
         , m_threads(threads)
         , m_dimensions(dimensions)
         , m_offset(offset)
         , m_poisson_lambda(poisson_lambda)
-        // MTGP32 supports a maximum of 200 states.
-        , m_mtgp32_states(std::min((size_t)200, blocks))
     {
     }
 
@@ -811,11 +807,8 @@ struct rocrand_device_api_benchmark : public primbench::benchmark_interface
         T* data;
         HIP_CHECK(hipMalloc(&data, items * sizeof(T)));
 
-        constexpr unsigned long long int seed   = 12345ULL; // TODO: Use state.seed
-        constexpr unsigned long long int offset = 6789ULL; // TODO: Use m_offset
-
         primbench::log("Creating runner");
-        runner<State> r(m_dimensions, m_blocks, m_threads, seed, offset);
+        runner<State> r(m_dimensions, m_blocks, m_threads, state.seed, m_offset);
 
         state.set_items(items);
         state.add_writes<T>(items);
@@ -828,14 +821,13 @@ struct rocrand_device_api_benchmark : public primbench::benchmark_interface
     }
 
 private:
-    Generator             m_generator; // TODO: REMOVE!
+    Generator             m_generator;
     rocrand_rng_type      m_engine;
     size_t                m_blocks;
     size_t                m_threads;
     size_t                m_dimensions;
     size_t                m_offset;
-    std::optional<double> m_poisson_lambda; // TODO: USE!
-    size_t                m_mtgp32_states; // TODO: USE!
+    std::optional<double> m_poisson_lambda;
 };
 
 #define QUEUE(generator, T, State, engine, Distribution, ...)                        \
