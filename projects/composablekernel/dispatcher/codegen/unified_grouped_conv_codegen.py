@@ -76,10 +76,19 @@ class GroupedConvLayout(Enum):
 
 @dataclass
 class GroupedConvTraitConfig(TraitConfigBase):
-    """Kernel trait configuration for grouped convolution (extends TraitConfigBase)"""
+    """Kernel trait configuration for grouped convolution (extends TraitConfigBase).
+
+    Conv-specific extensions beyond TraitConfigBase:
+    - double_smem_buffer: ping-pong LDS for compute V4+ pipelines
+    - num_groups_to_merge: fuse multiple groups into one tile
+    - large_tensor: enable 64-bit indexing for tensors > 2^31 elements
+    - two_stage: (future) two-stage bwd_weight with fp32 workspace accumulation
+    """
 
     double_smem_buffer: bool = False
     num_groups_to_merge: int = 1
+    large_tensor: bool = False
+    two_stage: bool = False  # TODO: wire through to codegen when CK Tile supports it
 
 
 # Backward compatibility alias
@@ -99,7 +108,9 @@ class GroupedConvKernelConfig:
         "nhwgc"  # Data layout (e.g., "nhwgc", "ndhwgc")
     )
 
-    # Vector sizes
+    # Vector sizes: a=4 for fp16 input (8-byte aligned global loads),
+    # b=8 for weight tensor, c=8 for output stores. These match the
+    # CK Tile default vectorization widths for fp16 on CDNA3 (gfx942).
     vector_size_a: int = 4
     vector_size_b: int = 8
     vector_size_c: int = 8
@@ -108,7 +119,7 @@ class GroupedConvKernelConfig:
     # Occupancy parameters
     block_per_cu: int = 1
     num_wave_groups: int = 1
-    num_groups_to_merge: int = 1  # For group merged convolution
+    num_groups_to_merge: int = 1
 
     # Double buffering
     double_smem_buffer: bool = False
@@ -118,6 +129,16 @@ class GroupedConvKernelConfig:
             self.vector_size_a, self.vector_size_b, self.vector_size_c = (
                 self.vector_sizes[:3]
             )
+        # Sync trait fields with top-level fields (trait is source of truth
+        # when both are specified, but top-level overrides default trait values).
+        if self.double_smem_buffer and not self.trait.double_smem_buffer:
+            self.trait.double_smem_buffer = self.double_smem_buffer
+        elif self.trait.double_smem_buffer:
+            self.double_smem_buffer = self.trait.double_smem_buffer
+        if self.num_groups_to_merge != 1 and self.trait.num_groups_to_merge == 1:
+            self.trait.num_groups_to_merge = self.num_groups_to_merge
+        elif self.trait.num_groups_to_merge != 1:
+            self.num_groups_to_merge = self.trait.num_groups_to_merge
 
     def _layout_str(self) -> str:
         """Get layout as lowercase string for naming."""
@@ -136,7 +157,7 @@ class GroupedConvKernelConfig:
 
         All parameters that affect kernel behavior MUST be included to ensure
         unique names for unique configurations:
-        - Variant (fwd/bwdd/bwdw)
+        - Variant (fwd/bwd_data/bwd_weight)
         - Data type
         - Layout (nhwgc, nchw, ndhwgc, etc.)
         - Spatial dimensions (2d/3d)
@@ -151,8 +172,8 @@ class GroupedConvKernelConfig:
 
         variant_str = {
             GroupedConvVariant.FORWARD: "fwd",
-            GroupedConvVariant.BACKWARD_DATA: "bwdd",
-            GroupedConvVariant.BACKWARD_WEIGHT: "bwdw",
+            GroupedConvVariant.BACKWARD_DATA: "bwd_data",
+            GroupedConvVariant.BACKWARD_WEIGHT: "bwd_weight",
         }[self.variant]
 
         # Core identity: variant, dtype, layout, dims
@@ -1102,36 +1123,35 @@ namespace ck_tile {{ namespace generated {{
         # Scan output directory for ALL kernel files (not just this run's generated_files)
         # This handles the case where fwd and bwd kernels are generated in separate make targets
         fwd_headers = []
-        bwdd_headers = []
-        bwdw_headers = []
+        bwd_data_headers = []
+        bwd_weight_headers = []
         fwd_kernels = []
-        bwdd_kernels = []
-        bwdw_kernels = []
+        bwd_data_kernels = []
+        bwd_weight_kernels = []
 
         for filepath in self.output_dir.glob("grouped_conv_*.hpp"):
             name = filepath.name
-            kernel_name = name[:-4]  # Remove .hpp
+            kernel_name = name[:-4]
             if name.startswith("grouped_conv_fwd_"):
                 fwd_headers.append(name)
                 fwd_kernels.append(kernel_name)
-            elif name.startswith("grouped_conv_bwdd_"):
-                bwdd_headers.append(name)
-                bwdd_kernels.append(kernel_name)
-            elif name.startswith("grouped_conv_bwdw_"):
-                bwdw_headers.append(name)
-                bwdw_kernels.append(kernel_name)
+            elif name.startswith(("grouped_conv_bwd_data_", "grouped_conv_bwdd_")):
+                bwd_data_headers.append(name)
+                bwd_data_kernels.append(kernel_name)
+            elif name.startswith(("grouped_conv_bwd_weight_", "grouped_conv_bwdw_")):
+                bwd_weight_headers.append(name)
+                bwd_weight_kernels.append(kernel_name)
 
-        # Generate include_all headers (for simple include-all usage)
         headers_to_generate = [
             ("include_all_grouped_conv_fwd_kernels.hpp", fwd_headers, "forward"),
             (
-                "include_all_grouped_conv_bwdd_kernels.hpp",
-                bwdd_headers,
+                "include_all_grouped_conv_bwd_data_kernels.hpp",
+                bwd_data_headers,
                 "backward data",
             ),
             (
-                "include_all_grouped_conv_bwdw_kernels.hpp",
-                bwdw_headers,
+                "include_all_grouped_conv_bwd_weight_kernels.hpp",
+                bwd_weight_headers,
                 "backward weight",
             ),
         ]
@@ -1171,13 +1191,13 @@ namespace ck_tile {{ namespace generated {{
                 log.info(f"Generated: {header_name} ({len(kernel_headers)} kernels)")
 
         # Generate registration header (following GEMM pattern)
-        self._generate_registration_header(fwd_kernels, bwdd_kernels, bwdw_kernels)
+        self._generate_registration_header(fwd_kernels, bwd_data_kernels, bwd_weight_kernels)
 
     def _generate_registration_header(
         self,
         fwd_kernels: List[str],
-        bwdd_kernels: List[str],
-        bwdw_kernels: List[str],
+        bwd_data_kernels: List[str],
+        bwd_weight_kernels: List[str],
     ):
         """Generate master registration header for all grouped conv kernels"""
         # Scan wrapper directory for ALL wrapper files
@@ -1194,13 +1214,13 @@ namespace ck_tile {{ namespace generated {{
             f"registry.register_kernel(generated::make_{k}(gfx_arch), priority);"
             for k in sorted(fwd_kernels)
         )
-        bwdd_registrations = "\n        ".join(
+        bwd_data_registrations = "\n        ".join(
             f"registry.register_kernel(generated::make_{k}(gfx_arch), priority);"
-            for k in sorted(bwdd_kernels)
+            for k in sorted(bwd_data_kernels)
         )
-        bwdw_registrations = "\n        ".join(
+        bwd_weight_registrations = "\n        ".join(
             f"registry.register_kernel(generated::make_{k}(gfx_arch), priority);"
-            for k in sorted(bwdw_kernels)
+            for k in sorted(bwd_weight_kernels)
         )
 
         content = f"""// SPDX-License-Identifier: MIT
@@ -1226,20 +1246,20 @@ inline void register_all_grouped_conv_fwd_kernels(
     {fwd_registrations if fwd_registrations else "// No forward kernels"}
 }}
 
-inline void register_all_grouped_conv_bwdd_kernels(
+inline void register_all_grouped_conv_bwd_data_kernels(
     const std::string& gfx_arch = "gfx942",
     Priority priority = Priority::Normal)
 {{
     auto& registry = GroupedConvRegistry::instance();
-    {bwdd_registrations if bwdd_registrations else "// No backward data kernels"}
+    {bwd_data_registrations if bwd_data_registrations else "// No backward data kernels"}
 }}
 
-inline void register_all_grouped_conv_bwdw_kernels(
+inline void register_all_grouped_conv_bwd_weight_kernels(
     const std::string& gfx_arch = "gfx942",
     Priority priority = Priority::Normal)
 {{
     auto& registry = GroupedConvRegistry::instance();
-    {bwdw_registrations if bwdw_registrations else "// No backward weight kernels"}
+    {bwd_weight_registrations if bwd_weight_registrations else "// No backward weight kernels"}
 }}
 
 inline void register_all_grouped_conv_kernels(
@@ -1247,14 +1267,14 @@ inline void register_all_grouped_conv_kernels(
     Priority priority = Priority::Normal)
 {{
     register_all_grouped_conv_fwd_kernels(gfx_arch, priority);
-    register_all_grouped_conv_bwdd_kernels(gfx_arch, priority);
-    register_all_grouped_conv_bwdw_kernels(gfx_arch, priority);
+    register_all_grouped_conv_bwd_data_kernels(gfx_arch, priority);
+    register_all_grouped_conv_bwd_weight_kernels(gfx_arch, priority);
 }}
 
 inline std::size_t get_grouped_conv_fwd_kernel_count() {{ return {len(fwd_kernels)}; }}
-inline std::size_t get_grouped_conv_bwdd_kernel_count() {{ return {len(bwdd_kernels)}; }}
-inline std::size_t get_grouped_conv_bwdw_kernel_count() {{ return {len(bwdw_kernels)}; }}
-inline std::size_t get_grouped_conv_kernel_count() {{ return {len(fwd_kernels) + len(bwdd_kernels) + len(bwdw_kernels)}; }}
+inline std::size_t get_grouped_conv_bwd_data_kernel_count() {{ return {len(bwd_data_kernels)}; }}
+inline std::size_t get_grouped_conv_bwd_weight_kernel_count() {{ return {len(bwd_weight_kernels)}; }}
+inline std::size_t get_grouped_conv_kernel_count() {{ return {len(fwd_kernels) + len(bwd_data_kernels) + len(bwd_weight_kernels)}; }}
 
 }}  // namespace dispatcher
 }}  // namespace ck_tile

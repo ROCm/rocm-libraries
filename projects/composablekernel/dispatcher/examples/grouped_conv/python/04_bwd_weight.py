@@ -62,6 +62,8 @@ def main():
     parser.add_argument("--arch", default=detect_gpu_arch())
     parser.add_argument("--dtype", default="fp16", choices=["fp16", "bf16"])
     parser.add_argument("--workers", type=int, default=0)
+    parser.add_argument("--split-k", type=int, default=1,
+                        help="Split-K factor for bwd_weight (k_batch)")
     args = parser.parse_args()
 
     arch = args.arch
@@ -150,7 +152,8 @@ def main():
     # =========================================================================
     print("\n--- Step 3: Backward Weight 2D ---")
     prob = GroupedConvProblem(
-        N=1, C=32, K=32, Hi=8, Wi=8, Y=3, X=3, pad_h=1, pad_w=1, direction="bwd_weight"
+        N=1, C=32, K=32, Hi=8, Wi=8, Y=3, X=3, pad_h=1, pad_w=1,
+        direction="bwd_weight", split_k=args.split_k,
     )
     prob.print_problem()
 

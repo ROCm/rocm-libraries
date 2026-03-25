@@ -76,7 +76,7 @@ inline GroupedConvKernelDecl create_grouped_conv2d_bwd_data(const std::string& d
             .tile(1, tile_n, tile_k)
             .wave(2, 2, 1)
             .warp(32, 32, 16)
-            .pipeline("compv4")
+            .pipeline("compv3")
             .vector_sizes(4, 8, 8),
         arch);
 }
@@ -92,7 +92,7 @@ inline GroupedConvKernelDecl create_grouped_conv2d_bwd_weight(const std::string&
             .tile(1, tile_n, tile_k)
             .wave(2, 2, 1)
             .warp(32, 32, 16)
-            .pipeline("compv4")
+            .pipeline("compv3")
             .memory_op("atomic_add")
             .vector_sizes(4, 8, 8),
         arch);

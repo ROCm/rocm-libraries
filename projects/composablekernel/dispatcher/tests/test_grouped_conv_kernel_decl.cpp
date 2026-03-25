@@ -24,9 +24,9 @@ void test_grouped_conv_signature_builder()
     assert(sig.groups_ == 4);
     assert(sig.op_str() == "fwd");
     sig.conv_type("bwd_data");
-    assert(sig.op_str() == "bwdd");
+    assert(sig.op_str() == "bwd_data");
     sig.conv_type("bwd_weight");
-    assert(sig.op_str() == "bwdw");
+    assert(sig.op_str() == "bwd_weight");
     std::cout << "PASSED\n";
 }
 

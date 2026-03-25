@@ -40,6 +40,8 @@ struct ConvDispatchBuffers
     void* output_ptr       = nullptr;
     int warmup             = 3;
     int repeat             = 10;
+    bool benchmarking      = true;
+    int split_k            = 1;
 };
 
 inline thread_local ConvDispatchBuffers g_conv_dispatch_buffers;
@@ -108,8 +110,8 @@ struct GroupedConvKernelKey
         switch(op)
         {
         case GroupedConvOp::Forward: op_str = "fwd"; break;
-        case GroupedConvOp::BackwardData: op_str = "bwdd"; break;
-        case GroupedConvOp::BackwardWeight: op_str = "bwdw"; break;
+        case GroupedConvOp::BackwardData: op_str = "bwd_data"; break;
+        case GroupedConvOp::BackwardWeight: op_str = "bwd_weight"; break;
         }
         return "grouped_conv_" + op_str + "_" + dtype_in + "_" + std::to_string(ndim_spatial) +
                "d_" + std::to_string(tile_m) + "x" + std::to_string(tile_n) + "x" +
@@ -463,8 +465,8 @@ class GroupedConvRegistry : public BaseRegistry<GroupedConvRegistry,
         switch(key.op)
         {
         case GroupedConvOp::Forward: op_str = "fwd"; break;
-        case GroupedConvOp::BackwardData: op_str = "bwdd"; break;
-        case GroupedConvOp::BackwardWeight: op_str = "bwdw"; break;
+        case GroupedConvOp::BackwardData: op_str = "bwd_data"; break;
+        case GroupedConvOp::BackwardWeight: op_str = "bwd_weight"; break;
         }
 
         json << "{\n";
@@ -560,13 +562,20 @@ class GroupedConvDispatcher
             throw NoKernelFound("No suitable grouped convolution kernel found for problem: " +
                                 problem.to_string());
         }
-        g_conv_dispatch_buffers.input_ptr  = input_ptr;
-        g_conv_dispatch_buffers.weight_ptr = weight_ptr;
-        g_conv_dispatch_buffers.output_ptr = output_ptr;
-        g_conv_dispatch_buffers.warmup     = warmup;
-        g_conv_dispatch_buffers.repeat     = repeat;
+        g_conv_dispatch_buffers.input_ptr    = input_ptr;
+        g_conv_dispatch_buffers.weight_ptr   = weight_ptr;
+        g_conv_dispatch_buffers.output_ptr   = output_ptr;
+        g_conv_dispatch_buffers.warmup       = warmup;
+        g_conv_dispatch_buffers.repeat       = repeat;
+        g_conv_dispatch_buffers.benchmarking = benchmarking_;
+        g_conv_dispatch_buffers.split_k      = problem.split_k;
         return kernel->run(problem, stream);
     }
+
+    /// Enable or disable GPU benchmarking (timing).
+    /// When disabled, kernels execute once with no timing overhead.
+    void set_benchmarking(bool enable) { benchmarking_ = enable; }
+    [[nodiscard]] bool benchmarking_enabled() const { return benchmarking_; }
 
     /// Alias kept for backward compatibility
     const GroupedConvKernelInstance* select(const GroupedConvProblem& problem) const
@@ -598,6 +607,7 @@ class GroupedConvDispatcher
     GroupedConvRegistry* registry_;
     SelectionStrategy strategy_;
     HeuristicFunction heuristic_;
+    bool benchmarking_ = true;
 };
 
 } // namespace dispatcher

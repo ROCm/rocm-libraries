@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -67,6 +68,9 @@ class BaseRegistry
     BaseRegistry(const BaseRegistry&)            = delete;
     BaseRegistry& operator=(const BaseRegistry&) = delete;
 
+    /// Register a kernel. If the key already exists, the new entry replaces it
+    /// unless the existing entry has strictly higher priority.
+    /// Same-priority registration overwrites (last-writer-wins at equal priority).
     bool
     register_kernel(const KeyType& key, InstancePtr instance, Priority priority = Priority::Normal)
     {
@@ -138,6 +142,38 @@ class BaseRegistry
         return merged;
     }
 
+    /// Enable automatic JSON export after every kernel registration.
+    /// Requires the derived class to implement export_json_to_file(path, stats).
+    void enable_auto_export(const std::string& path,
+                            bool include_statistics           = true,
+                            bool export_on_every_registration = true)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto_export_path_        = path;
+        auto_export_stats_       = include_statistics;
+        auto_export_on_register_ = export_on_every_registration;
+        auto_export_enabled_.store(true, std::memory_order_release);
+    }
+
+    void disable_auto_export() { auto_export_enabled_.store(false, std::memory_order_release); }
+
+    [[nodiscard]] bool is_auto_export_enabled() const
+    {
+        return auto_export_enabled_.load(std::memory_order_acquire);
+    }
+
+    /// Call after registration to trigger auto-export if enabled.
+    void perform_auto_export()
+    {
+        if(!auto_export_enabled_.load(std::memory_order_acquire))
+            return;
+        std::lock_guard<std::mutex> lock(mutex_);
+        if(auto_export_on_register_)
+        {
+            static_cast<Derived*>(this)->export_json_to_file(auto_export_path_, auto_export_stats_);
+        }
+    }
+
     protected:
     [[nodiscard]] const std::unordered_map<KeyType, Entry, KeyHash>& entries() const
     {
@@ -152,6 +188,11 @@ class BaseRegistry
     mutable std::mutex mutex_;
     std::unordered_map<KeyType, Entry, KeyHash> entries_;
     std::string name_ = "default";
+
+    std::atomic<bool> auto_export_enabled_{false};
+    bool auto_export_on_register_ = true;
+    bool auto_export_stats_       = true;
+    std::string auto_export_path_;
 };
 
 } // namespace dispatcher

@@ -277,8 +277,8 @@ def main():
     # =========================================================================
     print("\n--- Step 5: Backward Directions ---")
     for label, direction in [
-        ("bwdd ResNet-s3", "bwd_data"),
-        ("bwdw ResNet-s3", "bwd_weight"),
+        ("bwd_data ResNet-s3", "bwd_data"),
+        ("bwd_weight ResNet-s3", "bwd_weight"),
     ]:
         prob = GroupedConvProblem(
             N=1,

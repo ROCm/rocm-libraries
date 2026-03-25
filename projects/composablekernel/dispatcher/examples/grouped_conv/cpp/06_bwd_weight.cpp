@@ -52,6 +52,7 @@ int main(int argc, char* argv[])
     args.add_option("-c", "64", "Input channels");
     args.add_option("-k", "128", "Output channels");
     args.add_option("--size", "14", "Spatial size (H=W)");
+    args.add_option("--split-k", "1", "Split-K factor for bwd_weight (k_batch)");
 
     if(!args.parse(argc, argv))
         return 0;
@@ -121,6 +122,7 @@ int main(int argc, char* argv[])
 
     auto problem =
         create_grouped_conv2d_problem(N, C, K, Hi, Wi, Y, X, 1, 1, GroupedConvOp::BackwardWeight);
+    problem.split_k = args.get_int("--split-k", 1);
 
     auto* selected = dispatcher.select_kernel(problem);
     if(!selected)

@@ -9,10 +9,11 @@
 namespace ck_tile {
 namespace dispatcher {
 
-Dispatcher::Dispatcher(Registry* registry)
+Dispatcher::Dispatcher(Registry* registry, const std::string& gfx_arch)
     : registry_(registry ? registry : &Registry::instance()),
       heuristic_(nullptr),
-      strategy_(SelectionStrategy::FirstFit)
+      strategy_(SelectionStrategy::FirstFit),
+      gfx_arch_(gfx_arch)
 {
 }
 

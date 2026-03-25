@@ -1563,9 +1563,9 @@ def build_exact_conv_kernel_filename(decl: dict) -> str:
     if conv_type == "forward":
         type_prefix = "fwd"
     elif conv_type == "bwd_data":
-        type_prefix = "bwdd"
+        type_prefix = "bwd_data"
     elif conv_type == "bwd_weight":
-        type_prefix = "bwdw"
+        type_prefix = "bwd_weight"
     else:
         type_prefix = conv_type
 
@@ -1660,9 +1660,9 @@ def find_conv_kernel_header(decl: dict, gpu_target: str = "gfx942") -> Path:
     if conv_type == "forward":
         type_prefix = "fwd"
     elif conv_type == "bwd_data":
-        type_prefix = "bwdd"
+        type_prefix = "bwd_data"
     elif conv_type == "bwd_weight":
-        type_prefix = "bwdw"
+        type_prefix = "bwd_weight"
     else:
         type_prefix = conv_type
 

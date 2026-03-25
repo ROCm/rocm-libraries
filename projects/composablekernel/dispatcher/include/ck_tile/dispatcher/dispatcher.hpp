@@ -53,7 +53,11 @@ class Dispatcher
 
     /// Constructor
     /// @param registry Registry instance to use (default: global singleton)
-    explicit Dispatcher(Registry* registry = nullptr);
+    /// @param gfx_arch Target GPU architecture (e.g. "gfx950")
+    explicit Dispatcher(Registry* registry = nullptr, const std::string& gfx_arch = "");
+
+    void set_arch(const std::string& arch) { gfx_arch_ = arch; }
+    [[nodiscard]] const std::string& arch() const { return gfx_arch_; }
 
     /// Register a heuristic function for kernel selection
     /// @param heuristic Function that maps problems to ranked kernel identifiers
@@ -132,10 +136,18 @@ class Dispatcher
                                 const Problem& problem,
                                 float tolerance = 1e-3f) const;
 
+    /// Enable or disable GPU benchmarking (timing) on all kernels.
+    /// When disabled, kernels execute once with no timing overhead
+    /// (one-shot mode for production plugins).
+    void set_benchmarking(bool enable) { benchmarking_ = enable; }
+    [[nodiscard]] bool benchmarking_enabled() const { return benchmarking_; }
+
     private:
     Registry* registry_;
     HeuristicFunction heuristic_;
     SelectionStrategy strategy_;
+    std::string gfx_arch_;
+    bool benchmarking_ = true;
 
     /// Select kernel using first-fit strategy
     [[nodiscard]] KernelInstancePtr select_first_fit(const Problem& problem) const;

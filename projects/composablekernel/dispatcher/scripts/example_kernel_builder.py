@@ -985,12 +985,12 @@ def generate_conv_registration(
         if "_fwd_" in kname:
             direction = "Forward"
             run_fn_factory = "make_conv_fwd_run_fn"
-        elif "_bwdd_" in kname:
+        elif "_bwd_data_" in kname or "_bwdd_" in kname:
             direction = "BackwardData"
-            run_fn_factory = "make_conv_bwdd_run_fn"
-        elif "_bwdw_" in kname:
+            run_fn_factory = "make_conv_bwd_data_run_fn"
+        elif "_bwd_weight_" in kname or "_bwdw_" in kname:
             direction = "BackwardWeight"
-            run_fn_factory = "make_conv_bwdw_run_fn"
+            run_fn_factory = "make_conv_bwd_weight_run_fn"
         else:
             direction = "Forward"
             run_fn_factory = "make_conv_fwd_run_fn"
@@ -1373,8 +1373,8 @@ def main():
     else:
         prefix_map = {
             "forward": "grouped_conv_fwd",
-            "bwd_data": "grouped_conv_bwdd",
-            "bwd_weight": "grouped_conv_bwdw",
+            "bwd_data": "grouped_conv_bwd_data",
+            "bwd_weight": "grouped_conv_bwd_weight",
         }
         # Collect headers from ALL variants present in declarations
         variants_used = set(k.get("conv_type", "forward") for k in kernels)
@@ -1491,29 +1491,31 @@ def main():
                 )
 
         if has_bwd_data:
-            bwdd_kernel = find_kernel_by_dtype_type(kernel_headers, "fp16", "_bwdd_")
-            if bwdd_kernel:
-                bwdd_ns = f"ns_{bwdd_kernel.stem}"
+            bwd_data_kernel = find_kernel_by_dtype_type(kernel_headers, "fp16", "_bwd_data_")
+            if not bwd_data_kernel:
+                bwd_data_kernel = find_kernel_by_dtype_type(kernel_headers, "fp16", "_bwdd_")
+            if bwd_data_kernel:
+                bwd_data_ns = f"ns_{bwd_data_kernel.stem}"
                 launcher_aliases.append(
-                    f"using BwdDataKernelLauncher = {bwdd_ns}::{bwdd_kernel.stem}_Launcher;"
+                    f"using BwdDataKernelLauncher = {bwd_data_ns}::{bwd_data_kernel.stem}_Launcher;"
                 )
-                if not has_fwd:  # If no fwd, use bwd_data as first
+                if not has_fwd:
                     launcher_aliases.append(
-                        f"using FirstKernelLauncher = {bwdd_ns}::{bwdd_kernel.stem}_Launcher;"
+                        f"using FirstKernelLauncher = {bwd_data_ns}::{bwd_data_kernel.stem}_Launcher;"
                     )
 
         if has_bwd_weight:
-            bwdw_kernel = find_kernel_by_dtype_type(kernel_headers, "fp16", "_bwdw_")
-            if bwdw_kernel:
-                bwdw_ns = f"ns_{bwdw_kernel.stem}"
+            bwd_weight_kernel = find_kernel_by_dtype_type(kernel_headers, "fp16", "_bwd_weight_")
+            if not bwd_weight_kernel:
+                bwd_weight_kernel = find_kernel_by_dtype_type(kernel_headers, "fp16", "_bwdw_")
+            if bwd_weight_kernel:
+                bwd_weight_ns = f"ns_{bwd_weight_kernel.stem}"
                 launcher_aliases.append(
-                    f"using BwdWeightKernelLauncher = {bwdw_ns}::{bwdw_kernel.stem}_Launcher;"
+                    f"using BwdWeightKernelLauncher = {bwd_weight_ns}::{bwd_weight_kernel.stem}_Launcher;"
                 )
-                if (
-                    not has_fwd and not has_bwd_data
-                ):  # If no fwd or bwdd, use bwdw as first
+                if not has_fwd and not has_bwd_data:
                     launcher_aliases.append(
-                        f"using FirstKernelLauncher = {bwdw_ns}::{bwdw_kernel.stem}_Launcher;"
+                        f"using FirstKernelLauncher = {bwd_weight_ns}::{bwd_weight_kernel.stem}_Launcher;"
                     )
 
         launcher_section = "\n".join(launcher_aliases)

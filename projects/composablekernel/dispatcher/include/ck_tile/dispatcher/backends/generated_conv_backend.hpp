@@ -83,11 +83,12 @@ inline GroupedConvKernelInstance::RunFn make_conv_fwd_run_fn()
         ck_tile::GroupedConvFwdHostArgs<> args(
             param, ctx.input_ptr, ctx.weight_ptr, {}, ctx.output_ptr, 1);
         ck_tile::stream_config sc;
-        sc.stream_id_   = reinterpret_cast<hipStream_t>(stream);
-        sc.time_kernel_ = true;
-        sc.log_level_   = 0;
-        sc.cold_niters_ = ctx.warmup;
-        sc.nrepeat_     = ctx.repeat;
+        sc.stream_id_    = reinterpret_cast<hipStream_t>(stream);
+        sc.time_kernel_  = ctx.benchmarking;
+        sc.log_level_    = 0;
+        sc.cold_niters_  = ctx.benchmarking ? ctx.warmup : 0;
+        sc.nrepeat_      = ctx.benchmarking ? ctx.repeat : 1;
+        sc.is_gpu_timer_ = ctx.benchmarking;
         return LauncherType::launch(args, sc);
     };
 }
@@ -96,7 +97,7 @@ inline GroupedConvKernelInstance::RunFn make_conv_fwd_run_fn()
 // Dispatcher convention: run(dY, W, dX, problem) where dX is computed.
 // BwdDataHostArgs(param, in_ptr=dX, wei_ptr=W, {}, out_ptr=dY, k_batch)
 template <typename LauncherType, int NDim>
-inline GroupedConvKernelInstance::RunFn make_conv_bwdd_run_fn()
+inline GroupedConvKernelInstance::RunFn make_conv_bwd_data_run_fn()
 {
     return [](const GroupedConvProblem& problem, void* stream) -> float {
         auto& ctx  = g_conv_dispatch_buffers;
@@ -109,11 +110,12 @@ inline GroupedConvKernelInstance::RunFn make_conv_bwdd_run_fn()
             ctx.input_ptr, // out_ptr = dY (gradient from next layer)
             1);
         ck_tile::stream_config sc;
-        sc.stream_id_   = reinterpret_cast<hipStream_t>(stream);
-        sc.time_kernel_ = true;
-        sc.log_level_   = 0;
-        sc.cold_niters_ = ctx.warmup;
-        sc.nrepeat_     = ctx.repeat;
+        sc.stream_id_    = reinterpret_cast<hipStream_t>(stream);
+        sc.time_kernel_  = ctx.benchmarking;
+        sc.log_level_    = 0;
+        sc.cold_niters_  = ctx.benchmarking ? ctx.warmup : 0;
+        sc.nrepeat_      = ctx.benchmarking ? ctx.repeat : 1;
+        sc.is_gpu_timer_ = ctx.benchmarking;
         return LauncherType::launch(args, sc);
     };
 }
@@ -122,23 +124,25 @@ inline GroupedConvKernelInstance::RunFn make_conv_bwdd_run_fn()
 // Dispatcher convention: run(X, dY, dW, problem) where dW is computed.
 // BwdWeightHostArgs(param, in_ptr=X, wei_ptr=dW, {}, out_ptr=dY, k_batch)
 template <typename LauncherType, int NDim>
-inline GroupedConvKernelInstance::RunFn make_conv_bwdw_run_fn()
+inline GroupedConvKernelInstance::RunFn make_conv_bwd_weight_run_fn()
 {
     return [](const GroupedConvProblem& problem, void* stream) -> float {
         auto& ctx  = g_conv_dispatch_buffers;
         auto param = (NDim == 2) ? make_conv_param_2d(problem) : make_conv_param_3d(problem);
+        const int k_batch = (ctx.split_k > 1) ? ctx.split_k : 1;
         ck_tile::GroupedConvBwdWeightHostArgs args(param,
                                                    ctx.input_ptr,  // in_ptr = X
                                                    ctx.output_ptr, // wei_ptr = dW (being computed)
                                                    {},
                                                    ctx.weight_ptr, // out_ptr = dY
-                                                   1);
+                                                   k_batch);
         ck_tile::stream_config sc;
-        sc.stream_id_   = reinterpret_cast<hipStream_t>(stream);
-        sc.time_kernel_ = true;
-        sc.log_level_   = 0;
-        sc.cold_niters_ = ctx.warmup;
-        sc.nrepeat_     = ctx.repeat;
+        sc.stream_id_    = reinterpret_cast<hipStream_t>(stream);
+        sc.time_kernel_  = ctx.benchmarking;
+        sc.log_level_    = 0;
+        sc.cold_niters_  = ctx.benchmarking ? ctx.warmup : 0;
+        sc.nrepeat_      = ctx.benchmarking ? ctx.repeat : 1;
+        sc.is_gpu_timer_ = ctx.benchmarking;
         return LauncherType::launch(args, sc);
     };
 }

@@ -949,8 +949,8 @@ python3 scripts/compile_grouped_conv_examples.py examples/grouped_conv/cpp/01_ba
 ### Variants
 
 - **Forward** (`grouped_conv_fwd`) - Standard grouped convolution
-- **Backward Data** (`grouped_conv_bwdd`) - Gradient w.r.t. input
-- **Backward Weight** (`grouped_conv_bwdw`) - Gradient w.r.t. weights
+- **Backward Data** (`grouped_conv_bwd_data`) - Gradient w.r.t. input
+- **Backward Weight** (`grouped_conv_bwd_weight`) - Gradient w.r.t. weights
 
 ### Shared Infrastructure
 

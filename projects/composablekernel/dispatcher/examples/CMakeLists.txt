@@ -187,7 +187,6 @@ function(add_gpu_example NAME SOURCE KERNEL_HEADER)
     if(HEADER_NAME STREQUAL "register_all_kernels.hpp")
         # Registration header - examples include it directly
         target_compile_options(${NAME} PRIVATE
-            -DGEMM_KERNEL_AVAILABLE=1
             -mllvm -enable-noalias-to-md-conversion=0
             -Wno-undefined-func-template
             -Wno-float-equal
@@ -315,6 +314,7 @@ function(add_declarative_gpu_example NAME SOURCE)
     target_include_directories(${NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../include
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../..
         ${EXAMPLE_KERNEL_DIR}
         ${EXAMPLE_KERNEL_DIR}/dispatcher_wrappers
     )
@@ -322,7 +322,6 @@ function(add_declarative_gpu_example NAME SOURCE)
     # Force-include the generated registration header
     target_compile_options(${NAME} PRIVATE
         -include ${EXAMPLE_HEADER}
-        -DGEMM_KERNEL_AVAILABLE=1
         -mllvm -enable-noalias-to-md-conversion=0
         -Wno-undefined-func-template
         -Wno-float-equal
@@ -457,14 +456,14 @@ add_declarative_gpu_example(grouped_conv_06_bwd_weight    grouped_conv/cpp/06_bw
 add_declarative_gpu_example(grouped_conv_07_benchmark     grouped_conv/cpp/07_multi_tile_benchmark.cpp)
 
 # =============================================================================
-# Grouped Convolution Python Library - Multi-Kernel (fwd/bwdd/bwdw x 2D/3D)
+# Grouped Convolution Python Library - Multi-Kernel (fwd/bwd_data/bwd_weight x 2D/3D)
 # =============================================================================
 
 # Kernel output directory for the Python conv library
 set(CONV_FALLBACK_KERNEL_DIR "${CMAKE_CURRENT_BINARY_DIR}/conv_python_fallback")
 set(CONV_DISPATCH_HEADER "${CONV_FALLBACK_KERNEL_DIR}/conv_python_dispatch.hpp")
 
-# Generate ALL conv kernels (fwd/bwdd/bwdw x 2D/3D x multiple tile configs)
+# Generate ALL conv kernels (fwd/bwd_data/bwd_weight x 2D/3D x multiple tile configs)
 # then create the dispatch header with 2D/3D aliases
 add_custom_command(
     OUTPUT ${CONV_DISPATCH_HEADER}
@@ -476,7 +475,7 @@ add_custom_command(
     COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/generate_conv_dispatch_header.py
             --kernel-dir ${CONV_FALLBACK_KERNEL_DIR}
             --output ${CONV_DISPATCH_HEADER}
-    COMMENT "Generating conv kernels (fwd/bwdd/bwdw x 2D/3D) for Python library..."
+    COMMENT "Generating conv kernels (fwd/bwd_data/bwd_weight x 2D/3D) for Python library..."
     VERBATIM
 )
 

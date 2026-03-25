@@ -419,7 +419,7 @@ class GroupedConvKernelConfig:
 
     def kernel_name(self) -> str:
         """Generate kernel name from config"""
-        variant_map = {"forward": "fwd", "bwd_data": "bwdd", "bwd_weight": "bwdw"}
+        variant_map = {"forward": "fwd", "bwd_data": "bwd_data", "bwd_weight": "bwd_weight"}
         var_str = variant_map.get(self.variant, self.variant)
 
         name = f"conv_{var_str}_{self.dtype_input}_{self.ndim}d"
