@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/arch/mma/mfma/mfma.hpp"
-#include "ck_tile/core/arch/mma/wmma/wmma.hpp"
+#include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
 #include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_register_mapper.hpp"
 #include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_calculator.hpp"
 #include "ck_tile/core/container/tuple.hpp"
