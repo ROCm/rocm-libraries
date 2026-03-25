@@ -1,0 +1,67 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+# Our repo is setup for clang tidy version 20, newer versions of clang-tidy trigger
+# these new warnings below, disable them until we upgrade to the latest clang-tidy
+# portability-avoid-pragma-once
+# modernize-use-scoped-lock
+# readability-use-concise-preprocessor-directives
+# readability-math-missing-parentheses
+Checks: >
+  -*,
+  bugprone-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  google-global-names-in-headers,
+  -fuchsia-trailing-return,
+  -modernize-use-trailing-return-type,
+  -modernize-concat-nested-namespaces,
+  -modernize-use-nodiscard,
+  -modernize-use-using,
+  -performance-enum-size,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-qualified-auto,
+  -readability-uppercase-literal-suffix,
+  -readability-avoid-unconditional-preprocessor-if,
+  -readability-use-anyofallof,
+  -readability-function-cognitive-complexity,
+  -portability-avoid-pragma-once,
+  -modernize-use-scoped-lock,
+  -readability-use-concise-preprocessor-directives,
+  -readability-math-missing-parentheses,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-unchecked-optional-access,
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  -misc-no-recursion,
+  -misc-header-include-cycle,
+  -misc-use-anonymous-namespace
+
+WarningsAsErrors: "*"
+HeaderFileExtensions: ['h','hpp']
+
+# This regex is a inclusion filter for the files to be checked. Its a Posix regex and
+# does not seem to support negative lookahead.
+HeaderFilterRegex: '.'
+ExcludeHeaderFilterRegex: '^(.*data_objects.*)$'
+
+CheckOptions:
+  - { key: readability-identifier-naming.NamespaceCase,           value: lower_case }
+  - { key: readability-identifier-naming.ClassCase,               value: CamelCase }
+  - { key: readability-identifier-naming.StructCase,              value: CamelCase }
+  - { key: readability-identifier-naming.FunctionCase,            value: camelBack }
+  - { key: readability-identifier-naming.VariableCase,            value: camelBack }
+  - { key: readability-identifier-naming.ParameterCase,           value: camelBack }
+  - { key: readability-identifier-naming.MemberCase,              value: camelBack }
+  - { key: readability-identifier-naming.PrivateMemberCase,       value: camelBack }
+  - { key: readability-identifier-naming.ProtectedMemberPrefix,   value: _ }
+  - { key: readability-identifier-naming.PrivateMemberPrefix,     value: _ }
+  - { key: readability-identifier-naming.EnumCase,                value: CamelCase  }
+  - { key: readability-identifier-naming.EnumConstantCase,        value: UPPER_CASE }
+  - { key: readability-identifier-naming.GlobalConstantCase,      value: UPPER_CASE }
+  - { key: readability-identifier-naming.ConstexprVariableCase,   value: UPPER_CASE }
+  - { key: readability-identifier-naming.StaticVariablePrefix,    value: s_ }
