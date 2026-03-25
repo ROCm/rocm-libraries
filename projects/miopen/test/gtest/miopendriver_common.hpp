@@ -34,6 +34,8 @@
 
 #ifdef __linux__
 #include <dlfcn.h>
+#else
+#include <windows.h>
 #endif
 
 using ::testing::HasSubstr;
@@ -66,10 +68,9 @@ static const std::string Half  = "bnormfp16";
 // Note: Assuming that the MIOpenDriver executable will be beside the testing output location.
 static inline miopen::fs::path MIOpenDriverExePath()
 {
-    static const std::string MIOpenDriverExeName = "MIOpenDriver";
-
 #ifdef __linux__
-    miopen::fs::path path = miopen::fs::canonical("/proc/self/exe");
+    static const std::string MIOpenDriverExeName = "MIOpenDriver";
+    miopen::fs::path path                        = miopen::fs::canonical("/proc/self/exe");
 
     if(path.empty())
         return path;
@@ -77,7 +78,14 @@ static inline miopen::fs::path MIOpenDriverExePath()
     path = path.parent_path();
     return path /= MIOpenDriverExeName;
 #else
-    return {MIOpenDriverExeName};
+    static const std::string MIOpenDriverExeName = "MIOpenDriver.exe";
+    wchar_t modulePath[MAX_PATH];
+    if(GetModuleFileNameW(nullptr, modulePath, MAX_PATH) == 0)
+        return {};
+
+    miopen::fs::path path(modulePath);
+    path = path.parent_path();
+    return path / MIOpenDriverExeName;
 #endif
 }
 
