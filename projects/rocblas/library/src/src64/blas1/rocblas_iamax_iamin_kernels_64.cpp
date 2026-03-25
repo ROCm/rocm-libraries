@@ -133,7 +133,7 @@ rocblas_status rocblas_internal_iamax_iamin_launcher_64(rocblas_handle handle,
     if(handle->pointer_mode == rocblas_pointer_mode_host)
     {
         // sync here to match legacy BLAS
-        hipStreamSynchronize(handle->get_stream());
+        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->get_stream()));
     }
 
     return rocblas_status_success;

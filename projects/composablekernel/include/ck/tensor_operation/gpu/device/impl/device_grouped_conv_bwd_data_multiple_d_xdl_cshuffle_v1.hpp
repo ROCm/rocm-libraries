@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -26,6 +26,11 @@
 #include "ck/host_utility/io.hpp"
 
 #include "ck/tensor_operation/gpu/grid/block_to_ctile_map.hpp"
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+#include "ck_tile/builder/reflect/description.hpp"
+#include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_bwd_data_multiple_d_xdl_cshuffle.hpp"
+#endif
 
 namespace ck {
 namespace tensor_operation {
@@ -80,7 +85,7 @@ template <typename GridwiseGemm,
           bool CTranspose>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
 #endif
     kernel_grouped_conv_bwd_data_multiple_d_xdl_cshuffle(
         const ABDataType* __restrict__ p_a_grid,
@@ -124,7 +129,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         const long_index_t e_n_offset =
             amd_wave_read_first_lane(compute_ptr_offset_of_n.GetEPtrOffset(n_idx));
 
-        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
+        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
 
         DsPointer p_ds_grid_grp;
 
@@ -439,7 +444,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
     }
 
 // GridwiseGemm
-#define GridwiseGemmMultiDTemplateParams                                                        \
+#define CK_GRIDWISE_GEMM_BWD_DATA_MULTIPLE_D_TEMPLATE_PARAMETERS                                \
     ABDataType, ABDataType, AComputeType, AccDataType, CShuffleDataType, DsDataType, EDataType, \
         AElementwiseOp, BElementwiseOp, CDEElementwiseOp, NumGemmKPrefetchStage, BlockSize,     \
         MPerBlock, NPerBlock, KPerBlock, AK1, BK1, MPerXDL, NPerXDL, MXdlPerWave, NXdlPerWave_, \
@@ -454,7 +459,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
         CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,                       \
         CDEBlockTransferScalarPerVector_NPerBlock, LoopSched, PipelineVersion::v1, BComputeType
 
-#define GridwiseGemmCTransposeTemplateParameters                                                \
+#define CK_GRIDWISE_GEMM_BWD_DATA_CTRANSPOSE_TEMPLATE_PARAMETERS                                \
     ABDataType, ABDataType, AComputeType, AccDataType, CShuffleDataType, DsDataType, EDataType, \
         BElementwiseOp, AElementwiseOp, CDEElementwiseOp, NumGemmKPrefetchStage, BlockSize,     \
         NPerBlock, MPerBlock, KPerBlock, BK1, AK1, NPerXDL, MPerXDL, NXdlPerWave_, MXdlPerWave, \
@@ -470,10 +475,13 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
         CDEBlockTransferScalarPerVector_NPerBlock, LoopSched, PipelineVersion::v1, BComputeType
 
     template <index_t NXdlPerWave_>
-    using GridwiseGemmBase = GridwiseGemmMultipleD_xdl_cshuffle<GridwiseGemmMultiDTemplateParams>;
+    using GridwiseGemmBase = GridwiseGemmMultipleD_xdl_cshuffle<
+        CK_GRIDWISE_GEMM_BWD_DATA_MULTIPLE_D_TEMPLATE_PARAMETERS>;
     template <index_t NXdlPerWave_>
-    using GridwiseGemmCTransposeBase =
-        GridwiseGemmMultipleD_xdl_cshuffle<GridwiseGemmCTransposeTemplateParameters>;
+    using GridwiseGemmCTransposeBase = GridwiseGemmMultipleD_xdl_cshuffle<
+        CK_GRIDWISE_GEMM_BWD_DATA_CTRANSPOSE_TEMPLATE_PARAMETERS>;
+#undef CK_GRIDWISE_GEMM_BWD_DATA_MULTIPLE_D_TEMPLATE_PARAMETERS
+#undef CK_GRIDWISE_GEMM_BWD_DATA_CTRANSPOSE_TEMPLATE_PARAMETERS
     using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
     using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
 
@@ -1695,6 +1703,10 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                         valid = false;
                     }
                 }
+                else
+                {
+                    valid = false;
+                }
             }
             else
             {
@@ -1712,6 +1724,10 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                     {
                         valid = false;
                     }
+                }
+                else
+                {
+                    valid = false;
                 }
             }
             if(!valid)
@@ -1931,6 +1947,24 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                 "The argument pointer is not an object of "
                 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1::Argument structure!");
     }
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string GetInstanceString() const override
+    {
+        static_assert(ck_tile::reflect::HasInstanceTraits<DeviceOp>,
+                      "Specialization of instance_traits not found. Please check that a "
+                      "specialization exists in file "
+                      "ck_tile/builder/reflect/"
+                      "instance_traits_device_grouped_conv_bwd_data_multiple_d_xdl_cshuffle.hpp "
+                      "for the given template parameters.");
+        return ck_tile::reflect::instance_string<DeviceOp>();
+    }
+
+    std::unique_ptr<ck_tile::reflect::Description> describe() const override
+    {
+        return std::make_unique<ck_tile::reflect::InstanceStringDescription>(GetInstanceString());
+    }
+#endif
 };
 
 } // namespace device

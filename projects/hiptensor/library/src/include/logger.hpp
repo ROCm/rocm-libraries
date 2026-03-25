@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,13 +26,15 @@
 
 #pragma once
 
-#include "singleton.hpp"
-
+#include <cstdio>
 #include <mutex>
+
+#include "platform.hpp"
+#include "singleton.hpp"
 
 namespace hiptensor
 {
-    class Logger : public LazySingleton<Logger>
+    class HIPTENSOR_EXPORT Logger : public LazySingleton<Logger>
     {
     private:
         using Callback_t = void (*)(int32_t logLevel, const char* funcName, const char* msg);
@@ -99,4 +101,3 @@ namespace hiptensor
     };
 
 } // namespace hiptensor
-

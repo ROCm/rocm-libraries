@@ -90,7 +90,7 @@ struct proto_config
         UseFp16 ? type_strategy::fp16
                 : (UseFp32 ? type_strategy::fp32
                            : (UseFpmix ? type_strategy::fpmix : type_strategy::bfpmix));
-    static constexpr bool use_amdgnc = UseAMDGCN;
+    static constexpr bool use_amdgcn = UseAMDGCN;
     static constexpr auto neuron_op  = static_cast<neuron_op_type>(NrnOpId);
 };
 } // namespace detail
@@ -174,11 +174,14 @@ template <typename MiopenConfig,
           int Variant,
           int NCHW,
           int MaxN,
+          int NElements,
+          int N,
           int C,
           int HW,
           int NHW,
           int CHW,
           int Vectorize,
+          int VecSize,
           int StashMethod,
           int LoopUnrollMaxN,
           int LoopUnrollMaxHW,
@@ -192,12 +195,14 @@ struct proto_config
     static_assert(NCHW >= 0, "MIO_BN_NCHW should be always >= 0");
     static_assert(MaxN >= 0, "MIO_BN_MAXN should be always >= 0");
     static_assert(C >= 0, "MIO_BN_C should be always >= 0");
+    static_assert(N >= 0, "MIO_BN_N should be always >= 0");
     static_assert(HW >= 0, "MIO_BN_HW should be always >= 0");
     static_assert(NHW >= 0, "MIO_BN_NHW should be always >= 0");
     static_assert(CHW >= 0, "MIO_BN_CHW should be always >= 0");
 
     static constexpr auto input_type_strategy = MiopenConfig::input_type_strategy;
-    using fp_type                             = typename std::conditional<
+
+    using fp_type = typename std::conditional<
         input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix,
         _Float16,
         typename std::conditional<input_type_strategy == type_strategy::fp32, float, ushort>::
@@ -215,6 +220,8 @@ struct proto_config
     static constexpr auto launch_dim           = LaunchDim{};
     static constexpr unsigned int nchw         = static_cast<unsigned int>(NCHW);
     static constexpr unsigned int max_n        = static_cast<unsigned int>(MaxN);
+    static constexpr unsigned int n_elements   = static_cast<unsigned int>(NElements);
+    static constexpr unsigned int n            = static_cast<unsigned int>(N);
     static constexpr unsigned int c            = static_cast<unsigned int>(C);
     static constexpr unsigned int hw           = static_cast<unsigned int>(HW);
     static constexpr unsigned int nhw          = static_cast<unsigned int>(NHW);
@@ -230,15 +237,15 @@ struct proto_config
     static constexpr int variant      = Variant;
     static constexpr auto target_arch = Architecture::value;
 #ifdef __AMDGCN__
-    static constexpr bool use_amdgnc =
-        MiopenConfig::use_amdgnc &&
+    static constexpr bool use_amdgcn =
+        MiopenConfig::use_amdgcn &&
         !(target_arch == architecture::gfx103x || target_arch == architecture::gfx110x ||
           target_arch == architecture::gfx120x || target_arch == architecture::gfx115x) &&
         !(use_nodpp && (variant != 0));
 #else
-    static constexpr bool use_amdgnc = false;
+    static constexpr bool use_amdgcn = false;
 #endif
-    static constexpr unsigned int vec_size = vectorize ? 4 : 1;
+    static constexpr unsigned int vec_size = vectorize ? VecSize : 1;
     static constexpr unsigned int vec_size_x =
         vectorize && MiopenConfig::layout_nhwc ? vec_size : 1;
     static constexpr unsigned int vec_size_y =
@@ -285,11 +292,14 @@ using config = miopen::batchnorm::detail::proto_config<
     MIO_BN_VARIANT,
     MIO_BN_NCHW,
     MIO_BN_MAXN,
+    MIO_BN_N_ELEMENTS,
+    MIO_BN_N,
     MIO_BN_C,
     MIO_BN_HW,
     MIO_BN_NHW,
     MIO_BN_CHW,
     MIO_BN_VECTORIZE,
+    MIO_BN_VEC_SIZE,
     MIO_BN_STASH_METHOD,
     MIO_BN_LOOP_UNROLL_MAXN,
     MIO_BN_LOOP_UNROLL_MAXHW,

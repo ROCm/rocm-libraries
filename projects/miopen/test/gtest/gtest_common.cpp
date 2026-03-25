@@ -28,7 +28,7 @@
 
 std::ostream& operator<<(std::ostream& os, const DevDescription& dd)
 {
-    return os << dd.name << "(" << dd.cu_cnt << ")";
+    return os << dd.name << "(" << dd.cu_cnt << ", " << dd.wavefront_size << ")";
 }
 
 MockTargetProperties::MockTargetProperties(const TargetProperties& target_properties,
@@ -40,9 +40,9 @@ MockTargetProperties::MockTargetProperties(const TargetProperties& target_proper
 
 const std::string& MockTargetProperties::Name() const { return name; }
 
-boost::optional<bool> MockTargetProperties::Xnack() const
+bool MockTargetProperties::isXnackEnabled() const
 {
-    return xnack_disabled ? boost::none : TargetProperties::Xnack();
+    return xnack_disabled ? false : TargetProperties::isXnackEnabled();
 }
 
 MockHandle::MockHandle(const DevDescription& dev_description, bool disable_xnack)
@@ -57,6 +57,7 @@ const miopen::TargetProperties& MockHandle::GetTargetProperties() const
 }
 
 std::size_t MockHandle::GetMaxComputeUnits() const { return dev_descr.cu_cnt; }
+std::size_t MockHandle::GetWavefrontWidth() const { return dev_descr.wavefront_size; }
 
 std::size_t MockHandle::GetMaxMemoryAllocSize() const
 {
@@ -104,35 +105,37 @@ const std::multimap<Gpu, DevDescription>& GetAllKnownDevices()
     // https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html
     static const std::multimap<Gpu, DevDescription> known_devs = {
         // clang-format off
-        {Gpu::gfx900,  {"gfx900",  64}},
-        {Gpu::gfx906,  {"gfx906",  60}},
-        {Gpu::gfx906,  {"gfx906",  64}},
-        {Gpu::gfx908,  {"gfx908",  120}},
-        {Gpu::gfx90A,  {"gfx90a",  104}},
-        {Gpu::gfx90A,  {"gfx90a",  110}},
-        {Gpu::gfx94X,  {"gfx942",  228}},
-        {Gpu::gfx94X,  {"gfx942",  304}},
-        {Gpu::gfx950,  {"gfx950",  256}},
-        {Gpu::gfx103X, {"gfx1030", 30}},
-        {Gpu::gfx103X, {"gfx1030", 36}},
-        {Gpu::gfx103X, {"gfx1030", 40}},
-        {Gpu::gfx103X, {"gfx1031", 18}},
-        {Gpu::gfx103X, {"gfx1031", 20}},
-        {Gpu::gfx103X, {"gfx1032", 14}},
-        {Gpu::gfx103X, {"gfx1032", 16}},
-        {Gpu::gfx110X, {"gfx1100", 35}},
-        {Gpu::gfx110X, {"gfx1100", 40}},
-        {Gpu::gfx110X, {"gfx1100", 42}},
-        {Gpu::gfx110X, {"gfx1100", 48}},
-        {Gpu::gfx110X, {"gfx1101", 24}},
-        {Gpu::gfx110X, {"gfx1101", 27}},
-        {Gpu::gfx110X, {"gfx1101", 30}},
-        {Gpu::gfx110X, {"gfx1102", 16}},
-        {Gpu::gfx115X, {"gfx1150", 24}},
-        {Gpu::gfx115X, {"gfx1151", 40}},
-        {Gpu::gfx115X, {"gfx1152", 8}},
-        {Gpu::gfx120X, {"gfx1201", 32}},
-        {Gpu::gfx120X, {"gfx1201", 28}}
+        {Gpu::gfx900,  {"gfx900",  64, 64}},
+        {Gpu::gfx906,  {"gfx906",  60, 64}},
+        {Gpu::gfx906,  {"gfx906",  64, 64}},
+        {Gpu::gfx908,  {"gfx908",  120, 64}},
+        {Gpu::gfx90A,  {"gfx90a",  104, 64}},
+        {Gpu::gfx90A,  {"gfx90a",  110, 64}},
+        {Gpu::gfx94X,  {"gfx942",  228, 64}},
+        {Gpu::gfx94X,  {"gfx942",  304, 64}},
+        {Gpu::gfx950,  {"gfx950",  256, 64}},
+        {Gpu::gfx103X, {"gfx1030", 30, 32}},
+        {Gpu::gfx103X, {"gfx1030", 36, 32}},
+        {Gpu::gfx103X, {"gfx1030", 40, 32}},
+        {Gpu::gfx103X, {"gfx1031", 18, 32}},
+        {Gpu::gfx103X, {"gfx1031", 20, 32}},
+        {Gpu::gfx103X, {"gfx1032", 14, 32}},
+        {Gpu::gfx103X, {"gfx1032", 16, 32}},
+        {Gpu::gfx110X, {"gfx1100", 35, 32}},
+        {Gpu::gfx110X, {"gfx1100", 40, 32}},
+        {Gpu::gfx110X, {"gfx1100", 42, 32}},
+        {Gpu::gfx110X, {"gfx1100", 48, 32}},
+        {Gpu::gfx110X, {"gfx1101", 24, 32}},
+        {Gpu::gfx110X, {"gfx1101", 27, 32}},
+        {Gpu::gfx110X, {"gfx1101", 30, 32}},
+        {Gpu::gfx110X, {"gfx1102", 16, 32}},
+        {Gpu::gfx110X, {"gfx1103", 6, 32}},
+        {Gpu::gfx115X, {"gfx1150", 24, 32}},
+        {Gpu::gfx115X, {"gfx1151", 40, 32}},
+        {Gpu::gfx115X, {"gfx1152", 8, 32}},
+        {Gpu::gfx115X, {"gfx1153", 2, 32}},
+        {Gpu::gfx120X, {"gfx1201", 32, 32}},
+        {Gpu::gfx120X, {"gfx1201", 28, 32}}
         // clang-format on
     };
     return known_devs;

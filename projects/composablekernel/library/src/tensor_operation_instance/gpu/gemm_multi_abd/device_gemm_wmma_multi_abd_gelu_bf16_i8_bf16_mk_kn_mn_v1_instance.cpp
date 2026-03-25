@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <cstdlib>
 
@@ -11,6 +11,9 @@
 #include "device_gemm_wmma_multi_abd_bf16_i8_bf16_mk_kn_mn_common.hpp"
 
 #include "ck/library/tensor_operation_instance/add_device_operation_instance.hpp"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck {
 namespace tensor_operation {
@@ -39,7 +42,7 @@ void add_device_gemm_wmma_multi_abd_bf16_i8_bf16_mk_kn_mn_gelu_v1_instances(
                                        Multiply,
                                        FastGelu,
                                        GemmMNKPadding,
-                                       Interwave>{});
+                                       Intrawave>{});
 
     add_device_operation_instances(instances,
                                    device_gemm_wmma_multi_abd_bf16_i8_bf16_mk_kn_mn_mem_instances<
@@ -57,3 +60,4 @@ void add_device_gemm_wmma_multi_abd_bf16_i8_bf16_mk_kn_mn_gelu_v1_instances(
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+#pragma clang diagnostic pop

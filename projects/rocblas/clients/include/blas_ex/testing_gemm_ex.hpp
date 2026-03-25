@@ -102,7 +102,7 @@ void testing_gemm_ex_bad_arg(const Arguments& arg)
         HOST_MEMCHECK(host_matrix<To>, hC, (M, N, ldc));
         rocblas_seedrand();
         rocblas_init_matrix(hC, arg, rocblas_client_beta_sets_nan, rocblas_client_general_matrix);
-        dC.transfer_from(hC);
+        CHECK_HIP_ERROR(dC.transfer_from(hC));
 
         // clang-format off
 
@@ -805,7 +805,7 @@ void testing_gemm_ex_run(const Arguments& arg)
 template <typename Ti, typename To, typename Tc>
 void testing_gemm_ex(const Arguments& arg)
 {
-    bool                     compare_solutions = arg.solution_index == -2;
+    bool                     compare_solutions = arg.solution_index == c_rocblas_test_all_solutions;
     const Arguments*         arguments         = &arg;
     Arguments                run_arg(arg);
     std::vector<rocblas_int> solutions_that_solve(1, 0);
@@ -813,6 +813,7 @@ void testing_gemm_ex(const Arguments& arg)
     rocblas_gemm_algo algo = rocblas_gemm_algo(arg.algo);
 
 #ifdef BUILD_WITH_TENSILE // tensile or hipblaslt only for now
+/* TODO requires full data for query otherwise no solution guarantees
     if(compare_solutions && algo == rocblas_gemm_algo_solution_index)
     {
         arguments = &run_arg; // override
@@ -851,7 +852,12 @@ void testing_gemm_ex(const Arguments& arg)
             // append default
             solutions_that_solve.push_back(0);
         }
+        else
+        {
+            GTEST_SKIP() << "Backend returning 0 valid solutions";
+        }
     }
+*/
 #endif
 
     for(auto sol : solutions_that_solve)

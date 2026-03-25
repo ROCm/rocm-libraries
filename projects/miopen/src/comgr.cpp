@@ -54,9 +54,6 @@
 /// More info at https://github.com/ROCm/MIOpen/issues/1257.
 #define WORKAROUND_ISSUE_1257 (HIP_PACKAGE_VERSION_FLAT >= 4003021331ULL)
 
-/// https://github.com/ROCm/ROCm-CompilerSupport/issues/67 about unused -nogpulib.
-#define WORKAROUND_ROCMCOMPILERSUPPORT_ISSUE_67 1
-
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMGR_LOG_CALLS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMGR_LOG_SOURCE_NAMES)
 
@@ -528,17 +525,26 @@ static std::string GetLog(const Dataset& dataset, const bool comgr_error_handlin
         /// \todo Clarify API and update implementation.
         const auto count = dataset.GetDataCount(AMD_COMGR_DATA_KIND_LOG);
         if(count < 1)
-            return {comgr_error_handling ? "comgr warning: error log not found" : ""};
+        {
+            text = comgr_error_handling ? "comgr warning: error log not found" : "";
+            return text;
+        }
 
         const auto data = dataset.GetData(AMD_COMGR_DATA_KIND_LOG, 0);
         text            = data.GetString();
         if(text.empty())
-            return {comgr_error_handling ? "comgr info: error log empty" : ""};
+        {
+            text = comgr_error_handling ? "comgr info: error log empty" : "";
+            return text;
+        }
     }
     catch(ComgrError&)
     {
         if(comgr_error_handling)
-            return {"comgr error: failed to get error log"};
+        {
+            text = "comgr error: failed to get error log";
+            return text;
+        }
         // deepcode ignore EmptyThrowOutsideCatch: false positive
         throw;
         /// \anchor catch_and_rethrow_in_getlog
@@ -641,13 +647,11 @@ void BuildAsm(const std::string& name,
         action.SetLogging(true);
         auto optAsm = miopen::SplitSpaceSeparated(options);
 #if WORKAROUND_ISSUE_3001
-        if(target.Xnack() && !*target.Xnack())
+        if(!target.isXnackEnabled())
             optAsm.emplace_back("-mno-xnack");
 #endif
         compiler::lc::gcnasm::RemoveOptionsUnwanted(optAsm);
-#if WORKAROUND_ROCMCOMPILERSUPPORT_ISSUE_67
-        optAsm.push_back("--rocm-path=.");
-#endif
+
         action.SetOptionList(optAsm);
 
         const Dataset relocatable;
@@ -934,7 +938,7 @@ void BuildHip(const std::string& name,
 #endif
         opts.push_back("-D__HIP_PLATFORM_AMD__=1"); // Workaround?
         opts.push_back("-DHIP_PACKAGE_VERSION_FLAT=" + std::to_string(HIP_PACKAGE_VERSION_FLAT));
-        opts.push_back("-DMIOPEN_DONT_USE_HIP_RUNTIME_HEADERS");
+        opts.push_back("-DMIOPEN_HIP_RUNTIME_COMPILE");
 #if HIP_PACKAGE_VERSION_FLAT < 6001024000ULL && !defined(_WIN32)
         opts.push_back("-DWORKAROUND_DONT_USE_CUSTOM_LIMITS=1");
 #endif
@@ -963,13 +967,12 @@ void BuildHip(const std::string& name,
 
         auto rocm_path = env::value(ROCM_PATH);
 
-        if(rocm_path.empty())
+        if(!rocm_path.empty())
         {
-            rocm_path = "/opt/rocm";
+            auto rocm_include_arg = "-I" + rocm_path + "/include";
+            opts.push_back(rocm_include_arg);
+            MIOPEN_LOG_T("HIPRTC compile ROCm include path argument: " << rocm_include_arg);
         }
-        opts.push_back("-I" + rocm_path + "/include");
-
-        MIOPEN_LOG_T("HIPRTC compile ROCm path: " << rocm_path);
 
         HiprtcProgram prog(name, text);
         prog.Compile(opts);

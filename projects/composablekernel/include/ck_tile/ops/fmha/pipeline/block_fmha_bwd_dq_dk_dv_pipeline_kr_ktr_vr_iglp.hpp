@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -789,7 +789,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             {
                 tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dq_acc);
             }
-            if constexpr(kIsDeterministic)
+            if constexpr(decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
+                         memory_operation_enum::set)
             {
                 store_tile(dq_dram_window, dq_acc);
             }
@@ -1034,7 +1035,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dk_acc);
         }
 
-        if constexpr(kIsDeterministic)
+        if constexpr(decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
+                     memory_operation_enum::set)
         {
             store_tile(dq_dram_window, dq_acc);
         }

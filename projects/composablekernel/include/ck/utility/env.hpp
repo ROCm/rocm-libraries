@@ -1,7 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 #pragma once
-
 #ifndef CK_CODE_GEN_RTC
 
 #include <cstdlib>
@@ -9,6 +8,9 @@
 #include <string>
 #include <string_view>
 #include <map>
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck {
 namespace internal {
@@ -189,5 +191,5 @@ void UpdateEnvVar(EnvVar, const std::string_view& val)
 // environment variable to enable logging:
 // export CK_LOGGING=ON or CK_LOGGING=1 or CK_LOGGING=ENABLED
 CK_DECLARE_ENV_VAR_BOOL(CK_LOGGING)
-
+#pragma clang diagnostic pop
 #endif

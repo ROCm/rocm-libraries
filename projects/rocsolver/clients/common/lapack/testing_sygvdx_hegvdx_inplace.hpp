@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,6 +33,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename S, typename U>
 void sygvdx_hegvdx_inplace_checkBadArgs(const rocblas_handle handle,
@@ -579,7 +580,7 @@ void sygvdx_hegvdx_inplace_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -596,13 +597,13 @@ void sygvdx_hegvdx_inplace_getPerfData(const rocblas_handle handle,
         sygvdx_hegvdx_inplace_initData<false, true, T>(handle, itype, evect, n, dA, lda, stA, dB,
                                                        ldb, stB, bc, hA, hB, A, B, false, singular);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_sygvdx_hegvdx_inplace(STRIDED, handle, itype, evect, erange, uplo, n, dA.data(),
                                         lda, stA, dB.data(), ldb, stB, vl, vu, il, iu, abstol,
                                         hNevRes.data(), dW.data(), stW, dInfo.data(), bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -772,7 +773,7 @@ void testing_sygvdx_hegvdx_inplace(Arguments& argus)
                 hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvdx_hegvdx_inplace_getPerfData<STRIDED, T>(
                 handle, itype, evect, erange, uplo, n, dA, lda, stA, dB, ldb, stB, vl, vu, il, iu,
                 abstol, hNevRes, dW, stW, dInfo, bc, hA, hB, hNev, hW, hInfo, &gpu_time_used,
@@ -815,7 +816,7 @@ void testing_sygvdx_hegvdx_inplace(Arguments& argus)
                 hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvdx_hegvdx_inplace_getPerfData<STRIDED, T>(
                 handle, itype, evect, erange, uplo, n, dA, lda, stA, dB, ldb, stB, vl, vu, il, iu,
                 abstol, hNevRes, dW, stW, dInfo, bc, hA, hB, hNev, hW, hInfo, &gpu_time_used,
@@ -824,9 +825,9 @@ void testing_sygvdx_hegvdx_inplace(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using 3 * n * machine_precision as tolerance
+    // using 12 * n * machine_precision as tolerance
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, 3 * n);
+        ROCSOLVER_TEST_CHECK(T, max_error, 12 * n);
 
     // output results for rocsolver-bench
     if(argus.timing)

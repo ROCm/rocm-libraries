@@ -198,7 +198,7 @@ void testing_geqrf_batched(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dA.memcheck());
     CHECK_DEVICE_ALLOCATION(dIpiv.memcheck());
 
-    double gpu_time_used, hipblas_error;
+    double gpu_time_used{0}, hipblas_error{0};
 
     setup_geqrf_batched_testing(arg, hA, hIpiv, dA, dIpiv, M, N, lda, batch_count);
 

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,6 @@
 
 #include <hiptensor/hiptensor.h>
 #include <hiptensor/internal/hiptensor_utility.hpp>
-#include <hiptensor_options.hpp>
 
 #include "common.hpp"
 
@@ -148,13 +147,15 @@ int main()
      * Optional (but recommended): ensure that the scalar type is correct.
      *****************************/
 
-    // hiptensorDataType_t scalarType;
-    // CHECK_HIPTENSOR_ERROR(hiptensorOperationDescriptorGetAttribute(handle, desc,
-    // HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
-    // (void*)&scalarType,
-    // sizeof(scalarType)));
-    //
-    // assert(scalarType == HIPTENSOR_R_32F);
+    hiptensorDataType_t scalarType;
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorOperationDescriptorGetAttribute(handle,
+                                                 desc,
+                                                 HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
+                                                 (void*)&scalarType,
+                                                 sizeof(scalarType)));
+
+    assert(scalarType == HIPTENSOR_R_32F);
 
     /**************************
     * Set the algorithm to use
@@ -177,10 +178,6 @@ int main()
     /**********************
      * Run
      **********************/
-    using hiptensor::HiptensorOptions;
-    auto& options = HiptensorOptions::instance();
-    options->setColdRuns(5);
-    options->setHotRuns(50);
 
     CHECK_HIPTENSOR_ERROR(hiptensorPermute(handle, plan, &alpha, A_d, C_d, nullptr /* stream */))
 

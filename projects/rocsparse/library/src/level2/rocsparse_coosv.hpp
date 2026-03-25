@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,101 +28,36 @@
 
 namespace rocsparse
 {
-    template <typename I, typename T>
-    rocsparse_status coosv_buffer_size_template(rocsparse_handle          handle,
-                                                rocsparse_operation       trans,
-                                                int64_t                   m,
-                                                int64_t                   nnz,
-                                                const rocsparse_mat_descr descr,
-                                                const void*               coo_val,
-                                                const void*               coo_row_ind,
-                                                const void*               coo_col_ind,
-                                                rocsparse_mat_info        info,
-                                                size_t*                   buffer_size);
+    rocsparse_status coosv_analysis_buffer_size(rocsparse_handle            handle,
+                                                rocsparse_operation         trans,
+                                                rocsparse_const_spmat_descr A,
+                                                size_t*                     buffer_size);
 
-    template <typename I, typename T>
-    rocsparse_status coosv_analysis_template(rocsparse_handle          handle,
-                                             rocsparse_operation       trans,
-                                             int64_t                   m,
-                                             int64_t                   nnz,
-                                             const rocsparse_mat_descr descr,
-                                             const void*               coo_val,
-                                             const void*               coo_row_ind,
-                                             const void*               coo_col_ind,
-                                             rocsparse_mat_info        info,
-                                             rocsparse_analysis_policy analysis,
-                                             rocsparse_solve_policy    solve,
-                                             rocsparse_csrsv_info*     p_csrsv_info,
-                                             void*                     temp_buffer);
+    rocsparse_status coosv_analysis(rocsparse_handle            handle,
+                                    rocsparse_operation         trans,
+                                    rocsparse_const_spmat_descr A,
+                                    rocsparse_analysis_policy   analysis,
+                                    rocsparse_solve_policy      solve,
+                                    rocsparse_csrsv_info*       p_csrsv_info,
+                                    void*                       temp_buffer);
 
-    template <typename I, typename T>
-    rocsparse_status coosv_solve_template(rocsparse_handle          handle,
-                                          rocsparse_operation       trans,
-                                          int64_t                   m,
-                                          int64_t                   nnz,
-                                          const void*               alpha,
-                                          const rocsparse_mat_descr descr,
-                                          const void*               coo_val,
-                                          const void*               coo_row_ind,
-                                          const void*               coo_col_ind,
-                                          rocsparse_mat_info        info,
-                                          const void*               x,
-                                          void*                     y,
-                                          rocsparse_solve_policy    policy,
-                                          rocsparse_csrsv_info      csrsv_info,
-                                          void*                     temp_buffer);
+    rocsparse_status coosv_solve_buffer_size(rocsparse_handle            handle,
+                                             rocsparse_operation         trans,
+                                             rocsparse_const_spmat_descr A,
+                                             rocsparse_const_dnvec_descr x,
+                                             rocsparse_const_dnvec_descr y,
+                                             size_t*                     buffer_size);
 
-    rocsparse_status coosv_buffer_size(rocsparse_handle          handle,
-                                       rocsparse_operation       trans,
-                                       int64_t                   m,
-                                       int64_t                   nnz,
-                                       const rocsparse_mat_descr descr,
-                                       rocsparse_datatype        coo_val_datatype,
-                                       const void*               coo_val,
-                                       rocsparse_indextype       coo_row_ind_indextype,
-                                       const void*               coo_row_ind,
-                                       rocsparse_indextype       coo_col_ind_indextype,
-                                       const void*               coo_col_ind,
-                                       rocsparse_mat_info        info,
-                                       size_t*                   buffer_size);
-
-    rocsparse_status coosv_analysis(rocsparse_handle          handle,
-                                    rocsparse_operation       trans,
-                                    int64_t                   m,
-                                    int64_t                   nnz,
-                                    const rocsparse_mat_descr descr,
-                                    rocsparse_datatype        coo_val_datatype,
-                                    const void*               coo_val,
-                                    rocsparse_indextype       coo_row_ind_indextype,
-                                    const void*               coo_row_ind,
-                                    rocsparse_indextype       coo_col_ind_indextype,
-                                    const void*               coo_col_ind,
-                                    rocsparse_mat_info        info,
-                                    rocsparse_analysis_policy analysis,
-                                    rocsparse_solve_policy    solve,
-                                    rocsparse_csrsv_info*     p_csrsv_info,
-                                    void*                     temp_buffer);
-
-    rocsparse_status coosv_solve(rocsparse_handle          handle,
-                                 rocsparse_operation       trans,
-                                 int64_t                   m,
-                                 int64_t                   nnz,
-                                 rocsparse_datatype        alpha_datatype,
-                                 const void*               alpha,
-                                 const rocsparse_mat_descr descr,
-                                 rocsparse_datatype        coo_val_datatype,
-                                 const void*               coo_val,
-                                 rocsparse_indextype       coo_row_ind_indextype,
-                                 const void*               coo_row_ind,
-                                 rocsparse_indextype       coo_col_ind_indextype,
-                                 const void*               coo_col_ind,
-                                 rocsparse_mat_info        info,
-                                 rocsparse_datatype        x_datatype,
-                                 const void*               x,
-                                 rocsparse_datatype        y_datatype,
-                                 void*                     y,
-                                 rocsparse_solve_policy    policy,
-                                 rocsparse_csrsv_info      csrsv_info,
-                                 void*                     temp_buffer);
+    rocsparse_status coosv_solve(rocsparse_handle            handle,
+                                 rocsparse_operation         trans,
+                                 rocsparse_datatype          alpha_datatype,
+                                 const void*                 alpha,
+                                 int64_t                     alpha_stride,
+                                 rocsparse_const_spmat_descr A,
+                                 rocsparse_const_dnvec_descr x,
+                                 rocsparse_dnvec_descr       y,
+                                 rocsparse_solve_policy      policy,
+                                 rocsparse_csrsv_info        csrsv_info,
+                                 void*                       temp_buffer);
 
 }

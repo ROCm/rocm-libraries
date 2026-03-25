@@ -2,7 +2,7 @@
  #
  # MIT License
  #
- # Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ # Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a copy
  # of this software and associated documentation files (the "Software"), to deal
@@ -32,13 +32,17 @@
      )
  add_hiptensor_unit_test(util_test
      ${HIPTENSOR_COMMON_TEST_SOURCES}
-	 ${CMAKE_CURRENT_SOURCE_DIR}/util_test.cpp
-	 )
+     ${CMAKE_CURRENT_SOURCE_DIR}/util_test.cpp
+     )
  add_hiptensor_unit_test(hiptensor_options_test
      ${HIPTENSOR_COMMON_TEST_SOURCES}
-	 ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_options_test.cpp
-	 )
+     ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_options_test.cpp
+     )
+ add_hiptensor_unit_test(plan_lifetime_test
+     ${HIPTENSOR_COMMON_TEST_SOURCES}
+     ${CMAKE_CURRENT_SOURCE_DIR}/plan_lifetime_test.cpp
+     )
  # add_hiptensor_unit_test(interface_test
      # ${HIPTENSOR_COMMON_TEST_SOURCES}
-	 # ${CMAKE_CURRENT_SOURCE_DIR}/interface_test.cpp
-	 # )
+     # ${CMAKE_CURRENT_SOURCE_DIR}/interface_test.cpp
+     # )

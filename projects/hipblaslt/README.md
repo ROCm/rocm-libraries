@@ -144,8 +144,7 @@ Refer to the available build options using `./install.sh --help`:
 
 * `HIPBLASLT_ENABLE_BLIS`: Enable BLIS support (default `ON`)
 * `HIPBLASLT_ENABLE_HIP`: Use the HIP runtime (default `ON`)
-* `HIPBLASLT_ENABLE_LLVM`: Use msgpack for parsing configuration files (default `OFF`)
-* `HIPBLASLT_ENABLE_MSGPACK` Use msgpack for parsing configuration files (default `ON`)
+* `HIPBLASLT_ENABLE_YAML`: Use YAML for serializing and parsing configuration files; if `OFF` msgpack will be used (default `OFF`)
 * `HIPBLASLT_ENABLE_OPENMP`: "Use OpenMP to improve performance (default `ON`)
 * `HIPBLASLT_ENABLE_ROCROLLER:` Use RocRoller library (default `OFF`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build
@@ -170,12 +169,12 @@ Refer to the available build options using `./install.sh --help`:
 
 * `TENSILELITE_BUILD_PARALLEL_LEVEL` Number of CPU cores to use for building device libraries (will use nproc if unset)
 * `TENSILELITE_KEEP_BUILD_TMP` OFF CACHE STRING Keep temporary build directory for device libraries (default: see below)
-* `TENSILELITE_LIBLOGIC_PATH` Path to library logic files (will use 'library' if unset) (default: `Off`)
 * `TENSILELITE_LIBRARY_FORMAT` Format of master solution library files (msgpack or yaml) (default: see below)
 * `TENSILELITE_ASM_DEBUG` Keep debug information for built code objects (default: see below)
 * `TENSILELITE_LOGIC_FILTER` Cutomsized logic filter, default is *, i.e. all logics (default: see below)
 * `TENSILELITE_NO_COMPRESS` Do not compress device code object files (default: see below)
 * `TENSILELITE_EXPERIMENTAL` Process experimental logic files (default: see below)
+* `HIPBLASLT_LIBLOGIC_PATH` Path to library logic files (will use 'library' if unset) (default: `Off`)
 * `HIPBLASLT_TENSILE_LIBPATH` Path to output the device gemm libraries (default: `build/Tensile`)
 
 > [!NOTE]

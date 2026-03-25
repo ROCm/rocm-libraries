@@ -31,6 +31,9 @@
 #include <limits>
 #include <sstream>
 
+SchemeTreeVec EmptySchemeTreeVec;
+SchemeVec     EmptySchemeVec;
+
 struct rocfft_mp_request_t
 {
 #ifdef ROCFFT_MPI_ENABLE
@@ -537,15 +540,15 @@ MPI_Comm MultiPlanItem::ActiveMPIComm(rocfft_plan plan) const
     if(subcomm)
         return *subcomm;
     else
-        return plan->mpi_comm;
+        return plan->desc.mpi_comm;
 }
 #endif
 
-void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
-                                    void*                 in_buffer[],
-                                    void*                 out_buffer[],
-                                    rocfft_execution_info info,
-                                    size_t                multiPlanIdx,
+void CommPointToPoint::ExecuteAsync(const rocfft_plan                     plan,
+                                    void*                                 in_buffer[],
+                                    void*                                 out_buffer[],
+                                    const rocfft_execution_info_internal& info,
+                                    size_t                                multiPlanIdx,
                                     const std::map<int, device_callback_t>&)
 {
     rocfft_scoped_device dev(srcLocation.device);
@@ -600,7 +603,7 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
                                           rocfft_type_to_mpi_type(precision, arrayType),
                                           destLocation.comm_rank,
                                           multiPlanIdx,
-                                          plan->mpi_comm,
+                                          plan->desc.mpi_comm,
                                           &request);
             if(mpiret != MPI_SUCCESS)
             {
@@ -617,7 +620,7 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
                                           rocfft_type_to_mpi_type(precision, arrayType),
                                           srcLocation.comm_rank,
                                           multiPlanIdx,
-                                          plan->mpi_comm,
+                                          plan->desc.mpi_comm,
                                           &request);
             if(mpiret != MPI_SUCCESS)
             {
@@ -655,11 +658,11 @@ void CommPointToPoint::Print(rocfft_ostream& os, const int indent) const
     os << std::endl;
 }
 
-void CommScatter::ExecuteAsync(const rocfft_plan     plan,
-                               void*                 in_buffer[],
-                               void*                 out_buffer[],
-                               rocfft_execution_info info,
-                               size_t                multiPlanIdx,
+void CommScatter::ExecuteAsync(const rocfft_plan                     plan,
+                               void*                                 in_buffer[],
+                               void*                                 out_buffer[],
+                               const rocfft_execution_info_internal& info,
+                               size_t                                multiPlanIdx,
                                const std::map<int, device_callback_t>&)
 {
     rocfft_scoped_device dev(srcLocation.device);
@@ -703,7 +706,7 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
         }
         else
         {
-            // Inter-proccess communication
+            // Inter-process communication
 #if !defined ROCFFT_MPI_ENABLE
             throw std::runtime_error("MPI communication not enabled");
 #else
@@ -715,7 +718,7 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
                                               rocfft_type_to_mpi_type(precision, arrayType),
                                               op.destLocation.comm_rank,
                                               GetOperationCommTag(multiPlanIdx, opIdx),
-                                              plan->mpi_comm,
+                                              plan->desc.mpi_comm,
                                               &request);
                 if(mpiret != MPI_SUCCESS)
                 {
@@ -732,7 +735,7 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
                                               rocfft_type_to_mpi_type(precision, arrayType),
                                               srcLocation.comm_rank,
                                               GetOperationCommTag(multiPlanIdx, opIdx),
-                                              plan->mpi_comm,
+                                              plan->desc.mpi_comm,
                                               &request);
                 if(mpiret != MPI_SUCCESS)
                 {
@@ -784,11 +787,11 @@ void CommScatter::Print(rocfft_ostream& os, const int indent) const
     }
 }
 
-void CommGather::ExecuteAsync(const rocfft_plan     plan,
-                              void*                 in_buffer[],
-                              void*                 out_buffer[],
-                              rocfft_execution_info info,
-                              size_t                multiPlanIdx,
+void CommGather::ExecuteAsync(const rocfft_plan                     plan,
+                              void*                                 in_buffer[],
+                              void*                                 out_buffer[],
+                              const rocfft_execution_info_internal& info,
+                              size_t                                multiPlanIdx,
                               const std::map<int, device_callback_t>&)
 {
     if(LOG_PLAN_ENABLED())
@@ -840,7 +843,7 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
         }
         else
         {
-            // Inter-proccess communication
+            // Inter-process communication
 #if !defined ROCFFT_MPI_ENABLE
             throw std::runtime_error("MPI communication not enabled");
 #else
@@ -853,7 +856,7 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
                                        rocfft_type_to_mpi_type(precision, arrayType),
                                        destLocation.comm_rank,
                                        GetOperationCommTag(multiPlanIdx, opIdx),
-                                       plan->mpi_comm,
+                                       plan->desc.mpi_comm,
                                        &request);
                 if(rcmpi != MPI_SUCCESS)
                     throw std::runtime_error("MPI_Isend failed: " + std::to_string(rcmpi));
@@ -867,7 +870,7 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
                                        rocfft_type_to_mpi_type(precision, arrayType),
                                        op.srcLocation.comm_rank,
                                        GetOperationCommTag(multiPlanIdx, opIdx),
-                                       plan->mpi_comm,
+                                       plan->desc.mpi_comm,
                                        &request);
                 if(rcmpi != MPI_SUCCESS)
                     throw std::runtime_error("MPI_Irecv failed: " + std::to_string(rcmpi));
@@ -919,11 +922,11 @@ void CommGather::Print(rocfft_ostream& os, const int indent) const
     }
 }
 
-void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
-                                void*                 in_buffer[],
-                                void*                 out_buffer[],
-                                rocfft_execution_info info,
-                                size_t                multiPlanIdx,
+void CommAllToAll::ExecuteAsync(const rocfft_plan                     plan,
+                                void*                                 in_buffer[],
+                                void*                                 out_buffer[],
+                                const rocfft_execution_info_internal& info,
+                                size_t                                multiPlanIdx,
                                 const std::map<int, device_callback_t>&)
 {
     if(LOG_PLAN_ENABLED())
@@ -936,7 +939,7 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
 
     MPI_Request  request;
     MPI_Datatype elem_type       = rocfft_type_to_mpi_type(precision, arrayType);
-    const int    local_comm_rank = plan->get_local_comm_rank();
+    const int    local_comm_rank = plan->desc.get_local_comm_rank();
 
     if(uniform_counts)
     {

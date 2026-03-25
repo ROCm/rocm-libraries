@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,13 +28,17 @@
 
 // clang-format off
 // Include order needs to be preserved
+#include <memory>
 #include <optional>
+#include <vector>
+
 #include <hip/library_types.h>
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_complex.h>
 #include <hip/hip_fp16.h>
-#include <iostream>
+// clang-format on
 
+#include <hiptensor/hiptensor.h>
 #include <hiptensor/hiptensor_types.h>
 
 #include "hip_device.hpp"
@@ -51,7 +55,7 @@ typedef enum hiptensorOperationType_t
 
 struct hiptensorOperationDescriptor
 {
-    uint32_t             mTag;
+    uint32_t            mTag;
     hiptensorDataType_t mScalarType;
     float               mFlops;
     float               mMovedBytes;
@@ -76,8 +80,8 @@ struct hiptensorOperationDescriptor
     hiptensorTensorDescriptor_t mDescD;
     std::vector<int32_t>        mModeD;
 
-    hiptensorOperator_t         mOpAC;
-    hiptensorOperator_t         mOpABC;
+    hiptensorOperator_t mOpAC;
+    hiptensorOperator_t mOpABC;
 
     hiptensorComputeDescriptor_t mDescCompute;
 };
@@ -85,11 +89,21 @@ struct hiptensorOperationDescriptor
 //! @brief hipTensor's library context
 struct hiptensorHandle
 {
-    hiptensor::HipDevice   getDevice() { return mDevice;}
-    hiptensor::PlanCache*  getPlanCache() { return planCache; }
-    void setPlanCache(hiptensor::PlanCache* pt_PlanCache) { planCache = pt_PlanCache; }
+    hiptensor::HipDevice getDevice()
+    {
+        return mDevice;
+    }
+    hiptensor::PlanCache* getPlanCache()
+    {
+        return planCache;
+    }
+    void setPlanCache(hiptensor::PlanCache* pt_PlanCache)
+    {
+        planCache = pt_PlanCache;
+    }
+
 private:
-    hiptensor::HipDevice mDevice;
+    hiptensor::HipDevice  mDevice;
     hiptensor::PlanCache* planCache = nullptr;
 };
 
@@ -98,6 +112,15 @@ struct hiptensorPlan
     uint64_t                       mRequiredWorkspace;
     hiptensorOperationDescriptor_t mOpDesc;
     hiptensorPlanPreference_t      mPref;
+
+    // Owned deep copies so the plan is self-contained and does not hold
+    // dangling pointers when the caller destroys the original objects.
+    std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescA;
+    std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescB;
+    std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescC;
+    std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescD;
+    std::unique_ptr<hiptensorOperationDescriptor> mOwnedOpDesc;
+    std::unique_ptr<hiptensorPlanPreference>      mOwnedPref;
 };
 
 struct hiptensorPlanPreference
@@ -135,8 +158,6 @@ bool inline operator==(const hiptensorTensorDescriptor& lhs, const hiptensorTens
     return lhs.mType == rhs.mType && lhs.mLengths == rhs.mLengths && lhs.mStrides == rhs.mStrides
            && lhs.mAlignmentRequirement == rhs.mAlignmentRequirement;
 }
-
-// clang-format on
 
 namespace hiptensor
 {
@@ -186,11 +207,11 @@ namespace hiptensor
     static constexpr auto HipTensorDataType_v = HipTensorDataType<T>::value;
 
     // Get data size in bytes from id
-    uint32_t hiptensorDataTypeSize(hiptensorDataType_t id);
+    HIPTENSOR_EXPORT uint32_t hiptensorDataTypeSize(hiptensorDataType_t id);
 
     // Convert hiptensorDataType_t to hiptensorComputeDescriptor_t
-    hiptensorComputeDescriptor_t convertToComputeType(hiptensorDataType_t hipType);
-    std::optional<hiptensorDataType_t>
+    HIPTENSOR_EXPORT hiptensorComputeDescriptor_t convertToComputeType(hiptensorDataType_t hipType);
+    HIPTENSOR_EXPORT                              std::optional<hiptensorDataType_t>
         convertToHipTensorDataType(hiptensorComputeDescriptor_t computeType);
 
     // Read a single value from void pointer, casted to T
@@ -200,14 +221,15 @@ namespace hiptensor
     template <typename T>
     T readVal(void const* value, hiptensorComputeDescriptor_t id);
 
-    void writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value);
+    HIPTENSOR_EXPORT void
+        writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value);
 
-    std::string computeTypeToString(hiptensorComputeDescriptor_t computeType);
-    std::string hipTypeToString(hiptensorDataType_t hipType);
-    std::string opTypeToString(hiptensorOperator_t opType);
-    std::string algoTypeToString(hiptensorAlgo_t algoType);
-    std::string logLevelToString(hiptensorLogLevel_t);
-    std::string workSizePrefToString(hiptensorWorksizePreference_t workSize);
+    HIPTENSOR_EXPORT std::string computeTypeToString(hiptensorComputeDescriptor_t computeType);
+    HIPTENSOR_EXPORT std::string hipTypeToString(hiptensorDataType_t hipType);
+    HIPTENSOR_EXPORT std::string opTypeToString(hiptensorOperator_t opType);
+    HIPTENSOR_EXPORT std::string algoTypeToString(hiptensorAlgo_t algoType);
+    HIPTENSOR_EXPORT std::string logLevelToString(hiptensorLogLevel_t);
+    HIPTENSOR_EXPORT std::string workSizePrefToString(hiptensorWorksizePreference_t workSize);
 } // namespace hiptensor
 
 bool operator==(hiptensorDataType_t hipType, hiptensorComputeDescriptor_t computeType);
@@ -222,4 +244,3 @@ namespace std
 }
 
 #include "data_types_impl.hpp"
-

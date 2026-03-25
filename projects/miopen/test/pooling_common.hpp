@@ -28,7 +28,9 @@
 #define GUARD_MIOPEN_TEST_POOLING_COMMON_HPP
 
 #include "test.hpp"
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -38,6 +40,7 @@
 #include <miopen/pooling.hpp>
 #include <miopen/stringutils.hpp>
 #include <miopen/tensor.hpp>
+#include <miopen/tensor_layout.hpp>
 #include <utility>
 
 // #include "network_data.hpp"
@@ -129,6 +132,21 @@ struct verify_forward_pooling
     {
         auto out = get_output_tensor(filter, input);
 
+        const auto in_strides         = input.desc.GetStrides();
+        const std::size_t in_n_stride = in_strides[0];
+        const std::size_t in_c_stride = in_strides[1];
+        std::array<std::size_t, SptDim> in_spatial_strides{};
+        std::copy_n(in_strides.begin() + 2, SptDim, in_spatial_strides.begin());
+
+        const auto out_strides         = out.desc.GetStrides();
+        const std::size_t out_n_stride = out_strides[0];
+        const std::size_t out_c_stride = out_strides[1];
+        std::array<std::size_t, SptDim> out_spatial_strides{};
+        std::copy_n(out_strides.begin() + 2, SptDim, out_spatial_strides.begin());
+
+        const T* input_ptr = input.data.data();
+        T* out_ptr         = out.data.data();
+
         std::array<int, SptDim> in_dim{};
         std::copy_n(input.desc.GetLengths().begin() + 2, SptDim, in_dim.begin());
         std::array<int, SptDim> strides{};
@@ -158,14 +176,14 @@ struct verify_forward_pooling
                 int end_idx  = start_idx[i] + kers[i];
                 end_idx      = std::min(end_idx, in_dim[i]);
                 start_idx[i] = std::max(start_idx[i], 0);
-                win_sz[i]    = end_idx - start_idx[i];
-                win_sz[i]    = std::max(win_sz[i], 1);
+                win_sz[i]    = std::max(end_idx - start_idx[i], 0);
             }
 
             int pool_size =
                 filter.GetMode() == miopenPoolingAverageInclusive
                     ? std::accumulate(kers.begin(), kers.end(), 1, std::multiplies<int>())
                     : std::accumulate(win_sz.begin(), win_sz.end(), 1, std::multiplies<int>());
+            pool_size = std::max(pool_size, 1); // Avoid division by zero when window is in padding
 
             double acc = op.start();
             miopen::unpacker(miopen::ford)(win_sz)([&](auto... in_spatial_id_pack) {
@@ -183,10 +201,22 @@ struct verify_forward_pooling
 
                 if(in_cmp_idx)
                 {
-                    acc = op(acc, input(idx));
+                    // Compute input linear index
+                    std::size_t in_linear_idx = o * in_n_stride + w * in_c_stride;
+                    for(int i = 0; i < SptDim; ++i)
+                    {
+                        in_linear_idx += idx[i + 2] * in_spatial_strides[i];
+                    }
+                    acc = op(acc, input_ptr[in_linear_idx]);
                 }
             });
-            out(o, w, out_spatial_id_pack...) = T(op.final(acc, pool_size));
+            // Compute output linear index
+            std::size_t out_linear_idx = o * out_n_stride + w * out_c_stride;
+            for(int i = 0; i < SptDim; ++i)
+            {
+                out_linear_idx += out_spatial_id[i] * out_spatial_strides[i];
+            }
+            out_ptr[out_linear_idx] = T(op.final(acc, pool_size));
         });
         return out;
     }
@@ -251,6 +281,23 @@ struct verify_backward_pooling
         auto dinput = input;
         std::vector<double> din_vec(input.desc.GetElementSpace(), 0.0);
         CHECK(dout.desc == out.desc);
+
+        const auto in_strides         = input.desc.GetStrides();
+        const std::size_t in_n_stride = in_strides[0];
+        const std::size_t in_c_stride = in_strides[1];
+        std::array<std::size_t, SptDim> in_spatial_strides{};
+        std::copy_n(in_strides.begin() + 2, SptDim, in_spatial_strides.begin());
+
+        const auto out_strides         = dout.desc.GetStrides();
+        const std::size_t out_n_stride = out_strides[0];
+        const std::size_t out_c_stride = out_strides[1];
+        std::array<std::size_t, SptDim> out_spatial_strides{};
+        std::copy_n(out_strides.begin() + 2, SptDim, out_spatial_strides.begin());
+
+        const T* input_ptr = input.data.data();
+        const T* dout_ptr  = dout.data.data();
+        const T* out_ptr   = out.data.data();
+
         std::array<int, SptDim + 2> in_dim{};
         std::copy_n(input.desc.GetLengths().begin(), SptDim + 2, in_dim.begin());
         std::array<int, SptDim + 2> in_str{};
@@ -278,6 +325,21 @@ struct verify_backward_pooling
                     bool in_cmp_idx = true;
                     if(use_global_index)
                     {
+                        auto total_spatial = std::accumulate(
+                            in_dim.begin() + 2, in_dim.end(), 1ULL, std::multiplies<std::size_t>());
+                        in_cmp_idx = (mx_idx < total_spatial);
+
+                        auto out_spatial_id = make_array(out_spatial_id_pack...);
+                        for(int i = 0; i < SptDim && in_cmp_idx; i++)
+                        {
+                            int win_start = out_spatial_id[i] * strides[i] - pads[i];
+                            int win_end   = win_start + kers[i] - 1;
+                            if(win_end < 0 || win_start >= in_dim[i + 2])
+                            {
+                                in_cmp_idx = false;
+                            }
+                        }
+
                         for(int i = 0; i < SptDim; i++)
                         {
                             std::size_t mx_idx_dim = mx_idx;
@@ -313,15 +375,31 @@ struct verify_backward_pooling
                         idx[1] = w;
                         if(verify_index)
                         {
-                            CHECK(
-                                miopen::float_equal(input(idx), out(o, w, out_spatial_id_pack...)));
+                            // Compute input and output linear indices for verification
+                            std::size_t in_verify_idx  = o * in_n_stride + w * in_c_stride;
+                            auto out_spatial_id_verify = make_array(out_spatial_id_pack...);
+                            std::size_t out_verify_idx = o * out_n_stride + w * out_c_stride;
+                            for(int i = 0; i < SptDim; ++i)
+                            {
+                                in_verify_idx += idx[i + 2] * in_spatial_strides[i];
+                                out_verify_idx += out_spatial_id_verify[i] * out_spatial_strides[i];
+                            }
+                            CHECK(miopen::float_equal(input_ptr[in_verify_idx],
+                                                      out_ptr[out_verify_idx]));
                         }
                         std::size_t din_idx = 0;
                         for(int i = 0; i < SptDim + 2; i++)
                         {
                             din_idx += idx[i] * in_str[i];
                         }
-                        din_vec.at(din_idx) += dout(o, w, out_spatial_id_pack...);
+                        // Compute dout linear index
+                        auto out_spatial_id         = make_array(out_spatial_id_pack...);
+                        std::size_t dout_linear_idx = o * out_n_stride + w * out_c_stride;
+                        for(int i = 0; i < SptDim; ++i)
+                        {
+                            dout_linear_idx += out_spatial_id[i] * out_spatial_strides[i];
+                        }
+                        din_vec.at(din_idx) += dout_ptr[dout_linear_idx];
                     }
                 });
             }
@@ -338,7 +416,7 @@ struct verify_backward_pooling
                         int end_idx  = start_idx[i] + kers[i];
                         end_idx      = std::min(end_idx, in_dim[i + 2]);
                         win_sz[i]    = end_idx - std::max(start_idx[i], 0);
-                        win_sz[i]    = std::max(win_sz[i], 1);
+                        win_sz[i]    = std::max(win_sz[i], 0);
                     }
 
                     int pool_size =
@@ -346,6 +424,7 @@ struct verify_backward_pooling
                             ? std::accumulate(kers.begin(), kers.end(), 1, std::multiplies<int>())
                             : std::accumulate(
                                   win_sz.begin(), win_sz.end(), 1, std::multiplies<int>());
+                    pool_size = std::max(pool_size, 1); // Avoid division by zero
 
                     ford_ker([&](auto... ker_id_pack) {
                         auto ker_id = make_array(ker_id_pack...);
@@ -368,8 +447,15 @@ struct verify_backward_pooling
                                 din_idx += in_idx[i] * in_str[i];
                             }
 
+                            // Compute dout linear index
+                            std::size_t dout_linear_idx = o * out_n_stride + w * out_c_stride;
+                            for(int i = 0; i < SptDim; ++i)
+                            {
+                                dout_linear_idx += out_spatial_id[i] * out_spatial_strides[i];
+                            }
+
                             din_vec.at(din_idx) +=
-                                static_cast<double>(dout(o, w, out_spatial_id_pack...)) / pool_size;
+                                static_cast<double>(dout_ptr[dout_linear_idx]) / pool_size;
                         }
                     });
                 });
@@ -462,6 +548,7 @@ struct pooling_driver : test_driver
 #endif
     int verify_indices{};
     int wsidx{};
+    std::string in_layout;
     std::unordered_map<std::string, miopenIndexType_t> index_type_lookup = {
         {miopen::ToUpper("miopenIndexUint8"), miopenIndexUint8},
         {miopen::ToUpper("miopenIndexUint16"), miopenIndexUint16},
@@ -503,14 +590,31 @@ struct pooling_driver : test_driver
         add(pmode, "pmode", generate_data({"default", "same", "valid"}));
 #endif
         add(verify_indices, "verify_indices", generate_data({1}));
+        add(in_layout, "in_layout", generate_data({"NCHW"}));
     }
 
     template <class Index, int SptDim>
     void run_impl()
     {
         std::vector<Index> indices{};
-        auto input = tensor<T>{in_shape}.generate(
-            tensor_elem_gen_integer{miopen_type<T>{} == miopenHalf ? 5 : 17});
+        auto input = tensor<T>{in_shape};
+
+        // Set up tensor descriptor with correct layout BEFORE generating data
+        if(in_layout != "NCHW" && in_layout != "NCDHW")
+        {
+            const std::vector<std::size_t> dim_lens = input.desc.GetLengths();
+            std::vector<std::size_t> dim_strides;
+            miopen::tensor_layout_to_strides(
+                dim_lens,
+                miopen::tensor_layout_get_default(input.desc.GetNumDims()),
+                in_layout,
+                dim_strides);
+            input.desc = miopen::TensorDescriptor(miopen_type<T>{}, dim_lens, dim_strides);
+        }
+
+        input.generate(tensor_elem_gen_integer{
+            (miopen_type<T>{} == miopenHalf || miopen_type<T>{} == miopenBFloat16) ? 5 : 17});
+
         auto out  = verify(verify_forward_pooling<SptDim>{}, input, filter, indices);
         auto dout = out.first;
         dout.generate(tensor_elem_gen_integer{2503});
@@ -533,16 +637,15 @@ struct pooling_driver : test_driver
             (dataset_id == 0) && full_set; // Otherwise the default dataset takes too much time.
         const bool wide_dataset = (dataset_id == 2) && full_set;
 
-        filter = miopen::PoolingDescriptor
-        {
-            mode_lookup.at(miopen::ToUpper(mode)),
+        filter = miopen::PoolingDescriptor{mode_lookup.at(miopen::ToUpper(mode)),
 #if TEST_PADDING_MODE == 1
-                pmode_lookup.at(miopen::ToUpper(pmode)),
+                                           pmode_lookup.at(miopen::ToUpper(pmode)),
 #else
-                miopenPaddingDefault,
+                                           miopenPaddingDefault,
 #endif
-                lens, strides, pads
-        };
+                                           lens,
+                                           strides,
+                                           pads};
 
         filter.SetIndexType(idx_typ);
         filter.SetWorkspaceIndexMode(miopenPoolingWorkspaceIndexMode_t(wsidx));

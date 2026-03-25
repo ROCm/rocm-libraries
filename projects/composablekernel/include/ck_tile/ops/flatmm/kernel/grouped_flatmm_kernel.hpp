@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -227,8 +227,10 @@ struct GroupedFlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Epi
 
     CK_TILE_HOST static const std::string GetName()
     {
-        return concat(
-            '_', "grouped_flatmm", gemm_prec_str<ADataType, BDataType>, FlatmmPipeline::GetName());
+        return concat('_',
+                      "grouped_flatmm",
+                      gemm_prec_str<ADataType, BDataType>(),
+                      FlatmmPipeline::GetName());
     }
 
     template <class ScaleM       = FlatmmScalePointer<-1>,

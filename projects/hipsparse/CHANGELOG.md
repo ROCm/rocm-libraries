@@ -3,11 +3,42 @@
 Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
-## (Unreleased) hipSPARSE 4.2.0
+## hipSPARSE 4.5.0 for ROCm 7.12.0
+
+### Added
+* For sparse matrix vector product (`hipsparseSpMV`), when using `HIPSPARSE_SPMV_ALG_DEFAULT`, the routine now automatically falls back to a supported algorithm depending on the sparse matrix format and requested operation. For example, CSR format with transposed operations or CSC format with non-transposed operations will fall back to an appropriate algorithm.
+
+### Resolved issues
+* Fixed an issue where out-of-bounds memory reads can occur in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
+
+## hipSPARSE 4.4.0 for ROCm 7.11.0
+
+### Added
+* Added brain half float mixed precision to `hipsparseSpMV` where A, X, and Y use bfloat16 and the compute type uses float.
+* Added half float mixed precision to `hipsparseSpMV` where A, X, and Y use float16 and the compute type uses float.
+* Added brain half float mixed precision to `hipsparseSpMM` where A, B, and C use bfloat16 and the compute type use float.
+* Added half float mixed precision to `hipsparseSpMM` where A, B, and C use float16 and the compute type use float.
+* Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script.
+* Added sliced ELL format support to the `hipsparseSpMV` routine.
+
+### Resolved issues
+* In `hipsparseSpSM_solve()`, the external buffer is passed as a parameter, which does not match the NVIDIA CUDA cuSPARSE API. The `hipsparseSpSM_solve_ex()` routine has been added to properly match the
+NVIDIA CUDA cuSPARSE `cusparseSpSM_solve()` API. The original `hipsparseSpSM_solve()` routine has been 
+deprecated and will be removed in a future release.
+
+### Upcoming changes
+* The routine `hipsparseSpSM_solve()` has been deprecated and will be removed in a future release. 
+Users should use `hipsparseSpSM_solve_ex()` instead.
+
+## hipSPARSE 4.2.0 for ROCm 7.2.0
 
 ### Added
 
 * Added `--clients-only` option to the `install.sh` and `rmake.py` scripts to allow building only the clients while using an already installed version of hipSPARSE.
+
+### Optimized
+
+* Improved the user documentation.
 
 ### Resolved issues
 

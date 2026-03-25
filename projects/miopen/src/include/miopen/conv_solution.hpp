@@ -31,11 +31,10 @@
 #include <miopen/kernel_info.hpp>
 #include <miopen/invoker.hpp>
 
-#include <boost/optional.hpp>
-
+#include <optional>
+#include <ostream>
 #include <string>
 #include <vector>
-#include <ostream>
 
 namespace miopen {
 
@@ -53,7 +52,7 @@ struct ConvSolution
     std::vector<KernelInfo> construction_params; // impl may consist of multiple kernels.
     miopenStatus_t status;
     std::string solver_id;
-    boost::optional<InvokerFactory> invoker_factory;
+    std::optional<InvokerFactory> invoker_factory;
 
     size_t workspace_sz;
     int grp_tile1;       // total number ALUs per group
@@ -69,7 +68,6 @@ struct ConvSolution
     ConvSolution(miopenStatus_t status_ = miopenStatusSuccess)
         : status(status_),
           solver_id("<unknown>"),
-          invoker_factory(boost::none),
           workspace_sz(0),
           grp_tile1(-1),
           grp_tile0(-1),

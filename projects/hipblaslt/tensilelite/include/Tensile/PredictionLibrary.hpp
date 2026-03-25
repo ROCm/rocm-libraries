@@ -26,10 +26,11 @@
 
 #pragma once
 
+#include <atomic>
 #include <set>
 #include <vector>
 
-#include <origami/utils.hpp>
+#include <Tensile/UtilsOrigami.hpp>
 
 namespace TensileLite
 {
@@ -45,9 +46,10 @@ namespace TensileLite
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     struct ProblemPredictionLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
-        std::unordered_map<int, std::shared_ptr<MySolution>>        solutionmap;
-        std::vector<origami::tile_tuple>             tile_list;
-        std::unordered_map<origami::tile_tuple, int> tile_map;
+        std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
+        std::vector<origami::config_t>                           origami_config_list;
+
+        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         static std::string Type()
         {
@@ -59,17 +61,19 @@ namespace TensileLite
         }
         virtual std::string description() const override
         {
-            if(solutionmap.empty())
-                return concatenate(type(), ", solutionmap: empty");
-            return concatenate(type(), solutionmap.size());
+            if(solution_list.empty())
+                return concatenate(type(), ", solution_list: empty");
+            return concatenate(type(), solution_list.size());
         }
 
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
                                                                Hardware const&  hardware,
                                                                const int index) const override
         {
-            auto indexMatch = solutionmap.find(index);
-            if(indexMatch != solutionmap.end())
+            auto indexMatch =
+                std::find_if(solution_list.begin(), solution_list.end(),
+                             [&index](auto& s){ return s.first == index; });
+            if(indexMatch != solution_list.end())
                 return indexMatch->second;
             return nullptr;
         }
@@ -99,7 +103,7 @@ namespace TensileLite
             if(searchType == SolutionLibrarySearchType::DEFAULT)
                 return rv;
 
-            for(auto const& row : this->solutionmap)
+            for(auto const& row : this->solution_list)
             {
                 if(debug)
                     std::cout << row.second->description() << std::endl;
@@ -120,7 +124,7 @@ namespace TensileLite
             if(searchType == SolutionLibrarySearchType::DEFAULT)
                 return rv;
 
-            for(auto const& row : this->solutionmap)
+            for(auto const& row : this->solution_list)
             {
                 if(debug)
                     std::cout << row.second->description() << std::endl;
@@ -156,70 +160,52 @@ namespace TensileLite
                 batch *= problem.batchSize(i);
             }
 
-            bool                  debug   = Debug::Instance().printPropertyEvaluation();
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-            size_t elementSizeA_bits
-                = problem.a().elementBytes() * 8;
-            size_t elementSizeB_bits
-                = problem.b().elementBytes() * 8;
-            size_t elementSizeC_bits
-                = problem.c().elementBytes() * 8;
+
             const origami::hardware_t& analytical_hardware = *(pAMDGPU->analyticalHardware);
-            if(origami::hardware_t::is_debug_enabled())
-            {
-                analytical_hardware.print();
-            }
-            int defaultWGM = std::ceil(std::sqrt(analytical_hardware.N_CU / analytical_hardware.NUM_XCD));
-            origami::data_type_t miDataType = static_cast<origami::data_type_t>(problem.computeInputType());
+            auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
+
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
                 miDataType = origami::data_type_t::XFloat32;
-            auto selected_tiles = origami::select_best_macro_tile_size(
-                m,
-                n,
-                k,
-                batch,
-                problem.transA(),
-                problem.transB(),
-                *(pAMDGPU->analyticalHardware),
-                tile_list,
-                elementSizeA_bits,
-                elementSizeB_bits,
-                elementSizeC_bits,
-                miDataType,
-                0,   // mx_block_size -> MX Data types come from rocroller.
-                0.8, // L2 hit-rate (not used anymore -- should be removed)
-                false,
-                defaultWGM,
-                pAMDGPU->skMaxCUs);
-            for(const auto& tile : selected_tiles)
+            origami::problem_t origami_problem = {
+                .size        = {m, n, k},
+                .batch       = batch,
+                .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
+                .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
+                .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
+                .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
+                .mi_dtype    = miDataType,
+                .a_mx_block_size = 0, // MX Data types come from rocroller
+                .b_mx_block_size = 0, // MX Data types come from rocroller
+            };
+
+            auto prediction_result = origami::rank_configs(
+                origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+
+            for(const auto& r : prediction_result)
             {
-                auto mapiter  = tile_map.find(std::make_tuple(std::get<1>(tile),
-                                                              std::get<2>(tile),
-                                                              std::get<3>(tile),
-                                                              std::get<4>(tile),
-                                                              std::get<5>(tile),
-                                                              std::get<6>(tile),
-                                                              std::get<7>(tile),
-                                                              std::get<8>(tile),
-                                                              std::get<9>(tile),
-                                                              std::get<10>(tile)
-                                                            ));
-                auto smapiter = solutionmap.find(mapiter->second);
-                if(mapiter != tile_map.end() && smapiter != solutionmap.end())
+                auto& solution = solution_list[r.config.index].second;
+                if((*(solution->hardwarePredicate))(hardware)
+                   && (*(solution->problemPredicate))(problem))
                 {
-                    auto solution = smapiter->second;
-                    if((*solution->hardwarePredicate)(hardware)
-                       && (*solution->problemPredicate)(problem))
+                    rv.emplace_back(solution);
+                    if(rv.size() == numSolutions)
                     {
-                        rv.emplace_back(solution);
-                        if(rv.size() == numSolutions)
-                        {
-                            break;
-                        }
+                        break;
                     }
                 }
             }
+
+            // can't reach the requested number, means findTop already done its best
+            lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

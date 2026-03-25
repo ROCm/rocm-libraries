@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -229,7 +229,6 @@ struct BatchedGemmKernel
 
         // allocate LDS
         __shared__ char smem_ptr[GetSmemSize()];
-
         UniversalGemmKernel::RunGemm(
             {a_ptr}, {b_ptr}, {/*ds_ptr*/}, c_ptr, smem_ptr, kargs, splitk_batch_offset, i_m, i_n);
     }

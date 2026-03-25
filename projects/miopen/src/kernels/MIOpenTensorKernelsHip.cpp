@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
+ * Copyright (c) 2023-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,9 +23,9 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
-#include <hip/hip_fp16.h>
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
+#include <hip/hip_fp16.h>
 #include <hip/hip_bfloat16.h>
 #endif
 
@@ -166,10 +166,10 @@ extern "C" __global__ void Op2dTensorSquash(const MIOPEN_TYPE* a,
                                             const MIOPEN_TYPE alpha0,
                                             const MIOPEN_TYPE alpha1,
                                             const MIOPEN_TYPE beta,
-                                            const long Aoffset,
-                                            const long Boffset,
-                                            const long Coffset,
-                                            const long total_work,
+                                            const int64_t Aoffset,
+                                            const int64_t Boffset,
+                                            const int64_t Coffset,
+                                            const int64_t total_work,
                                             const int use_apl0,
                                             const int use_apl1,
                                             const int use_bet)
@@ -448,9 +448,9 @@ extern "C" __global__ void Op4dTensorGeneric(MIOPEN_TYPE* a,
                                              const MIOPEN_TYPE beta,
                                              const unsigned int bitmap,
                                              const int work_per_wg,
-                                             const long Aoffset,
-                                             const long Boffset,
-                                             const long Coffset,
+                                             const int64_t Aoffset,
+                                             const int64_t Boffset,
+                                             const int64_t Coffset,
                                              const int num_wg)
 {
     int gid = blockIdx.x;
@@ -535,7 +535,6 @@ extern "C" __global__ void Op4dTensorGeneric(MIOPEN_TYPE* a,
         }
     }
 }
-
 #endif
 
 #ifdef USE_4D_TENSOR_LITE
@@ -545,10 +544,10 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
                                           const MIOPEN_TYPE alpha0,
                                           const MIOPEN_TYPE alpha1,
                                           const MIOPEN_TYPE beta,
-                                          const long Aoffset,
-                                          const long Boffset,
-                                          const long Coffset,
-                                          const long total_work,
+                                          const int64_t Aoffset,
+                                          const int64_t Boffset,
+                                          const int64_t Coffset,
+                                          const int64_t total_work,
                                           const int use_beta)
 {
     int gid0        = blockIdx.x * blockDim.x + threadIdx.x;
@@ -630,4 +629,282 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
         }
     }
 }
-#endif // USE_4D_TENSOR_LITE
+#endif
+
+#ifdef USE_FWD_BIAS
+extern "C" __global__ void OpTensorFwdBias(MIOPEN_TYPE* a,
+                                           MIOPEN_TYPE* b,
+                                           const int b_c,
+                                           MIOPEN_TYPE* c,
+                                           const int c_n,
+                                           const int c_nstride,
+                                           const int c_cstride,
+                                           const int work_per_wg,
+                                           const MIOPEN_TYPE alpha0,
+                                           const MIOPEN_TYPE alpha1,
+                                           const MIOPEN_TYPE beta,
+                                           const uint64_t Aoffset,
+                                           const uint64_t Boffset,
+                                           const uint64_t Coffset,
+                                           const int num_wg,
+                                           const int incr_wg)
+{
+    MIOPEN_TYPE* a_off = a + Aoffset;
+    MIOPEN_TYPE* b_off = b + Boffset;
+    MIOPEN_TYPE* c_off = c + Coffset;
+
+    int gid = blockIdx.x;
+
+    // num_wg: the number of workgroups should be launched
+    // MAX_NUM_WG: the maximum number of workgroups actually launched
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfloat-equal"
+    if(beta == static_cast<MIOPEN_TYPE>(0))
+#pragma clang diagnostic pop
+    {
+        for(; gid < num_wg; gid += MAX_NUM_WG)
+        {
+            int lid = threadIdx.x;
+
+            int o_c             = incr_wg == 1 ? (gid % b_c) : gid;
+            MIOPEN_TYPE operand = b_off[o_c] * alpha1;
+
+            // each workgroup computes N*H*W for each C (bias-term)
+            // number of workgroups = c_c (b_c)
+            while(lid < work_per_wg)
+            {
+                int o_hw     = incr_wg == 0 ? (lid % (work_per_wg / c_n)) : lid;
+                int o_n      = incr_wg == 0 ? (lid / (work_per_wg / c_n)) : (gid / b_c);
+                int index    = o_n * c_nstride + o_c * c_cstride + o_hw;
+                c_off[index] = MIOPEN_TENSOR_OP(a_off[index] * alpha0, operand);
+
+                lid += blockDim.x;
+            }
+        }
+    }
+    else
+    {
+        for(; gid < num_wg; gid += MAX_NUM_WG)
+        {
+            int lid = threadIdx.x;
+
+            int o_c             = incr_wg == 1 ? (gid % b_c) : gid;
+            MIOPEN_TYPE operand = b_off[o_c] * alpha1;
+
+            // each workgroup computes N*H*W for each C (bias-term)
+            // number of workgroups = c_c (b_c)
+            while(lid < work_per_wg)
+            {
+                int o_hw  = incr_wg == 0 ? (lid % (work_per_wg / c_n)) : lid;
+                int o_n   = incr_wg == 0 ? (lid / (work_per_wg / c_n)) : (gid / b_c);
+                int index = o_n * c_nstride + o_c * c_cstride + o_hw;
+                c_off[index] =
+                    MIOPEN_TENSOR_OP(a_off[index] * alpha0, operand) + beta * c_off[index];
+
+                lid += blockDim.x;
+            }
+        }
+    }
+}
+#endif
+
+#ifdef USE_FWD_BIAS_GENERIC
+extern "C" __global__ void OpTensorFwdBiasGeneric(MIOPEN_TYPE* a,
+                                                  const int a_nstride,
+                                                  const int a_cstride,
+                                                  const int a_hstride,
+                                                  MIOPEN_TYPE* b,
+                                                  const int b_c,
+                                                  const int b_cstride,
+                                                  MIOPEN_TYPE* c,
+                                                  const int c_n,
+                                                  const int c_w,
+                                                  const int c_nstride,
+                                                  const int c_cstride,
+                                                  const int c_hstride,
+                                                  const MIOPEN_TYPE alpha0,
+                                                  const MIOPEN_TYPE alpha1,
+                                                  const MIOPEN_TYPE beta,
+                                                  const int work_per_wg,
+                                                  const uint64_t Aoffset,
+                                                  const uint64_t Boffset,
+                                                  const uint64_t Coffset,
+                                                  const int num_wg,
+                                                  const int incr_wg)
+{
+    int gid = blockIdx.x;
+
+    MIOPEN_TYPE* a_off = a + Aoffset;
+    MIOPEN_TYPE* b_off = b + Boffset;
+    MIOPEN_TYPE* c_off = c + Coffset;
+
+    // num_wg: the number of workgroups should be launched
+    // MAX_NUM_WG: the maximum number of workgroups actually launched
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfloat-equal"
+    if(beta == static_cast<MIOPEN_TYPE>(0))
+#pragma clang diagnostic pop
+    {
+        for(; gid < num_wg; gid += MAX_NUM_WG)
+        {
+            int lid = threadIdx.x;
+
+            // each workgroup computes N*H*W for each C (bias-term)
+            // number of workgroups = c_c (b_c)
+            int o_c             = (incr_wg == 1) ? (gid % b_c) : gid;
+            MIOPEN_TYPE operand = b_off[o_c * b_cstride] * alpha1;
+
+            while(lid < work_per_wg)
+            {
+                int o_n       = (incr_wg == 1) ? (gid / b_c) : (lid % c_n);
+                int o_h       = (incr_wg == 1) ? (lid / c_w) : ((lid / c_n) / c_w);
+                int o_w       = (incr_wg == 1) ? (lid % c_w) : ((lid / c_n) % c_w);
+                int aindex    = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
+                int cindex    = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
+                c_off[cindex] = MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand);
+
+                lid += blockDim.x;
+            }
+        }
+    }
+    else
+    {
+        for(; gid < num_wg; gid += MAX_NUM_WG)
+        {
+            int lid = threadIdx.x;
+
+            // each workgroup computes N*H*W for each C (bias-term)
+            // number of workgroups = c_c (b_c)
+            int o_c             = (incr_wg == 1) ? (gid % b_c) : gid;
+            MIOPEN_TYPE operand = b_off[o_c * b_cstride] * alpha1;
+
+            while(lid < work_per_wg)
+            {
+                int o_n    = (incr_wg == 1) ? (gid / b_c) : (lid % c_n);
+                int o_h    = (incr_wg == 1) ? (lid / c_w) : ((lid / c_n) / c_w);
+                int o_w    = (incr_wg == 1) ? (lid % c_w) : ((lid / c_n) % c_w);
+                int aindex = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
+                int cindex = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
+                c_off[cindex] =
+                    MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand) + beta * c_off[cindex];
+
+                lid += blockDim.x;
+            }
+        }
+    }
+}
+#endif
+
+#ifdef USE_2D_TENSOR_LITE
+extern "C" __global__ void Op2dTensorLite(const MIOPEN_TYPE* a,
+                                          const int a_nstride,
+                                          const MIOPEN_TYPE* b,
+                                          const int b_nstride,
+                                          MIOPEN_TYPE* c,
+                                          const int c_nstride,
+                                          const MIOPEN_TYPE alpha0,
+                                          const MIOPEN_TYPE alpha1,
+                                          const MIOPEN_TYPE beta,
+                                          const uint64_t Aoffset,
+                                          const uint64_t Boffset,
+                                          const uint64_t Coffset,
+                                          const size_t total_work,
+                                          const size_t total_work2,
+                                          const int use_beta,
+                                          const int use_bias)
+{
+    int gid0 = blockIdx.x * blockDim.x + threadIdx.x;
+    int gid1 = blockIdx.y * blockDim.y + threadIdx.y;
+
+    MIOPEN_TYPE a_dat[RD_BLCK];
+    MIOPEN_TYPE b_dat[RD_BLCK];
+    MIOPEN_TYPE c_dat[RD_BLCK];
+
+    if(gid0 < total_work)
+    {
+        if(use_bias == 1)
+        {
+            int b_index          = gid0 * RD_BLCK;
+            *((READ_TYPE*)b_dat) = *((const READ_TYPE*)(b + Boffset + b_index));
+        }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfloat-equal"
+        if(beta == static_cast<MIOPEN_TYPE>(0))
+#pragma clang diagnostic pop
+        {
+            for(; gid1 < total_work2; gid1 += gridDim.y * blockDim.y)
+            {
+                for(int i = 0; i < RD_BLCK; ++i)
+                {
+                    c_dat[i] = (MIOPEN_TYPE)0;
+                }
+
+                int a_index = gid1 * a_nstride + gid0 * RD_BLCK;
+                int c_index = gid1 * c_nstride + gid0 * RD_BLCK;
+
+                *((READ_TYPE*)a_dat) = *((const READ_TYPE*)(a + Aoffset + a_index));
+                if(use_beta == 1)
+                {
+                    *((READ_TYPE*)c_dat) = *((const READ_TYPE*)(c + Coffset + c_index));
+                }
+
+                if(use_bias == 0)
+                {
+                    int b_index          = gid1 * b_nstride + gid0 * RD_BLCK;
+                    *((READ_TYPE*)b_dat) = *((const READ_TYPE*)(b + Boffset + b_index));
+                }
+
+                for(int i = 0; i < RD_BLCK; ++i)
+                {
+                    if(use_beta == 1)
+                    {
+                        c_dat[i] = (MIOPEN_TYPE)0;
+                    }
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i] * alpha0, b_dat[i] * alpha1);
+                }
+
+                *((READ_TYPE*)(c + Coffset + c_index)) = *((READ_TYPE*)c_dat);
+            }
+        }
+        else
+        {
+            for(; gid1 < total_work2; gid1 += gridDim.y * blockDim.y)
+            {
+                for(int i = 0; i < RD_BLCK; ++i)
+                {
+                    c_dat[i] = (MIOPEN_TYPE)0;
+                }
+
+                int a_index = gid1 * a_nstride + gid0 * RD_BLCK;
+                int c_index = gid1 * c_nstride + gid0 * RD_BLCK;
+
+                *((READ_TYPE*)a_dat) = *((const READ_TYPE*)(a + Aoffset + a_index));
+                if(use_beta == 1)
+                {
+                    *((READ_TYPE*)c_dat) = *((const READ_TYPE*)(c + Coffset + c_index));
+                }
+
+                if(use_bias == 0)
+                {
+                    int b_index          = gid1 * b_nstride + gid0 * RD_BLCK;
+                    *((READ_TYPE*)b_dat) = *((const READ_TYPE*)(b + Boffset + b_index));
+                }
+
+                for(int i = 0; i < RD_BLCK; ++i)
+                {
+                    if(use_beta == 1)
+                    {
+                        c_dat[i] *= beta;
+                    }
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i] * alpha0, b_dat[i] * alpha1);
+                }
+
+                *((READ_TYPE*)(c + Coffset + c_index)) = *((READ_TYPE*)c_dat);
+            }
+        }
+    }
+}
+#endif

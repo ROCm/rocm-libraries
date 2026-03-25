@@ -31,6 +31,13 @@ endfunction()
 function(add_hipcub_test TEST_NAME TEST_SOURCES)
   get_hipcub_test_target(${TEST_SOURCES} TEST_TARGET)
   add_hipcub_test_internal(${TEST_NAME} "${TEST_SOURCES}" ${TEST_TARGET})
+  # Re-propagate DLLS_COPIED from add_hipcub_test_internal's scope to our
+  # caller (file scope). PARENT_SCOPE only propagates one level, so without
+  # this relay the guard resets on every call and each test target gets
+  # duplicate POST_BUILD copy commands that race on parallel builds.
+  if(DEFINED DLLS_COPIED)
+    set(DLLS_COPIED "${DLLS_COPIED}" PARENT_SCOPE)
+  endif()
 endfunction()
 
 function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
@@ -74,14 +81,21 @@ function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
   )
   if(GPU_TEST_TARGETS)
     foreach(GPU_TARGET IN LISTS GPU_TEST_TARGETS)
-      add_relative_test("${GPU_TARGET}-${TEST_NAME}" ${TEST_TARGET})
+      add_relative_test("${GPU_TARGET}-${TEST_NAME}" ${TEST_TARGET} ${GPU_TARGET})
+      # note: the set_tests_properties call below will set the test properties in the build directory.
+      # They also need to be set in the install directory. This is done in the call to add_relative_test (above),
+      # by writing to the install_CTestTestfile.cmake file used in the install).
       set_tests_properties("${GPU_TARGET}-${TEST_NAME}"
           PROPERTIES
               RESOURCE_GROUPS "1,${GPU_TARGET}:1"
       )
     endforeach()
   else()
-      add_relative_test(${TEST_NAME} ${TEST_TARGET})
+      add_relative_test(${TEST_NAME} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
+      set_tests_properties(${TEST_NAME}
+          PROPERTIES
+              RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
+      )
   endif()
 
   if (WIN32 AND NOT DEFINED DLLS_COPIED)
@@ -198,6 +212,10 @@ ${TEST_TYPE_SLICE_COUNT} test type slice(s) for test target ${TEST_TARGET}")
 
   add_hipcub_test_internal(${TEST_NAME} "${SOURCES}" ${TEST_TARGET})
   target_include_directories("${TEST_TARGET}" PRIVATE "../../test/hipcub")
+  # Re-propagate DLLS_COPIED (see comment in add_hipcub_test).
+  if(DEFINED DLLS_COPIED)
+    set(DLLS_COPIED "${DLLS_COPIED}" PARENT_SCOPE)
+  endif()
 endfunction()
 
 # ****************************************************************************

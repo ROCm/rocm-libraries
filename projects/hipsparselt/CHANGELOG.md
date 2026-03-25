@@ -2,6 +2,19 @@
 
 Full documentation for hipSPARSELt is available at [rocm.docs.amd.com/projects/hipSPARSELt](https://rocm.docs.amd.com/projects/hipSPARSELt/en/latest/index.html).
 
+## hipSPARSELt 0.2.7
+
+### Added
+
+* Support for the following data type combinations for the LLVM target gfx942/gfx950:
+  * `INT8` inputs, `INT32` output, and `INT32` Matrix Core accumulation.
+
+## hipSPARSELt 0.2.6 for ROCm 7.2.0
+
+### Optimized
+
+* Provided more kernels for the `FP16` and `FP8(E4M3)` data types.
+
 ## hipSPARSELt 0.2.5 for ROCm 7.1.0
 
 ### Changed

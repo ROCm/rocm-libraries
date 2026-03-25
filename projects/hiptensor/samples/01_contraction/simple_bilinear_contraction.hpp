@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -145,7 +145,7 @@ int bilinearContractionSample(void* alpha, void* beta)
         }
         else
         {
-            C[i] = (BDataType)(float(i) / 100);
+            C[i] = (CDataType)(float(i) / 100);
         }
     }
 
@@ -217,14 +217,15 @@ int bilinearContractionSample(void* alpha, void* beta)
                                                      modeC.data(),
                                                      typeCompute));
 
-#if 0 // TODO
     hiptensorDataType_t scalarType;
-    CHECK_HIPTENSOR_ERROR(hiptensorOperationDescriptorGetAttribute(handle,
-                desc,
-                HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
-                (void*)&scalarType,
-                sizeof(scalarType)));
-#endif
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorOperationDescriptorGetAttribute(handle,
+                                                 desc,
+                                                 HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
+                                                 (void*)&scalarType,
+                                                 sizeof(scalarType)));
+    assert(scalarType == *hiptensor::convertToHipTensorDataType(typeCompute));
+
     /***************************
      * Set the algorithm to use
      ***************************/

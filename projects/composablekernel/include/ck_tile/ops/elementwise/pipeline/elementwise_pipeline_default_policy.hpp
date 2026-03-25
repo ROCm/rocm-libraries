@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -23,6 +23,11 @@ struct ElementWiseDefaultPolicy
                                        sequence<1, 1>,                  // Yield
                                        sequence<0, 3>>{}                // Yield
         );
+    }
+
+    [[nodiscard]] CK_TILE_HOST static const std::string GetName()
+    {
+        return "ElementWiseDefaultPolicy";
     }
 };
 

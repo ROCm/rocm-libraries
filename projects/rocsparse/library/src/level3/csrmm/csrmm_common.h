@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,58 +21,67 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#define INSTANTIATE_KERNELS(kernel_macro)                                                 \
-    kernel_macro(float, int32_t, int32_t, float, float, float);                           \
-    kernel_macro(float, int64_t, int32_t, float, float, float);                           \
-    kernel_macro(float, int64_t, int64_t, float, float, float);                           \
-    kernel_macro(double, int32_t, int32_t, double, double, double);                       \
-    kernel_macro(double, int64_t, int32_t, double, double, double);                       \
-    kernel_macro(double, int64_t, int64_t, double, double, double);                       \
-    kernel_macro(rocsparse_float_complex,                                                 \
-                 int32_t,                                                                 \
-                 int32_t,                                                                 \
-                 rocsparse_float_complex,                                                 \
-                 rocsparse_float_complex,                                                 \
-                 rocsparse_float_complex);                                                \
-    kernel_macro(rocsparse_float_complex,                                                 \
-                 int64_t,                                                                 \
-                 int32_t,                                                                 \
-                 rocsparse_float_complex,                                                 \
-                 rocsparse_float_complex,                                                 \
-                 rocsparse_float_complex);                                                \
-    kernel_macro(rocsparse_float_complex,                                                 \
-                 int64_t,                                                                 \
-                 int64_t,                                                                 \
-                 rocsparse_float_complex,                                                 \
-                 rocsparse_float_complex,                                                 \
-                 rocsparse_float_complex);                                                \
-    kernel_macro(rocsparse_double_complex,                                                \
-                 int32_t,                                                                 \
-                 int32_t,                                                                 \
-                 rocsparse_double_complex,                                                \
-                 rocsparse_double_complex,                                                \
-                 rocsparse_double_complex);                                               \
-    kernel_macro(rocsparse_double_complex,                                                \
-                 int64_t,                                                                 \
-                 int32_t,                                                                 \
-                 rocsparse_double_complex,                                                \
-                 rocsparse_double_complex,                                                \
-                 rocsparse_double_complex);                                               \
-    kernel_macro(rocsparse_double_complex,                                                \
-                 int64_t,                                                                 \
-                 int64_t,                                                                 \
-                 rocsparse_double_complex,                                                \
-                 rocsparse_double_complex,                                                \
-                 rocsparse_double_complex);                                               \
-    kernel_macro(float, int32_t, int32_t, _Float16, _Float16, float);                     \
-    kernel_macro(float, int64_t, int32_t, _Float16, _Float16, float);                     \
-    kernel_macro(float, int64_t, int64_t, _Float16, _Float16, float);                     \
-    kernel_macro(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float); \
-    kernel_macro(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float); \
-    kernel_macro(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float); \
-    kernel_macro(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t);                     \
-    kernel_macro(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t);                     \
-    kernel_macro(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t);                     \
-    kernel_macro(float, int32_t, int32_t, int8_t, int8_t, float);                         \
-    kernel_macro(float, int64_t, int32_t, int8_t, int8_t, float);                         \
+#define INSTANTIATE_KERNELS(kernel_macro)                                                     \
+    kernel_macro(float, int32_t, int32_t, float, float, float);                               \
+    kernel_macro(float, int64_t, int32_t, float, float, float);                               \
+    kernel_macro(float, int64_t, int64_t, float, float, float);                               \
+    kernel_macro(double, int32_t, int32_t, double, double, double);                           \
+    kernel_macro(double, int64_t, int32_t, double, double, double);                           \
+    kernel_macro(double, int64_t, int64_t, double, double, double);                           \
+    kernel_macro(rocsparse_float_complex,                                                     \
+                 int32_t,                                                                     \
+                 int32_t,                                                                     \
+                 rocsparse_float_complex,                                                     \
+                 rocsparse_float_complex,                                                     \
+                 rocsparse_float_complex);                                                    \
+    kernel_macro(rocsparse_float_complex,                                                     \
+                 int64_t,                                                                     \
+                 int32_t,                                                                     \
+                 rocsparse_float_complex,                                                     \
+                 rocsparse_float_complex,                                                     \
+                 rocsparse_float_complex);                                                    \
+    kernel_macro(rocsparse_float_complex,                                                     \
+                 int64_t,                                                                     \
+                 int64_t,                                                                     \
+                 rocsparse_float_complex,                                                     \
+                 rocsparse_float_complex,                                                     \
+                 rocsparse_float_complex);                                                    \
+    kernel_macro(rocsparse_double_complex,                                                    \
+                 int32_t,                                                                     \
+                 int32_t,                                                                     \
+                 rocsparse_double_complex,                                                    \
+                 rocsparse_double_complex,                                                    \
+                 rocsparse_double_complex);                                                   \
+    kernel_macro(rocsparse_double_complex,                                                    \
+                 int64_t,                                                                     \
+                 int32_t,                                                                     \
+                 rocsparse_double_complex,                                                    \
+                 rocsparse_double_complex,                                                    \
+                 rocsparse_double_complex);                                                   \
+    kernel_macro(rocsparse_double_complex,                                                    \
+                 int64_t,                                                                     \
+                 int64_t,                                                                     \
+                 rocsparse_double_complex,                                                    \
+                 rocsparse_double_complex,                                                    \
+                 rocsparse_double_complex);                                                   \
+    kernel_macro(float, int32_t, int32_t, _Float16, _Float16, float);                         \
+    kernel_macro(float, int64_t, int32_t, _Float16, _Float16, float);                         \
+    kernel_macro(float, int64_t, int64_t, _Float16, _Float16, float);                         \
+    kernel_macro(float, int32_t, int32_t, _Float16, _Float16, _Float16);                      \
+    kernel_macro(float, int64_t, int32_t, _Float16, _Float16, _Float16);                      \
+    kernel_macro(float, int64_t, int64_t, _Float16, _Float16, _Float16);                      \
+    kernel_macro(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);     \
+    kernel_macro(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);     \
+    kernel_macro(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);     \
+    kernel_macro(                                                                             \
+        float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16); \
+    kernel_macro(                                                                             \
+        float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16); \
+    kernel_macro(                                                                             \
+        float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16); \
+    kernel_macro(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t);                         \
+    kernel_macro(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t);                         \
+    kernel_macro(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t);                         \
+    kernel_macro(float, int32_t, int32_t, int8_t, int8_t, float);                             \
+    kernel_macro(float, int64_t, int32_t, int8_t, int8_t, float);                             \
     kernel_macro(float, int64_t, int64_t, int8_t, int8_t, float);

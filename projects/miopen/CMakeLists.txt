@@ -1,29 +1,10 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright (c) 2017 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required( VERSION 3.15 )
+
+#Add a name for the rocm-libraries location
+set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../")
 
 if (POLICY CMP0074)
   cmake_policy(SET CMP0074 NEW)
@@ -71,7 +52,7 @@ if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
 endif()
 
-project ( MIOpen C CXX )
+project(MIOpen CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -80,8 +61,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 
 find_package(Threads REQUIRED)
-find_package(ROCM 0.7.3 REQUIRED PATHS /opt/rocm)
 
+find_package(ROCmCMakeBuildTools)
 include(ROCMInstallTargets)
 include(ROCMPackageConfigHelpers)
 include(ROCMSetupVersion)
@@ -104,6 +85,8 @@ set(MIOPEN_ENABLE_SQLITE_KERN_CACHE On CACHE BOOL "")
 # By default build shared libraries
 option(BUILD_SHARED_LIBS "Create shared libraries" ON)
 
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+
 if(MIOPEN_ENABLE_SQLITE)
     # MIOpen now depends on SQLite as well
     find_package(SQLite3 REQUIRED)
@@ -120,14 +103,12 @@ option( BUILD_DEV "Build for development only" OFF)
 option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen"  OFF)
 option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIOPEN_ENABLE_FIN})
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
+option(MIOPEN_CK_BUILDER_EXPERIMENTAL "Enable experimental support for CK Builder" OFF)
 
 option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
 if(MIOPEN_INCBIN)
     enable_language(ASM)
 endif()
-
-option(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM "Workaround: Use boost::filesystem instead of std::filesystem" OFF)
-message(STATUS "MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM ${MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM}")
 
 # Strip symbols for release
 if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
@@ -137,7 +118,6 @@ endif()
 
 rocm_setup_version(VERSION 3.5.1)
 
-list( APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake )
 include(TargetFlags)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -157,7 +137,7 @@ else()
     set(MIOPEN_DEFAULT_BACKEND "OpenCL")
 endif()
 
-if(NOT WIN32 AND NOT MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM)
+if(NOT WIN32)
     include(CheckCXXLinkerFlag)
     check_cxx_linker_flag(-lstdc++fs HAS_LIB_STD_FILESYSTEM)
 endif()
@@ -207,8 +187,7 @@ set( MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING
 set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS
     OpenCL HIP HIPOC HIPNOGPU)
     
-# On Windows, internal symbols are only exported when BUILD_TESTING=true. As a result, building driver with BUILD_TESTING=false will result in failure.
-set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")) AND ((NOT WIN32) OR BUILD_TESTING))  
+set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
 option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_BUILD_DRIVER_DEFAULT})
 message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
 
@@ -341,16 +320,15 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
             include(cmake/Dependencies.cmake)
 
             execute_process (
-                COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*ROCm\/composable_kernel@[a-fA-F0-9]+' ${CMAKE_SOURCE_DIR}/requirements.txt"
+                COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*\.\./composablekernel' ${CMAKE_SOURCE_DIR}/requirements.txt"
                 OUTPUT_VARIABLE _match
             )
             if(_match)
-                string(REGEX REPLACE "[ \t]*ROCm/composable_kernel@([a-fA-F0-9]+).*" "\\1" COMPOSABLE_KERNEL_HASH "${_match}")
-                message(STATUS "Parsed composable_kernel hash from requirements.txt: ${COMPOSABLE_KERNEL_HASH}")
+                message(STATUS "Found composablekernel in requirements.txt")
             else()
-                message(FATAL_ERROR "Could not find ROCm/composable_kernel@<hash> in requirements.txt")
+                message(FATAL_ERROR "Could not find composablekernel in requirements.txt")
             endif()
-            miopen_add_dependency(composable_kernel HASH ${COMPOSABLE_KERNEL_HASH} options NO_LOCAL)
+            miopen_add_dependency(composable_kernel options NO_LOCAL)
         else()
             find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
         endif()
@@ -492,17 +470,6 @@ if(MIOPEN_USE_HIPRTC)
     find_package(hiprtc REQUIRED)
     message(STATUS "Build with hiprtc ${hiprtc_VERSION} ${hiprtc_DIR}")
 endif()
-
-option(Boost_USE_STATIC_LIBS "Use boost static libraries" ON)
-set(BOOST_COMPONENTS filesystem)
-if(MIOPEN_BUILD_DRIVER)
-    # boost core is a header only component that can't be found by find_package
-    # list(APPEND BOOST_COMPONENTS core)
-endif()
-
-# The FindBoost module has been removed since CMake 3.30. Use the Boost 1.83 configuration file instead.
-add_definitions(-DBOOST_ALL_NO_LIB=1)
-find_package(Boost REQUIRED COMPONENTS ${BOOST_COMPONENTS} CONFIG)
 
 find_path(HALF_INCLUDE_DIR half/half.hpp)
 message(STATUS "HALF_INCLUDE_DIR: ${HALF_INCLUDE_DIR}")

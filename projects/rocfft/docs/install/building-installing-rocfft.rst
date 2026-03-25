@@ -91,9 +91,8 @@ To install the client dependencies on Ubuntu, run the following command:
 
 .. code-block:: shell
 
-   sudo apt install libgtest-dev libfftw3-dev libboost-dev
+   sudo apt install libgtest-dev libfftw3-dev
 
 .. note::
 
-   ``libboost-dev`` is the Boost development package. On Red Hat-related distributions,
-   these packages are named ``gtest-devel``, ``fftw-devel`` and ``boost-devel``.
+   On Red Hat-related distributions, these packages are named ``gtest-devel`` and ``fftw-devel``.

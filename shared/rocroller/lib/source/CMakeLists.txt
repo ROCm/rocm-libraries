@@ -40,6 +40,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelArguments.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelOptions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSAllocator.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LDSModel.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Logging.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Random.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Register.cpp"
@@ -57,41 +58,8 @@ add_subdirectory(CodeGen)
 add_subdirectory(Costs)
 add_subdirectory(ExpressionTransformations)
 add_subdirectory(Observers)
-add_subdirectory(Utilities)
 add_subdirectory(Operations)
+add_subdirectory(Utilities)
 add_subdirectory(Parameters)
 add_subdirectory(Graph)
 add_subdirectory(KernelGraph)
-
-add_library(rocroller-no-rtti
-    OBJECT
-        "${CMAKE_CURRENT_SOURCE_DIR}/Utilities/ReadELF.cpp"
-)
-if(ROCROLLER_ENABLE_LLD)
-    target_compile_definitions(rocroller-no-rtti PRIVATE ROCROLLER_USE_LLD)
-    target_link_libraries(rocroller-no-rtti PRIVATE lldELF)
-endif()
-target_compile_options(rocroller-no-rtti PRIVATE -fno-rtti)
-target_compile_features(rocroller-no-rtti PRIVATE cxx_std_20)
-target_compile_definitions(rocroller-no-rtti
-    PUBLIC
-        ROCROLLER_USE_HIP
-        __HIP_PLATFORM_AMD__
-)
-target_include_directories(rocroller-no-rtti
-    PRIVATE
-        "${LLVM_INCLUDE_DIRS}"
-        "${PROJECT_SOURCE_DIR}/lib/include" # is this necessary?
-)
-target_link_libraries(rocroller-no-rtti
-    PRIVATE
-        hip::host
-        $<BUILD_INTERFACE:spdlog::spdlog_header_only>
-        fmt::fmt-header-only
-)
-
-target_link_libraries(rocroller PRIVATE $<BUILD_INTERFACE:rocroller-no-rtti>)
-
-set_target_properties(
-    rocroller-no-rtti PROPERTIES POSITION_INDEPENDENT_CODE ON # necessary?
-)

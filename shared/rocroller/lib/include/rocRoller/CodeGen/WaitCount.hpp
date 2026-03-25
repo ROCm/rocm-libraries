@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2021-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -31,6 +8,7 @@
 
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
+#include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/Settings_fwd.hpp>
 
 namespace rocRoller
@@ -56,7 +34,14 @@ namespace rocRoller
                   int                    dscnt,
                   int                    kmcnt,
                   int                    expcnt);
-        WaitCount(GPUArchitecture const& arch, GPUWaitQueue, int count);
+
+        /// Issues a waitcnt with the given count for the given queue.
+        WaitCount(GPUArchitecture const& arch, GPUWaitQueue queueForCount, int count);
+
+        /// Instructs the WaitcntObserver to sync the given queues.
+        WaitCount(GPUArchitecture const&       arch,
+                  EnumBitset<GPUWaitQueueType> queuesToSync,
+                  std::string const&           message = "");
 
         ~WaitCount() = default;
 
@@ -86,6 +71,21 @@ namespace rocRoller
         static WaitCount Zero(GPUArchitecture const& arch, std::string const& message = " ");
 
         static WaitCount Max(GPUArchitecture const& arch, std::string const& message = " ");
+
+        /**
+         * This means to empty the specified queue, i.e. include a waitcount of 0 if that queue
+         * is not empty.
+         */
+        static WaitCount SyncQueue(GPUArchitecture const& arch,
+                                   GPUWaitQueueType       queue,
+                                   std::string const&     message = "");
+        /**
+         * This means to empty the specified queues, i.e. include a waitcount of 0 if any of the
+         * specified queues are not empty.
+         */
+        static WaitCount SyncQueues(GPUArchitecture const&       arch,
+                                    EnumBitset<GPUWaitQueueType> queues,
+                                    std::string const&           message = "");
 
         std::string toString(LogLevel level) const;
         void        toStream(std::ostream& os, LogLevel level) const;
@@ -129,6 +129,8 @@ namespace rocRoller
 
         WaitCount getAsSaturatedWaitCount(GPUArchitecture const& arch) const;
 
+        EnumBitset<GPUWaitQueueType> const& queuesToSync() const;
+
     private:
         /**
          * -1 means don't care.
@@ -148,6 +150,8 @@ namespace rocRoller
         bool m_isSplitCounter = false;
         bool m_hasVSCnt       = false;
         bool m_hasEXPCnt      = false;
+
+        EnumBitset<GPUWaitQueueType> m_queuesToSync;
     };
 
     std::ostream& operator<<(std::ostream& stream, WaitCount const& wait);

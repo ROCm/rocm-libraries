@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@
 namespace hiptensor
 {
     // Get data size in bytes from id
-    uint32_t hiptensorDataTypeSize(hiptensorDataType_t id)
+    HIPTENSOR_EXPORT uint32_t hiptensorDataTypeSize(hiptensorDataType_t id)
     {
         switch(id)
         {
@@ -102,8 +102,8 @@ namespace hiptensor
         }
     }
 
-    std::optional<hiptensorDataType_t>
-        convertToHipTensorDataType(hiptensorComputeDescriptor_t computeType)
+    HIPTENSOR_EXPORT std::optional<hiptensorDataType_t>
+                     convertToHipTensorDataType(hiptensorComputeDescriptor_t computeType)
     {
         switch(computeType)
         {
@@ -132,15 +132,15 @@ namespace hiptensor
         {
         case HIPTENSOR_COMPUTE_DESC_16F:
         {
-            return ScalarData(id, *(_Float16*)value);
+            return ScalarData(id, static_cast<double>(*(_Float16*)value));
         }
         case HIPTENSOR_COMPUTE_DESC_16BF:
         {
-            return ScalarData(id, *(hip_bfloat16*)value);
+            return ScalarData(id, static_cast<double>(*(hip_bfloat16*)value));
         }
         case HIPTENSOR_COMPUTE_DESC_32F:
         {
-            return ScalarData(id, *(float*)value);
+            return ScalarData(id, static_cast<double>(*(float*)value));
         }
         case HIPTENSOR_COMPUTE_DESC_64F:
         {
@@ -149,41 +149,42 @@ namespace hiptensor
         case HIPTENSOR_COMPUTE_DESC_C32F:
         {
             auto complex = *(hipFloatComplex*)value;
-            return {id, complex.x, complex.y};
+            return ScalarData(id, complex.x, complex.y);
         }
         case HIPTENSOR_COMPUTE_DESC_C64F:
         {
             auto complex = *(hipDoubleComplex*)value;
-            return {id, complex.x, complex.y};
+            return ScalarData(id, complex.x, complex.y);
         }
         default:
         {
 #if !NDEBUG
             std::cout << "Unhandled hiptensorComputeDescriptor_t: " << id << std::endl;
 #endif // !NDEBUG
-            return {HIPTENSOR_COMPUTE_DESC_NONE, 0, 0};
+            return ScalarData(HIPTENSOR_COMPUTE_DESC_NONE, 0, 0);
         }
         }
     }
     // @endcond
 
-    void writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value)
+    HIPTENSOR_EXPORT void
+        writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value)
     {
         switch(id)
         {
         case HIPTENSOR_COMPUTE_DESC_16F:
         {
-            *(_Float16*)addr = value.mReal;
+            *(_Float16*)addr = static_cast<_Float16>(value.mReal);
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_16BF:
         {
-            *(hip_bfloat16*)addr = value.mReal;
+            *(hip_bfloat16*)addr = static_cast<hip_bfloat16>(value.mReal);
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_32F:
         {
-            *(float*)addr = value.mReal;
+            *(float*)addr = static_cast<float>(value.mReal);
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_64F:
@@ -261,7 +262,7 @@ namespace hiptensor
         }
     }
 
-    std::string opTypeToString(hiptensorOperator_t opType)
+    HIPTENSOR_EXPORT std::string opTypeToString(hiptensorOperator_t opType)
     {
         switch(opType)
         {
@@ -326,7 +327,7 @@ namespace hiptensor
         }
     }
 
-    std::string algoTypeToString(hiptensorAlgo_t algoType)
+    HIPTENSOR_EXPORT std::string algoTypeToString(hiptensorAlgo_t algoType)
     {
         switch(algoType)
         {
@@ -341,7 +342,7 @@ namespace hiptensor
         }
     }
 
-    std::string logLevelToString(hiptensorLogLevel_t logLevel)
+    HIPTENSOR_EXPORT std::string logLevelToString(hiptensorLogLevel_t logLevel)
     {
         switch(logLevel)
         {
@@ -362,7 +363,7 @@ namespace hiptensor
         }
     }
 
-    std::string workSizePrefToString(hiptensorWorksizePreference_t workSize)
+    HIPTENSOR_EXPORT std::string workSizePrefToString(hiptensorWorksizePreference_t workSize)
     {
         switch(workSize)
         {

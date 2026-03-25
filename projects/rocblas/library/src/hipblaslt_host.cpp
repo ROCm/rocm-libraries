@@ -423,7 +423,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     bool solution_query = algo == rocblas_gemm_algo_solution_index
                           && prob.flags & rocblas_gemm_flags_check_solution_index;
 
-    if(prob.batch_A == 0)
+    if(prob.strided_batch)
     {
         auto gemm = ConstructHipBlasLTGemm(prob);
 
@@ -509,15 +509,15 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         }
 
         hipblaslt_ext::UserArguments* userArgs;
-        hipHostMalloc(&userArgs, userArgsSize);
+        RETURN_IF_HIP_ERROR(hipHostMalloc(&userArgs, userArgsSize));
         gemm.getDefaultValueForDeviceUserArguments(userArgs);
 
         // Copy them to device memory
         hipblaslt_ext::UserArguments* d_userArgs
             = (hipblaslt_ext::UserArguments*)((char*)(prob.handle->gsu_workspace)
                                               + (workspace_size - userArgsSize));
-        hipMemcpy(d_userArgs, userArgs, userArgsSize, hipMemcpyHostToDevice);
-        hipFree(userArgs);
+        RETURN_IF_HIP_ERROR(hipMemcpy(d_userArgs, userArgs, userArgsSize, hipMemcpyHostToDevice));
+        RETURN_IF_HIP_ERROR(hipHostFree(userArgs));
 
         if(gemm.run(d_userArgs, prob.handle->get_stream()) != HIPBLAS_STATUS_SUCCESS)
         {
@@ -565,8 +565,8 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
             std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
             std::vector<hipblasOperation_t> ops = {HIPBLAS_OP_N, HIPBLAS_OP_T, HIPBLAS_OP_C};
             hipblaslt_ext::GemmType         gemmType
-                = prob.batch_A == 0 ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
-                                    : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+                = prob.strided_batch ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
+                                     : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
             for(auto op1 : ops)
             {
                 for(auto op2 : ops)
@@ -625,8 +625,8 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
         else if(option == CAN_SOLVE)
         {
             hipblaslt_ext::GemmType gemmType
-                = prob.batch_A == 0 ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
-                                    : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+                = prob.strided_batch ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
+                                     : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
             std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
             auto                                          fetch = hipblaslt_ext::getAllAlgos(handle,
                                                     gemmType,
@@ -641,7 +641,7 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
 
             std::shared_ptr<hipblaslt_ext::GemmInstance> gemm;
 
-            if(prob.batch_A == 0)
+            if(prob.strided_batch)
             {
                 gemm = std::make_shared<hipblaslt_ext::GemmInstance>(ConstructHipBlasLTGemm(prob));
             }

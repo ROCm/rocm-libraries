@@ -83,7 +83,7 @@ void testing_gemm_batched_bad_arg(const Arguments& arg)
     device_batch_matrix<T> dC(M, N, ldc, batch_count);
 
     device_vector<T> d_alpha(1), d_beta(1), d_one(1), d_zero(1);
-    Ts               h_alpha{1}, h_beta{2}, h_one{1}, h_zero{0};
+    Ts               h_alpha{1.0f}, h_beta{2.0f}, h_one{1.0f}, h_zero{0.0f};
 
     if constexpr(std::is_same_v<T, hipblasHalf>)
         h_one = float_to_half(1.0f);
@@ -440,7 +440,7 @@ void testing_gemm_batched(const Arguments& arg)
         return;
     }
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Naming: `h` is in CPU (host) memory(eg hA), `d` is in GPU (device) memory (eg dA).
     // Allocate host memory

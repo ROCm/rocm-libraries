@@ -21,7 +21,8 @@ same Windows versions and toolchains that the HIP SDK supports. For more informa
 Installing prebuilt packages
 ============================
 
-rocSPARSE can be installed on Windows 10 or 11 using the AMD HIP SDK installer.
+rocSPARSE can be installed on Windows using the AMD HIP SDK installer.
+For version support information, see the :doc:`System requirements for Windows <rocm-install-on-windows:reference/system-requirements>`.
 
 The simplest way to add rocSPARSE to your code is to use CMake.
 Add the SDK installation location to your ``CMAKE_PREFIX_PATH``.
@@ -158,6 +159,10 @@ The following table lists the common ways to use ``rmake.py`` to build the rocSP
 .. note::
 
    You can run ``rmake.py`` from the ``projects\rocsparse`` directory.
+
+   By default, rocBLAS is a dependency and the build will fail if it isn't found.
+   To opt out of using rocBLAS when building from source with
+   the ``rmake.py`` script, use the ``no-rocblas`` option. 
 
 .. csv-table::
    :header: "Command","Description"

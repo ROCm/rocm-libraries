@@ -24,17 +24,12 @@
  *
  *******************************************************************************/
 #include "get_handle.hpp"
-#include "random.hpp"
-#include <verify.hpp>
-#include <miopen/miopen.h>
-#include <miopen/datatype.hpp>
-#include <miopen/kernel_build_params.hpp>
-#include <gtest/gtest.h>
-
-#include <tensor_util.hpp>
-
 #include "perf_helper.hpp"
-#include <miopen/float_equal.hpp>
+
+#include <miopen/datatype.hpp>
+#include <verify.hpp>
+
+#include <gtest/gtest.h>
 
 #define MAX_TENSOR_ELEM 17
 #define PERF_ENABLE 0
@@ -52,7 +47,7 @@ template <typename T>
 std::vector<TensorsConfig> TensorsConfigs()
 {
     std::vector<TensorsConfig> configs;
-    auto insertTestCase = [&configs](size_t& N, size_t& C, size_t& H, size_t& W) {
+    auto insertTestCase = [&configs](size_t N, size_t C, size_t H, size_t W) {
         configs.push_back(
             {{N, C, H, W}, {C * H * W, H * W, W, 1}, {N, C, H, W}, {C * H * W, H * W, W, 1}});
         configs.push_back(
@@ -262,14 +257,6 @@ protected:
             }
         }
 
-        // if(std::accumulate(tensorsConfig.blens.begin(),
-        //                    tensorsConfig.blens.end(),
-        //                    4,
-        //                    std::multiplies<std::size_t>()) == 1)
-        // {
-        //     bitmap = 4;
-        // }
-
         num_wg_orig = num_wg;
         max_num_wg  = 4096;
         num_wg      = num_wg > max_num_wg ? max_num_wg : num_wg;
@@ -289,7 +276,6 @@ protected:
 
     void runCPU()
     {
-
         std::vector<T> A = tensA.data;
         std::vector<T> B = tensB.data;
         std::vector<T> C = tensC.data;
@@ -342,46 +328,42 @@ protected:
         std::string program_name       = "MIOpenTensorKernels.cl";
         std::string network_config_ocl = network_config + "-ocl";
 
-        handle.AddKernel("Op4dTensorGeneric",
-                         network_config_ocl,
-                         program_name,
-                         "Op4dTensorGeneric",
-                         vld,
-                         vgd,
-                         params)(tensA_dev.get(),
-                                 static_cast<int>(tensorsConfig.acstrides[0]),
-                                 static_cast<int>(tensorsConfig.acstrides[1]),
-                                 static_cast<int>(tensorsConfig.acstrides[2]),
-                                 tensB_dev.get(),
-                                 static_cast<int>(tensorsConfig.blens[1]),
-                                 static_cast<int>(tensorsConfig.blens[2]),
-                                 static_cast<int>(tensorsConfig.blens[3]),
-                                 static_cast<int>(tensorsConfig.bstrides[0]),
-                                 static_cast<int>(tensorsConfig.bstrides[1]),
-                                 static_cast<int>(tensorsConfig.bstrides[2]),
-                                 tensC_dev.get(),
-                                 static_cast<int>(tensorsConfig.aclens[1]),
-                                 static_cast<int>(tensorsConfig.aclens[2]),
-                                 static_cast<int>(tensorsConfig.aclens[3]),
-                                 static_cast<int>(tensorsConfig.acstrides[0]),
-                                 static_cast<int>(tensorsConfig.acstrides[1]),
-                                 static_cast<int>(tensorsConfig.acstrides[2]),
-                                 alpha0,
-                                 alpha1,
-                                 beta,
-                                 bitmap,
-                                 work_per_wg,
-                                 static_cast<int64_t>(0),
-                                 static_cast<int64_t>(0),
-                                 static_cast<int64_t>(0),
-                                 static_cast<int>(num_wg_orig));
+        handle.AddKernel(
+            kernel_name, network_config_ocl, program_name, kernel_name, vld, vgd, params)(
+            tensA_dev.get(),
+            static_cast<int>(tensorsConfig.acstrides[0]),
+            static_cast<int>(tensorsConfig.acstrides[1]),
+            static_cast<int>(tensorsConfig.acstrides[2]),
+            tensB_dev.get(),
+            static_cast<int>(tensorsConfig.blens[1]),
+            static_cast<int>(tensorsConfig.blens[2]),
+            static_cast<int>(tensorsConfig.blens[3]),
+            static_cast<int>(tensorsConfig.bstrides[0]),
+            static_cast<int>(tensorsConfig.bstrides[1]),
+            static_cast<int>(tensorsConfig.bstrides[2]),
+            tensC_dev.get(),
+            static_cast<int>(tensorsConfig.aclens[1]),
+            static_cast<int>(tensorsConfig.aclens[2]),
+            static_cast<int>(tensorsConfig.aclens[3]),
+            static_cast<int>(tensorsConfig.acstrides[0]),
+            static_cast<int>(tensorsConfig.acstrides[1]),
+            static_cast<int>(tensorsConfig.acstrides[2]),
+            alpha0,
+            alpha1,
+            beta,
+            bitmap,
+            work_per_wg,
+            static_cast<long>(0),
+            static_cast<long>(0),
+            static_cast<long>(0),
+            num_wg_orig);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
 
         if constexpr(PERF_ENABLE)
         {
             ph.perfTest(handle,
-                        "Op4dTensorGeneric",
+                        kernel_name,
                         network_config_ocl,
                         false,
                         tensA_dev.get(),
@@ -407,10 +389,10 @@ protected:
                         beta,
                         bitmap,
                         work_per_wg,
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int>(num_wg_orig));
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        num_wg_orig);
         }
     }
 
@@ -429,46 +411,42 @@ protected:
         std::string program_name       = "MIOpenTensorKernelsHip.cpp";
         std::string network_config_hip = network_config + "-hip";
 
-        handle.AddKernel("Op4dTensorGeneric",
-                         network_config_hip,
-                         program_name,
-                         "Op4dTensorGeneric",
-                         vld,
-                         vgd,
-                         params)(tensA_dev.get(),
-                                 static_cast<int>(tensorsConfig.acstrides[0]),
-                                 static_cast<int>(tensorsConfig.acstrides[1]),
-                                 static_cast<int>(tensorsConfig.acstrides[2]),
-                                 tensB_dev.get(),
-                                 static_cast<int>(tensorsConfig.blens[1]),
-                                 static_cast<int>(tensorsConfig.blens[2]),
-                                 static_cast<int>(tensorsConfig.blens[3]),
-                                 static_cast<int>(tensorsConfig.bstrides[0]),
-                                 static_cast<int>(tensorsConfig.bstrides[1]),
-                                 static_cast<int>(tensorsConfig.bstrides[2]),
-                                 tensC_dev.get(),
-                                 static_cast<int>(tensorsConfig.aclens[1]),
-                                 static_cast<int>(tensorsConfig.aclens[2]),
-                                 static_cast<int>(tensorsConfig.aclens[3]),
-                                 static_cast<int>(tensorsConfig.acstrides[0]),
-                                 static_cast<int>(tensorsConfig.acstrides[1]),
-                                 static_cast<int>(tensorsConfig.acstrides[2]),
-                                 alpha0,
-                                 alpha1,
-                                 beta,
-                                 bitmap,
-                                 work_per_wg,
-                                 static_cast<int64_t>(0),
-                                 static_cast<int64_t>(0),
-                                 static_cast<int64_t>(0),
-                                 static_cast<int>(num_wg_orig));
+        handle.AddKernel(
+            kernel_name, network_config_hip, program_name, kernel_name, vld, vgd, params)(
+            tensA_dev.get(),
+            static_cast<int>(tensorsConfig.acstrides[0]),
+            static_cast<int>(tensorsConfig.acstrides[1]),
+            static_cast<int>(tensorsConfig.acstrides[2]),
+            tensB_dev.get(),
+            static_cast<int>(tensorsConfig.blens[1]),
+            static_cast<int>(tensorsConfig.blens[2]),
+            static_cast<int>(tensorsConfig.blens[3]),
+            static_cast<int>(tensorsConfig.bstrides[0]),
+            static_cast<int>(tensorsConfig.bstrides[1]),
+            static_cast<int>(tensorsConfig.bstrides[2]),
+            tensC_dev.get(),
+            static_cast<int>(tensorsConfig.aclens[1]),
+            static_cast<int>(tensorsConfig.aclens[2]),
+            static_cast<int>(tensorsConfig.aclens[3]),
+            static_cast<int>(tensorsConfig.acstrides[0]),
+            static_cast<int>(tensorsConfig.acstrides[1]),
+            static_cast<int>(tensorsConfig.acstrides[2]),
+            alpha0,
+            alpha1,
+            beta,
+            bitmap,
+            work_per_wg,
+            static_cast<long>(0),
+            static_cast<long>(0),
+            static_cast<long>(0),
+            num_wg_orig);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
 
         if constexpr(PERF_ENABLE)
         {
             ph.perfTest(handle,
-                        "Op4dTensorGeneric",
+                        kernel_name,
                         network_config_hip,
                         false,
                         tensA_dev.get(),
@@ -494,10 +472,10 @@ protected:
                         beta,
                         bitmap,
                         work_per_wg,
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int>(num_wg_orig));
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        num_wg_orig);
         }
     }
 
@@ -541,6 +519,7 @@ protected:
         }
     }
 
+    const std::string kernel_name{"Op4dTensorGeneric"};
     std::string network_config{};
     std::string params{};
     std::vector<size_t> vld, vgd;
@@ -565,7 +544,7 @@ protected:
     TensorsConfig tensorsConfig;
     float alpha0, alpha1, beta;
 
-    PerfHelper<T> ph;
+    PerfHelper ph;
 };
 
 struct GPU_Op4dTensorGenericTest_FP32 : Op4DTensorGenericTest<float>

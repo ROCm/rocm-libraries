@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -80,7 +80,9 @@ struct Partitioner
         using input_type = typename std::iterator_traits<InputIterator>::value_type;
         if(three_way_partitioning)
         {
-            using config = typename default_partition_config_base<input_type, true>::type;
+            constexpr auto params = partition_config_params_base<input_type, true>();
+            using config          = select_config<params.kernel_config.block_size,
+                                         params.kernel_config.items_per_thread>;
             return partition_three_way<config>(temporary_storage,
                                                storage_size,
                                                input,
@@ -96,7 +98,9 @@ struct Partitioner
         }
         else
         {
-            using config = typename default_partition_config_base<input_type, false>::type;
+            constexpr auto params = partition_config_params_base<input_type, false>();
+            using config          = select_config<params.kernel_config.block_size,
+                                         params.kernel_config.items_per_thread>;
             return partition<config>(temporary_storage,
                                      storage_size,
                                      input,
@@ -150,17 +154,11 @@ inline hipError_t segmented_radix_sort_impl(
                      typename std::iterator_traits<ValuesOutputIterator>::value_type>::value,
         "ValuesInputIterator and ValuesOutputIterator must have the same value_type");
 
-    using config = wrapped_segmented_radix_sort_config<Config, key_type, value_type>;
+    using Selector = segmented_radix_sort_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    hipError_t          result = detail::host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
+    const target current_target(stream);
 
-    const detail::segmented_radix_sort_config_params params
-        = detail::dispatch_target_arch<config, false>(target_arch);
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     static constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
     const bool            partitioning_allowed     = params.warp_sort_config.partitioning_allowed;
@@ -334,9 +332,9 @@ inline hipError_t segmented_radix_sort_impl(
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto segmented_sort_large_kernel = [=](auto arch_config)
+            auto segmented_sort_large_kernel = [=](auto target_config)
             {
-                segmented_sort_large<decltype(arch_config), Descending>(
+                segmented_sort_large<decltype(target_config), Descending>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -353,12 +351,12 @@ inline hipError_t segmented_radix_sort_impl(
             };
 
             ROCPRIM_RETURN_ON_ERROR(
-                execute_launch_plan<config>(target_arch,
-                                            segmented_sort_large_kernel,
-                                            dim3(large_segment_count),
-                                            dim3(params.kernel_config.block_size),
-                                            0,
-                                            stream));
+                execute_launch_plan<Config, Selector>(current_target,
+                                                      segmented_sort_large_kernel,
+                                                      dim3(large_segment_count),
+                                                      dim3(params.kernel_config.block_size),
+                                                      0,
+                                                      stream));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:large_segments",
                                                         large_segment_count,
                                                         start);
@@ -372,9 +370,9 @@ inline hipError_t segmented_radix_sort_impl(
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto segmented_sort_medium_kernel = [=](auto arch_config)
+            auto segmented_sort_medium_kernel = [=](auto target_config)
             {
-                segmented_sort_medium<decltype(arch_config), Descending>(
+                segmented_sort_medium<decltype(target_config), Descending>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -391,10 +389,10 @@ inline hipError_t segmented_radix_sort_impl(
             };
 
             ROCPRIM_RETURN_ON_ERROR(
-                execute_launch_plan<config,
-                                    decltype(segmented_sort_medium_kernel),
-                                    segmented_radix_sort_warp_sort_meduim_config_selector>(
-                    target_arch,
+                execute_launch_plan<Config,
+                                    Selector,
+                                    segmented_radix_sort_warp_sort_medium_config_static_selector>(
+                    current_target,
                     segmented_sort_medium_kernel,
                     dim3(medium_segment_grid_size),
                     dim3(params.warp_sort_config.block_size_medium),
@@ -413,9 +411,9 @@ inline hipError_t segmented_radix_sort_impl(
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto segmented_sort_small_kernel = [=](auto arch_config)
+            auto segmented_sort_small_kernel = [=](auto target_config)
             {
-                segmented_sort_small<decltype(arch_config), Descending>(
+                segmented_sort_small<decltype(target_config), Descending>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -432,10 +430,10 @@ inline hipError_t segmented_radix_sort_impl(
             };
 
             ROCPRIM_RETURN_ON_ERROR(
-                execute_launch_plan<config,
-                                    decltype(segmented_sort_small_kernel),
-                                    segmented_radix_sort_warp_sort_small_config_selector>(
-                    target_arch,
+                execute_launch_plan<Config,
+                                    Selector,
+                                    segmented_radix_sort_warp_sort_small_config_static_selector>(
+                    current_target,
                     segmented_sort_small_kernel,
                     dim3(small_segment_grid_size),
                     dim3(params.warp_sort_config.block_size_small),
@@ -453,28 +451,29 @@ inline hipError_t segmented_radix_sort_impl(
         {
             start = std::chrono::steady_clock::now();
         }
-        auto segmented_sort_kernel = [=](auto arch_config)
+        auto segmented_sort_kernel = [=](auto target_config)
         {
-            segmented_sort<decltype(arch_config), Descending>(keys_input,
-                                                              keys_tmp,
-                                                              keys_output,
-                                                              values_input,
-                                                              values_tmp,
-                                                              values_output,
-                                                              to_output,
-                                                              begin_offsets,
-                                                              end_offsets,
-                                                              iterations,
-                                                              begin_bit,
-                                                              end_bit);
+            segmented_sort<decltype(target_config), Descending>(keys_input,
+                                                                keys_tmp,
+                                                                keys_output,
+                                                                values_input,
+                                                                values_tmp,
+                                                                values_output,
+                                                                to_output,
+                                                                begin_offsets,
+                                                                end_offsets,
+                                                                iterations,
+                                                                begin_bit,
+                                                                end_bit);
         };
 
-        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                            segmented_sort_kernel,
-                                                            dim3(segments),
-                                                            dim3(params.kernel_config.block_size),
-                                                            0,
-                                                            stream));
+        ROCPRIM_RETURN_ON_ERROR(
+            execute_launch_plan<Config, Selector>(current_target,
+                                                  segmented_sort_kernel,
+                                                  dim3(segments),
+                                                  dim3(params.kernel_config.block_size),
+                                                  0,
+                                                  stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort", segments, start);
     }
     return hipSuccess;

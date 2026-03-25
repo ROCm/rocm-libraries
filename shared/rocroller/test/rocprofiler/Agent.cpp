@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include "Agent.hpp"
 
@@ -91,10 +72,10 @@ namespace rocRoller
         auto* data
             = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
 
-        Log::info("codeobj_callback: code_object_id {}, storage_type {}",
-                  data->code_object_id,
-                  static_cast<std::underlying_type_t<rocprofiler_code_object_storage_type_t>>(
-                      data->storage_type));
+        Log::debug("codeobj_callback: code_object_id {}, storage_type {}",
+                   data->code_object_id,
+                   static_cast<std::underlying_type_t<rocprofiler_code_object_storage_type_t>>(
+                       data->storage_type));
 
         if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
         {
@@ -131,7 +112,7 @@ namespace rocRoller
         Don't use AssertFatal macro, as that is caught as a rocprofiler error and masks the real issue.
         Handle other record types https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/api-reference/thread_trace.html#trace-decoder-info-events
         */
-        Log::info(
+        Log::debug(
             "trace_decode_callback: record_type_id {}, num_events {}",
             static_cast<std::underlying_type_t<rocprofiler_thread_trace_decoder_record_type_t>>(
                 record_type_id),
@@ -156,6 +137,9 @@ namespace rocRoller
                        wave->contexts,
                        wave->instructions_size);
 
+            assert(wave->instructions_size >= 1 && "expected at least one instruction in wave");
+            uint32_t prev_time    = wave->instructions_array[0].time;
+            uint32_t prev_latency = 0;
             for(size_t i = 0; i < wave->instructions_size; i++)
             {
                 auto& inst = wave->instructions_array[i];
@@ -174,15 +158,31 @@ namespace rocRoller
                     userdata->ok = false;
                     return;
                 }
+
+                uint32_t latencyWithPrecedingNone = inst.time - prev_time;
+                Log::trace("trace_decode_callback: duration {}, stall {}, time {}, "
+                           "prev_time {}, prev_latency {}, latencyWithPrecedingNone {}",
+                           inst.duration,
+                           static_cast<uint32_t>(inst.stall),
+                           inst.time,
+                           prev_time,
+                           prev_latency,
+                           latencyWithPrecedingNone);
+                prev_time    = inst.time;
+                prev_latency = inst.duration;
+
                 auto& data = userdata->instruction_map[inst.pc];
                 data.totalLatency += inst.duration;
+                data.totalLatencyWithPrecedingNone += latencyWithPrecedingNone;
                 data.hitcount += 1;
             }
             return;
         }
-        case ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY: // `rocprofiler_thread_trace_decoder_occupancy_t`
+        case ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY:
         case ROCPROFILER_THREAD_TRACE_DECODER_RECORD_GFXIP:
-            // Ok to ignore both these
+        case ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME:
+        case ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY:
+            // these data not used currently
             return;
 
         case ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO:
@@ -222,7 +222,7 @@ namespace rocRoller
         rocprofiler_dispatch_id_t dispatch_id
             = static_cast<rocprofiler_dispatch_id_t>(userdata.value);
 
-        Log::info("shader_data_callback: dispatch_id {}, data_size {}", dispatch_id, data_size);
+        Log::debug("shader_data_callback: dispatch_id {}, data_size {}", dispatch_id, data_size);
 
         // Note this exists to also prevent a deadlock, as profile_data.size() is checked under profile_data_cv.wait
         assert(data != nullptr && data_size > 0 && "invalid shader data callback");
@@ -247,7 +247,7 @@ namespace rocRoller
         // Protect against multiple dispatches, current behavior is to only profile the first dispatch after enabling
         std::lock_guard lock(enable_profiler_mutex);
 
-        Log::info(
+        Log::debug(
             "dispatch_callback: dispatch_id {}, enable_profiler {}", dispatch_id, enable_profiler);
 
         if(enable_profiler)
@@ -331,13 +331,14 @@ namespace rocRoller
             if(!enable_agent)
                 return std::nullopt;
 
-            Log::info("waitForData");
+            Log::debug("waitForData");
 
             std::unique_lock<std::mutex> lock(profile_data_mutex);
 
             profile_data_cv.wait(lock, [] { return !profile_data.empty(); });
 
-            Log::info("waitForData: acquired profile data, decoding {} bytes", profile_data.size());
+            Log::debug("waitForData: acquired profile data, decoding {} bytes",
+                       profile_data.size());
 
             TraceDecodeCallbackUserData callback_user_data{.ok = true, .instruction_map = {}};
 
@@ -347,8 +348,8 @@ namespace rocRoller
                                                          profile_data.size(),
                                                          &callback_user_data);
 
-            Log::info("waitForData: decoding complete, clearing {} bytes of profile data",
-                      profile_data.size());
+            Log::debug("waitForData: decoding complete, clearing {} bytes of profile data",
+                       profile_data.size());
 
             profile_data.clear();
             lock.unlock();
@@ -385,7 +386,7 @@ namespace rocRoller
             {
                 result.push_back(data);
             }
-            Log::info("waitForData: retrieved {} instructions", result.size());
+            Log::debug("waitForData: retrieved {} instructions", result.size());
 
             return result;
         }
@@ -393,10 +394,7 @@ namespace rocRoller
         std::optional<std::vector<InstructionProfile>>
             getDispatchData(std::function<void()> dispatch)
         {
-            if(!enable_agent)
-                return std::nullopt;
-
-            Log::info("getDispatchData");
+            Log::debug("getDispatchData");
 
             HIP_CHECK(hipDeviceSynchronize()); // Ensure all prior dispatches finished
 
@@ -412,10 +410,7 @@ namespace rocRoller
 
         std::vector<InstructionProfile> loopUntilDispatchData(std::function<void()> dispatch)
         {
-            if(!enable_agent)
-                return {};
-
-            Log::info("loopUntilDispatchData: starting loop to get dispatch data");
+            Log::debug("loopUntilDispatchData: starting loop to get dispatch data");
 
             std::optional<std::vector<InstructionProfile>> data;
 
@@ -426,7 +421,13 @@ namespace rocRoller
                 {
                     return *data;
                 }
-                Log::info("loopUntilDispatchData: got no data, invoking another dispatch");
+                if(!enable_agent)
+                {
+                    Log::debug(
+                        "loopUntilDispatchData: profiler disabled, returning empty data set");
+                    return {};
+                }
+                Log::debug("loopUntilDispatchData: got no data, invoking another dispatch");
             }
         }
 
@@ -444,14 +445,23 @@ namespace rocRoller
             return totalLatency / hitcount;
         }
 
+        uint64_t InstructionProfile::meanLatencyWithPrecedingNone() const
+        {
+            if(hitcount == 0)
+                return 0;
+            return totalLatencyWithPrecedingNone / hitcount;
+        }
+
         std::string InstructionProfile::toString() const
         {
-            return fmt::format("'{}', totalLatency: {}, "
-                               "hitcount: {}, meanLatency: {}",
+            return fmt::format("'{}', totalLatency: {}, totalLatencyWithPrecedingNone: {}, "
+                               "hitcount: {}, meanLatency: {}, meanLatencyWithPrecedingNone: {}",
                                instruction,
                                totalLatency,
+                               totalLatencyWithPrecedingNone,
                                hitcount,
-                               meanLatency());
+                               meanLatency(),
+                               meanLatencyWithPrecedingNone());
         }
 
         std::string toString(std::vector<InstructionProfile> const& profiles)

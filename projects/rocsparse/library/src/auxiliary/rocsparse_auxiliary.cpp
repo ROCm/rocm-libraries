@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1430,11 +1430,7 @@ try
         hipStream_t default_stream{};
         dest->csritsv_info->copy(src->csritsv_info, default_stream);
     }
-
-    dest->boost_enable   = src->boost_enable;
-    dest->boost_tol_size = src->boost_tol_size;
-    dest->boost_tol      = src->boost_tol;
-    dest->boost_val      = src->boost_val;
+    dest->get_boost()->copy(*src->get_boost());
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -1836,6 +1832,164 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
+_rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
+                                               bool                 analysed_,
+                                               int64_t              batch_count_,
+                                               int64_t              m_,
+                                               int64_t              n_,
+                                               int64_t              nnz_,
+                                               rocsparse_datatype   val_datatype_,
+                                               const void*          const_val_data_,
+                                               void*                val_data_,
+                                               int64_t              val_stride_,
+                                               rocsparse_indextype  row_indextype_,
+                                               const void*          const_row_data_,
+                                               void*                row_data_,
+                                               int64_t              row_stride_,
+                                               rocsparse_indextype  col_indextype_,
+                                               const void*          const_col_data_,
+                                               void*                col_data_,
+                                               int64_t              col_stride_,
+                                               rocsparse_index_base base_,
+                                               rocsparse_mat_descr  descr_,
+                                               rocsparse_mat_info   info_)
+    : init(true)
+    , analysed(analysed_)
+    ,
+
+    rows(m_)
+    , cols(n_)
+    , nnz(nnz_)
+    ,
+
+    row_data(row_data_)
+    , col_data(col_data_)
+    , ind_data((format_ == rocsparse_format_coo_aos) ? row_data_ : nullptr)
+    , val_data(val_data_)
+    ,
+
+    const_row_data(const_row_data_)
+    , const_col_data(const_col_data_)
+    , const_ind_data((format_ == rocsparse_format_coo_aos) ? const_row_data_ : nullptr)
+    , const_val_data(const_val_data_)
+    ,
+
+    row_type(row_indextype_)
+    , col_type(col_indextype_)
+    , data_type(val_datatype_)
+    ,
+
+    idx_base(base_)
+    , format(format_)
+    ,
+
+    descr(descr_)
+    , info(info_)
+    ,
+
+    block_dir((rocsparse_direction)-1)
+    , block_dim(0)
+    , ell_cols(0)
+    , ell_width(0)
+    ,
+
+    batch_count(batch_count_)
+    , batch_stride(val_stride_)
+    , offsets_batch_stride(row_stride_)
+    , columns_values_batch_stride{col_stride_}
+
+{
+}
+
+_rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
+                                               bool                 analysed_,
+                                               int64_t              batch_count_,
+                                               int64_t              m_,
+                                               int64_t              n_,
+                                               int64_t              nnz_,
+                                               rocsparse_direction  block_dir_,
+                                               int64_t              block_dim_,
+                                               rocsparse_datatype   val_datatype_,
+                                               const void*          const_val_data_,
+                                               void*                val_data_,
+                                               int64_t              val_stride_,
+                                               rocsparse_indextype  row_indextype_,
+                                               const void*          const_row_data_,
+                                               void*                row_data_,
+                                               int64_t              row_stride_,
+                                               rocsparse_indextype  col_indextype_,
+                                               const void*          const_col_data_,
+                                               void*                col_data_,
+                                               int64_t              col_stride_,
+                                               rocsparse_index_base base_,
+                                               rocsparse_mat_descr  descr_,
+                                               rocsparse_mat_info   info_)
+    : init(true)
+    , analysed(analysed_)
+    ,
+
+    rows(m_)
+    , cols(n_)
+    , nnz(nnz_)
+    ,
+
+    row_data(row_data_)
+    , col_data(col_data_)
+    , ind_data(nullptr)
+    , val_data(val_data_)
+    ,
+
+    const_row_data(const_row_data_)
+    , const_col_data(const_col_data_)
+    , const_ind_data(nullptr)
+    , const_val_data(const_val_data_)
+    ,
+
+    row_type(row_indextype_)
+    , col_type(col_indextype_)
+    , data_type(val_datatype_)
+    ,
+
+    idx_base(base_)
+    , format(format_)
+    ,
+
+    descr(descr_)
+    , info(info_)
+    ,
+
+    block_dir(block_dir_)
+    , block_dim(block_dim_)
+    , ell_cols(0)
+    , ell_width(0)
+    ,
+
+    batch_count(batch_count_)
+    , batch_stride(val_stride_)
+    , offsets_batch_stride(row_stride_)
+    , columns_values_batch_stride{col_stride_}
+
+{
+}
+
+_rocsparse_dnvec_descr::_rocsparse_dnvec_descr(int64_t            batch_count_,
+                                               int64_t            nitems_,
+                                               rocsparse_datatype datatype_,
+                                               const void*        const_values_,
+                                               void*              values_,
+                                               int64_t            inc_,
+                                               int64_t            batch_stride_)
+    : init(true)
+    , size(nitems_)
+    , values(values_)
+    , const_values(const_values_)
+    , data_type(datatype_)
+    , batch_stride(batch_stride_)
+    , batch_count(batch_count_)
+    , inc(inc_)
+{
+}
+
 /********************************************************************************
  * \brief rocsparse_create_coo_descr creates a descriptor holding the COO matrix
  * data, sizes and properties. It must be called prior to all subsequent library
@@ -2093,7 +2247,6 @@ try
     *descr = new _rocsparse_spmat_descr;
 
     (*descr)->init = true;
-
     (*descr)->rows = rows;
     (*descr)->cols = cols;
     (*descr)->nnz  = nnz;
@@ -3915,10 +4068,8 @@ rocsparse_status rocsparse_bsr_set_pointers(rocsparse_spmat_descr descr,
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
-
     ROCSPARSE_CHECKARG_POINTER(1, bsr_row_ptr);
     ROCSPARSE_CHECKARG(
         2, bsr_col_ind, descr->nnz > 0 && bsr_col_ind == nullptr, rocsparse_status_invalid_pointer);
@@ -4316,6 +4467,7 @@ try
                        rocsparse_status_invalid_value);
 
     descr->batch_count                 = batch_count;
+    descr->batch_stride                = columns_values_batch_stride;
     descr->offsets_batch_stride        = offsets_batch_stride;
     descr->columns_values_batch_stride = columns_values_batch_stride;
 
@@ -4512,15 +4664,11 @@ try
     ROCSPARSE_CHECKARG_SIZE(1, size);
     ROCSPARSE_CHECKARG_ARRAY(2, size, values);
     ROCSPARSE_CHECKARG_ENUM(3, data_type);
-
-    *descr = new _rocsparse_dnvec_descr;
-
-    (*descr)->init = true;
-
-    (*descr)->size         = size;
-    (*descr)->values       = values;
-    (*descr)->const_values = values;
-    (*descr)->data_type    = data_type;
+    static constexpr int64_t batch_count = 1;
+    static constexpr int64_t inc         = 1;
+    static constexpr int64_t batch_dist  = 0;
+    descr[0]
+        = new _rocsparse_dnvec_descr(batch_count, size, data_type, values, values, inc, batch_dist);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -4543,16 +4691,11 @@ try
     ROCSPARSE_CHECKARG_ARRAY(2, size, values);
     ROCSPARSE_CHECKARG_ENUM(3, data_type);
 
-    rocsparse_dnvec_descr new_descr = new _rocsparse_dnvec_descr;
-
-    new_descr->init = true;
-
-    new_descr->size         = size;
-    new_descr->values       = nullptr;
-    new_descr->const_values = values;
-    new_descr->data_type    = data_type;
-
-    *descr = new_descr;
+    static constexpr int64_t batch_count = 1;
+    static constexpr int64_t inc         = 1;
+    static constexpr int64_t batch_dist  = 0;
+    descr[0]                             = new _rocsparse_dnvec_descr(
+        batch_count, size, data_type, values, nullptr, inc, batch_dist);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -5021,6 +5164,34 @@ catch(...)
 // LCOV_EXCL_STOP
 
 /********************************************************************************
+ * \brief rocsparse_dnvec_get_strided_batch gets the dense matrix batch count
+ * and batch stride.
+ *******************************************************************************/
+rocsparse_status rocsparse_dnvec_get_strided_batch(rocsparse_const_dnvec_descr descr,
+                                                   rocsparse_int*              batch_count,
+                                                   int64_t*                    batch_stride)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG_POINTER(1, batch_count);
+    ROCSPARSE_CHECKARG_POINTER(2, batch_stride);
+
+    *batch_count  = descr->batch_count;
+    *batch_stride = descr->batch_stride;
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
  * \brief rocsparse_dnmat_set_strided_batch sets the dense matrix batch count
  * and batch stride.
  *******************************************************************************/
@@ -5054,6 +5225,32 @@ try
     descr->batch_count  = batch_count;
     descr->batch_stride = batch_stride;
 
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_dnvec_set_strided_batch sets the dense matrix batch count
+ * and batch stride.
+ *******************************************************************************/
+rocsparse_status rocsparse_dnvec_set_strided_batch(rocsparse_dnvec_descr descr,
+                                                   rocsparse_int         batch_count,
+                                                   int64_t               batch_stride)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
+
+    descr->batch_count  = batch_count;
+    descr->batch_stride = batch_stride;
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -5147,11 +5344,13 @@ try
 
     *descr = new _rocsparse_spgeam_descr();
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_destroy_spgeam_descr(rocsparse_spgeam_descr descr)
 try
@@ -5181,11 +5380,13 @@ try
 
     delete descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spgeam_set_input gets the input on the SpGEAM descriptor.
@@ -5278,11 +5479,13 @@ try
     }
     }
     return rocsparse_status_invalid_value;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spgeam_get_output gets the output from the SpGEAM descriptor.
@@ -5316,11 +5519,13 @@ try
     }
 
     return rocsparse_status_invalid_value;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 #ifdef __cplusplus
 }

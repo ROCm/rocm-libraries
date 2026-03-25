@@ -39,10 +39,10 @@ supported_distro( )
   fi
 
   case "${ID}" in
-    ubuntu|centos|rhel|fedora|sles|opensuse-leap)
+    ubuntu|debian|centos|rhel|fedora|sles|opensuse-leap|almalinux|rocky|ol)
         true
         ;;
-    *)  printf "This script is currently supported on Ubuntu, CentOS, RHEL, Fedora, SLES, and OpenSUSE-Leap\n"
+    *)  printf "This script is currently supported on Ubuntu, Debian, CentOS, RHEL, Fedora, SLES, OpenSUSE-Leap, Alma Linux, Rocky Linux (rocky), and Oracle Linux (ol) (detected: ${ID})\n"
         exit 2
         ;;
   esac
@@ -149,7 +149,7 @@ install_packages( )
   local client_dependencies_fedora=( "gcc-gfortran" )
   local client_dependencies_sles=( "gcc-fortran" )
 
-  if [[ ( "${ID}" == "centos" ) || ( "${ID}" == "rhel" ) ]]; then
+  if [[ ( "${ID}" == "centos" ) || ( "${ID}" == "rhel" ) || ( "${ID}" == "almalinux" ) || ( "${ID}" == "rocky" ) || ( "${ID}" == "ol" ) ]]; then
     if [[ "${MAJORVERSION}" == "6" ]]; then
       library_dependencies_centos_6+=( "numactl" )
     else
@@ -173,12 +173,12 @@ install_packages( )
   fi
 
   case "${ID}" in
-    ubuntu)
+    ubuntu|debian)
       elevate_if_not_root apt update
       install_apt_packages "${library_dependencies_ubuntu[@]}"
       ;;
 
-    centos|rhel)
+    centos|rhel|almalinux|rocky|ol)
 #     yum -y update brings *all* installed packages up to date
 #     without seeking user approval
 #     elevate_if_not_root yum -y update
@@ -227,7 +227,7 @@ install_packages( )
       fi
       ;;
     *)
-      echo "This script is currently supported on Ubuntu, CentOS, RHEL and Fedora"
+      echo "This script is currently supported on Ubuntu, Debian, CentOS, RHEL and Fedora"
       exit 2
       ;;
   esac
@@ -279,6 +279,7 @@ rocm_path=/opt/rocm
 build_relocatable=false
 build_address_sanitizer=false
 compiler=${CXX}
+c_compiler=${CC}
 
 # #################################################
 # Parameter parsing
@@ -343,6 +344,7 @@ while true; do
     --address-sanitizer)
         build_address_sanitizer=true
         compiler=amdclang++
+        c_compiler=amdclang
         shift ;;
     --matrices-dir)
         matrices_dir=${2}
@@ -373,6 +375,7 @@ done
 # or through using --compiler option. This is important so that googletest and hipsparse are built with the same
 # compiler to ensure settings like position independent code is consistent when linking.
 CXX=${compiler}
+CC=${c_compiler}
 
 if [[ "${build_relocatable}" == true ]]; then
     if ! [ -z ${ROCM_PATH+x} ]; then
@@ -430,7 +433,7 @@ fi
 cmake_executable=cmake
 
 case "${ID}" in
-  centos|rhel)
+  centos|rhel|almalinux|rocky|ol)
   cmake_executable=cmake3
   ;;
 esac
@@ -539,7 +542,7 @@ pushd .
 
   # Build library
   if [[ "${build_relocatable}" == true ]]; then
-    CXX=${compiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} \
+    CXX=${compiler} CC=${c_compiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} \
       -DCMAKE_INSTALL_PREFIX="${install_prefix}" \
       -DCMAKE_SHARED_LINKER_FLAGS="${rocm_rpath}" \
       -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hip" \
@@ -548,7 +551,7 @@ pushd .
       -DROCM_DISABLE_LDCONFIG=ON \
       -DROCM_PATH="${rocm_path}" ../..
   else
-    CXX=${compiler} ${cmake_executable} -DCMAKE_EXE_LINKER_FLAGS=" ${cmake_build_static_options}" ${cmake_common_options} ${cmake_client_options} -DCMAKE_INSTALL_PREFIX=hipsparse-install -DROCM_PATH=${rocm_path} ../..
+    CXX=${compiler} CC=${c_compiler} ${cmake_executable} -DCMAKE_EXE_LINKER_FLAGS=" ${cmake_build_static_options}" ${cmake_common_options} ${cmake_client_options} -DCMAKE_INSTALL_PREFIX=hipsparse-install -DROCM_PATH=${rocm_path} ../..
   fi
 
   check_exit_code "$?"
@@ -565,10 +568,10 @@ pushd .
     check_exit_code "$?"
 
     case "${ID}" in
-      ubuntu)
+      ubuntu|debian)
         elevate_if_not_root dpkg -i hipsparse[-\_]*.deb
       ;;
-      centos|rhel)
+      centos|rhel|almalinux|rocky|ol)
         elevate_if_not_root yum -y localinstall hipsparse-*.rpm
       ;;
       fedora)

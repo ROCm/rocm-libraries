@@ -81,9 +81,6 @@ struct verify_fwd_batchnorm_spatial_activ
     tensor<U> bnscale{};
     tensor<U> bnbias{};
     miopenProblem_t problem;
-    // miopenFusionPlanDescriptor_t fusionplan;
-    // miopenFusionOpDescriptor_t bNormFwdOp;
-    // miopenFusionOpDescriptor_t activFwdOp;
     miopen::TensorDescriptor derivedBnDesc{};
     double epsilon;
     double expAvgFactor;
@@ -91,23 +88,17 @@ struct verify_fwd_batchnorm_spatial_activ
     double alpha;
     double beta;
 
-    verify_fwd_batchnorm_spatial_activ( // miopenFusionPlanDescriptor_t pfwdfusionplan,
-        miopenProblem_t problem_,
-        const tensor<T>& pinput,
-        miopenActivationDescriptor_t pactivDesc,
-        const tensor<U>& pbnscale,
-        const tensor<U>& pbnbias/*,
-        miopenFusionOpDescriptor_t pbNormFwdOp,
-        miopenFusionOpDescriptor_t pactivFwdOp*/)
+    verify_fwd_batchnorm_spatial_activ(miopenProblem_t problem_,
+                                       const tensor<T>& pinput,
+                                       miopenActivationDescriptor_t pactivDesc,
+                                       const tensor<U>& pbnscale,
+                                       const tensor<U>& pbnbias)
     {
-        problem   = problem_;
-        x         = pinput;
-        activDesc = pactivDesc;
-        bnscale   = pbnscale;
-        bnbias    = pbnbias;
-        // fusionplan   = pfwdfusionplan;
-        // bNormFwdOp   = pbNormFwdOp;
-        // activFwdOp   = pactivFwdOp;
+        problem      = problem_;
+        x            = pinput;
+        activDesc    = pactivDesc;
+        bnscale      = pbnscale;
+        bnbias       = pbnbias;
         epsilon      = MIO_BN_TEST_EPSILON;
         expAvgFactor = MIO_BN_TEST_EXPAVGFACTOR;
         miopen::DeriveBNTensorDescriptor(derivedBnDesc, x.desc, miopenBNSpatial);
@@ -119,7 +110,6 @@ struct verify_fwd_batchnorm_spatial_activ
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>, tensor<U>, tensor<U>> cpu() const
     {
-
         auto bout = x;
         std::fill(bout.begin(), bout.end(), 0.);
         auto aout = x;
@@ -209,37 +199,6 @@ struct verify_fwd_batchnorm_spatial_activ
             // clang-format on
         };
 
-        /*double activ_alpha, activ_beta, activ_gamma;
-        miopenActivationMode_t activ_mode;
-        miopenGetActivationDescriptor(
-            activDesc, &activ_mode, &activ_alpha, &activ_beta, &activ_gamma);
-        auto ptr_fusionargs = GetManageFusionPlanArgs();
-        miopenSetOpArgsBatchNormForward(ptr_fusionargs.get(),
-                                        bNormFwdOp,
-                                        &alpha,
-                                        &beta,
-                                        bnscale_dev.get(),
-                                        bnbias_dev.get(),
-                                        savedMean_dev.get(),
-                                        savedInvVar_dev.get(),
-                                        runningMean_dev.get(),
-                                        runningVariance_dev.get(),
-                                        expAvgFactor,
-                                        epsilon);
-        miopenSetOpArgsActivForward(
-            ptr_fusionargs.get(), activFwdOp, &alpha, &beta, activ_alpha, activ_beta,
-        activ_gamma);
-
-        auto lclxdesc = x.desc;
-        miopenExecuteFusionPlan(&handle,
-                                fusionplan,
-                                &lclxdesc,
-                                in_dev.get(),
-                                &lclxdesc,
-                                out_dev.get(),
-                                ptr_fusionargs.get());
-                                */
-
         std::vector<miopenSolution_t> solutions;
         solutions.resize(1);
 
@@ -274,7 +233,6 @@ struct verify_fwd_batchnorm_spatial_activ
 
     void fail(int badtensor) const
     {
-
         std::cout << "Forward Train Spatial Batch Normalization + Activation: " << std::endl;
         std::cout << "Input tensor: " << x.desc.ToString() << std::endl;
 
@@ -306,9 +264,6 @@ struct verify_bwd_batchnorm_spatial_activ
     tensor<U> bnscale{};
     tensor<U> bnbias{};
     miopenProblem_t problem;
-    // miopenFusionPlanDescriptor_t fusionplan;
-    // miopenFusionOpDescriptor_t bNormBwdOp;
-    // miopenFusionOpDescriptor_t activBwdOp;
     miopen::TensorDescriptor derivedBnDesc{};
     double epsilon;
     double expAvgFactor;
@@ -318,7 +273,6 @@ struct verify_bwd_batchnorm_spatial_activ
     double beta;
 
     verify_bwd_batchnorm_spatial_activ(miopenProblem_t problem_,
-                                       // miopenFusionPlanDescriptor_t pbwdfusionplan,
                                        const tensor<T>& pdyin,
                                        const tensor<T>& pxin,
                                        const tensor<T>& pyin,
@@ -326,22 +280,17 @@ struct verify_bwd_batchnorm_spatial_activ
                                        const tensor<U>& pbnscale,
                                        const tensor<U>& pbnbias,
                                        const tensor<U>& psavedMean,
-                                       const tensor<U>& psavedInvVar/*,
-                                       miopenFusionOpDescriptor_t pbNormBwdOp,
-                                       miopenFusionOpDescriptor_t pactivBwdOp*/)
+                                       const tensor<U>& psavedInvVar)
     {
-        x           = pxin;
-        y           = pyin;
-        dy          = pdyin;
-        savedMean   = psavedMean;
-        savedInvVar = psavedInvVar;
-        activDesc   = pactivDesc;
-        bnscale     = pbnscale;
-        bnbias      = pbnbias;
-        problem     = problem_;
-        // fusionplan   = pbwdfusionplan;
-        // bNormBwdOp   = pbNormBwdOp;
-        // activBwdOp   = pactivBwdOp;
+        x            = pxin;
+        y            = pyin;
+        dy           = pdyin;
+        savedMean    = psavedMean;
+        savedInvVar  = psavedInvVar;
+        activDesc    = pactivDesc;
+        bnscale      = pbnscale;
+        bnbias       = pbnbias;
+        problem      = problem_;
         epsilon      = MIO_BN_TEST_EPSILON;
         expAvgFactor = MIO_BN_TEST_EXPAVGFACTOR;
         miopen::DeriveBNTensorDescriptor(derivedBnDesc, x.desc, miopenBNSpatial);
@@ -473,43 +422,6 @@ struct verify_bwd_batchnorm_spatial_activ
             EXPECT_EQUAL(run_ret, miopenStatusSuccess);
         }
 
-        /*
-        double activ_alpha, activ_beta, activ_gamma;
-        miopenActivationMode_t activ_mode;
-        miopenGetActivationDescriptor(
-            activDesc, &activ_mode, &activ_alpha, &activ_beta, &activ_gamma);
-        auto ptr_fusionargs = GetManageFusionPlanArgs();
-        miopenSetOpArgsBatchNormBackward(ptr_fusionargs.get(),
-                                         bNormBwdOp,
-                                         &alpha,
-                                         &beta,
-                                         xin_dev.get(),
-                                         bnscale_dev.get(),
-                                         bnbias_dev.get(),
-                                         dgamma_dev.get(),
-                                         dbeta_dev.get(),
-                                         savedMean_dev.get(),
-                                         savedInvVar_dev.get());
-        miopenSetOpArgsActivBackward(ptr_fusionargs.get(),
-                                     activBwdOp,
-                                     &alpha,
-                                     &beta,
-                                     yin_dev.get(),
-                                     nullptr,
-                                     activ_alpha,
-                                     activ_beta,
-                                     activ_gamma);
-
-        auto lcldydesc = dy.desc;
-        miopenExecuteFusionPlan(&handle,
-                                fusionplan,
-                                &lcldydesc,
-                                dyin_dev.get(),
-                                &lcldydesc,
-                                dxout_dev.get(),
-                                ptr_fusionargs.get());
-                                */
-
         dx.data     = handle.Read<T>(dxout_dev, dx.data.size());
         dgamma.data = handle.Read<U>(dgamma_dev, dgamma.data.size());
         dbeta.data  = handle.Read<U>(dbeta_dev, dbeta.data.size());
@@ -518,7 +430,6 @@ struct verify_bwd_batchnorm_spatial_activ
 
     void fail(int badtensor) const
     {
-
         std::cout << "Backward Train Spatial Batch Normalization + Activation: " << std::endl;
         std::cout << "Input x tensor: " << x.desc.ToString() << std::endl;
         std::cout << "Input y tensor: " << y.desc.ToString() << std::endl;
@@ -633,7 +544,6 @@ struct verify_fwd_batchnorm_peract_activ
         auto savedInvVar_dev     = handle.Write(savedInvVar.data);
         auto runningMean_dev     = handle.Write(runMean.data);
         auto runningVariance_dev = handle.Write(runVar.data);
-        // double activ_alpha, activ_beta, activ_gamma;
 
         const auto find_options = MakeFindOtions();
         // clang-format off
@@ -687,35 +597,6 @@ struct verify_fwd_batchnorm_peract_activ
             EXPECT_EQUAL(run_ret, miopenStatusSuccess);
         }
 
-        // miopenActivationMode_t activ_mode;
-        // miopenGetActivationDescriptor(
-        //     activDesc, &activ_mode, &activ_alpha, &activ_beta, &activ_gamma);
-        // auto ptr_fusionargs = GetManageFusionPlanArgs();
-        // miopenSetOpArgsBatchNormForward(ptr_fusionargs.get(),
-        //                                 bNormFwdOp,
-        //                                 &alpha,
-        //                                 &beta,
-        //                                 bnscale_dev.get(),
-        //                                 bnbias_dev.get(),
-        //                                 savedMean_dev.get(),
-        //                                 savedInvVar_dev.get(),
-        //                                 runningMean_dev.get(),
-        //                                 runningVariance_dev.get(),
-        //                                 expAvgFactor,
-        //                                 epsilon);
-        // miopenSetOpArgsActivForward(
-        //     ptr_fusionargs.get(), activFwdOp, &alpha, &beta, activ_alpha, activ_beta,
-        //     activ_gamma);
-
-        // auto lclxdesc = x.desc;
-        // miopenExecuteFusionPlan(&handle,
-        //                         fusionplan,
-        //                         &lclxdesc,
-        //                         in_dev.get(),
-        //                         &lclxdesc,
-        //                         out_dev.get(),
-        //                         ptr_fusionargs.get());
-
         baout.data       = handle.Read<T>(out_dev, baout.data.size());
         runMean.data     = handle.Read<U>(runningMean_dev, runMean.data.size());
         runVar.data      = handle.Read<U>(runningVariance_dev, runVar.data.size());
@@ -727,7 +608,6 @@ struct verify_fwd_batchnorm_peract_activ
 
     void fail(int badtensor) const
     {
-
         std::cout << "Forward Train Per Activation Batch Normalization + Activation: " << std::endl;
         std::cout << "Input tensor: " << x.desc.ToString() << std::endl;
 
@@ -799,7 +679,6 @@ struct verify_bwd_batchnorm_peract_activ
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>> cpu() const
     {
-
         auto dx = tensor<T>{input_n, input_c, input_h, input_w};
         std::fill(dx.begin(), dx.end(), 0.);
 
@@ -906,41 +785,6 @@ struct verify_bwd_batchnorm_peract_activ
             EXPECT_EQUAL(run_ret, miopenStatusSuccess);
         }
 
-        // double activ_alpha, activ_beta, activ_gamma;
-        // miopenActivationMode_t activ_mode;
-        // miopenGetActivationDescriptor(
-        //    activDesc, &activ_mode, &activ_alpha, &activ_beta, &activ_gamma);
-        // auto ptr_fusionargs = GetManageFusionPlanArgs();
-        // miopenSetOpArgsBatchNormBackward(ptr_fusionargs.get(),
-        //                                 bNormBwdOp,
-        //                                 &alpha,
-        //                                 &beta,
-        //                                 xin_dev.get(),
-        //                                 bnscale_dev.get(),
-        //                                 bnbias_dev.get(),
-        //                                 dgamma_dev.get(),
-        //                                 dbeta_dev.get(),
-        //                                 savedMean_dev.get(),
-        //                                 savedInvVar_dev.get());
-        // miopenSetOpArgsActivBackward(ptr_fusionargs.get(),
-        //                             activBwdOp,
-        //                             &alpha,
-        //                             &beta,
-        //                             yin_dev.get(),
-        //                             nullptr,
-        //                             activ_alpha,
-        //                             activ_beta,
-        //                             activ_gamma);
-
-        // auto lcldydesc = dy.desc;
-        // miopenExecuteFusionPlan(&handle,
-        //                        fusionplan,
-        //                        &lcldydesc,
-        //                        dyin_dev.get(),
-        //                        &lcldydesc,
-        //                        dxout_dev.get(),
-        //                        ptr_fusionargs.get());
-
         dx.data     = handle.Read<T>(dxout_dev, dx.data.size());
         dgamma.data = handle.Read<U>(dgamma_dev, dgamma.data.size());
         dbeta.data  = handle.Read<U>(dbeta_dev, dbeta.data.size());
@@ -949,7 +793,6 @@ struct verify_bwd_batchnorm_peract_activ
 
     void fail(int badtensor) const
     {
-
         std::cout << "Backward Train Per Activation Batch Normalization + Activation: "
                   << std::endl;
         std::cout << "Input x tensor: " << x.desc.ToString() << std::endl;
@@ -1000,7 +843,7 @@ struct na_fusion_driver : test_driver
     {
         this->batch_factor = 4;
 
-        add(batchnormMode, "batch-norm-mode", generate_data({/*0, */ 1}));
+        add(batchnormMode, "batch-norm-mode", generate_data({0, 1}));
         add(input,
             "input",
             (batchnormMode == 1) ? get_bn_spatial_input_tensor(tensor_elem_gen_integer{max_value})
@@ -1011,7 +854,7 @@ struct na_fusion_driver : test_driver
         add(amode,
             "amode",
             generate_data(
-                {"MIOPENACTIVATIONRELU" /*, "MIOPENACTIVATIONLOGISTIC", "MIOPENACTIVATIONABS"*/}));
+                {"MIOPENACTIVATIONRELU", "MIOPENACTIVATIONLOGISTIC", "MIOPENACTIVATIONABS"}));
     }
 
     void run()
@@ -1043,8 +886,9 @@ struct na_fusion_driver : test_driver
 
         std::size_t input_n, input_c, input_h, input_w;
         std::tie(input_n, input_c, input_h, input_w) = miopen::tien<4>(input.desc.GetLengths());
-        this->tolerance                              = 80 * double(input.desc.GetElementSize());
-        ptr_activdesc                                = GetManagedActivDesc();
+        this->tolerance = std::min(80 * double(input.desc.GetElementSize()),
+                                   1280 * sqrt(double(input.desc.GetElementSize())));
+        ptr_activdesc   = GetManagedActivDesc();
         miopenSetActivationDescriptor(ptr_activdesc.get(), activ_mode, alpha, beta, gamma);
         auto&& handle = get_handle();
 
@@ -1054,7 +898,6 @@ struct na_fusion_driver : test_driver
         std::size_t ssn, ssc, ssh, ssw;
         if(batchnormMode == 1)
         {
-
             bnmode = miopenBNSpatial;
 
             miopen::TensorDescriptor derivedBnDesc{};
@@ -1064,16 +907,6 @@ struct na_fusion_driver : test_driver
                 tensor<PREC_TYPE>{ssn, ssc, ssh, ssw}.generate(tensor_elem_gen_integer{max_value});
             shift =
                 tensor<PREC_TYPE>{ssn, ssc, ssh, ssw}.generate(tensor_elem_gen_integer{max_value});
-            /*miopenCreateOpBatchNormForward(ptr_fwdfusionplan.get(), &bNormFwdOp, bnmode, true);
-            miopenCreateOpActivationForward(ptr_fwdfusionplan.get(), &activFwdOp, activ_mode);
-            miopenStatus_t miopenFwdError =
-                miopenCompileFusionPlan(&handle, ptr_fwdfusionplan.get());
-            if(miopenFwdError != miopenStatusSuccess)
-            {
-                std::cerr << "BatchNorm+Activation Spatial Forward Training plan not supported."
-                          << std::endl;
-                return;
-            }*/
 
             const auto fwd_problem = [&]() {
                 miopenProblem_t problem;
@@ -1129,43 +962,17 @@ struct na_fusion_driver : test_driver
                 return ManagedProblem{problem, &miopenDestroyProblem};
             }();
 
-            /*
-            auto fwdTrain =
-                verify(verify_fwd_batchnorm_spatial_activ<T, PREC_TYPE>{ptr_fwdfusionplan.get(),
-                                                                        input,
-                                                                        ptr_activdesc.get(),
-                                                                        scale,
-                                                                        shift,
-                                                                        bNormFwdOp,
-                                                                        activFwdOp});
-                                                                        */
-
             auto fwdTrain = verify(verify_fwd_batchnorm_spatial_activ<T, PREC_TYPE>{
                 fwd_problem.get(), input, ptr_activdesc.get(), scale, shift});
 
-            //        Tuple returns: (aout, runMean, runVar, savedMean, savedInvVar);
             auto y_in        = std::get<0>(fwdTrain.second);
             auto savedMean   = std::get<3>(fwdTrain.second);
             auto savedInvVar = std::get<4>(fwdTrain.second);
             auto dyin        = tensor<T>{input_n, input_c, input_h, input_w}.generate(
                 tensor_elem_gen_integer{max_value});
 
-            /*
-            miopenCreateOpBatchNormBackward(ptr_bwdfusionplan.get(), &bNormBwdOp, bnmode);
-            miopenCreateOpActivationBackward(ptr_bwdfusionplan.get(), &activBwdOp, activ_mode);
-            miopenStatus_t miopenBwdError =
-                miopenCompileFusionPlan(&handle, ptr_bwdfusionplan.get());
-            if(miopenBwdError != miopenStatusSuccess)
-            {
-                std::cerr << "BatchNorm+Activation Spatial Backward Training plan not supported."
-                          << std::endl;
-                return;
-            }
-            */
-
             verify(verify_bwd_batchnorm_spatial_activ<T, PREC_TYPE>{
                 bwd_problem.get(),
-                // ptr_bwdfusionplan.get(),
                 dyin,
                 input,
                 y_in,
@@ -1174,16 +981,10 @@ struct na_fusion_driver : test_driver
                 shift,
                 savedMean,
                 savedInvVar,
-                // bNormBwdOp,
-                // activBwdOp,
             });
         }
         else if(batchnormMode == 0)
         {
-            // miopenFusionOpDescriptor_t bNormFwdOp = nullptr;
-            // miopenFusionOpDescriptor_t activFwdOp = nullptr;
-            // auto ptr_fwdfusionplan                = GetManagedFusionPlanDesc(&input.desc);
-
             miopenFusionOpDescriptor_t bNormBwdOp = nullptr;
             miopenFusionOpDescriptor_t activBwdOp = nullptr;
             auto ptr_bwdfusionplan                = GetManagedFusionPlanDesc(&input.desc);
@@ -1196,17 +997,6 @@ struct na_fusion_driver : test_driver
                 tensor<PREC_TYPE>{ssn, ssc, ssh, ssw}.generate(tensor_elem_gen_integer{max_value});
             shift =
                 tensor<PREC_TYPE>{ssn, ssc, ssh, ssw}.generate(tensor_elem_gen_integer{max_value});
-            // miopenCreateOpBatchNormForward(ptr_fwdfusionplan.get(), &bNormFwdOp, bnmode, true);
-            // miopenCreateOpActivationForward(ptr_fwdfusionplan.get(), &activFwdOp, activ_mode);
-            // miopenStatus_t miopenFwdError =
-            // miopenCompileFusionPlan(&handle, ptr_fwdfusionplan.get());
-            // if(miopenFwdError != miopenStatusSuccess)
-            // {
-            //    std::cerr
-            //        << "BatchNorm+Activation Per Activation Forward Training plan not supported."
-            //        << std::endl;
-            //    return;
-            //}
 
             const auto fwd_problem = [&]() {
                 miopenProblem_t problem;

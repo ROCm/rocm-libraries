@@ -9,16 +9,16 @@
 #include <random>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
-#include <hipdnn_sdk/utilities/MigratableMemory.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 namespace
 {
@@ -87,7 +87,7 @@ protected:
             , scaleTensor(Tensor<Intermediate_type>(derivedDims))
             , biasTensor(Tensor<Intermediate_type>(derivedDims))
             , meanTensor(Tensor<Intermediate_type>(derivedDims))
-            , varianceTensor(Tensor<Intermediate_type>(derivedDims))
+            , invVarianceTensor(Tensor<Intermediate_type>(derivedDims))
         {
             // Initialize with simple constant values
             xTensor.fillWithValue(static_cast<Input_type>(1.0f));
@@ -95,7 +95,7 @@ protected:
             scaleTensor.fillWithValue(static_cast<Intermediate_type>(1.0f));
             biasTensor.fillWithValue(static_cast<Intermediate_type>(0.0f));
             meanTensor.fillWithValue(static_cast<Intermediate_type>(0.0f));
-            varianceTensor.fillWithValue(static_cast<Intermediate_type>(1.0f));
+            invVarianceTensor.fillWithValue(static_cast<Intermediate_type>(1.0f));
         }
 
         std::vector<int64_t> derivedDims;
@@ -104,7 +104,7 @@ protected:
         Tensor<Intermediate_type> scaleTensor;
         Tensor<Intermediate_type> biasTensor;
         Tensor<Intermediate_type> meanTensor;
-        Tensor<Intermediate_type> varianceTensor;
+        Tensor<Intermediate_type> invVarianceTensor;
     };
 
     struct BatchnormTestTensors
@@ -120,6 +120,10 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+
+        ASSERT_EQ(hipInit(0), hipSuccess);
+        int deviceId = 0;
+        ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
     }
 
     void TearDown() override
@@ -132,10 +136,6 @@ protected:
 
     static hipdnnHandle_t setupEnvironmentWithPlugin(const std::string& pluginPath)
     {
-        EXPECT_EQ(hipInit(0), hipSuccess);
-        int deviceId = 0;
-        EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
-
         // Set up plugin path - load specific plugin by absolute path
         const std::array<const char*, 1> paths = {pluginPath.c_str()};
         EXPECT_EQ(hipdnnSetEnginePluginPaths_ext(
@@ -178,7 +178,7 @@ protected:
         tensors.mean = std::make_shared<TensorAttributes>(std::move(meanAttr));
 
         auto invVarianceAttr
-            = makeTensorAttributes("inv_variance", DataType::FLOAT, tensorBundle.varianceTensor);
+            = makeTensorAttributes("inv_variance", DataType::FLOAT, tensorBundle.invVarianceTensor);
         if(useManualUids)
         {
             invVarianceAttr.set_uid(uid++);
@@ -222,7 +222,7 @@ protected:
         variantPack[tensors.x->get_uid()] = tensorBundle.xTensor.memory().deviceData();
         variantPack[tensors.mean->get_uid()] = tensorBundle.meanTensor.memory().deviceData();
         variantPack[tensors.invVariance->get_uid()]
-            = tensorBundle.varianceTensor.memory().deviceData();
+            = tensorBundle.invVarianceTensor.memory().deviceData();
         variantPack[tensors.scale->get_uid()] = tensorBundle.scaleTensor.memory().deviceData();
         variantPack[tensors.bias->get_uid()] = tensorBundle.biasTensor.memory().deviceData();
         variantPack[tensors.y->get_uid()] = tensorBundle.yTensor.memory().deviceData();
@@ -284,7 +284,7 @@ protected:
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
 
         // Create tensor bundle
-        std::vector<int64_t> dims = {2, 3, 14, 14}; // n=2, c=3, h=14, w=14
+        const std::vector<int64_t> dims = {2, 3, 14, 14}; // n=2, c=3, h=14, w=14
         SimpleBatchnorm2DTensorBundle<float, float> tensorBundle(dims);
 
         // Create graph and tensors using the unified function

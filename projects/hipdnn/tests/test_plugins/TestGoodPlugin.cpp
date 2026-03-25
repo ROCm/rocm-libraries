@@ -3,9 +3,10 @@
 
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
+
 // NOLINTNEXTLINE
 thread_local char
-    hipdnn_plugin::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
+    hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
     = "";
 
 class GoodPlugin : public TestPluginBase
@@ -19,6 +20,12 @@ public:
     {
         return "1.0.0";
     }
+
+    const char* getPluginApiVersion() const override
+    {
+        return apiVersionWithoutTweak();
+    }
+
     int64_t getEngineId() const override
     {
         return hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
