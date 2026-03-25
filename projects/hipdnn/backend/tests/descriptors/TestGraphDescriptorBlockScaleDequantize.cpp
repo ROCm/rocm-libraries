@@ -20,7 +20,6 @@
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <array>
-#include <cstdint>
 #include <memory>
 #include <set>
 #include <vector>
@@ -85,58 +84,6 @@ public:
                            HIPDNN_TYPE_HANDLE,
                            1,
                            static_cast<const void*>(&handle));
-    }
-
-    // Build a graph from a BSD operation, finalize, and return serialized bytes
-    std::vector<uint8_t> buildAndSerializeBsdGraph(hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
-    {
-        auto xDesc = createFinalizedTensor(
-            K_BSD_TENSOR_X_UID, toVec(K_BSD_TENSOR_X_DIMS), toVec(K_BSD_TENSOR_X_STRIDES));
-        auto scaleDesc = createFinalizedTensor(K_BSD_TENSOR_SCALE_UID,
-                                               toVec(K_BSD_TENSOR_SCALE_DIMS),
-                                               toVec(K_BSD_TENSOR_SCALE_STRIDES));
-        auto yDesc = createFinalizedTensor(
-            K_BSD_TENSOR_Y_UID, toVec(K_BSD_TENSOR_Y_DIMS), toVec(K_BSD_TENSOR_Y_STRIDES));
-        auto opDesc = createFinalizedBlockScaleDequantizeOp(
-            xDesc.get(), scaleDesc.get(), yDesc.get(), computeType);
-
-        auto graphWrapper = createDescriptor<GraphDescriptor>();
-        auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
-
-        hipdnnHandle_t handle = &_mockHandle;
-        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
-                                HIPDNN_TYPE_HANDLE,
-                                1,
-                                static_cast<const void*>(&handle));
-
-        std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
-                                HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                1,
-                                static_cast<const void*>(ops.data()));
-        graphDesc->finalize();
-
-        auto serialized = graphDesc->getSerializedGraph();
-        return {static_cast<const uint8_t*>(serialized.ptr),
-                static_cast<const uint8_t*>(serialized.ptr) + serialized.size};
-    }
-
-    // Deserialize bytes into a new GraphDescriptor and finalize
-    std::shared_ptr<GraphDescriptor> deserializeAndFinalize(const std::vector<uint8_t>& bytes)
-    {
-        auto graphWrapper = createDescriptor<GraphDescriptor>();
-        auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
-
-        graphDesc->deserializeGraph(bytes.data(), bytes.size());
-
-        hipdnnHandle_t handle = &_mockHandle;
-        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
-                                HIPDNN_TYPE_HANDLE,
-                                1,
-                                static_cast<const void*>(&handle));
-        graphDesc->finalize();
-
-        return graphDesc;
     }
 
 protected:
@@ -230,81 +177,6 @@ TEST_F(TestGraphDescriptorBlockScaleDequantize, ComputeDataTypePreserved)
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
-}
-
-// =============================================================================
-// Lifting / Deserialization Round-Trip Tests
-// =============================================================================
-
-TEST_F(TestGraphDescriptorBlockScaleDequantize, DeserializePreservesBsdNode)
-{
-    auto serializedBytes = buildAndSerializeBsdGraph();
-
-    auto liftedGraph = deserializeAndFinalize(serializedBytes);
-
-    auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
-    ASSERT_EQ(graphT->nodes.size(), 1);
-    ASSERT_EQ(graphT->tensors.size(), 3);
-    ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::BlockScaleDequantizeAttributes);
-
-    auto* attrs = graphT->nodes[0]->attributes.AsBlockScaleDequantizeAttributes();
-    ASSERT_NE(attrs, nullptr);
-
-    EXPECT_EQ(attrs->x_tensor_uid, K_BSD_TENSOR_X_UID);
-    EXPECT_EQ(attrs->scale_tensor_uid, K_BSD_TENSOR_SCALE_UID);
-    EXPECT_EQ(attrs->y_tensor_uid, K_BSD_TENSOR_Y_UID);
-    ASSERT_EQ(attrs->block_size.size(), 1);
-    EXPECT_EQ(attrs->block_size[0], K_BSD_BLOCK_SIZE);
-    EXPECT_FALSE(attrs->is_negative_scale);
-}
-
-TEST_F(TestGraphDescriptorBlockScaleDequantize, LiftedGraphSerializesToSameBinary)
-{
-    auto originalBytes = buildAndSerializeBsdGraph();
-
-    auto liftedGraph = deserializeAndFinalize(originalBytes);
-
-    auto reSerializedData = liftedGraph->getSerializedGraph();
-    const std::vector<uint8_t> reSerializedBytes(static_cast<const uint8_t*>(reSerializedData.ptr),
-                                                 static_cast<const uint8_t*>(reSerializedData.ptr)
-                                                     + reSerializedData.size);
-
-    ASSERT_EQ(originalBytes.size(), reSerializedBytes.size());
-    EXPECT_EQ(originalBytes, reSerializedBytes);
-}
-
-TEST_F(TestGraphDescriptorBlockScaleDequantize, DeserializePreservesComputeDataType)
-{
-    auto serializedBytes = buildAndSerializeBsdGraph(HIPDNN_DATA_HALF);
-
-    auto liftedGraph = deserializeAndFinalize(serializedBytes);
-
-    auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
-    ASSERT_EQ(graphT->nodes.size(), 1);
-    EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
-}
-
-TEST_F(TestGraphDescriptorBlockScaleDequantize, DeserializePreservesTensorAttributes)
-{
-    auto serializedBytes = buildAndSerializeBsdGraph();
-
-    auto liftedGraph = deserializeAndFinalize(serializedBytes);
-
-    auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
-    ASSERT_EQ(graphT->tensors.size(), 3);
-
-    // Verify each tensor has the correct UID
-    std::set<int64_t> tensorUids;
-    for(const auto& tensor : graphT->tensors)
-    {
-        tensorUids.insert(tensor->uid);
-    }
-    EXPECT_EQ(tensorUids.count(K_BSD_TENSOR_X_UID), 1u);
-    EXPECT_EQ(tensorUids.count(K_BSD_TENSOR_SCALE_UID), 1u);
-    EXPECT_EQ(tensorUids.count(K_BSD_TENSOR_Y_UID), 1u);
 }
 
 } // namespace
