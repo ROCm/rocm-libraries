@@ -16,6 +16,7 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
 
     switch(nodeT.attributes.type)
     {
+    // Uncomment when fromNode() is implemented in the lifting PR:
     case NodeAttributes::BatchnormAttributes:
         return BatchnormOperationDescriptor::fromNode(nodeT, tensorMap);
     // case NodeAttributes::BatchnormBackwardAttributes:
