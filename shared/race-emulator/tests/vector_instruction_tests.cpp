@@ -1773,3 +1773,81 @@ TEST(Instructions, VPackB32F16) {
   EXPECT_EQ(packed & 0xFFFF, f16_one);
   EXPECT_EQ(packed >> 16, f16_neg2);
 }
+
+// ============================================================================
+// v_mfma_f32_16x16x32_f16 (gfx950, wave-64, K=32)
+//
+// D[16x16] = A[16x32] * B[32x16] + C[16x16], all f32 output, f16 inputs.
+// Each lane provides 8 f16 values (4 VGPRs) for A and B. The 64 lanes form
+// 4 groups of 16, each group covering 8 K-elements → 4 × 8 = 32.
+// ============================================================================
+
+TEST(Instructions, Mfma_F32_16x16x32_F16) {
+  Workgroup wg;
+  // 4 input + 4 output VGPRs per operand, plus headroom.
+  Wave wave(/*vgprCount=*/20, /*sgprCount=*/4, /*waveSize=*/64, wg);
+
+  // Set up A and B as all-ones in f16. With K=32, each output element
+  // should be 1.0 * 1.0 * 32 = 32.0.
+  uint16_t f16_one = raceemulator::floatToF16(1.0f);
+  uint32_t packed_ones = (static_cast<uint32_t>(f16_one) << 16) | f16_one;
+
+  for (int lane = 0; lane < 64; ++lane) {
+    // A in v[0:3], B in v[4:7], C=0 (literal).
+    for (int r = 0; r < 4; ++r) {
+      wave.setVgpr(r, lane, packed_ones);     // A
+      wave.setVgpr(4 + r, lane, packed_ones); // B
+    }
+  }
+
+  tryExecute(wave, "v_mfma_f32_16x16x32_f16 v[8:11], v[0:3], v[4:7], 0");
+
+  // Every element of the 16×16 output should be 32.0.
+  for (int lane = 0; lane < 64; ++lane) {
+    for (int i = 0; i < 4; ++i) {
+      float val = std::bit_cast<float>(wave.getVgpr(8 + i, lane));
+      EXPECT_FLOAT_EQ(val, 32.0f) << "lane=" << lane << " vgpr=" << (8 + i);
+    }
+  }
+}
+
+// Same test with non-trivial values: A=identity-like, B=known, verify
+// specific output elements.
+TEST(Instructions, Mfma_F32_16x16x32_F16_NonTrivial) {
+  Workgroup wg;
+  Wave wave(/*vgprCount=*/20, /*sgprCount=*/4, /*waveSize=*/64, wg);
+
+  // Zero all inputs first.
+  for (int lane = 0; lane < 64; ++lane) {
+    for (int r = 0; r < 12; ++r) {
+      wave.setVgpr(r, lane, 0);
+    }
+  }
+
+  // Set A[0][0] = 3.0, B[0][0] = 5.0, C=0.
+  // With the lane mapping: A row 0 is lane % 16 == 0, K-elem 0 is
+  // the low half of the first VGPR in group 0 (lane / 16 == 0).
+  // So lane 0, VGPR 0, low 16 bits.
+  uint16_t f16_3 = raceemulator::floatToF16(3.0f);
+  uint16_t f16_5 = raceemulator::floatToF16(5.0f);
+  wave.setVgpr(0, /*lane=*/0, static_cast<uint32_t>(f16_3)); // A[0][0] = 3.0
+  wave.setVgpr(4, /*lane=*/0, static_cast<uint32_t>(f16_5)); // B[0][0] = 5.0
+
+  tryExecute(wave, "v_mfma_f32_16x16x32_f16 v[8:11], v[0:3], v[4:7], 0");
+
+  // D[0][0] = A[0][0] * B[0][0] = 3.0 * 5.0 = 15.0.
+  // D[0][0] maps to: row=0, col=0 → lane with col=lane%16=0, row=4*(lane/16)+i.
+  // row=0 → lane/16=0, i=0 → lane=0, VGPR offset=0.
+  float d00 = std::bit_cast<float>(wave.getVgpr(8, /*lane=*/0));
+  EXPECT_FLOAT_EQ(d00, 15.0f);
+
+  // D[1][0] should be 0 (only A[0][0] was set, not A[1][0]).
+  // row=1 → lane/16=0, i=1 → lane=0, VGPR offset=1.
+  float d10 = std::bit_cast<float>(wave.getVgpr(9, /*lane=*/0));
+  EXPECT_FLOAT_EQ(d10, 0.0f);
+
+  // D[0][1] should be 0 (B[0][1] = 0).
+  // col=1 → lane=1, row=0 → i=0.
+  float d01 = std::bit_cast<float>(wave.getVgpr(8, /*lane=*/1));
+  EXPECT_FLOAT_EQ(d01, 0.0f);
+}

@@ -17,13 +17,8 @@ namespace raceemulator {
 
 namespace {
 
-// Coordinate mapping helpers (gfx942 MFMA 16x16x16 layout)
-static std::pair<int, int> mapLaneToCoordA(int lane, int elemIdx) {
-  int row = lane % 16;
-  int col = 4 * (lane / 16) + elemIdx;
-  return {row, col};
-}
-
+// C/D coordinate mapping (shared by MFMA 16x16xK variants).
+// Lane L → 4 output VGPRs → row = 4*(L/16)+elemIdx, col = L%16.
 static std::pair<int, int> mapLaneToCoordC(int lane, int elemIdx) {
   int col = lane % 16;
   int row = 4 * (lane / 16) + elemIdx;
@@ -108,12 +103,28 @@ class VMfmaF32_16168_XF32 : public Instruction {
   }
 };
 
-// v_mfma_f32_16x16x16_{bf16,f16} (gfx942, wave-64)
+// v_mfma_f32_16x16xK_{bf16,f16} (CDNA, wave-64)
 //
-// The only difference between the bf16 and f16 variants is the conversion
-// function used to unpack 16-bit inputs to float.  Templated on ToFloat.
-template <float (*ToFloat)(uint16_t)>
-class VMfmaF32_161616 : public Instruction {
+// D[16x16 f32] = A[16xK T] * B[Kx16 T] + C[16x16 f32]
+//
+// Template parameters:
+//   ToFloat    — f16→float or bf16→float conversion function.
+//   NInputRegs — VGPRs per A/B operand: K/8 (2 for K=16, 4 for K=32).
+//                Compile-time so the compiler can size arrays and unroll loops.
+//
+// K=16 is gfx942 (v_mfma_f32_16x16x16), K=32 is gfx950 (v_mfma_f32_16x16x32).
+//
+// Lane mapping (wave-64, 4 groups of 16 lanes):
+//   A: lane L holds row (L % 16). Each group of 16 lanes covers K/4 elements
+//      of the K dimension. NInputRegs VGPRs per operand, each holding
+//      2 packed f16/bf16 values → 2*NInputRegs elements per lane.
+//   B: same layout as A but interpreted as columns.
+//   C/D: lane L → 4 output VGPRs → row = 4*(L/16)+i, col = L%16.
+template <float (*ToFloat)(uint16_t), int NInputRegs>
+class VMfmaF32_16x16xK : public Instruction {
+  static constexpr int K = 8 * NInputRegs;
+  static constexpr int ElemsPerLane = 2 * NInputRegs;
+
 public:
   std::function<int()> getExecutor(Wave &wave,
                                    std::string_view line) const final {
@@ -129,36 +140,33 @@ public:
     assert(waveSize == 64);
 
     return [&wave, dst0, A, B, C, waveSize]() {
-      std::array<float, 16 * 16> matA = {};
-      std::array<float, 16 * 16> matB = {};
+      std::array<float, 16 * K> matA = {};
+      std::array<float, 16 * K> matB = {};
       std::array<float, 16 * 16> out = {};
 
       for (int l = 0; l < waveSize; ++l) {
-        uint32_t rA0 = wave.getVgpr(A + 0, l);
-        uint32_t rA1 = wave.getVgpr(A + 1, l);
-        uint16_t a_raw[4] = {static_cast<uint16_t>(rA0 & 0xFFFF),
-                             static_cast<uint16_t>(rA0 >> 16),
-                             static_cast<uint16_t>(rA1 & 0xFFFF),
-                             static_cast<uint16_t>(rA1 >> 16)};
+        uint16_t a_raw[ElemsPerLane], b_raw[ElemsPerLane];
+        for (int r = 0; r < NInputRegs; ++r) {
+          uint32_t rA = wave.getVgpr(A + r, l);
+          a_raw[2 * r] = static_cast<uint16_t>(rA & 0xFFFF);
+          a_raw[2 * r + 1] = static_cast<uint16_t>(rA >> 16);
+          uint32_t rB = wave.getVgpr(B + r, l);
+          b_raw[2 * r] = static_cast<uint16_t>(rB & 0xFFFF);
+          b_raw[2 * r + 1] = static_cast<uint16_t>(rB >> 16);
+        }
 
-        uint32_t rB0 = wave.getVgpr(B + 0, l);
-        uint32_t rB1 = wave.getVgpr(B + 1, l);
-        uint16_t b_raw[4] = {static_cast<uint16_t>(rB0 & 0xFFFF),
-                             static_cast<uint16_t>(rB0 >> 16),
-                             static_cast<uint16_t>(rB1 & 0xFFFF),
-                             static_cast<uint16_t>(rB1 >> 16)};
-
-        for (int i = 0; i < 4; ++i) {
-          auto [row, col] = mapLaneToCoordA(l, i);
-          matA[row * 16 + col] = ToFloat(a_raw[i]);
-          matB[row * 16 + col] = ToFloat(b_raw[i]);
+        int row = l % 16;
+        int kBase = ElemsPerLane * (l / 16);
+        for (int i = 0; i < ElemsPerLane; ++i) {
+          matA[row * K + kBase + i] = ToFloat(a_raw[i]);
+          matB[row * K + kBase + i] = ToFloat(b_raw[i]);
         }
 
         if (!C.isLiteral) {
           for (int i = 0; i < 4; ++i) {
             uint32_t rC = wave.getVgpr(C.reg.index + i, l);
-            auto [row, col] = mapLaneToCoordC(l, i);
-            out[row * 16 + col] = std::bit_cast<float>(rC);
+            auto [cRow, col] = mapLaneToCoordC(l, i);
+            out[cRow * 16 + col] = std::bit_cast<float>(rC);
           }
         } else {
           float initVal =
@@ -166,8 +174,8 @@ public:
                   ? 0.0f
                   : std::bit_cast<float>(static_cast<uint32_t>(C.literalValue));
           for (int i = 0; i < 4; ++i) {
-            auto [row, col] = mapLaneToCoordC(l, i);
-            out[row * 16 + col] = initVal;
+            auto [cRow, col] = mapLaneToCoordC(l, i);
+            out[cRow * 16 + col] = initVal;
           }
         }
       }
@@ -175,8 +183,8 @@ public:
       for (int row = 0; row < 16; ++row) {
         for (int col = 0; col < 16; ++col) {
           float sum = 0.0f;
-          for (int k = 0; k < 16; ++k) {
-            sum += matA[row * 16 + k] * matB[col * 16 + k];
+          for (int k = 0; k < K; ++k) {
+            sum += matA[row * K + k] * matB[col * K + k];
           }
           out[row * 16 + col] += sum;
         }
@@ -184,9 +192,9 @@ public:
 
       for (int l = 0; l < waveSize; ++l) {
         for (int i = 0; i < 4; ++i) {
-          auto [row, col] = mapLaneToCoordC(l, i);
+          auto [cRow, col] = mapLaneToCoordC(l, i);
           wave.setVgpr(dst0.index + i, l,
-                       std::bit_cast<uint32_t>(out[row * 16 + col]));
+                       std::bit_cast<uint32_t>(out[cRow * 16 + col]));
         }
       }
 
@@ -301,13 +309,17 @@ template <typename InstT> struct Register {
   }
 };
 
-static Register<VMfmaF32_161616<bf16ToFloat>>
+static Register<VMfmaF32_16x16xK<bf16ToFloat, 2>>
     v_mfma_bf16("v_mfma_f32_16x16x16_bf16");
-static Register<VMfmaF32_161616<bf16ToFloat>>
+static Register<VMfmaF32_16x16xK<bf16ToFloat, 2>>
     v_mfma_bf16_1k("v_mfma_f32_16x16x16bf16_1k");
-static Register<VMfmaF32_161616<f16ToFloat>>
+static Register<VMfmaF32_16x16xK<f16ToFloat, 2>>
     v_mfma_f16("v_mfma_f32_16x16x16_f16");
 static Register<VMfmaF32_16168_XF32> v_mfma_8("v_mfma_f32_16x16x8_xf32");
+static Register<VMfmaF32_16x16xK<bf16ToFloat, 4>>
+    v_mfma_bf16_32("v_mfma_f32_16x16x32_bf16");
+static Register<VMfmaF32_16x16xK<f16ToFloat, 4>>
+    v_mfma_f16_32("v_mfma_f32_16x16x32_f16");
 static Register<VWmmaF32_161616<bf16ToFloat>>
     v_wmma_bf16("v_wmma_f32_16x16x16_bf16");
 static Register<VWmmaF32_161616<f16ToFloat>>
