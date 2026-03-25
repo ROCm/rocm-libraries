@@ -46,7 +46,7 @@ inline Error {{ op.frontend.packer_function }}(
 {% if df.is_vector %}
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             {{ df.attr_name }},
-                                            HIPDNN_TYPE_INT64,
+                                            {{ df.backend_type }},
                                             attributes.{{ df.frontend_getter }},
                                             "{{ op.effective_error_label }} {{ df.name }}"));
 {% elif df.is_mode %}

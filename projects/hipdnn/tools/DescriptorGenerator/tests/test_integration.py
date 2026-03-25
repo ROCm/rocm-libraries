@@ -902,20 +902,20 @@ class TestDirectRenderMethods:
         assert len(result) > 0
 
     def test_render_backend_file_count(self, matmul_config, generator, tmp_path):
-        """render_backend for matmul (no mode enums) produces exactly 18 files."""
+        """render_backend for matmul (no mode enums) produces exactly 19 files."""
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = generator.render_backend(matmul_config, output_dir)
-        # 9 file templates + 9 fragment templates = 18
-        assert len(result) == 18
+        # 9 file templates + 10 fragment templates = 19
+        assert len(result) == 19
 
     def test_render_lift_only_file_count(self, matmul_config, generator, tmp_path):
-        """render_lift_only produces exactly 9 outputs (3 files + 5 fragments + 1 additions)."""
+        """render_lift_only produces exactly 10 outputs (3 files + 6 fragments + 1 additions)."""
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = generator.render_lift_only(matmul_config, output_dir)
-        # 3 lift templates + 5 lift fragments + 1 descriptor_lifting_additions = 9
-        assert len(result) == 9
+        # 3 lift templates + 6 lift fragments + 1 descriptor_lifting_additions = 10
+        assert len(result) == 10
 
     def test_render_frontend_file_count(
         self, convolution_fwd_config, generator, tmp_path

@@ -77,8 +77,8 @@ void {{ op.class_name }}::setAttribute(hipdnnBackendAttributeName_t attributeNam
 {% for df in op.data_fields %}
 {% if df.is_vector %}
     case {{ df.attr_name }}:
-        setScalarVector<int64_t>(_data.{{ df.fbs_field }},
-                       HIPDNN_TYPE_INT64,
+        setScalarVector<{{ df.cpp_type }}>(_data.{{ df.fbs_field }},
+                       {{ df.backend_type }},
                        attributeType,
                        elementCount,
                        arrayOfElements,
@@ -224,8 +224,8 @@ void {{ op.class_name }}::getAttribute(hipdnnBackendAttributeName_t attributeNam
 {% for df in op.data_fields %}
 {% if df.is_vector %}
     case {{ df.attr_name }}:
-        getScalarVector<int64_t>(_data.{{ df.fbs_field }},
-                       HIPDNN_TYPE_INT64,
+        getScalarVector<{{ df.cpp_type }}>(_data.{{ df.fbs_field }},
+                       {{ df.backend_type }},
                        attributeType,
                        requestedElementCount,
                        elementCount,
