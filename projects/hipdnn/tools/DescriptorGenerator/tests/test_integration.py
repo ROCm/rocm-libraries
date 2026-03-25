@@ -1230,3 +1230,70 @@ class TestOptionalTensorTemplateOutput:
         content = cpp_path.read_text()
         assert "setTensorDescriptorArray" in content
         assert "getTensorDescriptorArray" in content
+
+    # --- Optional scalar field (setOptionalScalar / getOptionalScalar) tests ---
+
+    def test_descriptor_optional_scalars_use_set_optional_scalar(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """setAttribute uses setOptionalScalar for optional scalar fields."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "setOptionalScalar<" in content
+
+    def test_descriptor_optional_scalars_use_get_optional_scalar(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """getAttribute uses getOptionalScalar for optional scalar fields."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "getOptionalScalar<" in content
+
+    def test_descriptor_required_scalars_no_optional_scalar(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Config with no optional scalars does NOT contain setOptionalScalar."""
+        config = convolution_fwd_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "setOptionalScalar" not in content
+        assert "getOptionalScalar" not in content
+
+    # --- fromNode() dereference tests ---
+
+    def test_descriptor_from_node_dereferences_optional_uid(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """fromNode() dereferences optional tensor UIDs with *."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        # Optional tensor UIDs must be dereferenced with * in findTensorInMap calls
+        assert "*attrs->in_1_tensor_uid" in content
+        assert "*attrs->in_2_tensor_uid" in content

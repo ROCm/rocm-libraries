@@ -96,6 +96,14 @@ void {{ op.class_name }}::setAttribute(hipdnnBackendAttributeName_t attributeNam
     case {{ df.attr_name }}:
         {{ df.setter_helper_name }}(attributeType, elementCount, arrayOfElements);
         break;
+{% elif df.is_optional_scalar %}
+    case {{ df.attr_name }}:
+        setOptionalScalar<{{ df.backend_type }}>(_data.{{ df.fbs_field }},
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "{{ op.class_name }}::setAttribute()");
+        break;
 {% elif df.is_scalar %}
     case {{ df.attr_name }}:
         setScalar(_data.{{ df.fbs_field }},
@@ -236,6 +244,15 @@ void {{ op.class_name }}::getAttribute(hipdnnBackendAttributeName_t attributeNam
 {% elif df.is_enum %}
     case {{ df.attr_name }}:
         {{ df.getter_helper_name }}(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
+{% elif df.is_optional_scalar %}
+    case {{ df.attr_name }}:
+        getOptionalScalar<{{ df.backend_type }}>(_data.{{ df.fbs_field }},
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "{{ op.class_name }}::getAttribute()");
         break;
 {% elif df.is_scalar %}
     case {{ df.attr_name }}:
@@ -457,7 +474,7 @@ std::shared_ptr<{{ op.class_name }}> {{ op.class_name }}::fromNode(
     if(attrs->{{ tf.uid_field }})
     {
         desc->{{ tf.member_name }} = findTensorInMap(
-            tensorMap, attrs->{{ tf.uid_field }}, "{{ op.class_name }}::fromNode: {{ tf.pascal_name }}");
+            tensorMap, *attrs->{{ tf.uid_field }}, "{{ op.class_name }}::fromNode: {{ tf.pascal_name }}");
     }
 {% endif %}
 {% endfor %}
