@@ -453,15 +453,16 @@ def main():
         writer = csv.DictWriter(csv_file, fieldnames=csv_fields)
         writer.writeheader()
 
-    # Pre-filter: match shapes to kernels by (hdim, dtype, variant, mode)
+    # Pre-filter: match shapes to kernels by (hdim, dtype, variant, mode).
+    # YAML shapes are batch-mode only. Group-mode kernels need seqstart arrays
+    # which batch shapes don't provide -- they all GPU fault.
     runnable = []
     for shape in all_shapes:
         ck_dtype = DTYPE_CK.get(shape.dtype, shape.dtype)
-        for mode in ["batch", "group"]:
-            key = (shape.hdim_q, shape.hdim_v, ck_dtype, shape.variant, mode)
-            kernel_entries = kernel_index.get(key, [])
-            if kernel_entries:
-                runnable.append((shape, kernel_entries))
+        key = (shape.hdim_q, shape.hdim_v, ck_dtype, shape.variant, "batch")
+        entries = kernel_index.get(key, [])
+        if entries:
+            runnable.append((shape, entries))
 
     # Flatten to work items, skip already-completed
     def _resume_key(cfg, shape):
