@@ -79,6 +79,16 @@ inline const char* hipdnnGetDataTypeString(hipdnnDataType_t type)
         return "HIPDNN_DATA_FP8_E4M3";
     case HIPDNN_DATA_FP8_E5M2:
         return "HIPDNN_DATA_FP8_E5M2";
+    case HIPDNN_DATA_FP8_E8M0:
+        return "HIPDNN_DATA_FP8_E8M0";
+    case HIPDNN_DATA_FP4_E2M1:
+        return "HIPDNN_DATA_FP4_E2M1";
+    case HIPDNN_DATA_INT4:
+        return "HIPDNN_DATA_INT4";
+    case HIPDNN_DATA_FP6_E2M3:
+        return "HIPDNN_DATA_FP6_E2M3";
+    case HIPDNN_DATA_FP6_E3M2:
+        return "HIPDNN_DATA_FP6_E3M2";
     default:
         return "HIPDNN_DATA_UNKNOWN";
     }
@@ -214,6 +224,8 @@ inline const char* hipdnnGetBackendDescriptorTypeName(hipdnnBackendDescriptorTyp
         return "HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT";
     case HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT:
         return "HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT";
+    case HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT:
+        return "HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT";
     default:
         return "UNKNOWN_TYPE";
     }
@@ -630,6 +642,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT";
     case HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT:
         return "HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT";
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT:
+        return "HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT";
 
     // Block scale quantize operation attributes
     case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT:
@@ -690,6 +704,18 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT";
     case HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT:
         return "HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT";
+
+    // Custom op operation attributes
+    case HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT:
+        return "HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT";
+    case HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT:
+        return "HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT";
+    case HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT:
+        return "HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT";
+    case HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT:
+        return "HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT";
+    case HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT:
+        return "HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT";
 
     // Operation extension attributes
     case HIPDNN_ATTR_OPERATION_NAME_EXT:
