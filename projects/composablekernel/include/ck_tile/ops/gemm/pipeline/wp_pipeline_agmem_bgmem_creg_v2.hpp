@@ -592,10 +592,7 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
 
             // A tile in LDS
             auto a_copy_dram_window =
-                make_tile_window(a_dram_block_window_tmp.get_bottom_tensor_view(),
-                                 make_tuple(MPerBlock, KPerBlock),
-                                 a_dram_block_window_tmp.get_window_origin(),
-                                 PipelinePolicy::template MakeADramTileDistribution<Problem>());
+                PipelinePolicy::template MakeADramWindow<Problem>(a_dram_block_window_tmp);
 
             constexpr auto write_a_lds_block_desc =
                 PipelinePolicy::template MakeWriteALdsBlockDescriptor<Problem>();
@@ -690,7 +687,9 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
                     if constexpr(Problem::Async)
                     {
                         // global -> lds
-                        Base::GlobalPrefetchAsync(lds_tile_a, dram_tile_a, window_step_a);
+                        constexpr auto NEG1 = number<-1>{};
+                        async_load_tile(lds_tile_a, dram_tile_a, NEG1, false_type{}, true_type{});
+                        move_tile_window(dram_tile_a, window_step_a);
                     }
                     else
                     {
