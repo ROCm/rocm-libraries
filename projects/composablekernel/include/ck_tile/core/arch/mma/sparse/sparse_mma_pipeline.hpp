@@ -13,8 +13,11 @@
 namespace ck_tile::core::arch::mma {
 
 namespace sparse::detail {
-// TODO: c++20: return MmaPipelineOptionFlags directly]
-constexpr inline int getFlags() { return static_cast<int>(MmaPipelineOptionFlag::COMPRESS_A); }
+// TODO: c++20: return MmaPipelineOptionFlags directly
+constexpr inline int getPipelineFlags()
+{
+    return static_cast<int>(MmaPipelineOptionFlag::COMPRESS_A);
+}
 } // namespace sparse::detail
 
 template <typename ADataType,
@@ -39,9 +42,9 @@ template <typename ADataType,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp_, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getFlags(), SparseMmaPipeline<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp_, MmaTransforms>>
+struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFlags(), SparseMmaPipeline<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp_, MmaTransforms>>
 {
-    using Base = MmaPipelineBase<sparse::detail::getFlags(), SparseMmaPipeline<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp_, MmaTransforms>>;
+    using Base = MmaPipelineBase<sparse::detail::getPipelineFlags(), SparseMmaPipeline<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
 
     using MmaOp = MmaOp_; // Expose the selected MmaOp
