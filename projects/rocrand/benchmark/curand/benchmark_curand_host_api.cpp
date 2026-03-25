@@ -249,6 +249,8 @@ int main(int argc, char* argv[])
     primbench::settings settings;
     settings.size = 128 * 1024 * 1024; // In items
     settings.min_gpu_ms_per_batch = 100;
+    settings.noise_tolerance_percent = 2;
+    settings.hot = true;
     primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
     auto dimensions
