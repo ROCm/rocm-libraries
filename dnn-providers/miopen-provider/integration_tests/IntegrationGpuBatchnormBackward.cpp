@@ -39,17 +39,10 @@ class BatchnormBackward : public IntegrationGraphVerificationHarness<DataType, B
 protected:
     void initializeBundle([[maybe_unused]] const graph::Graph& graph,
                           GraphTensorBundle& bundle,
-                          const std::vector<int64_t>& outputTensorIds,
                           unsigned int seed) override
     {
         // Fill output tensors with sentinel values
-        for(auto id : outputTensorIds)
-        {
-            if(bundle.tensors.find(id) != bundle.tensors.end())
-            {
-                bundle.tensors.at(id)->fillWithSentinelValue();
-            }
-        }
+        bundle.sentinelFillOutputTensors();
 
         bundle.tensors.at(BatchnormBwdTensorIds::X_UID)
             ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);

@@ -31,21 +31,13 @@ class ConvForward : public IntegrationGraphVerificationHarness<DataType, ConvTes
 protected:
     void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
                           GraphTensorBundle& bundle,
-                          const std::vector<int64_t>& outputTensorIds,
                           unsigned int seed) override
     {
-        auto isOutputTensor = [&outputTensorIds](int64_t id) {
-            return std::find(outputTensorIds.begin(), outputTensorIds.end(), id)
-                   != outputTensorIds.end();
-        };
+        bundle.sentinelFillOutputTensors();
 
         for(auto& tensorPair : bundle.tensors)
         {
-            if(isOutputTensor(tensorPair.first))
-            {
-                tensorPair.second->fillWithSentinelValue();
-            }
-            else
+            if(!bundle.isOutput(tensorPair.first))
             {
                 bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
             }

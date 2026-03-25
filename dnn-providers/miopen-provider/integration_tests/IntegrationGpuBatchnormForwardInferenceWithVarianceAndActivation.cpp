@@ -32,22 +32,14 @@ class BatchnormForwardInferenceWithVarianceAndActivation
 protected:
     void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
                           GraphTensorBundle& bundle,
-                          const std::vector<int64_t>& outputTensorIds,
                           unsigned int seed) override
     {
         // Fill output tensors with sentinel values
-        for(auto id : outputTensorIds)
-        {
-            if(bundle.tensors.find(id) != bundle.tensors.end())
-            {
-                bundle.tensors.at(id)->fillWithSentinelValue();
-            }
-        }
+        bundle.sentinelFillOutputTensors();
 
         for(auto& tensorPair : bundle.tensors)
         {
-            if(std::find(outputTensorIds.begin(), outputTensorIds.end(), tensorPair.first)
-               != outputTensorIds.end())
+            if(bundle.isOutput(tensorPair.first))
             {
                 continue;
             }
