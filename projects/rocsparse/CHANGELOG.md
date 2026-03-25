@@ -17,7 +17,6 @@ Documentation for rocSPARSE is available at
 ## rocSPARSE 4.5.0 for ROCm 7.12.0
 
 ### Added
-
 * Added `--show-skipped` and `--hide-skipped` command-line options to `rocsparse-test` to control whether skipped test output is displayed.
 * For sparse matrix vector product (`rocsparse_spmv`), when using `rocsparse_spmv_alg_default`, the routine now automatically falls back to a supported algorithm depending on the sparse matrix format and requested operation. For example, CSR format with transposed operations or CSC format with non-transposed operations will fall back to an appropriate algorithm.
 
