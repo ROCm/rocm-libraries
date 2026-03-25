@@ -119,8 +119,16 @@ namespace
         // Hook for derived classes to do something when the first group of instructions are ready to issue.
         virtual void onInit(IRList::iterator regionStart, IRList::iterator regionEnd) {}
 
-        // Hook for derived classes to do something when the first group of instructions are ready to issue.
-        virtual void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd) {}
+        // Hook called before scheduling each region. \p blockBegin is the start of the basic block
+        // (prefix [blockBegin, regionStart) is visible for cross-region / preloop state).
+        virtual void onInitRegion(IRList::iterator regionStart,
+                                  IRList::iterator regionEnd,
+                                  IRList::iterator blockBegin)
+        {
+            (void)regionStart;
+            (void)regionEnd;
+            (void)blockBegin;
+        }
 
     private:
         // reference to const PassContext (object content immutable)

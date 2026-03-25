@@ -63,7 +63,9 @@ namespace
 
         void onInit(IRList::iterator regionStart, IRList::iterator regionEnd) override;
 
-        void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd) override;
+        void onInitRegion(IRList::iterator regionStart,
+                          IRList::iterator regionEnd,
+                          IRList::iterator blockBegin) override;
     };
 
     void CDNA3ReadyQueue::updateMFMALatencyCounters(DAGNode* node)
@@ -251,8 +253,11 @@ namespace
         isInit = false;
     }
 
-    void CDNA3ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd)
+    void CDNA3ReadyQueue::onInitRegion(IRList::iterator regionStart,
+                                       IRList::iterator regionEnd,
+                                       IRList::iterator blockBegin)
     {
+        (void)blockBegin;
         // For for loop only optimization
         if(getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false)
             return;
