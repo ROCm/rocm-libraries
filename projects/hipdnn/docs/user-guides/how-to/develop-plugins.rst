@@ -103,8 +103,6 @@ Use engine IDs
 
   // This macro registers the engine name and creates helper variables
   // such as MY_CUSTOM_ENGINE_ID for this engine.
-  using hipdnn_data_sdk::utilities::engineNameToId;
-  using hipdnn_data_sdk::utilities::EngineRegistrar;
   HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE)
 
   class MyCustomEngine : public hipdnn_plugin_sdk::IEngine< ... >
