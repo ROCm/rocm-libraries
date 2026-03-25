@@ -11,7 +11,7 @@
 #include <hipdnn_frontend/detail/OperationUnpacker.hpp>
 // Uncomment when unpack_from_descriptor() is implemented in the lifting PR:
 // #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
-// #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
 // #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 // #include <hipdnn_frontend/node/BatchnormNode.hpp>
 // #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
@@ -283,16 +283,16 @@ TEST_F(TestUnpackOperation, FailsImmediatelyOnUnpackError)
 //     EXPECT_NE(typedNode, nullptr);
 // }
 
-// TEST(TestCreateNodeForType, CreatesBatchnormInferenceNode)
-// {
-//     const GraphAttributes graphAttrs;
-//     auto [node, err]
-//         = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE, graphAttrs);
-//     EXPECT_EQ(err.code, ErrorCode::OK);
-//     ASSERT_NE(node, nullptr);
-//     auto typedNode = std::dynamic_pointer_cast<BatchnormInferenceNode>(node);
-//     EXPECT_NE(typedNode, nullptr);
-// }
+TEST(TestCreateNodeForType, CreatesBatchnormInferenceNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err]
+        = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<BatchnormInferenceNode>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
 
 // TEST(TestCreateNodeForType, CreatesBatchnormInferenceNodeVarianceExt)
 // {
@@ -441,3 +441,5 @@ TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
     EXPECT_TRUE(err.get_message().find("999") != std::string::npos)
         << "Error should include the unsupported type id, got: " << err.get_message();
 }
+
+
