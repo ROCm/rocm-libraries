@@ -693,4 +693,49 @@ TEST(TestCpuFpReferenceValidationFp32, PassesForFiniteValues)
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
+/* ======== Integer sentinel detection tests ======== */
+
+TEST(TestCpuIntReferenceValidationInt32, FailsWhenReferenceHasSentinel)
+{
+    const CpuIntReferenceValidation<int32_t> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<int32_t> tensor1(dims);
+    Tensor<int32_t> tensor2(dims);
+    tensor1.fillTensorWithValue(1);
+    tensor2.fillTensorWithValue(1);
+
+    tensor1.setHostValue(std::numeric_limits<int32_t>::max(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidationInt32, FailsWhenImplementationHasSentinel)
+{
+    const CpuIntReferenceValidation<int32_t> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<int32_t> tensor1(dims);
+    Tensor<int32_t> tensor2(dims);
+    tensor1.fillTensorWithValue(1);
+    tensor2.fillTensorWithValue(1);
+
+    tensor2.setHostValue(std::numeric_limits<int32_t>::max(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuIntReferenceValidationInt32, PassesWhenBothHaveSentinel)
+{
+    const CpuIntReferenceValidation<int32_t> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<int32_t> tensor1(dims);
+    Tensor<int32_t> tensor2(dims);
+    tensor1.fillWithSentinelValue();
+    tensor2.fillWithSentinelValue();
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}
+
 /* ================================================= */
