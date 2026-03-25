@@ -66,6 +66,69 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<DataTypeConversionParam>& info) { return info.param.name; });
 
 // =============================================================================
+// Low-precision type conversion tests (no byte size support)
+// =============================================================================
+
+TEST(TestDataTypeConversion, ToSdkDataTypeFp8E8M0)
+{
+    ASSERT_EQ(toSdkDataType(HIPDNN_DATA_FP8_E8M0), DataType::FP8_E8M0);
+}
+
+TEST(TestDataTypeConversion, FromSdkDataTypeFp8E8M0)
+{
+    ASSERT_EQ(fromSdkDataType(DataType::FP8_E8M0), HIPDNN_DATA_FP8_E8M0);
+}
+
+TEST(TestDataTypeConversion, ToSdkDataTypeFp4E2M1)
+{
+    ASSERT_EQ(toSdkDataType(HIPDNN_DATA_FP4_E2M1), DataType::FP4_E2M1);
+}
+
+TEST(TestDataTypeConversion, FromSdkDataTypeFp4E2M1)
+{
+    ASSERT_EQ(fromSdkDataType(DataType::FP4_E2M1), HIPDNN_DATA_FP4_E2M1);
+}
+
+TEST(TestDataTypeConversion, ToSdkDataTypeInt4)
+{
+    ASSERT_EQ(toSdkDataType(HIPDNN_DATA_INT4), DataType::INT4);
+}
+
+TEST(TestDataTypeConversion, FromSdkDataTypeInt4)
+{
+    ASSERT_EQ(fromSdkDataType(DataType::INT4), HIPDNN_DATA_INT4);
+}
+
+TEST(TestDataTypeConversion, ToSdkDataTypeFp6E2M3)
+{
+    ASSERT_EQ(toSdkDataType(HIPDNN_DATA_FP6_E2M3), DataType::FP6_E2M3);
+}
+
+TEST(TestDataTypeConversion, FromSdkDataTypeFp6E2M3)
+{
+    ASSERT_EQ(fromSdkDataType(DataType::FP6_E2M3), HIPDNN_DATA_FP6_E2M3);
+}
+
+TEST(TestDataTypeConversion, ToSdkDataTypeFp6E3M2)
+{
+    ASSERT_EQ(toSdkDataType(HIPDNN_DATA_FP6_E3M2), DataType::FP6_E3M2);
+}
+
+TEST(TestDataTypeConversion, FromSdkDataTypeFp6E3M2)
+{
+    ASSERT_EQ(fromSdkDataType(DataType::FP6_E3M2), HIPDNN_DATA_FP6_E3M2);
+}
+
+TEST(TestDataTypeConversion, GetDataTypeByteSizeThrowsForLowPrecisionTypes)
+{
+    ASSERT_THROW_HIPDNN_STATUS(getDataTypeByteSize(DataType::FP8_E8M0), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(getDataTypeByteSize(DataType::FP4_E2M1), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(getDataTypeByteSize(DataType::INT4), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(getDataTypeByteSize(DataType::FP6_E2M3), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(getDataTypeByteSize(DataType::FP6_E3M2), HIPDNN_STATUS_BAD_PARAM);
+}
+
+// =============================================================================
 // toSdkDataType Edge Cases
 // =============================================================================
 

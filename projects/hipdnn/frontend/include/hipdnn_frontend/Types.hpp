@@ -37,6 +37,7 @@
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/types.hpp>
@@ -136,6 +137,27 @@ enum class PointwiseMode
 typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
 
 /**
+ * @enum ReductionMode
+ * @brief Specifies the reduction operation to perform
+ *
+ * Matches the cudnn-frontend ReductionMode_t enumeration for API compatibility.
+ */
+enum class ReductionMode
+{
+    NOT_SET = 0, ///< Reduction mode not specified
+    ADD = 1, ///< Sum reduction
+    MUL = 2, ///< Product reduction
+    MIN = 3, ///< Minimum reduction
+    MAX = 4, ///< Maximum reduction
+    AMAX = 5, ///< Absolute maximum reduction
+    AVG = 6, ///< Average reduction
+    NORM1 = 7, ///< L1 norm reduction
+    NORM2 = 8, ///< L2 norm reduction
+    MUL_NO_ZEROS = 9, ///< Product reduction excluding zeros
+};
+typedef ReductionMode ReductionMode_t; ///< @brief Type alias for ReductionMode
+
+/**
  * @enum DataType
  * @brief Specifies the data type for tensor elements
  *
@@ -154,6 +176,11 @@ enum class DataType
     INT8 = 7, ///< 8-bit signed integer
     FP8_E4M3 = 8, ///< 8-bit floating point (4 exponent, 3 mantissa bits)
     FP8_E5M2 = 9, ///< 8-bit floating point (5 exponent, 2 mantissa bits)
+    FP8_E8M0 = 10, ///< 8-bit floating point (8 exponent, 0 mantissa bits)
+    FP4_E2M1 = 11, ///< 4-bit floating point (2 exponent, 1 mantissa bit)
+    INT4 = 12, ///< 4-bit signed integer
+    FP6_E2M3 = 13, ///< 6-bit floating point (2 exponent, 3 mantissa bits)
+    FP6_E3M2 = 14, ///< 6-bit floating point (3 exponent, 2 mantissa bits)
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -612,6 +639,16 @@ inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
         return hipdnn_data_sdk::data_objects::DataType::FP8_E4M3;
     case DataType::FP8_E5M2:
         return hipdnn_data_sdk::data_objects::DataType::FP8_E5M2;
+    case DataType::FP8_E8M0:
+        return hipdnn_data_sdk::data_objects::DataType::FP8_E8M0;
+    case DataType::FP4_E2M1:
+        return hipdnn_data_sdk::data_objects::DataType::FP4_E2M1;
+    case DataType::INT4:
+        return hipdnn_data_sdk::data_objects::DataType::INT4;
+    case DataType::FP6_E2M3:
+        return hipdnn_data_sdk::data_objects::DataType::FP6_E2M3;
+    case DataType::FP6_E3M2:
+        return hipdnn_data_sdk::data_objects::DataType::FP6_E3M2;
     default:
         return hipdnn_data_sdk::data_objects::DataType::UNSET;
     }
@@ -640,6 +677,16 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::FP8_E4M3;
     case hipdnn_data_sdk::data_objects::DataType::FP8_E5M2:
         return hipdnn_frontend::DataType::FP8_E5M2;
+    case hipdnn_data_sdk::data_objects::DataType::FP8_E8M0:
+        return hipdnn_frontend::DataType::FP8_E8M0;
+    case hipdnn_data_sdk::data_objects::DataType::FP4_E2M1:
+        return hipdnn_frontend::DataType::FP4_E2M1;
+    case hipdnn_data_sdk::data_objects::DataType::INT4:
+        return hipdnn_frontend::DataType::INT4;
+    case hipdnn_data_sdk::data_objects::DataType::FP6_E2M3:
+        return hipdnn_frontend::DataType::FP6_E2M3;
+    case hipdnn_data_sdk::data_objects::DataType::FP6_E3M2:
+        return hipdnn_frontend::DataType::FP6_E3M2;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -736,6 +783,16 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
         return HIPDNN_DATA_FP8_E4M3;
     case DataType::FP8_E5M2:
         return HIPDNN_DATA_FP8_E5M2;
+    case DataType::FP8_E8M0:
+        return HIPDNN_DATA_FP8_E8M0;
+    case DataType::FP4_E2M1:
+        return HIPDNN_DATA_FP4_E2M1;
+    case DataType::INT4:
+        return HIPDNN_DATA_INT4;
+    case DataType::FP6_E2M3:
+        return HIPDNN_DATA_FP6_E2M3;
+    case DataType::FP6_E3M2:
+        return HIPDNN_DATA_FP6_E3M2;
     case DataType::NOT_SET:
     default:
         return std::nullopt;
@@ -772,6 +829,16 @@ inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
         return {DataType::FP8_E4M3, {}};
     case HIPDNN_DATA_FP8_E5M2:
         return {DataType::FP8_E5M2, {}};
+    case HIPDNN_DATA_FP8_E8M0:
+        return {DataType::FP8_E8M0, {}};
+    case HIPDNN_DATA_FP4_E2M1:
+        return {DataType::FP4_E2M1, {}};
+    case HIPDNN_DATA_INT4:
+        return {DataType::INT4, {}};
+    case HIPDNN_DATA_FP6_E2M3:
+        return {DataType::FP6_E2M3, {}};
+    case HIPDNN_DATA_FP6_E3M2:
+        return {DataType::FP6_E3M2, {}};
     default:
         return {DataType::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -1156,6 +1223,16 @@ inline const char* to_string(const DataType& type)
         return "fp8_e4m3";
     case DataType::FP8_E5M2:
         return "fp8_e5m2";
+    case DataType::FP8_E8M0:
+        return "fp8_e8m0";
+    case DataType::FP4_E2M1:
+        return "fp4_e2m1";
+    case DataType::INT4:
+        return "int4";
+    case DataType::FP6_E2M3:
+        return "fp6_e2m3";
+    case DataType::FP6_E3M2:
+        return "fp6_e3m2";
     default:
         return "unknown";
     }
@@ -1266,6 +1343,63 @@ inline hipdnn_frontend::NormFwdPhase
         return hipdnn_frontend::NormFwdPhase::TRAINING;
     default:
         return hipdnn_frontend::NormFwdPhase::NOT_SET;
+    }
+}
+
+/// @brief Convert frontend ReductionMode to SDK ReductionMode
+inline hipdnn_data_sdk::data_objects::ReductionMode toSdkType(const ReductionMode& type)
+{
+    switch(type)
+    {
+    case ReductionMode::ADD:
+        return hipdnn_data_sdk::data_objects::ReductionMode::ADD;
+    case ReductionMode::MUL:
+        return hipdnn_data_sdk::data_objects::ReductionMode::MUL;
+    case ReductionMode::MIN:
+        return hipdnn_data_sdk::data_objects::ReductionMode::MIN_OP;
+    case ReductionMode::MAX:
+        return hipdnn_data_sdk::data_objects::ReductionMode::MAX_OP;
+    case ReductionMode::AMAX:
+        return hipdnn_data_sdk::data_objects::ReductionMode::AMAX;
+    case ReductionMode::AVG:
+        return hipdnn_data_sdk::data_objects::ReductionMode::AVG;
+    case ReductionMode::NORM1:
+        return hipdnn_data_sdk::data_objects::ReductionMode::NORM1;
+    case ReductionMode::NORM2:
+        return hipdnn_data_sdk::data_objects::ReductionMode::NORM2;
+    case ReductionMode::MUL_NO_ZEROS:
+        return hipdnn_data_sdk::data_objects::ReductionMode::MUL_NO_ZEROS;
+    default:
+        return hipdnn_data_sdk::data_objects::ReductionMode::NOT_SET;
+    }
+}
+
+/// @brief Convert SDK ReductionMode to frontend ReductionMode
+inline hipdnn_frontend::ReductionMode
+    fromSdkType(const hipdnn_data_sdk::data_objects::ReductionMode& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::ReductionMode::ADD:
+        return hipdnn_frontend::ReductionMode::ADD;
+    case hipdnn_data_sdk::data_objects::ReductionMode::MUL:
+        return hipdnn_frontend::ReductionMode::MUL;
+    case hipdnn_data_sdk::data_objects::ReductionMode::MIN_OP:
+        return hipdnn_frontend::ReductionMode::MIN;
+    case hipdnn_data_sdk::data_objects::ReductionMode::MAX_OP:
+        return hipdnn_frontend::ReductionMode::MAX;
+    case hipdnn_data_sdk::data_objects::ReductionMode::AMAX:
+        return hipdnn_frontend::ReductionMode::AMAX;
+    case hipdnn_data_sdk::data_objects::ReductionMode::AVG:
+        return hipdnn_frontend::ReductionMode::AVG;
+    case hipdnn_data_sdk::data_objects::ReductionMode::NORM1:
+        return hipdnn_frontend::ReductionMode::NORM1;
+    case hipdnn_data_sdk::data_objects::ReductionMode::NORM2:
+        return hipdnn_frontend::ReductionMode::NORM2;
+    case hipdnn_data_sdk::data_objects::ReductionMode::MUL_NO_ZEROS:
+        return hipdnn_frontend::ReductionMode::MUL_NO_ZEROS;
+    default:
+        return hipdnn_frontend::ReductionMode::NOT_SET;
     }
 }
 
