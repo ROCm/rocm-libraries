@@ -33,10 +33,8 @@ struct _rocsparse_spmat_descr
 private:
     _rocsparse_spattern_descr m_spattern{};
     _rocsparse_dnvec_descr    m_values{};
-    _rocsparse_mat_info       m_mat_info{};
     rocsparse_spattern_descr  m_p_spattern{&m_spattern};
     rocsparse_dnvec_descr     m_p_values{&m_values};
-    rocsparse_mat_info        m_p_mat_info{&m_mat_info};
 
 protected:
     bool         m_own_spattern{};
@@ -44,14 +42,12 @@ protected:
     mutable bool analysed{};
 
 public:
-    ~_rocsparse_spmat_descr();
+    ~_rocsparse_spmat_descr() = default;
     rocsparse_status destroy(hipStream_t stream);
     void             set_own_spattern(bool value);
     rocsparse_status validate();
 
-    void define(_rocsparse_spattern_descr* spattern,
-                rocsparse_dnvec_descr      values,
-                rocsparse_mat_info         info = nullptr);
+    void define(_rocsparse_spattern_descr* spattern, rocsparse_dnvec_descr values);
 
     rocsparse_index_base get_idx_base() const;
     int64_t              get_batch_dist() const;

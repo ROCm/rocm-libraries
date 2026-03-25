@@ -35,6 +35,8 @@ set(rocsparse_source
   src/auxiliary/rocsparse_spmat.cpp
   src/auxiliary/rocsparse_spmat_backward.cpp
   src/auxiliary/rocsparse_spvec.cpp
+  src/auxiliary/rocsparse_mat_info_backward.cpp
+  src/auxiliary/rocsparse_mat_info.cpp
 
   # Common
   src/common/rocsparse_dnmat_descr.cpp
@@ -55,6 +57,8 @@ set(rocsparse_source
   src/common/rocsparse_singular_info_t.cpp
   src/common/rocsparse_pivot_info_t.cpp
   src/common/rocsparse_csric0_info.cpp
+  src/common/rocsparse_csrsv_info.cpp
+  src/common/rocsparse_bsrsv_info.cpp
   src/common/rocsparse_csrilu0_info.cpp
   src/common/rocsparse_bsric0_info.cpp
   src/common/rocsparse_bsrilu0_info.cpp
@@ -141,6 +145,7 @@ set(rocsparse_source
   src/level2/rocsparse_csrmv_info.cpp
   src/level2/rocsparse_csrmv_adaptive_info.cpp
   src/level2/rocsparse_csrmv_lrb_info.cpp
+  src/level2/rocsparse_csrmv_nnzsplit_info.cpp
   src/level2/rocsparse_csrmv_analysis.cpp
   #
   src/level2/rocsparse_cscmv_impl.cpp

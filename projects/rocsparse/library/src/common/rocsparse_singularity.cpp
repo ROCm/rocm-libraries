@@ -298,8 +298,8 @@ namespace rocsparse
                                              position_pointer_mode,
                                              position_indextype,
                                              position,
-                                             handle->buffer_size,
-                                             handle->buffer,
+                                             handle->get_buffer_size(),
+                                             handle->get_buffer(),
                                              handle->stream));
         return rocsparse_status_success;
     }
@@ -378,8 +378,8 @@ namespace rocsparse
                                              singularity_pointer_mode,
                                              indextype, // not used
                                              singularity,
-                                             handle->buffer_size,
-                                             handle->buffer,
+                                             handle->get_buffer_size(),
+                                             handle->get_buffer(),
                                              handle->stream));
         return rocsparse_status_success;
     }

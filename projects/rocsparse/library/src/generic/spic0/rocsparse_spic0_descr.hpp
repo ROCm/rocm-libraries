@@ -47,8 +47,9 @@ protected:
 public:
     int64_t                   m_batch_count{};
     rocsparse::numeric_boost* get_boost();
+    rocsparse_status          destroy(hipStream_t);
 
-    ~_rocsparse_spic0_descr();
+    ~_rocsparse_spic0_descr() = default;
     _rocsparse_spic0_descr();
 
     const double*          get_tolerance_pointer() const;

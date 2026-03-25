@@ -139,21 +139,31 @@ public:
         this->m_bsrmv_info = value;
     }
 
-    ~_rocsparse_spmv_descr()
+    rocsparse_status destroy(hipStream_t stream)
     {
         if(this->m_csrmv_info != nullptr)
         {
+            RETURN_IF_ROCSPARSE_ERROR(this->m_csrmv_info->destroy(stream));
             delete this->m_csrmv_info;
+            this->m_csrmv_info = nullptr;
         }
         if(this->m_cscmv_info != nullptr)
         {
+            RETURN_IF_ROCSPARSE_ERROR(this->m_cscmv_info->destroy(stream));
             delete this->m_cscmv_info;
+            this->m_cscmv_info = nullptr;
         }
         if(this->m_bsrmv_info != nullptr)
         {
+            RETURN_IF_ROCSPARSE_ERROR(this->m_bsrmv_info->destroy(stream));
+
             delete this->m_bsrmv_info;
+            this->m_bsrmv_info = nullptr;
         }
+        return rocsparse_status_success;
     }
+
+    ~_rocsparse_spmv_descr() = default;
 
     _rocsparse_spmv_descr()
         : m_stage((rocsparse_v2_spmv_stage)-1)
@@ -450,8 +460,11 @@ try
 {
 
     ROCSPARSE_ROUTINE_TRACE;
+
     if(descr != nullptr)
     {
+        hipStream_t default_stream{};
+        RETURN_IF_ROCSPARSE_ERROR(descr->destroy(default_stream));
         delete descr;
     }
     return rocsparse_status_success;
@@ -744,10 +757,6 @@ namespace rocsparse
                 rocsparse_cscmv_info cscmv_info = spmv_descr->get_cscmv_info();
                 if(cscmv_info == nullptr)
                 {
-                    std::cout << "row type 32? " << (row_type == rocsparse_indextype_i32)
-                              << std::endl;
-                    std::cout << "col type 32? " << (col_type == rocsparse_indextype_i32)
-                              << std::endl;
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscmv_analysis(handle,
                                                                          operation,
                                                                          alg_csrmv,
@@ -815,16 +824,17 @@ namespace rocsparse
                     //
                     // Convert scalars from scalar_datatype to compute_datatype
                     //
-                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_device_scalars(handle->stream,
-                                                                                scalar_datatype,
-                                                                                compute_datatype,
-                                                                                alpha,
-                                                                                handle->alpha,
-                                                                                beta,
-                                                                                handle->beta));
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::convert_device_scalars(handle->stream,
+                                                          scalar_datatype,
+                                                          compute_datatype,
+                                                          alpha,
+                                                          handle->get_alpha(),
+                                                          beta,
+                                                          handle->get_beta()));
 
-                    local_alpha = handle->alpha;
-                    local_beta  = handle->beta;
+                    local_alpha = handle->get_alpha();
+                    local_beta  = handle->get_beta();
 
                     break;
                 }

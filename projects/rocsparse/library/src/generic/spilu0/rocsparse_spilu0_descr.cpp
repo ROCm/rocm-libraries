@@ -57,7 +57,7 @@ void _rocsparse_spilu0_descr::set_shared_bsrilu0_info(
     this->m_bsrilu0_info = value;
 }
 
-_rocsparse_spilu0_descr::~_rocsparse_spilu0_descr()
+rocsparse_status _rocsparse_spilu0_descr::destroy(hipStream_t stream)
 {
     this->m_stage                  = ((rocsparse_spilu0_stage)-1);
     this->m_alg                    = ((rocsparse_spilu0_alg)-1);
@@ -66,8 +66,17 @@ _rocsparse_spilu0_descr::~_rocsparse_spilu0_descr()
     this->m_format                 = ((rocsparse_format)-1);
     this->m_tolerance_pointer      = nullptr;
     this->m_tolerance_pointer_mode = ((rocsparse_pointer_mode)-1);
-
+    if(this->m_csrilu0_info.use_count() == 1)
+    {
+        this->m_csrilu0_info.get()->destroy(stream);
+    }
     this->m_csrilu0_info.reset();
+    if(this->m_bsrilu0_info.use_count() == 1)
+    {
+        this->m_bsrilu0_info.get()->destroy(stream);
+    }
+    this->m_bsrilu0_info.reset();
+    return rocsparse_status_success;
 }
 
 _rocsparse_spilu0_descr::_rocsparse_spilu0_descr()
@@ -162,7 +171,8 @@ extern "C" rocsparse_status rocsparse_spilu0_descr_create(rocsparse_handle      
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
     *descr = new _rocsparse_spilu0_descr();
     return rocsparse_status_success;
 }
@@ -177,8 +187,10 @@ extern "C" rocsparse_status rocsparse_spilu0_descr_destroy(rocsparse_handle     
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
     if(descr != nullptr)
     {
+        RETURN_IF_ROCSPARSE_ERROR(descr->destroy(handle->stream));
         delete descr;
     }
     return rocsparse_status_success;

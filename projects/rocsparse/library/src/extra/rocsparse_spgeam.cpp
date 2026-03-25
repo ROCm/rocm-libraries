@@ -1280,3 +1280,239 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
+
+extern "C" rocsparse_status rocsparse_spgeam_descr_create(rocsparse_handle        handle,
+                                                          rocsparse_spgeam_descr* descr,
+                                                          rocsparse_error*        p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+    *descr = new _rocsparse_spgeam_descr();
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+extern "C" rocsparse_status rocsparse_create_spgeam_descr(rocsparse_spgeam_descr* descr)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+
+    *descr = new _rocsparse_spgeam_descr();
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+extern "C" rocsparse_status rocsparse_destroy_spgeam_descr(rocsparse_spgeam_descr descr)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+
+    hipStream_t default_stream{};
+    // Clean up row pointer array
+    if(descr->csr_row_ptr_C != nullptr)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(descr->csr_row_ptr_C, default_stream));
+    }
+
+    // Clean up rocprim buffer
+    if(descr->rocprim_buffer != nullptr && descr->rocprim_alloc)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(descr->rocprim_buffer, default_stream));
+    }
+
+    delete descr;
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+extern "C" rocsparse_status rocsparse_spgeam_descr_destroy(rocsparse_handle       handle,
+                                                           rocsparse_spgeam_descr descr,
+                                                           rocsparse_error*       p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+
+    // Clean up row pointer array
+    if(descr->csr_row_ptr_C != nullptr)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(descr->csr_row_ptr_C, handle->stream));
+    }
+
+    // Clean up rocprim buffer
+    if(descr->rocprim_buffer != nullptr && descr->rocprim_alloc)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(descr->rocprim_buffer, handle->stream));
+    }
+
+    delete descr;
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_spgeam_set_input gets the input on the SpGEAM descriptor.
+ *******************************************************************************/
+extern "C" rocsparse_status rocsparse_spgeam_set_input(rocsparse_handle       handle,
+                                                       rocsparse_spgeam_descr descr,
+                                                       rocsparse_spgeam_input input,
+                                                       const void*            data,
+                                                       size_t                 data_size_in_bytes,
+                                                       rocsparse_error*       p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+    ROCSPARSE_CHECKARG_ENUM(2, input);
+    ROCSPARSE_CHECKARG_POINTER(3, data);
+
+    switch(input)
+    {
+    case rocsparse_spgeam_input_scalar_alpha:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(void*),
+                           rocsparse_status_invalid_size);
+        descr->set_scalar_A(data);
+        return rocsparse_status_success;
+    }
+    case rocsparse_spgeam_input_scalar_beta:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(void*),
+                           rocsparse_status_invalid_size);
+        descr->set_scalar_B(data);
+        return rocsparse_status_success;
+    }
+
+    case rocsparse_spgeam_input_alg:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_spgeam_alg),
+                           rocsparse_status_invalid_size);
+        const rocsparse_spgeam_alg alg = *reinterpret_cast<const rocsparse_spgeam_alg*>(data);
+        descr->set_alg(alg);
+        return rocsparse_status_success;
+    }
+    case rocsparse_spgeam_input_scalar_datatype:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_datatype),
+                           rocsparse_status_invalid_size);
+        const rocsparse_datatype scalar_type = *reinterpret_cast<const rocsparse_datatype*>(data);
+        descr->set_scalar_datatype(scalar_type);
+        return rocsparse_status_success;
+    }
+    case rocsparse_spgeam_input_compute_datatype:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_datatype),
+                           rocsparse_status_invalid_size);
+        const rocsparse_datatype compute_type = *reinterpret_cast<const rocsparse_datatype*>(data);
+        descr->set_compute_datatype(compute_type);
+        return rocsparse_status_success;
+    }
+    case rocsparse_spgeam_input_operation_A:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_operation),
+                           rocsparse_status_invalid_size);
+        const rocsparse_operation op_A = *reinterpret_cast<const rocsparse_operation*>(data);
+        descr->set_operation_A(op_A);
+        return rocsparse_status_success;
+    }
+    case rocsparse_spgeam_input_operation_B:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_operation),
+                           rocsparse_status_invalid_size);
+        const rocsparse_operation op_B = *reinterpret_cast<const rocsparse_operation*>(data);
+        descr->set_operation_B(op_B);
+        return rocsparse_status_success;
+    }
+    }
+    return rocsparse_status_invalid_value;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_spgeam_get_output gets the output from the SpGEAM descriptor.
+ *******************************************************************************/
+extern "C" rocsparse_status rocsparse_spgeam_get_output(rocsparse_handle        handle,
+                                                        rocsparse_spgeam_descr  descr,
+                                                        rocsparse_spgeam_output output,
+                                                        void*                   data,
+                                                        size_t                  data_size_in_bytes,
+                                                        rocsparse_error*        p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+    ROCSPARSE_CHECKARG_ENUM(2, output);
+    ROCSPARSE_CHECKARG_POINTER(3, data);
+    switch(output)
+    {
+    case rocsparse_spgeam_output_nnz:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(int64_t),
+                           rocsparse_status_invalid_size);
+        int64_t* nnz_C = reinterpret_cast<int64_t*>(data);
+        *nnz_C         = descr->nnz_C;
+        return rocsparse_status_success;
+    }
+    }
+
+    return rocsparse_status_invalid_value;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP

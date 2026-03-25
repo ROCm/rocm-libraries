@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,12 +23,13 @@
  * ************************************************************************ */
 
 #pragma once
-
+#include "rocsparse-auxiliary.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_datatype_utils.hpp"
 #include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_pivot_info_t.hpp"
 #include "rocsparse_trm_info.hpp"
+
 #include <memory>
 namespace rocsparse
 {
@@ -74,8 +75,11 @@ namespace rocsparse
         }
 
     public:
-        trm_data_t() = default;
-        ~trm_data_t();
+        trm_data_t()  = default;
+        ~trm_data_t() = default;
+        rocsparse_status destroy(hipStream_t stream);
+        void             info() const;
+
         void uncouple(const trm_data_t* that);
         void copy(const trm_data_t* that, hipStream_t stream);
 
@@ -183,16 +187,21 @@ namespace rocsparse
         }
 
         template <typename... ARGS>
-        rocsparse_status
-            recreate(rocsparse_operation operation, rocsparse_fill_mode fill_mode, ARGS... arg)
+        rocsparse_status recreate(rocsparse_operation operation,
+                                  rocsparse_fill_mode fill_mode,
+                                  rocsparse_handle    handle,
+                                  ARGS... arg)
         {
             const int index = this->storage_index(operation, fill_mode);
             if(this->m_data[index] != nullptr)
             {
+                hipStream_t stream;
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
+                this->m_data[index]->destroy(stream);
                 delete this->m_data[index];
             }
             this->m_data[index] = nullptr;
-            this->m_data[index] = this->create(arg...);
+            this->m_data[index] = this->create(handle, arg...);
             return rocsparse_status_success;
         }
 

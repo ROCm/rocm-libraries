@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,20 +33,22 @@ protected:
     rocsparse_direction     m_direction{};
     size_t                  m_stage_analysis_buffer_size{};
     size_t                  m_stage_compute_buffer_size{};
+    int64_t*                m_device_nnz{};
 
 public:
-    int64_t* m_device_nnz{};
-    virtual ~_rocsparse_extract_descr()
+    int64_t* get_device_nnz()
     {
-        // Due to the changes in the hipFree introduced in HIP 7.0
-        // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
-        // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
-        // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
-        // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-        WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
-
-        std::ignore = rocsparse_hipFree(this->m_device_nnz);
+        return this->m_device_nnz;
     }
+
+    rocsparse_status destroy(hipStream_t stream)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->m_device_nnz, stream));
+        this->m_device_nnz = nullptr;
+        return rocsparse_status_success;
+    }
+
+    ~_rocsparse_extract_descr() = default;
 
     ///
     /// @brief Get which algorithm is used.
@@ -92,11 +94,12 @@ public:
     ///
     _rocsparse_extract_descr(rocsparse_extract_alg       alg,
                              rocsparse_const_spmat_descr source,
-                             rocsparse_const_spmat_descr target)
+                             rocsparse_const_spmat_descr target,
+                             hipStream_t                 stream)
         : m_alg(alg)
     {
         this->m_stage = rocsparse_extract_stage_analysis;
-        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&this->m_device_nnz, sizeof(int64_t)));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&this->m_device_nnz, sizeof(int64_t), stream));
     }
 
     ///

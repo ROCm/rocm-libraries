@@ -34,6 +34,9 @@
 #include "rocsparse_memstat.hpp"
 #include "rocsparse_scalar.hpp"
 #include "rocsparse_singularity.hpp"
+
+#define DEPRECATED_ROCSPARSE_ITILU0_ALG_SYNC_SPLIT_FUSION ((rocsparse_itilu0_alg)4)
+
 namespace rocsparse
 {
 

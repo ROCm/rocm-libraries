@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -54,7 +54,9 @@ public:
     }
 
     void copy(const _rocsparse_csritsv_info*, hipStream_t);
-    _rocsparse_csritsv_info() = default;
-    ~_rocsparse_csritsv_info();
+
+    rocsparse_status destroy(hipStream_t stream);
+    _rocsparse_csritsv_info()  = default;
+    ~_rocsparse_csritsv_info() = default;
 
 } * rocsparse_csritsv_info;

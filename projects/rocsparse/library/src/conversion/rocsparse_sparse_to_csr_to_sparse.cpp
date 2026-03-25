@@ -158,8 +158,8 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         void* TEMP_val__ = nullptr;
         if(csr_m > 0)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
-                &TEMP_row__, rocsparse::indextype_sizeof(row_type) * (csr_m + 1)));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+                &TEMP_row__, rocsparse::indextype_sizeof(row_type) * (csr_m + 1), handle_->stream));
         }
         RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch,
                                   (csr_nnz > std::numeric_limits<int32_t>::max()
@@ -167,10 +167,14 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
 
         if(csr_nnz > 0)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
-                &TEMP_col__, rocsparse::indextype_sizeof(source_->get_col_type()) * csr_nnz));
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
-                &TEMP_val__, rocsparse::datatype_sizeof(source_->get_data_type()) * csr_nnz));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+                &TEMP_col__,
+                rocsparse::indextype_sizeof(source_->get_col_type()) * csr_nnz,
+                handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+                &TEMP_val__,
+                rocsparse::datatype_sizeof(source_->get_data_type()) * csr_nnz,
+                handle_->stream));
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_csr_descr(&intermediate,
                                                              csr_m,
@@ -213,7 +217,7 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         //
         // Allocate the buffer.
         //
-        RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&buffer, buffer_size, handle_->stream));
 
         //
         // Analysis.
@@ -227,7 +231,8 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
                                        buffer_size,
                                        buffer));
 
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(buffer));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(buffer, handle_->stream));
+        buffer = nullptr;
 
         //
         // Here we know unknown size of intermediate if any.
@@ -236,17 +241,17 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         {
         case rocsparse_format_ell:
         {
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMalloc(&TEMP_col__,
-                                    rocsparse::indextype_sizeof(intermediate->get_col_type())
-                                        * intermediate->get_nnz()));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+                &TEMP_col__,
+                rocsparse::indextype_sizeof(intermediate->get_col_type()) * intermediate->get_nnz(),
+                handle_->stream));
             //
             // MUST BE CONDITIONAL
             //
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMalloc(&TEMP_val__,
-                                    rocsparse::datatype_sizeof(intermediate->get_data_type())
-                                        * intermediate->get_nnz()));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+                &TEMP_val__,
+                rocsparse::datatype_sizeof(intermediate->get_data_type()) * intermediate->get_nnz(),
+                handle_->stream));
             rocsparse_csr_set_pointers(intermediate, TEMP_row__, TEMP_col__, TEMP_val__);
             break;
         }
@@ -279,7 +284,7 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
                                                    intermediate,
                                                    rocsparse_sparse_to_sparse_stage_compute,
                                                    &buffer_size));
-        RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&buffer, buffer_size, handle_->stream));
 
         //
         // Compute.
@@ -296,7 +301,8 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         //
         // Free the buffer.
         //
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(buffer));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(buffer, handle_->stream));
+        buffer = nullptr;
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_destroy_sparse_to_sparse_descr(intermediate_descr));
 
         //

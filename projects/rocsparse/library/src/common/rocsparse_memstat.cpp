@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -80,15 +80,6 @@ static std::string relfilename(const char* tag_)
         }
     }
     return res;
-}
-
-static double get_time_us(void)
-{
-    std::ignore = hipDeviceSynchronize();
-    auto now    = std::chrono::steady_clock::now();
-    auto duration
-        = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-    return (static_cast<double>(duration));
 }
 
 //
@@ -254,7 +245,7 @@ private:
         const char*           kind;
         size_t                total_nbytes[memstat_mode::size];
         const char*           tag;
-        double                t;
+        size_t                t;
     };
 
     //
@@ -262,7 +253,6 @@ private:
     //
     std::map<void*, stat> m_map;
     std::vector<stat>     m_data;
-    double                m_start_time;
     size_t                m_total_nbytes[memstat_mode::size]{};
     int                   m_next_flush_report{};
     std::string           m_report_filename;
@@ -699,6 +689,8 @@ hipError_t memstat_allocator<MODE>::free_async(void* d_, hipStream_t stream)
 
 hipError_t rocsparse_free(void* mem, memstat_mode::value_t mode, const char* tag)
 {
+    if(!mem)
+        return hipSuccess;
     hipError_t err = hipErrorInvalidValue;
     switch(mode)
     {
@@ -737,6 +729,11 @@ hipError_t rocsparse_free(void* mem, memstat_mode::value_t mode, const char* tag
 hipError_t rocsparse_malloc(void** mem, size_t nbytes, memstat_mode::value_t mode, const char* tag)
 {
 
+    if(nbytes == 0)
+    {
+        mem[0] = nullptr;
+        return hipSuccess;
+    }
     hipError_t err = hipErrorInvalidValue;
     switch(mode)
     {
@@ -772,6 +769,8 @@ hipError_t rocsparse_malloc(void** mem, size_t nbytes, memstat_mode::value_t mod
 hipError_t
     rocsparse_free_async(void* mem, hipStream_t stream, memstat_mode::value_t mode, const char* tag)
 {
+    if(!mem)
+        return hipSuccess;
     hipError_t err = hipErrorInvalidValue;
     switch(mode)
     {
@@ -810,6 +809,11 @@ hipError_t rocsparse_malloc_async(
 {
 
     hipError_t err = hipErrorInvalidValue;
+    if(nbytes == 0)
+    {
+        mem[0] = nullptr;
+        return hipSuccess;
+    }
     switch(mode)
     {
     case memstat_mode::host:
@@ -848,10 +852,9 @@ memstat& memstat::instance()
 }
 
 memstat::memstat()
-    : m_report_filename("rocsparse_memstat.json")
-{
-    this->m_start_time = get_time_us();
-};
+    : m_report_filename("rocsparse_memstat.json"){
+
+    };
 
 void memstat::add(void* address, size_t nbytes, memstat_mode::value_t mode, const char* tag)
 {
@@ -859,7 +862,7 @@ void memstat::add(void* address, size_t nbytes, memstat_mode::value_t mode, cons
         return;
     if(!contains(address))
     {
-        double t = get_time_us();
+
         this->m_total_nbytes[mode] += nbytes;
         const size_t index = this->m_next_flush_report + (this->m_data.size() + 1);
         this->m_map[address]
@@ -869,7 +872,7 @@ void memstat::add(void* address, size_t nbytes, memstat_mode::value_t mode, cons
                "malloc",
                {this->m_total_nbytes[0], this->m_total_nbytes[1], this->m_total_nbytes[2]},
                tag,
-               t};
+               this->m_map.size()};
         this->m_data.push_back(
             {index,
              nbytes,
@@ -877,7 +880,7 @@ void memstat::add(void* address, size_t nbytes, memstat_mode::value_t mode, cons
              "malloc",
              {this->m_total_nbytes[0], this->m_total_nbytes[1], this->m_total_nbytes[2]},
              tag,
-             t});
+             this->m_map.size()});
         memstat::instance().flush_report();
     }
     else
@@ -971,7 +974,6 @@ void memstat::remove(void* address, const char* tag)
     if(it != m_map.end())
     {
         this->m_total_nbytes[it->second.mode] -= it->second.nbytes;
-        double       t     = get_time_us();
         const size_t index = this->m_next_flush_report + (this->m_data.size() + 1);
         this->m_data.push_back(
             {index,
@@ -980,7 +982,7 @@ void memstat::remove(void* address, const char* tag)
              "free",
              {this->m_total_nbytes[0], this->m_total_nbytes[1], this->m_total_nbytes[2]},
              tag,
-             t});
+             this->m_map.size()});
         memstat::instance().flush_report();
         m_map.erase(address);
     }
@@ -1008,7 +1010,7 @@ void memstat::report(std::ostream& out) const
         out << " { ";
         out << "  \"index\": \"" << m_data[i].index << "\"";
         out << ", "
-            << " \"time\": \"" << (m_data[i].t - m_start_time) / 1e3 << "\"";
+            << " \"id\": \"" << m_data[i].t << "\"";
         for(auto v : memstat_mode::all)
         {
             out << ", "
@@ -1030,7 +1032,7 @@ void memstat::report(std::ostream& out) const
 void memstat::report_legend(std::ostream& out) const
 {
     out << " [ "
-        << "\"index\", \"time\"";
+        << "\"index\", \"id\"";
     for(auto v : memstat_mode::all)
     {
         out << ", "
@@ -1109,6 +1111,28 @@ rocsparse_status rocsparse_memstat_report(const char* filename)
     }
     return rocsparse_status_success;
 }
+}
+#else
+hipError_t rocsparse_hipMallocAsync(void** mem, size_t nbytes, hipStream_t stream)
+{
+    if(nbytes > 0)
+    {
+        return hipMallocAsync(mem, nbytes, stream);
+    }
+    else
+    {
+        mem[0] = nullptr;
+        return hipSuccess;
+    }
+}
+
+hipError_t rocsparse_hipFreeAsync(void* mem, hipStream_t stream)
+{
+    if(mem)
+    {
+        return hipFreeAsync(mem, stream);
+    }
+    return hipSuccess;
 }
 
 #endif

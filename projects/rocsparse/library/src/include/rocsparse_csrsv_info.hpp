@@ -33,26 +33,13 @@ protected:
     rocsparse::singular_info_t m_singularity_numeric_exact;
 
 public:
+    rocsparse_status destroy(hipStream_t stream);
     ~_rocsparse_csrsv_info() = default;
-    void copy(const _rocsparse_csrsv_info* that, hipStream_t stream)
-    {
-        this->rocsparse::trm_data_t::copy(that, stream);
-        this->m_singularity_numeric_exact.copy_singular_info_async(
-            &that->m_singularity_numeric_exact, stream);
-        THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
-    }
-
-    rocsparse::singular_info_t* get_singularity_numeric_exact()
-    {
-        return &this->m_singularity_numeric_exact;
-    }
+    void                        copy(const _rocsparse_csrsv_info* that, hipStream_t stream);
+    rocsparse::singular_info_t* get_singularity_numeric_exact();
 
     void create_singularity_numeric_exact(int64_t             batch_count,
                                           rocsparse_indextype indextype,
-                                          hipStream_t         stream)
-    {
-        THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact.create_singular_pivot_async(
-            batch_count, indextype, stream));
-    }
+                                          hipStream_t         stream);
 };
 typedef _rocsparse_csrsv_info* rocsparse_csrsv_info;

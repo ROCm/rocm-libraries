@@ -36,6 +36,7 @@ namespace rocsparse
 
     public:
         ~pivot_info_t() = default;
+        rocsparse_status destroy(hipStream_t stream);
 
         inline rocsparse_status create_zero_pivot_async(rocsparse_indextype indextype,
                                                         hipStream_t         stream)

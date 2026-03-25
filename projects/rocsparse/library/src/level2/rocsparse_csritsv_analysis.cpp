@@ -191,6 +191,7 @@ namespace rocsparse
             info->ptr_end_size = m;
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMallocAsync(&info->ptr_end, sizeof(I) * m, handle->stream));
+
             info->is_submatrix = true;
 
             //
@@ -457,11 +458,11 @@ rocsparse_status rocsparse::csritsv_analysis_template(rocsparse_handle          
     // Clear csritsv info
     if(info->csritsv_info != nullptr)
     {
+        info->csritsv_info->destroy(handle->stream);
         delete info->csritsv_info;
         info->csritsv_info = nullptr;
     }
     info->csritsv_info = new _rocsparse_csritsv_info();
-
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csritsv_info_analysis(handle,
                                                                trans,
                                                                m,

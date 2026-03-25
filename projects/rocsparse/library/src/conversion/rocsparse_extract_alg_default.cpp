@@ -681,8 +681,8 @@ namespace rocsparse
 }
 
 rocsparse_extract_descr_default_t::rocsparse_extract_descr_default_t(
-    rocsparse_const_spmat_descr source, rocsparse_const_spmat_descr target)
-    : _rocsparse_extract_descr(rocsparse_extract_alg_default, source, target)
+    rocsparse_const_spmat_descr source, rocsparse_const_spmat_descr target, hipStream_t stream)
+    : _rocsparse_extract_descr(rocsparse_extract_alg_default, source, target, stream)
 {
     ROCSPARSE_ROUTINE_TRACE;
 

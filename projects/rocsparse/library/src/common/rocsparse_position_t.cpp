@@ -38,12 +38,7 @@ int64_t rocsparse::position_t::get_stride() const
     return 1;
 }
 
-rocsparse::position_t::~position_t()
-{
-    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_position));
-}
-
-rocsparse_status rocsparse::position_t::free_position_async(hipStream_t stream)
+rocsparse_status rocsparse::position_t::destroy(hipStream_t stream)
 {
     RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->m_position, stream));
     this->m_position = nullptr;

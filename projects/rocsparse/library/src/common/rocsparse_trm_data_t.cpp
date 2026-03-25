@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,7 @@ void rocsparse::trm_data_t::copy(const rocsparse::trm_data_t* that, hipStream_t 
         {
             if(that->m_data[i] != nullptr)
             {
-                rocsparse::trm_info_t::copy(&this->m_data[i], that->m_data[i]);
+                rocsparse::trm_info_t::copy(&this->m_data[i], that->m_data[i], stream);
             }
         }
 
@@ -65,18 +65,21 @@ void rocsparse::trm_data_t::uncouple(const rocsparse::trm_data_t* that)
     }
 }
 
-rocsparse::trm_data_t::~trm_data_t()
+rocsparse_status rocsparse::trm_data_t::destroy(hipStream_t stream)
 {
     // Clear zero pivot
-    for(int i = 0; i < 4; ++i)
+    this->rocsparse::pivot_info_t::destroy(stream);
+    for(int32_t i = 0; i < 4; ++i)
     {
         auto trm_info = this->m_data[i];
         if(trm_info != nullptr)
         {
+            trm_info->destroy(stream);
             delete trm_info;
             this->m_data[i] = nullptr;
         }
     }
+    return rocsparse_status_success;
 }
 
 rocsparse::trm_info_t* rocsparse::trm_data_t::get(rocsparse_operation operation,
@@ -84,6 +87,19 @@ rocsparse::trm_info_t* rocsparse::trm_data_t::get(rocsparse_operation operation,
 {
     const int idx = rocsparse::trm_data_t::storage_index(operation, fill_mode);
     return this->m_data[idx];
+}
+
+void rocsparse::trm_data_t::info() const
+{
+    std::cout << "rocsparse::trm_data_t::info addr = " << this << std::endl;
+    for(int32_t i = 0; i < 4; ++i)
+    {
+        std::cout << " TRM_DATA.TRM_INFO[" << i << "]" << this->m_data[i] << std::endl;
+        if(this->m_data[i])
+        {
+            this->m_data[i]->info();
+        }
+    }
 }
 
 void rocsparse::trm_data_t::set(rocsparse_operation    operation,

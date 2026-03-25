@@ -53,6 +53,7 @@ protected:
     rocsparse::numeric_boost m_boost{};
 
 public:
+    void info() const;
     void duplicate_trdata(const rocsparse_mat_info src, hipStream_t stream);
     const rocsparse::numeric_boost*          get_boost() const;
     rocsparse::numeric_boost*                get_boost();
@@ -64,14 +65,14 @@ public:
     std::shared_ptr<_rocsparse_bsrsm_info>   get_shared_bsrsm_info();
     std::shared_ptr<_rocsparse_bsrilu0_info> get_shared_bsrilu0_info();
     std::shared_ptr<_rocsparse_bsric0_info>  get_shared_bsric0_info();
-    void                                     clear_csrsv_info();
-    void                                     clear_csrsm_info();
-    void                                     clear_csrilu0_info();
-    void                                     clear_csric0_info();
-    void                                     clear_bsrsv_info();
-    void                                     clear_bsrsm_info();
-    void                                     clear_bsrilu0_info();
-    void                                     clear_bsric0_info();
+    rocsparse_status                         clear_csrsv_info(hipStream_t);
+    rocsparse_status                         clear_csrsm_info(hipStream_t);
+    rocsparse_status                         clear_csrilu0_info(hipStream_t);
+    rocsparse_status                         clear_csric0_info(hipStream_t);
+    rocsparse_status                         clear_bsrsv_info(hipStream_t);
+    rocsparse_status                         clear_bsrsm_info(hipStream_t);
+    rocsparse_status                         clear_bsrilu0_info(hipStream_t);
+    rocsparse_status                         clear_bsric0_info(hipStream_t);
 
     rocsparse_bsric0_info  get_bsric0_info();
     rocsparse::trm_info_t* get_bsric0_info(rocsparse_operation operation,
@@ -132,7 +133,7 @@ public:
     rocsparse_csrgemm_info csrgemm_info{};
     rocsparse_csritsv_info csritsv_info{};
 
-    ~_rocsparse_mat_info();
+    ~_rocsparse_mat_info() = default;
     rocsparse_status destroy(hipStream_t);
 
     void                 set_csrmv_info(rocsparse_csrmv_info value);

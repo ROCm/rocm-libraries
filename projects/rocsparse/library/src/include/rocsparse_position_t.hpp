@@ -35,12 +35,12 @@ namespace rocsparse
         int64_t             m_batch_count{};
         void*               m_position{};
         position_t();
-        ~position_t();
+        ~position_t() = default;
 
         rocsparse_status create_position_async(int64_t             batch_count,
                                                rocsparse_indextype indextype,
                                                hipStream_t         stream);
-        rocsparse_status free_position_async(hipStream_t stream);
+        rocsparse_status destroy(hipStream_t stream);
         rocsparse_status set_max_position_async(hipStream_t stream);
         rocsparse_status copy_position_async(const position_t* that, hipStream_t stream);
 

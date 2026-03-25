@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -163,6 +163,7 @@ namespace rocsparse
 
         if(bsrmv_info != nullptr)
         {
+            RETURN_IF_ROCSPARSE_ERROR(bsrmv_info->destroy(handle->stream));
             delete bsrmv_info;
             bsrmv_info = nullptr;
         }

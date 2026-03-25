@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,7 +41,8 @@ const char* rocsparse::enum_utils::to_string(rocsparse_itilu0_alg value)
         CASE(rocsparse_itilu0_alg_async_inplace);
         CASE(rocsparse_itilu0_alg_async_split);
         CASE(rocsparse_itilu0_alg_sync_split);
-        CASE(rocsparse_itilu0_alg_sync_split_fusion);
+    case DEPRECATED_ROCSPARSE_ITILU0_ALG_SYNC_SPLIT_FUSION:
+        return "rocsparse_itilu0_alg_sync_split_fusion";
 #undef CASE
     }
     // LCOV_EXCL_START
@@ -58,7 +59,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_itilu0_alg value)
     case rocsparse_itilu0_alg_async_inplace:
     case rocsparse_itilu0_alg_async_split:
     case rocsparse_itilu0_alg_sync_split:
-    case rocsparse_itilu0_alg_sync_split_fusion:
+    case DEPRECATED_ROCSPARSE_ITILU0_ALG_SYNC_SPLIT_FUSION:
     {
         return false;
     }
@@ -97,10 +98,10 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
-        case rocsparse_itilu0_alg_sync_split_fusion:
+        case DEPRECATED_ROCSPARSE_ITILU0_ALG_SYNC_SPLIT_FUSION:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split_fusion>::
+                (rocsparse::csritilu0_driver_t<DEPRECATED_ROCSPARSE_ITILU0_ALG_SYNC_SPLIT_FUSION>::
                      buffer_size<I, J>::run(parameters...)));
             return rocsparse_status_success;
         }

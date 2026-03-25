@@ -105,8 +105,7 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, info);
 
     // Clear bsrsm meta data (this includes lower, upper and their transposed equivalents
-    info->clear_bsrsm_info();
-
+    RETURN_IF_ROCSPARSE_ERROR(info->clear_bsrsm_info(handle->stream));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

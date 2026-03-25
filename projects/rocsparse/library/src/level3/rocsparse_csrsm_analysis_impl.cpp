@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -59,7 +59,6 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
     const T* csr_val     = reinterpret_cast<const T*>(csr_val_);
     const I* csr_row_ptr = reinterpret_cast<const I*>(csr_row_ptr_);
     const J* csr_col_ind = reinterpret_cast<const J*>(csr_col_ind_);
-
     if(nrhs == 1)
     {
         //

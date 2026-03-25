@@ -216,6 +216,54 @@ rocsparse_status rocsparse_spmat_set_data(rocsparse_handle      handle,
                                           rocsparse_dnvec_descr value,
                                           rocsparse_error*      p_error);
 
+/*! \ingroup aux_module
+ *  \brief Get the requested attribute data from the sparse matrix descriptor
+ *
+ *  @param[in]
+ *  descr       the pointer to the sparse matrix descriptor.
+ *  @param[in]
+ *  attribute \ref rocsparse_spmat_fill_mode or \ref rocsparse_spmat_diag_type or
+ *            \ref rocsparse_spmat_matrix_type or \ref rocsparse_spmat_storage_mode
+ *  @param[out]
+ *  data      attribute data
+ *  @param[in]
+ *  data_size attribute data size.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p attribute is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spmat_get_attribute(rocsparse_const_spmat_descr descr,
+                                               rocsparse_spmat_attribute   attribute,
+                                               void*                       data,
+                                               size_t                      data_size);
+
+/*! \ingroup aux_module
+ *  \brief Set the requested attribute data in the sparse matrix descriptor
+ *
+ *  @param[inout]
+ *  descr       the pointer to the sparse matrix descriptor.
+ *  @param[in]
+ *  attribute \ref rocsparse_spmat_fill_mode or \ref rocsparse_spmat_diag_type or
+ *            \ref rocsparse_spmat_matrix_type or \ref rocsparse_spmat_storage_mode
+ *  @param[in]
+ *  data      attribute data
+ *  @param[in]
+ *  data_size attribute data size.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p attribute is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spmat_set_attribute(rocsparse_spmat_descr     descr,
+                                               rocsparse_spmat_attribute attribute,
+                                               const void*               data,
+                                               size_t                    data_size);
+
 #ifdef __cplusplus
 }
 #endif

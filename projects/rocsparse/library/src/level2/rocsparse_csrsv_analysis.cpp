@@ -173,7 +173,6 @@ static rocsparse_status rocsparse_trm_transpose(rocsparse_handle          handle
 
     void**       ref_csrt_col_ind           = info->get_ref_transposed_col_ind();
     const size_t csrt_col_ind_size_in_bytes = sizeof_J * nnz;
-
     RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(ref_csrt_perm, csrt_perm_size_in_bytes, stream));
     RETURN_IF_HIP_ERROR(
         rocsparse_hipMallocAsync(ref_csrt_col_ind, csrt_col_ind_size_in_bytes, stream));
@@ -375,7 +374,6 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
         pivot_info->get_batch_count(), csr_col_ind_indextype, zero_pivot, stream));
 
-    //  rocsparse_indextype row_map_indextype = csr_col_ind_indextype;
     void*               row_map            = info->get_row_map();
     rocsparse_indextype diag_ind_indextype = csr_row_ptr_indextype;
     void*               diag_ind           = info->get_diag_ind();

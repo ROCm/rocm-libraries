@@ -113,6 +113,7 @@ try
     // Clear csritsv meta data (this includes lower, upper and their transposed equivalents
     if(info->csritsv_info != nullptr)
     {
+        info->csritsv_info->destroy(handle->stream);
         delete info->csritsv_info;
         info->csritsv_info = nullptr;
     }

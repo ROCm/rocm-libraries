@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,18 +49,19 @@ namespace rocsparse
         std::shared_ptr<_rocsparse_bsrilu0_info> m_bsrilu0_info;
         std::shared_ptr<_rocsparse_bsric0_info>  m_bsric0_info;
 
-        void destroy_csrsv_info();
-        void destroy_csrsm_info();
-        void destroy_csrilu0_info();
-        void destroy_csric0_info();
-        void destroy_bsrsv_info();
-        void destroy_bsrsm_info();
-        void destroy_bsrilu0_info();
-        void destroy_bsric0_info();
+        rocsparse_status destroy_csrsv_info(hipStream_t);
+        rocsparse_status destroy_csrsm_info(hipStream_t);
+        rocsparse_status destroy_csrilu0_info(hipStream_t);
+        rocsparse_status destroy_csric0_info(hipStream_t);
+        rocsparse_status destroy_bsrsv_info(hipStream_t);
+        rocsparse_status destroy_bsrsm_info(hipStream_t);
+        rocsparse_status destroy_bsrilu0_info(hipStream_t);
+        rocsparse_status destroy_bsric0_info(hipStream_t);
 
         void uncouple(rocsparse::trm_data_t* p);
 
     public:
+        void                   info() const;
         rocsparse_csrsv_info   create_csrsv_info();
         rocsparse_csrsm_info   create_csrsm_info();
         rocsparse_csrilu0_info create_csrilu0_info();
@@ -79,19 +80,20 @@ namespace rocsparse
         std::shared_ptr<_rocsparse_bsrilu0_info> get_shared_bsrilu0_info();
         std::shared_ptr<_rocsparse_bsric0_info>  get_shared_bsric0_info();
 
-        void clear_csrsv_info();
-        void clear_csrsm_info();
-        void clear_csrilu0_info();
-        void clear_csric0_info();
-        void clear_bsrsv_info();
-        void clear_bsrsm_info();
-        void clear_bsrilu0_info();
-        void clear_bsric0_info();
+        rocsparse_status clear_csrsv_info(hipStream_t);
+        rocsparse_status clear_csrsm_info(hipStream_t);
+        rocsparse_status clear_csrilu0_info(hipStream_t);
+        rocsparse_status clear_csric0_info(hipStream_t);
+        rocsparse_status clear_bsrsv_info(hipStream_t);
+        rocsparse_status clear_bsrsm_info(hipStream_t);
+        rocsparse_status clear_bsrilu0_info(hipStream_t);
+        rocsparse_status clear_bsric0_info(hipStream_t);
 
     public:
-        trm_t() = default;
-        ~trm_t();
-        void copy(const trm_t& that, hipStream_t stream);
+        trm_t()  = default;
+        ~trm_t() = default;
+        rocsparse_status destroy(hipStream_t stream);
+        void             copy(const trm_t& that, hipStream_t stream);
     };
 
 }

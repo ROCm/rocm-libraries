@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -366,9 +366,9 @@ rocsparse_status
                                                          rocsparse_csrmv_info*     p_csrmv_info)
 {
     ROCSPARSE_ROUTINE_TRACE;
-
     p_csrmv_info[0]                 = new _rocsparse_csrmv_info();
     rocsparse_csrmv_info csrmv_info = p_csrmv_info[0];
+    std::cout << "create csrmv_info " << csrmv_info << std::endl;
 
     if(trans == rocsparse_operation_none)
     {
@@ -421,6 +421,7 @@ rocsparse_status
             RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&csrmv_info->adaptive.row_blocks,
                                                          sizeof(I) * csrmv_info->adaptive.size,
                                                          handle->stream));
+            std::cout << "adaptif " << csrmv_info->adaptive.row_blocks << std::endl;
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMallocAsync(&csrmv_info->adaptive.wg_flags,
                                          sizeof(uint32_t) * csrmv_info->adaptive.size,

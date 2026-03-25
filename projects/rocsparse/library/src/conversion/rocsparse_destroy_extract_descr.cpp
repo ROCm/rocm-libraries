@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,8 @@ try
         {
         case rocsparse_extract_alg_default:
         {
+            hipStream_t default_stream = 0;
+            RETURN_IF_ROCSPARSE_ERROR(descr->destroy(default_stream));
             delete descr;
         }
         }

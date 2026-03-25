@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -88,7 +88,6 @@ static void test_csric0_matrix(rocsparse_local_handle&    handle,
 
     void* dbuffer = nullptr;
     CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
-
     if(arg_unit_check)
     {
         // Copy data from CPU to device
@@ -145,6 +144,7 @@ static void test_csric0_matrix(rocsparse_local_handle&    handle,
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
         CHECK_ROCSPARSE_ERROR(testing::rocsparse_csric0<T>(
             handle, M, nnz, descr, dcsr_val_1, dcsr_row_ptr, dcsr_col_ind, info, spol, dbuffer));
+
         {
             auto st = rocsparse_csric0_zero_pivot(handle, info, h_solve_pivot_1);
             EXPECT_ROCSPARSE_STATUS(st,
@@ -1058,6 +1058,8 @@ void testing_csric0_extra_dense_matrix(const Arguments& arg)
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
 
+    hipStream_t stream{};
+    CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
     // Create matrix descriptor
     rocsparse_local_mat_descr descr;
 
@@ -1149,7 +1151,7 @@ void testing_csric0_extra_dense_matrix(const Arguments& arg)
     }
 
     // Sync to force updated pivots
-    CHECK_HIP_ERROR(hipDeviceSynchronize());
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
     // Pointer mode device
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
@@ -1160,7 +1162,7 @@ void testing_csric0_extra_dense_matrix(const Arguments& arg)
                                                           : rocsparse_status_success);
 
     // Sync to force updated pivots
-    CHECK_HIP_ERROR(hipDeviceSynchronize());
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
     // Perform solve step
 
@@ -1176,7 +1178,7 @@ void testing_csric0_extra_dense_matrix(const Arguments& arg)
     }
 
     // Sync to force updated pivots
-    CHECK_HIP_ERROR(hipDeviceSynchronize());
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
     // Pointer mode device
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
@@ -1187,7 +1189,7 @@ void testing_csric0_extra_dense_matrix(const Arguments& arg)
                                                        : rocsparse_status_success);
 
     // Sync to force updated pivots
-    CHECK_HIP_ERROR(hipDeviceSynchronize());
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
     // Copy output to host
     CHECK_HIP_ERROR(hipMemcpy(hcsr_val_1, dcsr_val_1, sizeof(float) * nnz, hipMemcpyDeviceToHost));

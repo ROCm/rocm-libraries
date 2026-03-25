@@ -39,8 +39,8 @@ protected:
     int64_t                m_batch_stride;
     rocsparse_datatype     m_data_type{};
     rocsparse_pointer_mode m_pointer_mode{};
-    bool                   m_init;
-    bool                   m_own_values;
+    bool                   m_init{};
+    bool                   m_own_values{};
 
 public:
     //

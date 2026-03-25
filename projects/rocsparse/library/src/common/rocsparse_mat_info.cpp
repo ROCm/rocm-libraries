@@ -148,6 +148,7 @@ void _rocsparse_mat_info::set_csrsm_info(rocsparse_operation    operation,
                                          rocsparse_fill_mode    fill_mode,
                                          rocsparse::trm_info_t* trm)
 {
+
     this->m_trm.create_csrsm_info()->set(operation, fill_mode, trm);
 }
 
@@ -206,37 +207,45 @@ std::shared_ptr<_rocsparse_bsric0_info> _rocsparse_mat_info::get_shared_bsric0_i
     return this->m_trm.get_shared_bsric0_info();
 }
 
-void _rocsparse_mat_info::clear_csrsv_info()
+rocsparse_status _rocsparse_mat_info::clear_csrsv_info(hipStream_t stream)
 {
-    this->m_trm.clear_csrsv_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->m_trm.clear_csrsv_info(stream));
+    return rocsparse_status_success;
 }
-void _rocsparse_mat_info::clear_csrsm_info()
+rocsparse_status _rocsparse_mat_info::clear_csrsm_info(hipStream_t stream)
 {
-    this->m_trm.clear_csrsm_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->m_trm.clear_csrsm_info(stream));
+    return rocsparse_status_success;
 }
-void _rocsparse_mat_info::clear_csrilu0_info()
+rocsparse_status _rocsparse_mat_info::clear_csrilu0_info(hipStream_t stream)
 {
-    this->m_trm.clear_csrilu0_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->m_trm.clear_csrilu0_info(stream));
+    return rocsparse_status_success;
 }
-void _rocsparse_mat_info::clear_csric0_info()
+rocsparse_status _rocsparse_mat_info::clear_csric0_info(hipStream_t stream)
 {
-    this->m_trm.clear_csric0_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->m_trm.clear_csric0_info(stream));
+    return rocsparse_status_success;
 }
-void _rocsparse_mat_info::clear_bsrsv_info()
+rocsparse_status _rocsparse_mat_info::clear_bsrsv_info(hipStream_t stream)
 {
-    this->m_trm.clear_bsrsv_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->m_trm.clear_bsrsv_info(stream));
+    return rocsparse_status_success;
 }
-void _rocsparse_mat_info::clear_bsrsm_info()
+rocsparse_status _rocsparse_mat_info::clear_bsrsm_info(hipStream_t stream)
 {
-    this->m_trm.clear_bsrsm_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->m_trm.clear_bsrsm_info(stream));
+    return rocsparse_status_success;
 }
-void _rocsparse_mat_info::clear_bsrilu0_info()
+rocsparse_status _rocsparse_mat_info::clear_bsrilu0_info(hipStream_t stream)
 {
-    this->m_trm.clear_bsrilu0_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->m_trm.clear_bsrilu0_info(stream));
+    return rocsparse_status_success;
 }
-void _rocsparse_mat_info::clear_bsric0_info()
+rocsparse_status _rocsparse_mat_info::clear_bsric0_info(hipStream_t stream)
 {
-    this->m_trm.clear_bsric0_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->m_trm.clear_bsric0_info(stream));
+    return rocsparse_status_success;
 }
 
 //
@@ -277,10 +286,22 @@ rocsparse::sorted_coo2csr_info_t* _rocsparse_mat_info::get_sorted_coo2csr_info()
     return this->m_sorted_coo2csr_info;
 }
 
-_rocsparse_mat_info::~_rocsparse_mat_info()
+void _rocsparse_mat_info::info() const
 {
-    hipStream_t default_stream{};
-    WARNING_IF_ROCSPARSE_ERROR(this->destroy(default_stream));
+    std::cout << "===== INFO MAT_INFO ===== addr = " << this << std::endl;
+    std::cout << "   == csrgemm_info ? " << ((this->csrgemm_info == nullptr) ? "NO" : "YES")
+              << std::endl;
+    std::cout << "   == csritsv_info ? " << ((this->csritsv_info == nullptr) ? "NO" : "YES")
+              << std::endl;
+    std::cout << "   == csrmv_info ? " << ((this->csrmv_info == nullptr) ? "NO" : "YES")
+              << std::endl;
+    std::cout << "   == bsrmv_info ? " << ((this->bsrmv_info == nullptr) ? "NO" : "YES")
+              << std::endl;
+    std::cout << "   == sorted_coo2csr_info ? "
+              << ((this->m_sorted_coo2csr_info == nullptr) ? "NO" : "YES") << std::endl;
+    std::cout << "   == TRM ? " << std::endl;
+    this->m_trm.info();
+    std::cout << "===== INFO MAT_INFO DONE ===== addr = " << this << std::endl;
 }
 
 rocsparse_status _rocsparse_mat_info::destroy(hipStream_t stream)
@@ -291,28 +312,24 @@ rocsparse_status _rocsparse_mat_info::destroy(hipStream_t stream)
 
     if(this->csritsv_info != nullptr)
     {
+        this->csritsv_info->destroy(stream);
         delete this->csritsv_info;
         this->csritsv_info = nullptr;
     }
-
-    // Due to the changes in the hipFree introduced in HIP 7.0
-    // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
-    // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
-    // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
-    // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
 
     //
     // TRM_INFO data are automatically destroyed.
     //
     if(this->csrmv_info != nullptr)
     {
+        this->csrmv_info->destroy(stream);
         delete this->csrmv_info;
         this->csrmv_info = nullptr;
     }
 
     if(this->bsrmv_info != nullptr)
     {
+        this->bsrmv_info->destroy(stream);
         delete this->bsrmv_info;
         this->bsrmv_info = nullptr;
     }
@@ -320,12 +337,11 @@ rocsparse_status _rocsparse_mat_info::destroy(hipStream_t stream)
     rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = this->get_sorted_coo2csr_info();
     if(sorted_coo2csr_info != nullptr)
     {
-        hipStream_t default_stream = 0;
-        std::ignore                = sorted_coo2csr_info->free_memory(default_stream);
-
+        RETURN_IF_ROCSPARSE_ERROR(sorted_coo2csr_info->destroy(stream));
         delete sorted_coo2csr_info;
         this->set_sorted_coo2csr_info(nullptr);
     }
 
+    RETURN_IF_ROCSPARSE_ERROR(this->m_trm.destroy(stream));
     return rocsparse_status_success;
 }

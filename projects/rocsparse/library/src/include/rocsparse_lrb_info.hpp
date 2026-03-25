@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,8 @@ typedef struct _rocsparse_lrb_info
 
     int64_t nRowsBins[32]{}; // host array
 
-    ~_rocsparse_lrb_info();
-    void clear();
+    ~_rocsparse_lrb_info() = default;
+    void             clear(hipStream_t);
+    rocsparse_status destroy(hipStream_t);
 
 } * rocsparse_lrb_info;

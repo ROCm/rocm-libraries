@@ -476,7 +476,7 @@ namespace rocsparse
             }
             case rocsparse_pointer_mode_device:
             {
-                *local_alpha = handle->alpha;
+                *local_alpha = handle->get_alpha();
                 break;
             }
                 // LCOV_EXCL_START

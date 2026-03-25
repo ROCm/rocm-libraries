@@ -58,18 +58,19 @@ protected:
     int64_t m_batch_count{1};
 
 public:
-    _rocsparse_spattern_descr() = default;
-    ~_rocsparse_spattern_descr();
+    _rocsparse_spattern_descr()  = default;
+    ~_rocsparse_spattern_descr() = default;
+
     rocsparse_status destroy(hipStream_t stream);
     rocsparse_status validate();
 
-    void define(rocsparse_format      format_,
-                int64_t               rows_,
-                int64_t               cols_,
-                int64_t               nnz_,
-                rocsparse_idvec_descr row_data_,
-                rocsparse_idvec_descr col_data_,
-                rocsparse_mat_descr   mat_descr_);
+    void define(rocsparse_format      format,
+                int64_t               rows,
+                int64_t               cols,
+                int64_t               nnz,
+                rocsparse_idvec_descr row_data,
+                rocsparse_idvec_descr col_data,
+                rocsparse_mat_descr   mat_descr);
 
     void define_csr(int64_t               rows,
                     int64_t               cols,

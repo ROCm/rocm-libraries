@@ -60,7 +60,7 @@ void _rocsparse_spic0_descr::set_shared_bsric0_info(std::shared_ptr<_rocsparse_b
     this->m_bsric0_info = value;
 }
 
-_rocsparse_spic0_descr::~_rocsparse_spic0_descr()
+rocsparse_status _rocsparse_spic0_descr::destroy(hipStream_t stream)
 {
     this->m_stage                  = ((rocsparse_spic0_stage)-1);
     this->m_alg                    = ((rocsparse_spic0_alg)-1);
@@ -69,8 +69,17 @@ _rocsparse_spic0_descr::~_rocsparse_spic0_descr()
     this->m_format                 = ((rocsparse_format)-1);
     this->m_tolerance_pointer      = nullptr;
     this->m_tolerance_pointer_mode = ((rocsparse_pointer_mode)-1);
-
+    if(this->m_csric0_info.use_count() == 1)
+    {
+        this->m_csric0_info.get()->destroy(stream);
+    }
     this->m_csric0_info.reset();
+    if(this->m_bsric0_info.use_count() == 1)
+    {
+        this->m_bsric0_info.get()->destroy(stream);
+    }
+    this->m_bsric0_info.reset();
+    return rocsparse_status_success;
 }
 
 _rocsparse_spic0_descr::_rocsparse_spic0_descr()
@@ -154,13 +163,14 @@ void _rocsparse_spic0_descr::set_format(rocsparse_format value)
 }
 
 extern "C" rocsparse_status rocsparse_spic0_descr_create(rocsparse_handle       handle,
-                                                         rocsparse_spic0_descr* descr,
+                                                         rocsparse_spic0_descr* p_spic0_descr,
                                                          rocsparse_error*       p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-    ROCSPARSE_CHECKARG_POINTER(0, descr);
-    *descr = new _rocsparse_spic0_descr();
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, p_spic0_descr);
+    p_spic0_descr[0] = new _rocsparse_spic0_descr();
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -171,14 +181,16 @@ catch(...)
 // LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_spic0_descr_destroy(rocsparse_handle      handle,
-                                                          rocsparse_spic0_descr descr,
+                                                          rocsparse_spic0_descr spic0_descr,
                                                           rocsparse_error*      p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-    if(descr != nullptr)
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    if(spic0_descr != nullptr)
     {
-        delete descr;
+        RETURN_IF_ROCSPARSE_ERROR(spic0_descr->destroy(handle->stream));
+        delete spic0_descr;
     }
     return rocsparse_status_success;
     // LCOV_EXCL_START

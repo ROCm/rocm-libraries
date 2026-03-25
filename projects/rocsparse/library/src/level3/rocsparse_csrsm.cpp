@@ -127,7 +127,7 @@ try
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(1, info);
-    info->clear_csrsm_info();
+    RETURN_IF_ROCSPARSE_ERROR(info->clear_csrsm_info(handle->stream));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

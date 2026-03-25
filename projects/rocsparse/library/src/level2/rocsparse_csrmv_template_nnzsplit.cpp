@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -272,9 +272,9 @@ rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
             handle, static_cast<J>(0), requiredBlocks + 1, &buffer_size)));
         bool  temp_alloc       = false;
         void* temp_storage_ptr = nullptr;
-        if(handle->buffer_size >= buffer_size)
+        if(handle->get_buffer_size() >= buffer_size)
         {
-            temp_storage_ptr = handle->buffer;
+            temp_storage_ptr = handle->get_buffer();
             temp_alloc       = false;
         }
         else

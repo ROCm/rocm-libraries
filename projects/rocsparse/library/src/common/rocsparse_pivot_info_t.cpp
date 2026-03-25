@@ -26,6 +26,12 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_logging.hpp"
 
+rocsparse_status rocsparse::pivot_info_t::destroy(hipStream_t stream)
+{
+    this->rocsparse::position_t::destroy(stream);
+    return rocsparse_status_success;
+}
+
 rocsparse_status rocsparse::pivot_info_t::create_zero_pivot_async(int64_t             batch_count,
                                                                   rocsparse_indextype indextype,
                                                                   hipStream_t         stream)

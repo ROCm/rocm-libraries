@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,37 +23,107 @@
 
 #include "rocsparse_trm_t.hpp"
 
-void rocsparse::trm_t::destroy_csrsv_info()
+rocsparse_status rocsparse::trm_t::destroy_csrsv_info(hipStream_t stream)
 {
-    this->m_csrsv_info.reset();
+    auto& which           = this->m_csrsv_info;
+    auto  shared_instance = which.get();
+    if(shared_instance != nullptr)
+    {
+        this->uncouple(shared_instance);
+        RETURN_IF_ROCSPARSE_ERROR(shared_instance->destroy(stream));
+    }
+    which.reset();
+    return rocsparse_status_success;
 }
-void rocsparse::trm_t::destroy_csrsm_info()
+rocsparse_status rocsparse::trm_t::destroy_csrsm_info(hipStream_t stream)
 {
-    this->m_csrsm_info.reset();
+    auto& which           = this->m_csrsm_info;
+    auto  shared_instance = which.get();
+    if(shared_instance != nullptr)
+    {
+        this->uncouple(shared_instance);
+        RETURN_IF_ROCSPARSE_ERROR(shared_instance->destroy(stream));
+    }
+    which.reset();
+    return rocsparse_status_success;
 }
-void rocsparse::trm_t::destroy_csrilu0_info()
+
+rocsparse_status rocsparse::trm_t::destroy_csrilu0_info(hipStream_t stream)
 {
-    this->m_csrilu0_info.reset();
+    auto& which           = this->m_csrilu0_info;
+    auto  shared_instance = which.get();
+    if(shared_instance != nullptr)
+    {
+        this->uncouple(shared_instance);
+        RETURN_IF_ROCSPARSE_ERROR(shared_instance->destroy(stream));
+    }
+    which.reset();
+    return rocsparse_status_success;
 }
-void rocsparse::trm_t::destroy_csric0_info()
+
+rocsparse_status rocsparse::trm_t::destroy_csric0_info(hipStream_t stream)
 {
-    this->m_csric0_info.reset();
+    auto& which           = this->m_csric0_info;
+    auto  shared_instance = which.get();
+    if(shared_instance != nullptr)
+    {
+        this->uncouple(shared_instance);
+        RETURN_IF_ROCSPARSE_ERROR(shared_instance->destroy(stream));
+    }
+    which.reset();
+    return rocsparse_status_success;
 }
-void rocsparse::trm_t::destroy_bsrsv_info()
+
+rocsparse_status rocsparse::trm_t::destroy_bsrsv_info(hipStream_t stream)
 {
-    this->m_bsrsv_info.reset();
+    auto& which           = this->m_bsrsv_info;
+    auto  shared_instance = which.get();
+    if(shared_instance != nullptr)
+    {
+        this->uncouple(shared_instance);
+        RETURN_IF_ROCSPARSE_ERROR(shared_instance->destroy(stream));
+    }
+    which.reset();
+    return rocsparse_status_success;
 }
-void rocsparse::trm_t::destroy_bsrsm_info()
+
+rocsparse_status rocsparse::trm_t::destroy_bsrsm_info(hipStream_t stream)
 {
-    this->m_bsrsm_info.reset();
+    auto& which           = this->m_bsrsm_info;
+    auto  shared_instance = which.get();
+    if(shared_instance != nullptr)
+    {
+        this->uncouple(shared_instance);
+        RETURN_IF_ROCSPARSE_ERROR(shared_instance->destroy(stream));
+    }
+    which.reset();
+    return rocsparse_status_success;
 }
-void rocsparse::trm_t::destroy_bsrilu0_info()
+
+rocsparse_status rocsparse::trm_t::destroy_bsrilu0_info(hipStream_t stream)
 {
-    this->m_bsrilu0_info.reset();
+    auto& which           = this->m_bsrilu0_info;
+    auto  shared_instance = which.get();
+    if(shared_instance != nullptr)
+    {
+        this->uncouple(shared_instance);
+        RETURN_IF_ROCSPARSE_ERROR(shared_instance->destroy(stream));
+    }
+    which.reset();
+    return rocsparse_status_success;
 }
-void rocsparse::trm_t::destroy_bsric0_info()
+
+rocsparse_status rocsparse::trm_t::destroy_bsric0_info(hipStream_t stream)
 {
-    this->m_bsric0_info.reset();
+    auto& which           = this->m_bsric0_info;
+    auto  shared_instance = which.get();
+    if(shared_instance != nullptr)
+    {
+        this->uncouple(shared_instance);
+        RETURN_IF_ROCSPARSE_ERROR(shared_instance->destroy(stream));
+    }
+    which.reset();
+    return rocsparse_status_success;
 }
 
 rocsparse_csrsv_info rocsparse::trm_t::create_csrsv_info()
@@ -86,6 +156,7 @@ rocsparse_csrilu0_info rocsparse::trm_t::create_csrilu0_info()
 
 rocsparse_csric0_info rocsparse::trm_t::create_csric0_info()
 {
+
     if(this->m_csric0_info.get() == nullptr)
     {
         this->m_csric0_info = std::shared_ptr<_rocsparse_csric0_info>(new _rocsparse_csric0_info());
@@ -130,48 +201,165 @@ rocsparse_bsric0_info rocsparse::trm_t::create_bsric0_info()
     return this->m_bsric0_info.get();
 }
 
-void rocsparse::trm_t::clear_csrsv_info()
+rocsparse_status rocsparse::trm_t::clear_csrsv_info(hipStream_t stream)
 {
     this->uncouple(this->m_csrsv_info.get());
-    this->destroy_csrsv_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->destroy_csrsv_info(stream));
+    return rocsparse_status_success;
 }
-void rocsparse::trm_t::clear_csrsm_info()
+
+rocsparse_status rocsparse::trm_t::clear_csrsm_info(hipStream_t stream)
 {
     this->uncouple(this->m_csrsm_info.get());
-    this->destroy_csrsm_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->destroy_csrsm_info(stream));
+    return rocsparse_status_success;
 }
-void rocsparse::trm_t::clear_csrilu0_info()
+rocsparse_status rocsparse::trm_t::clear_csrilu0_info(hipStream_t stream)
 {
     this->uncouple(this->m_csrilu0_info.get());
-    this->destroy_csrilu0_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->destroy_csrilu0_info(stream));
+    return rocsparse_status_success;
 }
 
-void rocsparse::trm_t::clear_csric0_info()
+rocsparse_status rocsparse::trm_t::clear_csric0_info(hipStream_t stream)
 {
     this->uncouple(this->m_csric0_info.get());
-    this->destroy_csric0_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->destroy_csric0_info(stream));
+    return rocsparse_status_success;
 }
 
-void rocsparse::trm_t::clear_bsrsv_info()
+rocsparse_status rocsparse::trm_t::clear_bsrsv_info(hipStream_t stream)
 {
     this->uncouple(this->m_bsrsv_info.get());
-    this->destroy_bsrsv_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->destroy_bsrsv_info(stream));
+    return rocsparse_status_success;
 }
-void rocsparse::trm_t::clear_bsrsm_info()
+rocsparse_status rocsparse::trm_t::clear_bsrsm_info(hipStream_t stream)
 {
     this->uncouple(this->m_bsrsm_info.get());
-    this->destroy_bsrsm_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->destroy_bsrsm_info(stream));
+    return rocsparse_status_success;
 }
-void rocsparse::trm_t::clear_bsrilu0_info()
+rocsparse_status rocsparse::trm_t::clear_bsrilu0_info(hipStream_t stream)
 {
     this->uncouple(this->m_bsrilu0_info.get());
-    this->destroy_bsrilu0_info();
+    RETURN_IF_ROCSPARSE_ERROR(this->destroy_bsrilu0_info(stream));
+    return rocsparse_status_success;
 }
 
-void rocsparse::trm_t::clear_bsric0_info()
+rocsparse_status rocsparse::trm_t::clear_bsric0_info(hipStream_t stream)
 {
     this->uncouple(this->m_bsric0_info.get());
-    this->destroy_bsric0_info();
+    this->destroy_bsric0_info(stream);
+    return rocsparse_status_success;
+}
+
+void rocsparse::trm_t::info() const
+{
+    std::cout << "  ===== TRM_INFO ==== addr = " << this << std::endl;
+    {
+        auto p = this->m_csrsv_info.get();
+        if(p != nullptr)
+        {
+            std::cout << "  -> TRM_INFO.CSRSV_INFO " << std::endl;
+            p->info();
+        }
+        else
+        {
+            std::cout << "  -> TRM_INFO.CSRSV_INFO NONE" << std::endl;
+        }
+    }
+    {
+        auto p = this->m_csrsm_info.get();
+        if(p != nullptr)
+        {
+            std::cout << "  -> TRM_INFO.CSRSM_INFO " << std::endl;
+            p->info();
+        }
+        else
+        {
+            std::cout << "  -> TRM_INFO.CSRSM_INFO NONE" << std::endl;
+        }
+    }
+
+    {
+        auto p = this->m_csrilu0_info.get();
+        if(p != nullptr)
+        {
+            std::cout << "  -> TRM_INFO.CSRILU0_INFO " << std::endl;
+
+            p->info();
+        }
+        else
+        {
+            std::cout << "  -> TRM_INFO.CSRILU0_INFO NONE" << std::endl;
+        }
+    }
+
+    {
+        auto p = this->m_csric0_info.get();
+        if(p != nullptr)
+        {
+            std::cout << "  -> TRM_INFO.CSRIC0_INFO " << std::endl;
+            p->info();
+        }
+        else
+        {
+            std::cout << "  -> TRM_INFO.CSRIC0_INFO NONE" << std::endl;
+        }
+    }
+
+    {
+        auto p = this->m_bsrsv_info.get();
+        if(p != nullptr)
+        {
+            std::cout << "  -> TRM_INFO.BSRSV_INFO " << std::endl;
+
+            p->info();
+        }
+        else
+        {
+            std::cout << "  -> TRM_INFO.BSRSV_INFO NONE" << std::endl;
+        }
+    }
+    {
+        auto p = this->m_bsrsm_info.get();
+        if(p != nullptr)
+        {
+            std::cout << "  -> TRM_INFO.BSRSM_INFO " << std::endl;
+            p->info();
+        }
+        else
+        {
+            std::cout << "  -> TRM_INFO.BSRSM_INFO NONE" << std::endl;
+        }
+    }
+
+    {
+        auto p = this->m_bsrilu0_info.get();
+        if(p != nullptr)
+        {
+            std::cout << "  -> TRM_INFO.BSRILU0_INFO " << std::endl;
+            p->info();
+        }
+        else
+        {
+            std::cout << "  -> TRM_INFO.BSRILU0_INFO NONE" << std::endl;
+        }
+    }
+
+    {
+        auto p = this->m_bsric0_info.get();
+        if(p != nullptr)
+        {
+            std::cout << "  -> TRM_INFO.BSRIC0_INFO " << std::endl;
+            p->info();
+        }
+        else
+        {
+            std::cout << "  -> TRM_INFO.BSRIC0_INFO NONE" << std::endl;
+        }
+    }
 }
 
 void rocsparse::trm_t::copy(const trm_t& that, hipStream_t stream)
@@ -239,32 +427,19 @@ void rocsparse::trm_t::copy(const trm_t& that, hipStream_t stream)
     }
 }
 
-rocsparse::trm_t::~trm_t()
+rocsparse_status rocsparse::trm_t::destroy(hipStream_t stream)
 {
+    RETURN_IF_ROCSPARSE_ERROR(this->clear_csrsv_info(stream));
+    RETURN_IF_ROCSPARSE_ERROR(this->clear_csrsm_info(stream));
+    RETURN_IF_ROCSPARSE_ERROR(this->clear_csric0_info(stream));
+    RETURN_IF_ROCSPARSE_ERROR(this->clear_csrilu0_info(stream));
 
-    this->uncouple(m_csrsv_info.get());
-    m_csrsv_info.reset();
+    RETURN_IF_ROCSPARSE_ERROR(this->clear_bsrsv_info(stream));
+    RETURN_IF_ROCSPARSE_ERROR(this->clear_bsrsm_info(stream));
+    RETURN_IF_ROCSPARSE_ERROR(this->clear_bsric0_info(stream));
+    RETURN_IF_ROCSPARSE_ERROR(this->clear_bsrilu0_info(stream));
 
-    this->uncouple(m_csrsm_info.get());
-    m_csrsm_info.reset();
-
-    this->uncouple(m_csrilu0_info.get());
-    m_csrilu0_info.reset();
-
-    this->uncouple(m_csric0_info.get());
-    m_csric0_info.reset();
-
-    this->uncouple(m_bsrsv_info.get());
-    m_bsrsv_info.reset();
-
-    this->uncouple(m_bsrsm_info.get());
-    m_bsrsm_info.reset();
-
-    this->uncouple(m_bsrilu0_info.get());
-    m_bsrilu0_info.reset();
-
-    this->uncouple(m_bsric0_info.get());
-    m_bsric0_info.reset();
+    return rocsparse_status_success;
 }
 
 #define GET_SHARED_INFO(TOKEN)                                                               \

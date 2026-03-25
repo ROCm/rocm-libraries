@@ -135,7 +135,7 @@ try
     rocsparse::log_trace(handle, "rocsparse_csrsv_clear", (const void*&)descr, (const void*&)info);
 
     // Clear csrsv meta data (this includes lower, upper and their transposed equivalents
-    info->clear_csrsv_info();
+    RETURN_IF_ROCSPARSE_ERROR(info->clear_csrsv_info(handle->stream));
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

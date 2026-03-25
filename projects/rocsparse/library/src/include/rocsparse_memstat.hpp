@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,14 +32,15 @@
 //
 #ifndef ROCSPARSE_WITH_MEMSTAT
 
-#define rocsparse_hipMalloc(p_, nbytes_) hipMalloc((p_), (nbytes_))
-#define rocsparse_hipFree(p_) hipFree((p_))
+// #define rocsparse_hipMalloc(p_, nbytes_) hipMalloc((p_), (nbytes_))
+// #define rocsparse_hipFree(p_) hipFree((p_))
 
 // if hip version is atleast 5.3.0 hipMallocAsync and hipFreeAsync are defined
 #if HIP_VERSION >= 50300000
-#define rocsparse_hipMallocAsync(p_, nbytes_, stream_) hipMallocAsync((p_), (nbytes_), (stream_))
-#define rocsparse_hipFreeAsync(p_, stream_) \
-    (((p_) != nullptr) ? hipFreeAsync((p_), (stream_)) : hipSuccess)
+
+hipError_t rocsparse_hipMallocAsync(void** mem, size_t nbytes, hipStream_t stream);
+hipError_t rocsparse_hipFreeAsync(void* mem, hipStream_t stream);
+
 #else
 #define rocsparse_hipMallocAsync(p_, nbytes_, stream_) hipMalloc((p_), (nbytes_))
 #define rocsparse_hipFreeAsync(p_, stream_) hipFree((p_))
@@ -58,24 +59,49 @@
 #define ROCSPARSE_HIP_SOURCE_MSG(msg_) #msg_
 #define ROCSPARSE_HIP_SOURCE_TAG(msg_) __FILE__ " " ROCSPARSE_HIP_SOURCE_MSG(msg_)
 
+template <typename T>
+static inline hipError_t use_rocsparse_hip_malloc(T** p, size_t nbytes, const char* tag)
+{
+    return rocsparse_hip_malloc(reinterpret_cast<void**>(p), nbytes, tag);
+}
+
 #define rocsparse_hipMalloc(p_, nbytes_) \
-    rocsparse_hip_malloc((p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
+    use_rocsparse_hip_malloc((p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
 #define rocsparse_hipFree(p_) rocsparse_hip_free((p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
+template <typename T>
+static inline hipError_t
+    use_rocsparse_hip_malloc_async(T** p, size_t nbytes, hipStream_t stream, const char* tag)
+{
+    return rocsparse_hip_malloc_async(reinterpret_cast<void**>(p), nbytes, stream, tag);
+}
+
 #define rocsparse_hipMallocAsync(p_, nbytes_, stream_) \
-    rocsparse_hip_malloc_async((p_), (nbytes_), (stream_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
+    use_rocsparse_hip_malloc_async((p_), (nbytes_), (stream_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
 #define rocsparse_hipFreeAsync(p_, stream_) \
     rocsparse_hip_free_async((p_), (stream_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
+template <typename T>
+static inline hipError_t use_rocsparse_hip_host_malloc(T** p, size_t nbytes, const char* tag)
+{
+    return rocsparse_hip_host_malloc(reinterpret_cast<void**>(p), nbytes, tag);
+}
+
 #define rocsparse_hipHostMalloc(p_, nbytes_) \
-    rocsparse_hip_host_malloc((p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
+    use_rocsparse_hip_host_malloc((p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
 #define rocsparse_hipHostFree(p_) rocsparse_hip_host_free((p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
+template <typename T>
+static inline hipError_t use_rocsparse_hip_malloc_managed(T** p, size_t nbytes, const char* tag)
+{
+    return rocsparse_hip_malloc_managed(reinterpret_cast<void**>(p), nbytes, tag);
+}
+
 #define rocsparse_hipMallocManaged(p_, nbytes_) \
-    rocsparse_hip_malloc_managed((p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
+    use_rocsparse_hip_malloc_managed((p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
 #define rocsparse_hipFreeManaged(p_) \
     rocsparse_hip_free_managed((p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))

@@ -112,8 +112,7 @@ try
 
     // Clear bsrsv meta data (this includes lower, upper and their transposed equivalents
 
-    info->clear_bsrsv_info();
-
+    RETURN_IF_ROCSPARSE_ERROR(info->clear_bsrsv_info(handle->stream));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

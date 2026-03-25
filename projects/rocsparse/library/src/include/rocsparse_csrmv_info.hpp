@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -54,15 +54,15 @@ typedef struct _rocsparse_csrmv_info
 
     _rocsparse_csrmv_info() {}
 
-    ~_rocsparse_csrmv_info()
-    {
-        this->clear();
-    }
+    ~_rocsparse_csrmv_info() = default;
 
-    void clear()
+    rocsparse_status destroy(hipStream_t stream);
+
+    void clear(hipStream_t stream)
     {
-        this->adaptive.clear();
-        this->lrb.clear();
+        this->adaptive.clear(stream);
+        this->lrb.clear(stream);
+        this->nnzsplit.clear(stream);
         this->trans        = rocsparse_operation_none;
         this->m            = 0;
         this->n            = 0;
@@ -82,5 +82,5 @@ namespace rocsparse
     /********************************************************************************
    * \brief Copy csrmv info.
    *******************************************************************************/
-    rocsparse_status copy_csrmv_info(rocsparse_csrmv_info dest, const rocsparse_csrmv_info src);
+    rocsparse_status copy_csrmv_info(rocsparse_csrmv_info, const rocsparse_csrmv_info, hipStream_t);
 }

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,7 @@
  * ************************************************************************ */
 
 #pragma once
-
+#include "rocsparse-types.h"
 typedef struct _rocsparse_adaptive_info
 {
 
@@ -35,6 +35,7 @@ typedef struct _rocsparse_adaptive_info
     void*     wg_ids{};
 
 public:
-    ~_rocsparse_adaptive_info();
-    void clear();
+    ~_rocsparse_adaptive_info() = default;
+    void             clear(hipStream_t);
+    rocsparse_status destroy(hipStream_t);
 } * rocsparse_adaptive_info;

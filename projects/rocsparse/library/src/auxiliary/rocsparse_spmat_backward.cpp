@@ -53,7 +53,7 @@ static void define_coo(rocsparse_spmat_descr that,
     col->define(idx_type, idx_base, nnz, 1, const_col_data, col_data);
     val->define(val_type, nnz, 1, const_val_data, val_data);
     spattern->define_coo(rows, cols, nnz, row, col, mat_descr, mat_info);
-    that->define(spattern, val, mat_info);
+    that->define(spattern, val);
 }
 
 static void define_coo_aos(rocsparse_spmat_descr that,
@@ -88,7 +88,7 @@ static void define_coo_aos(rocsparse_spmat_descr that,
     col->define(idx_type, idx_base, nnz, 2, s_const_ind_data, s_ind_data);
     val->define(val_type, nnz, 1, const_val_data, val_data);
     spattern->define_coo_aos(rows, cols, nnz, row, col, mat_descr, mat_info);
-    that->define(spattern, val, mat_info);
+    that->define(spattern, val);
 }
 
 static void define_bsr(rocsparse_spmat_descr that,
@@ -119,7 +119,7 @@ static void define_bsr(rocsparse_spmat_descr that,
     col->define(col_type, idx_base, nnzb, 1, const_col_data, col_data);
     val->define(val_type, nnzb * block_dim * block_dim, 1, const_val_data, val_data);
     spattern->define_bsr(mb, nb, nnzb, block_dir, block_dim, row, col, mat_descr, mat_info);
-    that->define(spattern, val, mat_info);
+    that->define(spattern, val);
 }
 
 static void define_sell(rocsparse_spmat_descr that,
@@ -151,7 +151,7 @@ static void define_sell(rocsparse_spmat_descr that,
     val->define(val_type, sell_colval_size, 1, const_val_data, val_data);
     spattern->define_sell(
         rows, cols, nnz, sell_slice_size, sell_colval_size, row, col, mat_descr, mat_info);
-    that->define(spattern, val, mat_info);
+    that->define(spattern, val);
 }
 
 static void define_csr(rocsparse_spmat_descr that,
@@ -179,7 +179,7 @@ static void define_csr(rocsparse_spmat_descr that,
     col->define(col_type, idx_base, nnz, 1, const_col_data, col_data);
     val->define(val_type, nnz, 1, const_val_data, val_data);
     spattern->define_csr(rows, cols, nnz, row, col, mat_descr, mat_info);
-    that->define(spattern, val, mat_info);
+    that->define(spattern, val);
 }
 
 static void define_csc(rocsparse_spmat_descr that,
@@ -207,7 +207,7 @@ static void define_csc(rocsparse_spmat_descr that,
     col->define(col_type, idx_base, cols + 1, 1, const_col_data, col_data);
     val->define(val_type, nnz, 1, const_val_data, val_data);
     spattern->define_csc(rows, cols, nnz, row, col, mat_descr, mat_info);
-    that->define(spattern, val, mat_info);
+    that->define(spattern, val);
 }
 
 static void define_bell(rocsparse_spmat_descr that,
@@ -237,7 +237,7 @@ static void define_bell(rocsparse_spmat_descr that,
     col->define(idx_type, idx_base, nnz_s, 1, const_ind_data, ind_data);
     val->define(val_type, nnz_n, 1, const_val_data, val_data);
     spattern->define_bell(rows, cols, width, block_dir, block_dim, col, mat_descr, mat_info);
-    that->define(spattern, val, mat_info);
+    that->define(spattern, val);
 }
 
 static void define_ell(rocsparse_spmat_descr that,
@@ -262,7 +262,7 @@ static void define_ell(rocsparse_spmat_descr that,
     col->define(idx_type, idx_base, width * rows, 1, const_ind_data, ind_data);
     val->define(val_type, width * rows, 1, const_val_data, val_data);
     spattern->define_ell(rows, cols, width, col, mat_descr, mat_info);
-    that->define(spattern, val, mat_info);
+    that->define(spattern, val);
 }
 
 #ifdef __cplusplus
@@ -1145,8 +1145,8 @@ try
         return rocsparse_status_success;
     }
 
-    //    RETURN_IF_ROCSPARSE_ERROR(rocsparse_destroy_mat_descr(descr->get_descr() ));
-    //    RETURN_IF_ROCSPARSE_ERROR(rocsparse_destroy_mat_info(descr->get_info() ));
+    hipStream_t default_stream{};
+    const_cast<rocsparse_spmat_descr>(descr)->destroy(default_stream);
 
     delete descr;
     return rocsparse_status_success;

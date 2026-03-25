@@ -38,8 +38,9 @@ namespace rocsparse
         rocsparse_datatype     m_singular_tol_datatype{rocsparse_datatype_f64_r};
 
     public:
-        singular_info_t() = default;
-        ~singular_info_t();
+        singular_info_t()  = default;
+        ~singular_info_t() = default;
+        rocsparse_status destroy(hipStream_t);
 
         double get_tolerance_legacy() const;
         void   set_tolerance_legacy(double);

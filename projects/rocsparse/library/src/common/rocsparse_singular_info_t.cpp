@@ -66,7 +66,11 @@ void rocsparse::singular_info_t::set_tolerance_legacy(double value)
     this->m_singular_tol_pointer_mode  = rocsparse_pointer_mode_host;
 }
 
-rocsparse::singular_info_t::~singular_info_t() {}
+rocsparse_status rocsparse::singular_info_t::destroy(hipStream_t stream)
+{
+    this->rocsparse::position_t::destroy(stream);
+    return rocsparse_status_success;
+}
 
 const void* rocsparse::singular_info_t::get_tolerance_pointer() const
 {

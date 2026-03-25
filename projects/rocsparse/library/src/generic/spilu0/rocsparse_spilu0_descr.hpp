@@ -49,8 +49,9 @@ protected:
 
 public:
     int64_t m_batch_count{};
-    ~_rocsparse_spilu0_descr();
+    ~_rocsparse_spilu0_descr() = default;
     _rocsparse_spilu0_descr();
+    rocsparse_status          destroy(hipStream_t);
     rocsparse::numeric_boost* get_boost();
     const double*             get_tolerance_pointer() const;
     rocsparse_pointer_mode    get_tolerance_pointer_mode() const;

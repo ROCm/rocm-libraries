@@ -33,7 +33,8 @@ protected:
     rocsparse::singular_info_t m_singularity_numeric_exact;
 
 public:
-    ~_rocsparse_bsrilu0_info();
+    rocsparse_status destroy(hipStream_t stream);
+    ~_rocsparse_bsrilu0_info() = default;
     void copy(const _rocsparse_bsrilu0_info* that, hipStream_t stream);
 
     rocsparse::singular_info_t* get_singularity_numeric_exact()

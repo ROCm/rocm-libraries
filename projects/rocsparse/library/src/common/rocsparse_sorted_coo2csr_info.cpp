@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -57,10 +57,10 @@ hipError_t rocsparse::sorted_coo2csr_info_t::free_memory(hipStream_t stream)
     }
 }
 
-rocsparse::sorted_coo2csr_info_t::~sorted_coo2csr_info_t()
+rocsparse_status rocsparse::sorted_coo2csr_info_t::destroy(hipStream_t stream)
 {
-    hipStream_t default_stream = 0;
-    std::ignore                = this->free_memory(default_stream);
+    RETURN_IF_HIP_ERROR(this->free_memory(stream));
+    return rocsparse_status_success;
 }
 
 rocsparse_status

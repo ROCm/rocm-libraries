@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@
 #include "rocsparse_csritilu0_driver.hpp"
 
 template <>
-struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
+struct rocsparse::csritilu0_driver_t<DEPRECATED_ROCSPARSE_ITILU0_ALG_SYNC_SPLIT_FUSION>
 {
     //
     // History, same as algorithm 1.
@@ -167,7 +167,7 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
 
 #define INSTANTIATE(T, I, J)                       \
     template struct rocsparse::csritilu0_driver_t< \
-        rocsparse_itilu0_alg_sync_split_fusion>::compute<T, I, J>
+        DEPRECATED_ROCSPARSE_ITILU0_ALG_SYNC_SPLIT_FUSION>::compute<T, I, J>
 
 INSTANTIATE(float, rocsparse_int, rocsparse_int);
 INSTANTIATE(double, rocsparse_int, rocsparse_int);
@@ -178,18 +178,18 @@ INSTANTIATE(rocsparse_double_complex, rocsparse_int, rocsparse_int);
 
 #define INSTANTIATE(T, J)                          \
     template struct rocsparse::csritilu0_driver_t< \
-        rocsparse_itilu0_alg_sync_split_fusion>::history<T, J>
+        DEPRECATED_ROCSPARSE_ITILU0_ALG_SYNC_SPLIT_FUSION>::history<T, J>
 
 INSTANTIATE(float, rocsparse_int);
 INSTANTIATE(double, rocsparse_int);
 
 #undef INSTANTIATE
 
-#define INSTANTIATE(I, J)                                           \
-    template struct rocsparse::csritilu0_driver_t<                  \
-        rocsparse_itilu0_alg_sync_split_fusion>::buffer_size<I, J>; \
-    template struct rocsparse::csritilu0_driver_t<                  \
-        rocsparse_itilu0_alg_sync_split_fusion>::preprocess<I, J>;
+#define INSTANTIATE(I, J)                                                      \
+    template struct rocsparse::csritilu0_driver_t<                             \
+        DEPRECATED_ROCSPARSE_ITILU0_ALG_SYNC_SPLIT_FUSION>::buffer_size<I, J>; \
+    template struct rocsparse::csritilu0_driver_t<                             \
+        DEPRECATED_ROCSPARSE_ITILU0_ALG_SYNC_SPLIT_FUSION>::preprocess<I, J>;
 
 INSTANTIATE(rocsparse_int, rocsparse_int);
 

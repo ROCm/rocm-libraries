@@ -545,9 +545,11 @@ static rocsparse_status rocsparse_csrmv_analysis_impl(rocsparse_handle          
     ROCSPARSE_CHECKARG_ARRAY(8, nnz, csr_col_ind);
 
     rocsparse_csrmv_info csrmv_info = (info != nullptr) ? info->get_csrmv_info() : nullptr;
-
+    std::cout << "RRRRRRRRRRRRRR " << std::endl;
     if(csrmv_info != nullptr)
     {
+        std::cout << "csrmv_info->destroy " << std::endl;
+        csrmv_info->destroy(handle->stream);
         delete csrmv_info;
         info->set_csrmv_info(nullptr);
         csrmv_info = nullptr;
@@ -572,6 +574,7 @@ static rocsparse_status rocsparse_csrmv_analysis_impl(rocsparse_handle          
 
     if(info != nullptr)
     {
+        std::cout << "CALL SET CSRMV_INFO " << csrmv_info << std::endl;
         info->set_csrmv_info(csrmv_info);
     }
     else if(csrmv_info != nullptr)
@@ -1000,9 +1003,10 @@ try
 
     // Destroy csrmv info struct
     rocsparse_csrmv_info csrmv_info = info->get_csrmv_info();
-
+    std::cout << "CALL CLEAR CSRMV_INFO " << csrmv_info << std::endl;
     if(csrmv_info != nullptr)
     {
+        RETURN_IF_ROCSPARSE_ERROR(csrmv_info->destroy(handle->stream));
         delete csrmv_info;
         info->set_csrmv_info(nullptr);
     }

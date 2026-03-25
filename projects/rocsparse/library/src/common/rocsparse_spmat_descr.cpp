@@ -36,36 +36,24 @@ void _rocsparse_spmat_descr::set_own_spattern(bool value)
     this->m_own_spattern = value;
 }
 
-_rocsparse_spmat_descr::~_rocsparse_spmat_descr()
-{
-    hipStream_t default_stream{};
-    this->destroy(default_stream);
-}
-
 rocsparse_status _rocsparse_spmat_descr::destroy(hipStream_t stream)
 {
-
-    if(&this->m_mat_info == this->m_p_mat_info)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(this->m_mat_info.destroy(stream));
-    }
-
     if(&this->m_spattern == this->m_p_spattern)
     {
         RETURN_IF_ROCSPARSE_ERROR(this->m_spattern.destroy(stream));
+        this->m_p_spattern = nullptr;
     }
 
     if(&this->m_values == this->m_p_values)
     {
         RETURN_IF_ROCSPARSE_ERROR(this->m_values.destroy(stream));
+        this->m_p_values = nullptr;
     }
 
     return rocsparse_status_success;
 }
 
-void _rocsparse_spmat_descr::define(rocsparse_spattern_descr spattern,
-                                    rocsparse_dnvec_descr    values,
-                                    rocsparse_mat_info       info)
+void _rocsparse_spmat_descr::define(rocsparse_spattern_descr spattern, rocsparse_dnvec_descr values)
 {
     if(spattern != nullptr)
     {
@@ -75,11 +63,6 @@ void _rocsparse_spmat_descr::define(rocsparse_spattern_descr spattern,
     if(values != nullptr)
     {
         this->m_p_values = values;
-    }
-
-    if(info != nullptr)
-    {
-        this->m_p_mat_info = info;
     }
 
     this->set_init(true);

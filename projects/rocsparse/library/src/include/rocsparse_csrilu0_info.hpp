@@ -34,8 +34,9 @@ protected:
     rocsparse::singular_info_t m_singularity_numeric_near{};
 
 public:
-    _rocsparse_csrilu0_info() = default;
-    ~_rocsparse_csrilu0_info();
+    _rocsparse_csrilu0_info()  = default;
+    ~_rocsparse_csrilu0_info() = default;
+    rocsparse_status destroy(hipStream_t stream);
 
     void copy(const _rocsparse_csrilu0_info* that, hipStream_t stream);
 

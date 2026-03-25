@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,31 @@
 #include <hip/hip_runtime.h>
 
 ROCSPARSE_KERNEL(1) void init_kernel(){};
+
+size_t _rocsparse_handle::get_buffer_size() const
+{
+    return this->buffer_size;
+}
+void* _rocsparse_handle::get_buffer()
+{
+    return this->buffer;
+}
+void* _rocsparse_handle::get_alpha()
+{
+    return this->alpha;
+}
+void* _rocsparse_handle::get_beta()
+{
+    return this->beta;
+}
+void* _rocsparse_handle::get_sone()
+{
+    return this->sone;
+}
+void* _rocsparse_handle::get_done()
+{
+    return this->done;
+}
 
 /*******************************************************************************
  * constructor
@@ -76,15 +101,15 @@ _rocsparse_handle::_rocsparse_handle()
 
     // Allocate device buffer
     buffer_size = (coomv_size > 1024 * 1024) ? coomv_size : 1024 * 1024;
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+    THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&buffer, buffer_size, stream));
 
     // Device alpha and beta
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&alpha, sizeof(double) * 2));
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&beta, sizeof(double) * 2));
+    THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&alpha, sizeof(double) * 2, stream));
+    THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&beta, sizeof(double) * 2, stream));
 
     // Device one
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&sone, sizeof(float) * 2));
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&done, sizeof(double) * 2));
+    THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&sone, sizeof(float) * 2, stream));
+    THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&done, sizeof(double) * 2, stream));
 
     // Execute empty kernel for initialization
 
@@ -152,18 +177,16 @@ _rocsparse_handle::~_rocsparse_handle()
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // Due to the changes in the hipFree introduced in HIP 7.0
-    // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
-    // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
-    // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
-    // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    PRINT_IF_HIP_ERROR(hipDeviceSynchronize());
-
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(buffer));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(done));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(alpha));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
+    PRINT_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->buffer, this->stream));
+    buffer = nullptr;
+    PRINT_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->sone, this->stream));
+    sone = nullptr;
+    PRINT_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->done, this->stream));
+    done = nullptr;
+    PRINT_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->alpha, this->stream));
+    alpha = nullptr;
+    PRINT_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->beta, this->stream));
+    beta = nullptr;
 
     // destroy blas handle
     rocsparse_status status = rocsparse::blas_destroy_handle(this->blas_handle);
@@ -171,17 +194,18 @@ _rocsparse_handle::~_rocsparse_handle()
     {
         ROCSPARSE_ERROR_MESSAGE(status, "handle error");
     }
+    this->blas_handle = nullptr;
 
     // Close log files
-    if(log_trace_ofs.is_open())
+    if(this->log_trace_ofs.is_open())
     {
         log_trace_ofs.close();
     }
-    if(log_bench_ofs.is_open())
+    if(this->log_bench_ofs.is_open())
     {
         log_bench_ofs.close();
     }
-    if(log_debug_ofs.is_open())
+    if(this->log_debug_ofs.is_open())
     {
         log_debug_ofs.close();
     }

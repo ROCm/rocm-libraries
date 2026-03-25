@@ -87,16 +87,21 @@ struct _rocsparse_handle
     rocsparse_pointer_mode pointer_mode = rocsparse_pointer_mode_host;
     // logging mode
     rocsparse_layer_mode layer_mode;
-    // device buffer
+
+protected:
+public:
     size_t buffer_size{};
     void*  buffer{};
-
-    void* alpha{};
-    void* beta{};
-
-    // device one
-    void* sone{};
-    void* done{};
+    void*  alpha{};
+    void*  beta{};
+    void*  sone{};
+    void*  done{};
+    void*  get_buffer();
+    void*  get_alpha();
+    void*  get_beta();
+    void*  get_sone();
+    void*  get_done();
+    size_t get_buffer_size() const;
 
     // blas handle
     rocsparse::blas_handle blas_handle;

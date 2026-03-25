@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -59,13 +59,14 @@ namespace rocsparse
         rocsparse_indextype         index_type_J{(rocsparse_indextype)-1};
 
     public:
-        trm_info_t(const trm_info_t&);
+        trm_info_t(const trm_info_t&, hipStream_t);
         trm_info_t();
-        ~trm_info_t();
-
-        trm_info_t& operator=(const trm_info_t&);
-        int64_t     get_max_nnz() const;
-        void        set_max_nnz(int64_t);
+        ~trm_info_t() = default;
+        rocsparse_status destroy(hipStream_t);
+        void             info() const;
+        void             deep_copy(const trm_info_t&, hipStream_t);
+        int64_t          get_max_nnz() const;
+        void             set_max_nnz(int64_t);
 
         int64_t get_m() const;
         void    set_m(int64_t);
@@ -105,7 +106,7 @@ namespace rocsparse
         void    set_nnz(int64_t);
 
         static void destroy(trm_info_t*);
-        static void copy(trm_info_t* __restrict__*, const trm_info_t* __restrict__);
+        static void copy(trm_info_t* __restrict__*, const trm_info_t* __restrict__, hipStream_t);
     };
 
 }

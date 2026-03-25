@@ -63,6 +63,7 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, src);
     ROCSPARSE_CHECKARG(1, src, (src == dest), rocsparse_status_invalid_pointer);
 
+    hipStream_t default_stream{};
     // check if destination already contains data. If it does, verify its allocated arrays are the same size as source
     bool previously_created = false;
     previously_created |= (dest->m != 0);
@@ -96,118 +97,76 @@ try
         }
     }
 
-    size_t T_size = sizeof(float);
-    switch(src->data_type_T)
-    {
-    case rocsparse_datatype_f16_r:
-    {
-        T_size = sizeof(_Float16);
-        break;
-    }
-    case rocsparse_datatype_bf16_r:
-    {
-        T_size = sizeof(rocsparse_bfloat16);
-        break;
-    }
-    case rocsparse_datatype_f32_r:
-    {
-        T_size = sizeof(float);
-        break;
-    }
-    case rocsparse_datatype_f64_r:
-    {
-        T_size = sizeof(double);
-        break;
-    }
-    case rocsparse_datatype_f32_c:
-    {
-        T_size = sizeof(rocsparse_float_complex);
-        break;
-    }
-    case rocsparse_datatype_f64_c:
-    {
-        T_size = sizeof(rocsparse_double_complex);
-        break;
-    }
-    case rocsparse_datatype_i8_r:
-    {
-        T_size = sizeof(int8_t);
-        break;
-    }
-    case rocsparse_datatype_u8_r:
-    {
-        T_size = sizeof(uint8_t);
-        break;
-    }
-    case rocsparse_datatype_i32_r:
-    {
-        T_size = sizeof(int32_t);
-        break;
-    }
-    case rocsparse_datatype_u32_r:
-    {
-        T_size = sizeof(uint32_t);
-        break;
-    }
-    }
+    size_t T_size = rocsparse::datatype_sizeof(src->data_type_T);
 
     if(src->ell_col_ind != nullptr)
     {
         if(dest->ell_col_ind == nullptr)
         {
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMalloc(&dest->ell_col_ind, sizeof(rocsparse_int) * src->ell_nnz));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+                &dest->ell_col_ind, sizeof(rocsparse_int) * src->ell_nnz, default_stream));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->ell_col_ind,
-                                      src->ell_col_ind,
-                                      sizeof(rocsparse_int) * src->ell_nnz,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(dest->ell_col_ind,
+                                           src->ell_col_ind,
+                                           sizeof(rocsparse_int) * src->ell_nnz,
+                                           hipMemcpyDeviceToDevice,
+                                           default_stream));
     }
 
     if(src->ell_val != nullptr)
     {
         if(dest->ell_val == nullptr)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->ell_val, T_size * src->ell_nnz));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMallocAsync(&dest->ell_val, T_size * src->ell_nnz, default_stream));
         }
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(dest->ell_val, src->ell_val, T_size * src->ell_nnz, hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(dest->ell_val,
+                                           src->ell_val,
+                                           T_size * src->ell_nnz,
+                                           hipMemcpyDeviceToDevice,
+                                           default_stream));
     }
 
     if(src->coo_row_ind != nullptr)
     {
         if(dest->coo_row_ind == nullptr)
         {
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMalloc(&dest->coo_row_ind, sizeof(rocsparse_int) * src->coo_nnz));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+                &dest->coo_row_ind, sizeof(rocsparse_int) * src->coo_nnz, default_stream));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->coo_row_ind,
-                                      src->coo_row_ind,
-                                      sizeof(rocsparse_int) * src->coo_nnz,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(dest->coo_row_ind,
+                                           src->coo_row_ind,
+                                           sizeof(rocsparse_int) * src->coo_nnz,
+                                           hipMemcpyDeviceToDevice,
+                                           default_stream));
     }
 
     if(src->coo_col_ind != nullptr)
     {
         if(dest->coo_col_ind == nullptr)
         {
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMalloc(&dest->coo_col_ind, sizeof(rocsparse_int) * src->coo_nnz));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+                &dest->coo_col_ind, sizeof(rocsparse_int) * src->coo_nnz, default_stream));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->coo_col_ind,
-                                      src->coo_col_ind,
-                                      sizeof(rocsparse_int) * src->coo_nnz,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(dest->coo_col_ind,
+                                           src->coo_col_ind,
+                                           sizeof(rocsparse_int) * src->coo_nnz,
+                                           hipMemcpyDeviceToDevice,
+                                           default_stream));
     }
 
     if(src->coo_val != nullptr)
     {
         if(dest->coo_val == nullptr)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->coo_val, T_size * src->coo_nnz));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMallocAsync(&dest->coo_val, T_size * src->coo_nnz, default_stream));
         }
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(dest->coo_val, src->coo_val, T_size * src->coo_nnz, hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(dest->coo_val,
+                                           src->coo_val,
+                                           T_size * src->coo_nnz,
+                                           hipMemcpyDeviceToDevice,
+                                           default_stream));
     }
 
     dest->m           = src->m;
@@ -236,36 +195,30 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, hyb);
-
-    // Due to the changes in the hipFree introduced in HIP 7.0
-    // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
-    // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
-    // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
-    // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
+    hipStream_t default_stream{};
 
     // Clean up ELL part
     if(hyb->ell_col_ind != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->ell_col_ind));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->ell_col_ind, default_stream));
     }
     if(hyb->ell_val != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->ell_val));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->ell_val, default_stream));
     }
 
     // Clean up COO part
     if(hyb->coo_row_ind != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->coo_row_ind));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_row_ind, default_stream));
     }
     if(hyb->coo_col_ind != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->coo_col_ind));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_col_ind, default_stream));
     }
     if(hyb->coo_val != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->coo_val));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_val, default_stream));
     }
 
     delete hyb;

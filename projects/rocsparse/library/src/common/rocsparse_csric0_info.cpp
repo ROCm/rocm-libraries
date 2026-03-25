@@ -22,6 +22,15 @@
  * ************************************************************************ */
 
 #include "rocsparse_csric0_info.hpp"
+
+rocsparse_status _rocsparse_csric0_info::destroy(hipStream_t stream)
+{
+    this->rocsparse::trm_data_t::destroy(stream);
+    this->m_singularity_numeric_exact.destroy(stream);
+    this->m_singularity_numeric_near.destroy(stream);
+    return rocsparse_status_success;
+}
+
 void _rocsparse_csric0_info::copy(const _rocsparse_csric0_info* that, hipStream_t stream)
 {
     this->rocsparse::trm_data_t::copy(that, stream);
@@ -31,4 +40,3 @@ void _rocsparse_csric0_info::copy(const _rocsparse_csric0_info* that, hipStream_
                                                               stream);
     THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
 }
-_rocsparse_csric0_info::~_rocsparse_csric0_info() {}

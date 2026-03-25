@@ -101,14 +101,13 @@ void _rocsparse_spattern_descr::set_own_data(bool value)
     this->m_own_data = value;
 }
 
-_rocsparse_spattern_descr::~_rocsparse_spattern_descr()
-{
-    hipStream_t default_stream{};
-    this->destroy(default_stream);
-}
-
 rocsparse_status _rocsparse_spattern_descr::destroy(hipStream_t stream)
 {
+
+    if(&this->m_mat_info == this->m_p_mat_info)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(this->m_mat_info.destroy(stream));
+    }
 
     if(this->m_p_row_data && (this->m_p_row_data == &this->m_row_data))
     {

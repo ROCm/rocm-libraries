@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -441,7 +441,7 @@ namespace rocsparse
             I nloops    = (nnz - 1) / (COOMVN_DIM * nblocks) + 1;
 
             // Buffer
-            char* ptr = reinterpret_cast<char*>(handle->buffer);
+            char* ptr = reinterpret_cast<char*>(handle->get_buffer());
             ptr += 256;
 
             // row block reduction buffer

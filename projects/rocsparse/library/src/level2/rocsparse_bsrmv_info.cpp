@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,8 @@
  * \brief Copy csrmv info.
  *******************************************************************************/
 rocsparse_status rocsparse::copy_bsrmv_info(rocsparse_bsrmv_info       dest,
-                                            const rocsparse_bsrmv_info src)
+                                            const rocsparse_bsrmv_info src,
+                                            hipStream_t                stream)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -48,7 +49,7 @@ rocsparse_status rocsparse::copy_bsrmv_info(rocsparse_bsrmv_info       dest,
             dest->set_csrmv_info(csrmv_info);
         }
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::copy_csrmv_info(csrmv_info, src_csrmv_info));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::copy_csrmv_info(csrmv_info, src_csrmv_info, stream));
     }
     return rocsparse_status_success;
 }
