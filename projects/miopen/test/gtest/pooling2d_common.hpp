@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <sstream>
 #include <vector>
 #include <gtest/gtest.h>
