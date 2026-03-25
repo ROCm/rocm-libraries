@@ -262,6 +262,16 @@ TEST_F(TestUnpackOperation, FailsImmediatelyOnUnpackError)
 // createNodeForType tests
 // ---------------------------------------------------------------------------
 
+TEST(TestCreateNodeForType, CreatesBatchnormNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<BatchnormNode>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
+
 // TEST(TestCreateNodeForType, CreatesBatchnormBackwardNode)
 // {
 //     const GraphAttributes graphAttrs;
@@ -335,16 +345,6 @@ TEST(TestCreateNodeForType, CreatesConvFpropNode)
     ASSERT_NE(node, nullptr);
     auto convNode = std::dynamic_pointer_cast<ConvolutionFpropNode>(node);
     EXPECT_NE(convNode, nullptr);
-}
-
-TEST(TestCreateNodeForType, CreatesBatchnormNode)
-{
-    const GraphAttributes graphAttrs;
-    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM, graphAttrs);
-    EXPECT_EQ(err.code, ErrorCode::OK);
-    ASSERT_NE(node, nullptr);
-    auto bnNode = std::dynamic_pointer_cast<BatchnormNode>(node);
-    EXPECT_NE(bnNode, nullptr);
 }
 
 TEST(TestCreateNodeForType, CreatesConvWgradNode)
@@ -427,7 +427,6 @@ TEST(TestCreateNodeForType, CreatesSdpaBpropNode)
 //     auto typedNode = std::dynamic_pointer_cast<SdpaFpropNode>(node);
 //     EXPECT_NE(typedNode, nullptr);
 // }
-
 
 TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
 {
