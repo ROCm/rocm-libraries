@@ -258,14 +258,10 @@ void log_profile(const char* func, Ts&&... xs)
     // Add at_quick_exit handler in case the program exits early
     static int aqe = at_quick_exit([] { profile.dump(); });
 
-    // SIGTERM handler — fires when vLLM kills the worker process
+    // Register signal handlers to flush profile on early termination
+    // Works on both Windows and Linux
     static int sig = [] {
-        static struct sigaction sa {};
-        sa.sa_handler = [](int) {
-            profile.dump();
-            ::_exit(0);
-        };
-        sigaction(SIGTERM, &sa, nullptr);
+        signal(SIGTERM, [](int) { profile.dump(); ::_exit(0); });
         return 0;
     }();
 
