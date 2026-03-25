@@ -75,10 +75,12 @@ add_benchmarks_for_mfma(add_fp32_benchmark 16 16 16)
 #
 # FP16 benchmarks
 #
-# MFMA tiles: 32x32x8, 32x32x16, 16x16x16
+# MFMA tiles: 32x32x8, 32x32x16, 16x16x16, 4x64x16, 64x4x16
 add_benchmarks_for_mfma(add_fp16_benchmark 32 32 8)
 add_benchmarks_for_mfma(add_fp16_benchmark 32 32 16)
 add_benchmarks_for_mfma(add_fp16_benchmark 16 16 16)
+add_benchmarks_for_mfma(add_fp16_benchmark 4 64 16)
+add_benchmarks_for_mfma(add_fp16_benchmark 64 4 16)
 
 #
 # FP8 -> FP16 benchmarks
