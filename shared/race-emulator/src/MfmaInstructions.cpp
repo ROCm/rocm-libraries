@@ -21,7 +21,7 @@ namespace raceemulator {
 namespace {
 
 // C/D coordinate mapping (shared by MFMA 16x16xK variants).
-// Lane L → 4 output VGPRs → row = 4*(L/16)+elemIdx, col = L%16.
+// Lane L -> 4 output VGPRs -> row = 4*(L/16)+elemIdx, col = L%16.
 static std::pair<int, int> mapLaneToCoordC(int lane, int elemIdx) {
   int col = lane % 16;
   int row = 4 * (lane / 16) + elemIdx;
@@ -111,8 +111,8 @@ class VMfmaF32_16168_XF32 : public Instruction {
 // D[16x16 f32] = A[16xK T] * B[Kx16 T] + C[16x16 f32]
 //
 // Template parameters:
-//   ToFloat    — f16→float or bf16→float conversion function.
-//   NInputRegs — VGPRs per A/B operand: K/8 (2 for K=16, 4 for K=32).
+//   ToFloat    -- f16->float or bf16->float conversion function.
+//   NInputRegs -- VGPRs per A/B operand: K/8 (2 for K=16, 4 for K=32).
 //                Compile-time so the compiler can size arrays and unroll loops.
 //
 // K=16 is gfx942 (v_mfma_f32_16x16x16), K=32 is gfx950 (v_mfma_f32_16x16x32).
@@ -120,9 +120,9 @@ class VMfmaF32_16168_XF32 : public Instruction {
 // Lane mapping (wave-64, 4 groups of 16 lanes):
 //   A: lane L holds row (L % 16). Each group of 16 lanes covers K/4 elements
 //      of the K dimension. NInputRegs VGPRs per operand, each holding
-//      2 packed f16/bf16 values → 2*NInputRegs elements per lane.
+//      2 packed f16/bf16 values -> 2*NInputRegs elements per lane.
 //   B: same layout as A but interpreted as columns.
-//   C/D: lane L → 4 output VGPRs → row = 4*(L/16)+i, col = L%16.
+//   C/D: lane L -> 4 output VGPRs -> row = 4*(L/16)+i, col = L%16.
 template <float (*ToFloat)(uint16_t), int NInputRegs>
 class VMfmaF32_16x16xK : public Instruction {
   static constexpr int K = 8 * NInputRegs;

@@ -48,14 +48,14 @@ enum class EventStatus {
 /// all memory event tracking and validated LDS access.
 ///
 /// Event lifecycle:
-///   1. Wave issues a memory instruction → allocateEventId() allocates an
+///   1. Wave issues a memory instruction -> allocateEventId() allocates an
 ///      event. LDS events (VGPR_TO_LDS, GLOBAL_TO_LDS, LDS_TO_VGPR) are
 ///      automatically added to the appropriate live event list (writes or
 ///      reads).
-///   2. s_waitcnt → markEventWaveComplete() transitions the event to
+///   2. s_waitcnt -> markEventWaveComplete() transitions the event to
 ///      WAVE_COMPLETE. The owning wave may now safely access the same
 ///      LDS bytes, but other waves may not.
-///   3. s_barrier (all waves arrived) → retireLdsEvent() removes the event
+///   3. s_barrier (all waves arrived) -> retireLdsEvent() removes the event
 ///      from the live list and decrements per-byte counts, making the LDS
 ///      ranges available for cross-wave access.
 ///
@@ -258,7 +258,7 @@ private:
   std::vector<EventId> ldsReadEvents;  // LDS_TO_VGPR
 
   // Per-byte event counts for fast-path validation. If count is zero for all
-  // bytes in a read/write range, no race is possible — skip interval scanning.
+  // bytes in a read/write range, no race is possible -- skip interval scanning.
   std::vector<int>
       byteWriteCounts; // VGPR_TO_LDS / GLOBAL_TO_LDS events per byte
   std::vector<int> byteReadCounts; // LDS_TO_VGPR events per byte

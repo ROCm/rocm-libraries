@@ -13,8 +13,8 @@
 
 namespace raceemulator {
 
-// BF16 (bfloat16): 1 sign, 8 exponent (bias 127), 7 mantissa.
-// Identical to the upper 16 bits of IEEE 754 binary32.
+/// BF16 (bfloat16): 1 sign, 8 exponent (bias 127), 7 mantissa.
+/// Identical to the upper 16 bits of IEEE 754 binary32.
 
 inline float bf16ToFloat(uint16_t b) {
   uint32_t val = static_cast<uint32_t>(b) << 16;
@@ -26,7 +26,7 @@ inline uint16_t floatToBf16(float f) {
   return static_cast<uint16_t>(bits >> 16);
 }
 
-// F16 (IEEE 754 binary16): 1 sign, 5 exponent (bias 15), 10 mantissa.
+/// F16 (IEEE 754 binary16): 1 sign, 5 exponent (bias 15), 10 mantissa.
 
 inline float f16ToFloat(uint16_t h) {
 #if defined(__F16C__)

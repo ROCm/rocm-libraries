@@ -87,8 +87,8 @@ public:
     assert(partitioned.size() == 1);
 
     return [&wave]() {
-      // Note: flushWaveCompleteMemoryEvents is NOT called here.
-      // It is called in Emulator::run when ALL waves have reached
+      // Note: flushWaveCompleteMemoryEvents is not called here.
+      // It is called in Emulator::run when all waves have reached
       // the barrier (tryReleaseBarrier), not when each wave arrives.
       return wave.getPc() + 1;
     };
@@ -325,7 +325,7 @@ const Register<SOPP_NoOp> s_endpgm("s_endpgm");
 const Register<SOPP_NoOp> s_clause("s_clause");
 const Register<SOPP_NoOp> s_delay_alu("s_delay_alu");
 const Register<SOPP_NoOp> s_sendmsg("s_sendmsg");
-// Cache invalidation — no semantic effect in the emulator.
+// Cache invalidation -- no semantic effect in the emulator.
 const Register<SOPP_NoOp> buffer_gl0_inv("buffer_gl0_inv");
 const Register<SOPP_WaitCnt> s_waitcnt("s_waitcnt");
 const Register<SOPP_Barrier> s_barrier("s_barrier");

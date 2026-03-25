@@ -305,7 +305,7 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
   };
 
   auto processInArgs = [&](ParsedLine token) {
-    // Skip the ".args:" line itself — it enters Args state but isn't an arg.
+    // Skip the ".args:" line itself -- it enters Args state but isn't an arg.
     if (token.key == ".args") {
       return;
     }

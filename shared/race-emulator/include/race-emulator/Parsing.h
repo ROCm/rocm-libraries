@@ -15,58 +15,35 @@
 
 namespace raceemulator {
 
+/// Tracks which section of the assembly file the parser is currently in.
 enum class ParserState { Root, Amdhsa, Kernels, Args, Macro };
 
-// ParsedLine represents a single line of assembly code after parsing.
+/// A single line of assembly after parsing: comments stripped, symbols
+/// resolved, labels and key-value pairs identified.
 struct ParsedLine {
   ParsedLine(std::string_view line, int lineNumber,
              ParserState precedingParserState,
              const std::map<std::string, uint32_t> &symbolTable);
 
-  // The original line of assembly code.
   std::string originalLine;
-
-  // The line with comments removed, and symbols replaced.
+  /// Comments removed and symbols replaced.
   std::string commentFreeLine;
-
-  // True if the comment-free line contains only whitespace.
   bool isEmptyLine{false};
-
-  // The line number in the original assembly code.
-  // Assembly lines start at index 0.
+  /// 0-based line number in the original assembly.
   int lineNumber;
-
-  // The state of the preceding token.
   ParserState precedingParserState;
-
-  // The indentation level of the line. More specifically, the index of the line
-  // of the first non-whitespace character.
+  /// Column index of the first non-whitespace character.
   int indent{-1};
-
-  // True if the line starts with '- ', ignoring leading whitespace.
   bool isListItem{false};
-
-  // True if the parser has determined that this line is a label in the
-  // assembly.
   bool isLabel{false};
-
-  // True if the parser has determined that this line is a key-value pair.
   bool isKeyValue{false};
   std::string key{"none"};
   std::string value{"none"};
 
-  // String representation of the ParsedLine for debugging.
   std::string str() const;
 };
 
-// Kernel corresponds to the yaml entry in the amdgpu metadata of an assembly
-// file, such as
-//     .args:
-//      - .name:          My important argument
-//        .size:          4
-//        .offset:        0
-//        .value_kind:    by_value
-//        .value_type:    u32
+/// A kernel argument descriptor from the AMDGPU metadata YAML section.
 struct KernelArg {
   int size = 0;
   int offset = 0;
@@ -76,10 +53,8 @@ struct KernelArg {
   std::string name;
 };
 
-// Scalar registers are initialized with certain values, such as a pointer to
-// the kernel argument segment in global memory, and workgroup ID. These structs
-// represent how the registers are allocated, as determined by parsing the .s
-// file.
+/// Pre-allocated scalar register ranges (e.g., kernarg pointer, workgroup ID),
+/// determined by parsing the assembly metadata.
 struct RegisterMapping {
   int start_register;
   int count;
@@ -88,6 +63,8 @@ struct AllocationResult {
   std::map<std::string, RegisterMapping> registers;
 };
 
+/// Top-level result of parsing an AMD GPU assembly file: kernel metadata,
+/// parsed instruction lines, labels, and macros.
 struct ParsedAsm {
   ParsedAsm(std::string_view assembly);
 
@@ -101,15 +78,15 @@ struct ParsedAsm {
   AllocationResult initialRegisterAllocation;
   std::vector<std::pair<std::string, int>> amdhsa;
 
-  // Kernarg preload: hardware preloads this many dwords from the kernarg
-  // segment into SGPRs starting right after the kernarg segment pointer.
+  /// Kernarg preload: hardware preloads this many dwords from the kernarg
+  /// segment into SGPRs starting right after the kernarg segment pointer.
   int kernargPreloadLength = 0;
   int kernargPreloadOffset = 0;
 
-  // labels to the lines they are on
+  /// Label name -> line index.
   std::map<std::string, int> labels;
 
-  // macro names, to the lines with '.macro' and '.endm'
+  /// Macro name -> line range and argument names.
   std::map<std::string, Macro> macros;
 
   void appendStr(std::ostream &os) const;

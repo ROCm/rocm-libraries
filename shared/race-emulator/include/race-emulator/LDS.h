@@ -50,8 +50,8 @@ public:
   void resize(int size);
   void clear();
 
-  // Sentinel values used to initialize LDS memory. Reading these back
-  // indicates uninitialized memory (helpful for debugging).
+  /// Sentinel values used to initialize LDS memory. Reading these back
+  /// indicates uninitialized memory (helpful for debugging).
   static constexpr const uint8_t unset1 = 0x77;
   static constexpr const uint32_t unset4 = 0x77777777;
 

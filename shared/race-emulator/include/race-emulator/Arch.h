@@ -10,15 +10,20 @@
 
 namespace raceemulator {
 
+/// GPU architecture properties used to configure the emulator.
 class Architecture {
 public:
   virtual ~Architecture() = default;
+  /// Maximum LDS (Local Data Share) size in bytes.
   virtual int getMaxLdsSize() const = 0;
+  /// Number of lanes per wave (32 for RDNA, 64 for CDNA).
   virtual int getWaveSize() const = 0;
+  /// Number of compute units on the device.
   virtual int getCuCount() const = 0;
   virtual std::string getName() const = 0;
 };
 
+/// MI300X (CDNA3).
 class Gfx942 : public Architecture {
 public:
   int getMaxLdsSize() const override { return 65536; }
@@ -27,6 +32,7 @@ public:
   std::string getName() const override { return "gfx942"; }
 };
 
+/// MI350X (CDNA4).
 class Gfx950 : public Architecture {
 public:
   int getMaxLdsSize() const override { return 163840; }
@@ -35,6 +41,7 @@ public:
   std::string getName() const override { return "gfx950"; }
 };
 
+/// Strix (RDNA 3.5).
 class Gfx1151 : public Architecture {
 public:
   int getMaxLdsSize() const override { return 65536; }

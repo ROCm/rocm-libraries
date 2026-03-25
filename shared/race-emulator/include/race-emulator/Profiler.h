@@ -27,7 +27,7 @@ namespace raceemulator {
 ///
 /// Scopes may nest: when a new scope starts while one is already active, the
 /// outer scope pauses and resumes when the inner scope ends. Time is
-/// partitioned — each instant is attributed to exactly one scope. This ensures
+/// partitioned -- each instant is attributed to exactly one scope. This ensures
 /// that accounted time never exceeds wall-clock time and that the report
 /// percentages are meaningful.
 ///
@@ -70,7 +70,7 @@ public:
   /// Nesting is supported: creating a new stopwatch pauses the current one.
   class ScopedStopwatch {
   public:
-    /// No-op stopwatch — destructor does nothing.
+    /// No-op stopwatch -- destructor does nothing.
     ScopedStopwatch() = default;
 
     ~ScopedStopwatch();
@@ -81,7 +81,7 @@ public:
     ScopedStopwatch(const ScopedStopwatch &) = delete;
     ScopedStopwatch &operator=(const ScopedStopwatch &) = delete;
 
-    /// Active stopwatch — pauses any current scope and starts timing.
+    /// Active stopwatch -- pauses any current scope and starts timing.
     /// Only Profiler can supply an Entry* (Entry is private to Profiler).
     ScopedStopwatch(Profiler *profiler, Entry *entry);
 

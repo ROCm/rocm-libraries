@@ -11,28 +11,29 @@
 
 namespace raceemulator {
 
+/// Categorizes in-flight memory operations for race detection.
 enum class MemoryEventType {
-  GLOBAL_TO_VGPR = 0,
-  VGPR_TO_GLOBAL,
-  LDS_TO_VGPR,
-  VGPR_TO_LDS,
+  GLOBAL_TO_VGPR = 0, ///< Load from global memory to VGPR (counted by vmcnt).
+  VGPR_TO_GLOBAL,     ///< Store from VGPR to global memory (counted by vmcnt).
+  LDS_TO_VGPR,        ///< Load from LDS to VGPR (counted by lgkmcnt).
+  VGPR_TO_LDS,        ///< Store from VGPR to LDS (counted by lgkmcnt).
 
-  // Direct-to-LDS (DTL): `buffer_load ... lds` bypasses VGPRs and writes
-  // global memory data directly to LDS. Unlike VGPR_TO_LDS (which has VGPR
-  // registers), GLOBAL_TO_LDS events have no VGPR registers — only LDS
-  // intervals.
-  //
-  // Wait counter: DTL is a MUBUF instruction, so it uses vmcnt (not lgkmcnt).
-  // s_waitcnt vmcnt(0) must complete before the owning wave can read the LDS
-  // bytes. Cross-wave access requires s_barrier after vmcnt, same as ds_write
-  // followed by s_barrier.
+  /// Direct-to-LDS (DTL): `buffer_load ... lds` bypasses VGPRs and writes
+  /// global memory data directly to LDS. Unlike VGPR_TO_LDS (which has VGPR
+  /// registers), GLOBAL_TO_LDS events have no VGPR registers -- only LDS
+  /// intervals.
+  ///
+  /// Wait counter: DTL is a MUBUF instruction, so it uses vmcnt (not lgkmcnt).
+  /// s_waitcnt vmcnt(0) must complete before the owning wave can read the LDS
+  /// bytes. Cross-wave access requires s_barrier after vmcnt, same as ds_write
+  /// followed by s_barrier.
   GLOBAL_TO_LDS,
 
   N
 };
 
-// Event direction helpers: "to VGPR" means a load writing into a VGPR,
-// "from VGPR" means a store reading out of a VGPR.
+/// Event direction helpers: "to VGPR" means a load writing into a VGPR,
+/// "from VGPR" means a store reading out of a VGPR.
 inline bool isToVgpr(MemoryEventType t) {
   return t == MemoryEventType::GLOBAL_TO_VGPR ||
          t == MemoryEventType::LDS_TO_VGPR;
@@ -48,6 +49,7 @@ inline bool isFromVgpr(MemoryEventType t) {
          t == MemoryEventType::VGPR_TO_LDS;
 }
 
+/// A register reference (type + index).
 class CommonRegister {
 public:
   enum class Type { SGPR, VGPR, UNKNOWN };
@@ -58,7 +60,6 @@ public:
     return CommonRegister{Type::VGPR, idx};
   }
 
-  // Append to an ostream
   void appendStr(std::ostream &os) const;
   std::string str() const;
 };

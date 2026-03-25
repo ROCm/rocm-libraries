@@ -52,7 +52,7 @@ void Profiler::ScopedStopwatch::retire() {
       profiler->activeStart = now;
     }
   } else {
-    // We are a paused (middle) scope — our time was already flushed when we
+    // We are a paused (middle) scope -- our time was already flushed when we
     // were paused. Just remove ourselves from the list.
     for (auto it = stack.begin(); it != stack.end(); ++it) {
       if (it->id == scopeId) {

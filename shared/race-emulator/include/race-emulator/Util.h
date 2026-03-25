@@ -13,10 +13,9 @@
 #include <string_view>
 #include <vector>
 
-// Emulator & GPU independent functionality.
-
 namespace raceemulator {
 
+/// 3D integer coordinate for workgroup IDs and block dimensions.
 class Dim3d {
 public:
   Dim3d() = delete;
@@ -28,23 +27,26 @@ public:
   int z = 0;
 };
 
+/// Split an assembly line into whitespace/comma-separated tokens.
 std::vector<std::string_view> getPartitioned(std::string_view line);
 
-// Helper to trim whitespace, returning a view to avoid copies
+/// Trim leading and trailing whitespace, returning a view to avoid copies.
 std::string_view trim(std::string_view sv);
 
-// Helper to parse number (Hex 0x... or Decimal) using std::from_chars
+/// Parse a number literal (hex 0x... or decimal) via std::from_chars.
 bool parseNumber(std::string_view sv, uint32_t &outVal);
 
-// Evaluates "Symbol + 0 + AnotherSymbol + 4"
-// Returns input if evaluation fails.
+/// Evaluate an expression like "Symbol + 0 + AnotherSymbol + 4" using the
+/// symbol table. Returns the input unchanged if evaluation fails.
 std::string
 maybeEvaluateExpression(std::string_view inputExpr,
                         const std::map<std::string, uint32_t> &table);
 
+/// Replace all symbols in a line with their values from the symbol table.
 std::string getSymbolReducedLine(const std::string &line,
                                  const std::map<std::string, uint32_t> &table);
 
+/// Evaluate an expression to a uint32_t, or return nullopt on failure.
 std::optional<uint32_t>
 evaluateExpression(std::string_view inputExpr,
                    const std::map<std::string, uint32_t> &table);
@@ -80,7 +82,7 @@ template <typename T> T getIntFromView(std::string_view nStr) {
   }
 
   // Decimal: parse as signed to handle negative values, then cast to T.
-  // (e.g. "-1" as uint32_t → 0xFFFFFFFF)
+  // (e.g. "-1" as uint32_t -> 0xFFFFFFFF)
   if (negative) {
     int64_t sValue = 0;
     auto [ptr, ec] =

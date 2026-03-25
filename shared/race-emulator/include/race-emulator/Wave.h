@@ -21,6 +21,7 @@
 
 namespace raceemulator {
 
+/// An assembly macro (.macro / .endm) with its line range and argument names.
 class Macro {
 public:
   Macro() = default;
@@ -39,7 +40,7 @@ private:
   std::vector<std::string> argNames;
 };
 
-// An operand that knows if it is a Literal or a Register
+/// A parsed instruction operand: either a literal value or a register reference.
 template <typename T> struct Operand {
   bool isLiteral;
   CommonRegister reg;
@@ -56,50 +57,34 @@ template <typename T> struct Operand {
 
 class Macro;
 
+/// A single SIMD wave. Manages VGPRs, SGPRs, exec mask, program counter,
+/// memory event tracking, and race checking. Delegates LDS storage and
+/// cross-wave event coordination to the Workgroup.
 class Wave {
 
 public:
-  // vgprCount:  total number of vector and accumulator registers.
-  //
-  // agprOffset: starting index of accumulator registers.
-  //
-  // sgprCount:  total number of scalar registers.
-  //
-  // waveSize:   number of lanes in the wave (32 or 64).
-  //
-  // waveId:     the id of this wave within the workgroup.
-  //
-  // workgroup:  workgroup state (LDS memory, event registry).
-  //
-  // labels:     optional pointer to the label map for the assembly.
-  //             If null, no branching to labels is allowed.
+  /// Full constructor with all parameters.
   Wave(int vgprCount, int agprOffset, int sgprCount, int waveSize,
        WaveId waveId, Workgroup &workgroup,
        const std::map<std::string, int> *labels,
        const std::map<std::string, Macro> *macros);
 
-  // Construct a wave without accumulator registers, labels, or macros.
-  // The waveId is set to zero.
+  /// Convenience constructor for tests (no accumulators, labels, or macros;
+  /// waveId defaults to zero).
   Wave(int vgprCount, int sgprCount, int waveSize, Workgroup &workgroup);
 
-  // Example s17      -> SGPR 17
-  //         s[16:17] -> SGPR 16
-  //         v5       -> VGPR 5
-  //         v[4:7]   -> VGPR 4
-  //
-  // Also supports 'acc', 'm0', 'vcc', 'exec', mapping them to specific
-  // scalar register assigned for emulation.
+  /// Parse a register string (e.g., "s17", "s[16:17]", "v[4:7]", "vcc",
+  /// "exec") and return the first register in the range.
   CommonRegister getFirstRegister(std::string_view regStr) const;
 
-  // Number of outstanding events of a given type on a register (across all
-  // lanes). Used by getVgprs() to skip per-lane checks when zero.
+  /// Number of outstanding events of a given type on a register (across all
+  /// lanes). Used by getVgprs() to skip per-lane checks when zero.
   int getRegEventCount(MemoryEventType type, int reg) const {
     return regEventCount[static_cast<int>(type)][reg];
   }
 
-  // Return the value in the given register. If race checks are enabled, will
-  // raise an exception if an outstanding to-VGPR event (load) exists on this
-  // slot.
+  /// Return the value in the given VGPR. Throws RaceConditionException if
+  /// race checks are enabled and an outstanding load targets this register.
   uint32_t getVgpr(int reg, int lane) const {
     int32_t index = reg * waveSize + lane;
     assert(index < static_cast<int64_t>(vgprs.size()));
@@ -115,11 +100,9 @@ public:
     return vgprs[index];
   }
 
-  // Read all lanes of a single VGPR into out[0..waveSize-1].
-  //
-  // Race checking is O(1) per register: regEventCount tracks whether any
-  // to-VGPR events (loads) are outstanding. Only when events exist does it
-  // fall back to per-lane checking.
+  /// Read all lanes of a single VGPR into out[0..waveSize-1]. Race checking
+  /// is O(1) per register via regEventCount; only falls back to per-lane
+  /// checking when outstanding events exist.
   void getVgprs(int reg, uint32_t *out) const {
     assert(reg >= 0);
     assert((reg + 1) * waveSize <= static_cast<int>(vgprs.size()));
@@ -140,21 +123,19 @@ public:
                 waveSize * sizeof(uint32_t));
   }
 
-  // Return a single byte from a VGPR. Race-checks only that byte.
-  // byteIdx 0 = bits [7:0], 3 = bits [31:24].
+  /// Return a single byte from a VGPR. Race-checks only that byte.
+  /// byteIdx 0 = bits [7:0], 3 = bits [31:24].
   uint8_t getVgprByte(int id, int lane, int byteIdx) const;
 
-  // Return 16 bits from a VGPR. Race-checks only the relevant 2 bytes.
-  // hi=false: bits [15:0], hi=true: bits [31:16].
+  /// Return 16 bits from a VGPR. Race-checks only the relevant 2 bytes.
+  /// hi=false: bits [15:0], hi=true: bits [31:16].
   uint16_t getHalfVgpr(int id, int lane, bool hi) const;
 
-  // Write 16 bits directly to VGPR storage without reading.
-  // Matches ISA d16 semantics: "writes only 16 bits".
+  /// Write 16 bits directly to VGPR storage without reading the other half.
+  /// Matches ISA d16 semantics.
   void setVgprHalf(int id, int lane, bool hi, uint16_t value);
 
   // TODO(newling) implement race checks for scalar registers.
-
-  // Return the value in the given register.
   uint32_t getSgpr(int id) const;
 
   void setVgpr(int reg, int lane, uint32_t value) {
@@ -166,11 +147,9 @@ public:
   }
   void setSgpr(int id, uint32_t value);
 
-  // Get a pair of consecutively numbered 32-bit registers.
+  /// Get/set a pair of consecutively numbered 32-bit registers as uint64_t.
   uint64_t getSgpr64(int id) const;
   uint64_t getVgpr64(int id, int lane) const;
-
-  // Set a pair of consecutively numbered 32-bit registers.
   void setSgpr64(int id, uint64_t value);
   void setVgpr64(int id, int lane, uint64_t value);
 
@@ -194,60 +173,47 @@ public:
   void setExecU32(uint32_t value);
   uint32_t getExecU32() const;
 
-  // Exec mask as uint64_t. Safe for both wave-32 and wave-64: on wave-32
-  // the upper 32 bits are always zero because (1) the exec mask is
-  // initialized to ~0ULL then masked by runExecConditionedForLanes using
-  // fullMask = (1ULL << waveSize) - 1, and (2) no instruction sets bits
-  // beyond waveSize. Unlike VCC (which has distinct vcc/vcc_lo naming in
-  // assembly), exec mask operations use the same accessor regardless of
-  // wave size.
+  /// Exec mask as uint64_t. Safe for both wave-32 and wave-64: on wave-32
+  /// the upper 32 bits are always zero.
   void setExecU64(uint64_t value);
   uint64_t getExecU64() const;
 
   Workgroup &getWorkgroup();
 
-  // Validated LDS read: auto-supplies waveId and delegates to Workgroup.
+  /// Validated LDS read: auto-supplies waveId and delegates to Workgroup.
   template <typename T> T readLds(int addr, int lane) const {
     return workgroup->readLds<T>(addr, waveId, lane);
   }
 
-  // Validated bulk LDS read: validates the full range once, then copies
-  // count elements of type T.
+  /// Validated bulk LDS read: validates the full range once, then copies
+  /// count elements of type T.
   template <typename T>
   void readLds(int addr, int lane, T *out, int count) const {
     workgroup->readLds<T>(addr, waveId, lane, out, count);
   }
 
-  // Validated LDS write: auto-supplies waveId and delegates to Workgroup.
+  /// Validated LDS write: auto-supplies waveId and delegates to Workgroup.
   template <typename T> void writeLds(int addr, int lane, T value) {
     workgroup->writeLds<T>(addr, waveId, lane, value);
   }
 
-  // Called by instructions like global load.
-  // byteMask: which bytes of each register this event covers (default 0xF =
-  // all).
+  /// Register an in-flight memory event. The event remains outstanding until
+  /// retired by s_waitcnt. byteMask selects which bytes of each register are
+  /// covered (0xF = all 4 bytes).
   void registerGlobalToVgprEvent(int pc, const std::vector<uint32_t> &registers,
                                  uint8_t byteMask = 0xF);
-
-  // Called by instructions like global store.
   void registerVgprToGlobalEvent(int pc,
                                  const std::vector<uint32_t> &registers);
-
-  // Called by instructions like lds read.
   void registerLdsToVgprEvent(int pc, const std::vector<uint32_t> &registers,
                               const IntervalSet &ldsIntervals,
                               uint8_t byteMask = 0xF);
-
-  // Called by instructions like lds write.
   void registerVgprToLdsEvent(int pc, const std::vector<uint32_t> &registers,
                               const IntervalSet &ldsIntervals);
 
-  // Called by buffer_load ... lds (direct-to-LDS). No VGPR registers involved,
-  // only LDS intervals. Counted against vmcnt.
+  /// Direct-to-LDS: no VGPR registers, only LDS intervals. Counted by vmcnt.
   void registerGlobalToLdsEvent(int pc, const IntervalSet &ldsIntervals);
 
-  // Check if there are any outstanding memory events FROM a specific vgpr, and
-  // in a specific lane.
+  /// True if any outstanding store reads from the given VGPR lane.
   bool isOutstandingFromVgpr(int lane, int reg) const;
 
   void setRaceChecks(bool enable) { raceChecks = enable; }
@@ -255,12 +221,10 @@ public:
 
   bool isCompleteEmulation() const { return completeEmulation; }
 
-  // Reduce the number of outstanding memory events down to `vmcnt` for global
-  // memory operations.
+  /// Retire global memory events until at most vmcnt remain outstanding.
   void sWaitCntVmcnt(int vmcnt);
 
-  // Reduce the number of outstanding memory events down to `lgkmcnt` for
-  // LDS memory operations.
+  /// Retire LDS events until at most lgkmcnt remain outstanding.
   void sWaitCntLgkmcnt(int lgkmcnt);
 
   std::vector<EventId> &getVgprMemoryEvents(int reg) {
@@ -281,7 +245,8 @@ public:
   void setProfiler(Profiler *p) { profiler = p; }
   Profiler::ScopedStopwatch profileScope(std::string_view key);
 
-  // s_barrier operation
+  /// Discard all wave-complete events. Called when all waves have reached
+  /// s_barrier (not when individual waves arrive).
   void flushWaveCompleteMemoryEvents();
 
   template <typename T> T getValue(const Operand<T> &operand, int lane) const;
@@ -292,7 +257,6 @@ public:
   void setPc(int newPc) { pc = newPc; }
   int getPc() const { return pc; }
 
-  // Get the label map:
   const std::map<std::string, int> &getLabels() const {
     assert(labels != nullptr && "Labels map is null");
     return *labels;
@@ -353,8 +317,8 @@ private:
   int sgprCount;
   int waveSize;
 
-  // D16 LDS reads: whether to preserve the non-targeted half of the VGPR.
-  // RDNA (wave-32) preserves, CDNA (wave-64) does not (hardware-verified).
+  /// D16 LDS reads: whether to preserve the non-targeted half of the VGPR.
+  /// RDNA (wave-32) preserves, CDNA (wave-64) does not (hardware-verified).
   bool dsPreserve;
 
   // The id of this wave within the workgroup.

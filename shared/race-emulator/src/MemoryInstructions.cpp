@@ -242,7 +242,7 @@ struct BufferConfig {
     // Map Operands.
     // Standard: parts[1]=VDATA, [2]=VADDR, [3]=SRSRC, [4]=SOFFSET
     // DTL:      parts[1]=VDATA,            [2]=SRSRC, [3]=SOFFSET
-    //   No separate VADDR — VDATA doubles as the offen offset.
+    //   No separate VADDR -- VDATA doubles as the offen offset.
     // The LDS case has one fewer operand, so SRSRC/SOFFSET shift down by 1.
     int srsrcIdx = cfg.useLds ? 2 : 3;
     cfg.srsrc = wave.getFirstRegister(parts[srsrcIdx]);
@@ -362,7 +362,7 @@ public:
     // the hardware bypasses VGPRs entirely and writes the loaded data straight
     // into LDS (Local Data Share / shared memory). This is used by high-
     // performance GEMM kernels (e.g. TensileLite on gfx950) to overlap global
-    // memory fetches with compute — the data arrives in LDS ready for the
+    // memory fetches with compute -- the data arrives in LDS ready for the
     // math units without an intermediate ds_write step.
     //
     // ISA reference: CDNA4 ISA §9.1.9 "Memory Buffer Load to LDS".
@@ -412,7 +412,7 @@ public:
 
     // Shared iteration: for each active lane, compute BufferState, check
     // bounds per element, and call onLoad/onOob. This is the common logic
-    // between standard buffer loads (→ VGPR) and DTL (→ LDS).
+    // between standard buffer loads (to VGPR) and DTL (to LDS).
     //
     // OOB behavior (ISA reference: CDNA3 §9.1, CDNA4 §9.1):
     // "When an address is out of range, reads return zero, and writes and

@@ -92,7 +92,7 @@ public:
   /// Requires intervals to be sorted (i.e. finalize() was called).
   ///
   /// For sorted non-overlapping intervals, iv[i].end < iv[i+1].start (strict
-  /// inequality — equal endpoints would have been merged). So the only
+  /// inequality -- equal endpoints would have been merged). So the only
   /// candidate is the last interval with start < qEnd: if its end > qStart,
   /// it overlaps; otherwise no interval does.
   bool overlapsRange(int qStart, int qEnd) const {

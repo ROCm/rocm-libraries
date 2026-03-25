@@ -81,7 +81,7 @@ Wave::Wave(int vgprCount, int agprOffset, int sgprCount, int waveSize,
   static_assert(sizeof(0ULL) * 8 >= 64, "uint64_t must be at least 64 bits");
 
   // Initialize EXEC as all active. On wave-32, only the low 32 bits
-  // should be set — the upper 32 must be zero so that instructions
+  // should be set -- the upper 32 must be zero so that instructions
   // operating on exec_lo (e.g. s_and_not1_b32 exec_lo, ...) can clear
   // exec to zero without the upper bits keeping it non-zero.
   uint64_t allActive = (waveSize == 64) ? ~0ULL : ((1ULL << waveSize) - 1);
@@ -784,7 +784,7 @@ template uint64_t Wave::getValue<uint64_t>(const Operand<uint64_t> &,
                                            int) const;
 template double Wave::getValue<double>(const Operand<double> &, int) const;
 
-// Explicit instantiations — parseOperand
+// Explicit instantiations -- parseOperand
 template Operand<float> Wave::parseOperand<float>(std::string_view) const;
 template Operand<double> Wave::parseOperand<double>(std::string_view) const;
 template Operand<int32_t> Wave::parseOperand<int32_t>(std::string_view) const;
@@ -792,7 +792,7 @@ template Operand<uint32_t> Wave::parseOperand<uint32_t>(std::string_view) const;
 template Operand<short> Wave::parseOperand<short>(std::string_view) const;
 template Operand<uint64_t> Wave::parseOperand<uint64_t>(std::string_view) const;
 
-// Explicit instantiations — getSgprOrLiteralValue
+// Explicit instantiations -- getSgprOrLiteralValue
 template short Wave::getSgprOrLiteralValue<short>(const Operand<short> &) const;
 template int32_t
 Wave::getSgprOrLiteralValue<int32_t>(const Operand<int32_t> &) const;

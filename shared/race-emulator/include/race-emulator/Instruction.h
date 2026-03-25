@@ -14,14 +14,19 @@ namespace raceemulator {
 
 class Wave;
 
+/// Base class for instruction implementations. Each subclass emulates one
+/// assembly mnemonic (e.g., v_add_f32, ds_write_b32).
 class Instruction {
 public:
-  // Given a specific line in the assembly, return a function that executes it.
+  /// Parse operands from the assembly line and return a callable that
+  /// executes the instruction, returning the next program counter.
   virtual std::function<int()> getExecutor(Wave &registers,
                                            std::string_view line) const = 0;
   virtual ~Instruction() = default;
 };
 
+/// Singleton registry mapping instruction mnemonics to Instruction instances.
+/// Populated at static initialization time via Register<InstT>.
 class InstructionRegistry {
 public:
   static InstructionRegistry &instance() {
@@ -41,6 +46,8 @@ private:
   std::map<std::string, std::unique_ptr<Instruction>> map;
 };
 
+/// Auto-registration helper. A static instance registers an Instruction
+/// subclass with the InstructionRegistry at program startup.
 template <typename InstT> struct Register {
   template <typename... Args>
   Register(const std::string &name, Args &&...args) {
