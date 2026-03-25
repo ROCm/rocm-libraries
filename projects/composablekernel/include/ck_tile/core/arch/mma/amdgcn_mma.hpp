@@ -89,7 +89,7 @@ namespace ck_tile::core::arch::mma {
  *
  * (logical correctness). Applies to scale MFMA fp8, which due to the index matrix layout does not
  * allow arbitrary K perms to simplify layouts. This means the layout can only properly be described
- * with a Num Access value of at least 2.
+ * with a Num Access value which is a multiple of 2.
  *
  * (load / store manipulation). It seems like the load and store tile functions end up looking for
  * the size of the smallest unmerged K dimension (K0) to determine how many elements should be

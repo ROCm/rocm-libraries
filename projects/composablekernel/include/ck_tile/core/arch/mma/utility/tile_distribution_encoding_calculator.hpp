@@ -1,20 +1,23 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-/**
- * @file tile_distribution_encoding_calculator.hpp
- * @brief Generate TileDistributionEncodings describing register mappings for any MmaOp
- * @details Defines TileDistrEncCalc, which takes an amdgcn_mma type (MmaOp) and provides
- * ABC warp distribution encodings for mapping matrix fragment coordinates to register coordinates
- * (lane, vector item) and vice versa.
- */
-
 #pragma once
 
 #include "ck_tile/core/tensor/tile_distribution.hpp"
 #include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_register_mapper.hpp"
 
 namespace ck_tile::core::arch::mma {
+/**
+ * @class TileDistrEncCalc
+ * @brief Given an MmaOp and modifiers, provides warp-level tile distribution encodings for mapping
+ * ABC matrix fragment coordinates to register coordinates (lane, vector item) and vice versa.
+ * @tparam MmaOp          Intrinsic (amdgcn_mma).
+ * @tparam CTranspose     Whether we are using CTranspose.
+ * @tparam SFactor        Swizzle factor. Not implemented.
+ * @tparam AttrNumAccessA Requested NumAccess for the A matrix. Must be multiple of "fundamental"
+ *                        NumAccess for intrinsic. See details in amdgcn_mma.hpp.
+ * @tparam AttrNumAccessB Requested NumAccess for the B matrix.
+ */
 template <typename MmaOp,
           bool CTranspose        = false,
           index_t SFactor        = 1,
@@ -26,10 +29,12 @@ struct TileDistrEncCalc
     static constexpr index_t NumAccessA = std::max(MmaOp::kAKNumAccess, AttrNumAccessA);
     static constexpr index_t NumAccessB = std::max(MmaOp::kBKNumAccess, AttrNumAccessB);
 
-    static_assert(AttrNumAccessA >= MmaOp::kAKNumAccess,
-                  "Requesting smaller NumAccessA than required by builtin.");
-    static_assert(AttrNumAccessB >= MmaOp::kBKNumAccess,
-                  "Requesting smaller NumAccessB than required by builtin.");
+    // We are free to choose any NumAccess value to manipulate the load / store behavior, unless the
+    // intrinsic fundamentally requires a base NumAccess factor for the layout to be correct.
+    static_assert(AttrNumAccessA % MmaOp::kAKNumAccess == 0,
+                  "Requesting NumAccessA incompatible with builtin.");
+    static_assert(AttrNumAccessB % MmaOp::kBKNumAccess == 0,
+                  "Requesting NumAccessB incompatible with builtin.");
 
     static_assert(MmaOp::kABKPerLane % NumAccessA == 0);
     static_assert(MmaOp::kABKPerLane % NumAccessB == 0);
