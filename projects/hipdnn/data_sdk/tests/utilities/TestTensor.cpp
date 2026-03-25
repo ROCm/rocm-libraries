@@ -613,7 +613,7 @@ TEST(TestTensor, SparseTensorCreationAndUsage)
 /* ======== fillWithSentinelValue tests ======== */
 
 template <typename T>
-class TestTensorSentinel : public ::testing::Test
+class TensorSentinel : public ::testing::Test
 {
 };
 
@@ -627,9 +627,9 @@ using SentinelTypes = ::testing::Types<float,
                                        uint8_t,
                                        int32_t>;
 
-TYPED_TEST_SUITE(TestTensorSentinel, SentinelTypes, );
+TYPED_TEST_SUITE(TensorSentinel, SentinelTypes, );
 
-TYPED_TEST(TestTensorSentinel, PackedTensorFilled)
+TYPED_TEST(TensorSentinel, PackedTensorFilled)
 {
     using hipdnn_data_sdk::types::isnan;
     Tensor<TypeParam> tensor({2, 3});
@@ -649,7 +649,7 @@ TYPED_TEST(TestTensorSentinel, PackedTensorFilled)
     }
 }
 
-TYPED_TEST(TestTensorSentinel, StridedTensorFilled)
+TYPED_TEST(TensorSentinel, StridedTensorFilled)
 {
     using hipdnn_data_sdk::types::isnan;
     const std::vector<int64_t> dims = {2, 2, 2};
