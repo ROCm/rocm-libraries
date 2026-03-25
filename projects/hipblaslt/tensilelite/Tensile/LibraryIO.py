@@ -512,7 +512,7 @@ def parseLibraryLogicData(
     if isinstance(data, list):
         # TODO: this can be removed when all logic files have dict format
         data = parseLibraryLogicList(data, srcFile)
-    elif isinstance(data, dict) in data:
+    elif isinstance(data, dict):
         libraryType = data["LibraryType"]
         if libraryType == "FreeSize":
             data["Library"] = {}
