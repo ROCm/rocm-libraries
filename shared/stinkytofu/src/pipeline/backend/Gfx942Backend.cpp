@@ -59,7 +59,7 @@ namespace stinkytofu
                                       moduleOptions.NumGRA,
                                       moduleOptions.NumGRB,
                                       moduleOptions.NumGRM,
-                                      moduleOptions.wavefrontSize);
+                                      moduleOptions.WaveGroup0 * moduleOptions.WaveGroup1);
 
             // Configure pass features (GEMM-specific optimizations)
             config

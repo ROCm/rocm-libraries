@@ -48,7 +48,7 @@ namespace stinkytofu
         uint32_t           NumGRA; ///< Number of global read A
         uint32_t           NumGRB; ///< Number of global read B
         uint32_t           NumGRM; ///< Number of global read M
-        uint32_t           NumWaves; ///< Number of wavefronts
+        uint32_t           NumWaves; ///< Number of waves
     };
 
     /// Pass-specific feature configuration

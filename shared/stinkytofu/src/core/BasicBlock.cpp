@@ -20,10 +20,16 @@
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 
+#include <iostream>
 #include <ostream>
 
 namespace stinkytofu
 {
+    const Function* BasicBlock::getParentFunc() const
+    {
+        return getParent();
+    }
+
     void BasicBlock::remove()
     {
         Function* p = getParent();
@@ -40,38 +46,36 @@ namespace stinkytofu
             delete this;
     }
 
-    void BasicBlock::dump(std::ostream& out) const
+    void BasicBlock::dump() const
     {
         if(!label.empty())
         {
-            out << label << ":\n";
+            std::cerr << label << ":\n";
         }
         else
         {
-            out << "(unlabeled):";
+            std::cerr << "(unlabeled):";
         }
 
         for(const IRBase& irNode : ir)
         {
-            out << "  ";
-            irNode.dump(out);
+            std::cerr << "  ";
+            irNode.dump(std::cerr);
         }
 
         if(!successors.empty())
         {
-            out << "  ; successors: ";
+            std::cerr << "  ; successors: ";
             for(size_t i = 0; i < successors.size(); ++i)
             {
                 if(i > 0)
-                    out << ", ";
+                    std::cerr << ", ";
                 if(!successors[i]->getLabel().empty())
-                    out << successors[i]->getLabel();
+                    std::cerr << successors[i]->getLabel();
                 else
-                    out << "<unlabeled>";
+                    std::cerr << "<unlabeled>";
             }
-            out << "\n";
+            std::cerr << "\n";
         }
-
-        out.flush();
     }
 }

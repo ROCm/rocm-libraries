@@ -23,6 +23,7 @@
 #include <map>
 
 #include "ReadyQueue.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 
 namespace
 {
@@ -50,6 +51,8 @@ namespace
         bool     isMFMALatencyFree();
         DAGNode* pickOneFromMFMA();
         void     MFMAIssueUpdate(DAGNode* node);
+        /// True if MFMA, pickable global read, or otherQueue still has a candidate this step.
+        bool hasNonBarrierWorkRemaining() const;
 
     public:
         explicit CDNA3ReadyQueue(const PassContext& passCtx)
@@ -140,6 +143,18 @@ namespace
         mfmaIssueConfig.totalIssuedCycles -= node->inst->issueCycles;
     }
 
+    bool CDNA3ReadyQueue::hasNonBarrierWorkRemaining() const
+    {
+        if(!mfmaQueue.empty())
+            return true;
+        if(!globalReadQueue.empty()
+           && (globalReadCounter < globalReadPerMFMA || otherQueue.empty()))
+            return true;
+        if(!otherQueue.empty())
+            return true;
+        return false;
+    }
+
     DAGNode* CDNA3ReadyQueue::pickOne()
     {
         // Priority 1: Try to schedule MFMA if counter allows
@@ -190,17 +205,32 @@ namespace
             return node;
         }
 
-        // Priority 3: Schedule barriers when their dependencies are satisfied
+        // Ready MFMA must run before a barrier when Priority 1 did not already take it — otherwise
+        // barriers steal picks from deferred MFMA and violate "barrier last if possible".
+        if(!mfmaQueue.empty())
+        {
+            return pickOneFromMFMA();
+        }
+
+        assert(!hasNonBarrierWorkRemaining()
+               && "CDNA3 pickOne: barrier only after MFMA / pickable global / other work is gone");
+
+        // Priority 3: movable barriers only when nothing else in the ready set can issue this step.
         if(!barrierQueue.empty())
         {
             DAGNode* barrier = barrierQueue.top();
             barrierQueue.pop();
             MFMAIssueUpdate(barrier);
             updateMFMALatencyCounters(barrier);
+            PASS_DEBUG(std::cerr << "[DAG CDNA3 pickOne] Priority 3 barrierQueue dagId=" << barrier->id
+                                 << " (non-barrier buckets empty for this pick)\n";
+                       barrier->inst->dump(std::cerr);
+                       std::cerr << "\n");
             return barrier;
         }
 
-        return pickOneFromMFMA();
+        assert(false && "CDNA3ReadyQueue::pickOne: all buckets empty");
+        return nullptr;
     }
 
     void CDNA3ReadyQueue::push(DAGNode* node)

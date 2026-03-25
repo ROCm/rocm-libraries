@@ -199,8 +199,6 @@ namespace stinkytofu
         os << "\"st.asm_directive\"(\"" << directive.name << "\"";
         if(!directive.symbol.empty())
             os << ", \"" << directive.symbol << "\"";
-        if(!directive.value.empty())
-            os << ", \"" << directive.value << "\"";
         os << ")\n";
     }
 

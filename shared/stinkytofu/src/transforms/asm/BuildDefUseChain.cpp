@@ -24,6 +24,7 @@
 
 #include "stinkytofu/analysis/controlflow/Dominance.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/DefUseChainUpdater.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
@@ -31,6 +32,37 @@
 
 #include <cassert>
 #include <vector>
+
+namespace stinkytofu
+{
+    /// Chain construction helpers is private to BuildDefUseChain.cpp because
+    /// it directly modify sources and users.
+    class DefUseChainBuilder
+    {
+    public:
+        static void addLink(StinkyInstruction* user, StinkyInstruction* def)
+        {
+            if(!def)
+                return;
+            user->sources.push_back(def);
+            def->users.push_back(user);
+        }
+
+        static void addPhiOperand(StinkyInstruction* phi, StinkyInstruction* def)
+        {
+            phi->sources.push_back(def);
+            if(def)
+                def->users.push_back(phi);
+        }
+
+        static void clearChains(StinkyInstruction* inst)
+        {
+            inst->sources.clear();
+            inst->users.clear();
+        }
+    };
+
+} // namespace stinkytofu
 
 namespace
 {
@@ -48,9 +80,7 @@ namespace
             {
                 if(ir.getType() != IRBase::IRType::StinkyTofu)
                     continue;
-                auto* inst = cast<StinkyInstruction>(&ir);
-                inst->getSources().clear();
-                inst->getUsers().clear();
+                DefUseChainBuilder::clearChains(cast<StinkyInstruction>(&ir));
             }
         }
     }
@@ -66,7 +96,7 @@ namespace
                 break;
             if(inst->getUsers().empty())
             {
-                it = bb.eraseIR(it);
+                it = DefUseChainUpdater::eraseAndUnlink(bb, it);
                 continue;
             }
             ++it;
@@ -120,15 +150,18 @@ namespace
                 if(inst->getUnifiedOpcode() == GFX::LABEL)
                     continue;
 
+                std::unordered_set<StinkyInstruction*> addedDefs;
                 for(const auto& src : inst->getSrcRegs())
                 {
                     if(!src.isRegister() || isPseudoReg(src))
                         continue;
+
                     for(unsigned s = 0; s < src.reg.num; ++s)
                     {
                         auto it = currentDef.find(toRegKey(src, s));
-                        if(it != currentDef.end() && it->second != nullptr)
-                            inst->addOperandDef(it->second);
+                        if(it != currentDef.end() && it->second != nullptr
+                           && addedDefs.insert(it->second).second)
+                            DefUseChainBuilder::addLink(inst, it->second);
                     }
                 }
 
@@ -175,9 +208,7 @@ namespace
                             def = defIt->second;
                     }
 
-                    inst->getSources().push_back(def);
-                    if(def != nullptr)
-                        def->getUsers().push_back(inst);
+                    DefUseChainBuilder::addPhiOperand(inst, def);
                 }
             }
         }
@@ -232,7 +263,7 @@ namespace stinkytofu
         insertPhiInstructions(func, clearExisting);
 
         // Phase 2: Clear all existing chains when rebuilding, so buildChains
-        // starts from a clean slate via push_back/addOperandDef.
+        // starts from a clean slate via DefUseChainBuilder.
         if(clearExisting)
             clearAllChains(func);
 

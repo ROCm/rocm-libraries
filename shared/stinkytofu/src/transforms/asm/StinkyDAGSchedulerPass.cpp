@@ -21,11 +21,15 @@
  *
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
-#include "dag/CDNA3.hpp"
-#include "dag/CDNA5.hpp"
+#include "stinkytofu/core/BasicBlock.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
 
+// Before dag/CDNA*.hpp so PASS_DEBUG inside those headers uses this pass name.
 #define DEBUG_TYPE "StinkyDAGSchedulerPass"
+
+#include "dag/CDNA3.hpp"
+#include "dag/CDNA5.hpp"
 
 namespace
 {
@@ -62,6 +66,13 @@ namespace
         PASS_DEBUG(std::cerr << "\n");
 
         unsigned regionSize = std::distance(regionStart, regionEnd);
+
+        std::string regionBbLabel;
+        if(regionStart != regionEnd)
+        {
+            if(BasicBlock* pbb = getStinkyInst(regionStart).getParent())
+                regionBbLabel = pbb->getLabel();
+        }
 
         // Map each instruction to an unique id [0..n-1]
         DAGNodeList dagNodes;
@@ -168,10 +179,21 @@ namespace
         }
 
         // Process the ready queue until it's empty.
+        unsigned orderInRegion = 0;
         while(!readyQueue.empty())
         {
             // Pop the last instruction from the ready queue.
             DAGNode* currentNode = readyQueue.pickOne();
+            ++orderInRegion;
+
+            if(isBarrier(*currentNode->inst))
+            {
+                PASS_DEBUG(std::cerr << "[DAG schedule] bb=\"" << regionBbLabel
+                                     << "\" orderInRegion=" << orderInRegion << " dagId=" << currentNode->id
+                                     << " movable barrier (position in region schedule)\n";
+                           currentNode->inst->dump(std::cerr);
+                           std::cerr << "\n");
+            }
 
             // Add the instruction to the scheduled list.
             scheduled.push_back(currentNode->inst);

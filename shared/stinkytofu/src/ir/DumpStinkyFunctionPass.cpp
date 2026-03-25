@@ -68,6 +68,13 @@ namespace stinkytofu
 
             std::ofstream out(asmPath, std::ios::out | std::ios::trunc);
             assert(out && "[DumpStinkyFunctionPass] Failed to open asmPath");
+
+            config_.emitterOptions.emitComments     = true;
+            config_.emitterOptions.emitCycleInfo    = false;
+            config_.emitterOptions.indent           = 0;
+            config_.emitterOptions.emitBlankLines   = false;
+            config_.emitterOptions.useSymbolicNames = false; // Enable symbolic register names
+
             StinkyAsmEmitter emitter(config_.emitterOptions);
             emitter.emit(out, func);
         }

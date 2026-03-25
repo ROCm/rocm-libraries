@@ -53,6 +53,8 @@ namespace stinkytofu
             return nullptr;
         }
 
+        const BasicBlock* getParentBlock() const;
+
         virtual void dump(std::ostream& out) const = 0;
 
         void dump();

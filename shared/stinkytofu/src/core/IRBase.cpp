@@ -29,6 +29,11 @@ namespace stinkytofu
         dump(std::cerr);
     }
 
+    const BasicBlock* IRBase::getParentBlock() const
+    {
+        return getParent();
+    }
+
     void IRBase::remove()
     {
         BasicBlock* p = getParent();

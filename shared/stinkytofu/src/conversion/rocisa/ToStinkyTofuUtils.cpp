@@ -716,7 +716,7 @@ namespace
             RegType regType = stringToRegType(regCont->regType);
 
             int physicalIdx = regCont->regIdx;
-            if(regCont->regName)
+            if(regCont->regName && regType == RegType::V)
             {
                 physicalIdx = regCont->regName->getTotalIdx();
             }
@@ -873,7 +873,7 @@ namespace
                               arg.addrSpaceQual);
         }
 
-        // Note: Optimization config (ThreadTile, SubGroup, VectorWidth, etc.) is now passed
+        // Note: Optimization config (ThreadTile, WaveGroup, VectorWidth, etc.) is now passed
         // directly from Python via toStinkyTofuModule's parameters and set via setOptimizationConfig()
 
         return stinkySig;
@@ -945,7 +945,7 @@ namespace stinkytofu
         bool hasVgprMsb = asmCaps.count("HasVgprMSB") && asmCaps.at("HasVgprMSB");
 
         auto processItem = [&](rocisa::Item*                          item,
-                                  const std::vector<const std::string*>& moduleNames) {
+                               const std::vector<const std::string*>& moduleNames) {
             const auto instsCountBefore = currentBB->size();
 
             // Handle text blocks
@@ -1248,10 +1248,10 @@ void init_stinkytofu(nb::module_ m)
 
             // Set optimization config
             std::array<int, 2> tt = {moduleOptions.TileA0, moduleOptions.TileB0};
-            std::array<int, 2> sg = {moduleOptions.SubGroup0, moduleOptions.SubGroup1};
+            std::array<int, 2> wg = {moduleOptions.WaveGroup0, moduleOptions.WaveGroup1};
 
             stinkySig->setOptimizationConfig(tt,
-                                             sg,
+                                             wg,
                                              moduleOptions.VectorWidthA,
                                              moduleOptions.VectorWidthB,
                                              moduleOptions.GlobalReadVectorWidthA,

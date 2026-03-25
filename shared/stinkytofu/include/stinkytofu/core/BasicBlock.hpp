@@ -58,6 +58,8 @@ namespace stinkytofu
         /// Parent function that owns this block (from IntrusiveListNode); null if not in any function.
         using IntrusiveListNode<BasicBlock, Function>::getParent;
 
+        const Function* getParentFunc() const;
+
         const std::string& getLabel() const
         {
             return label;
@@ -204,7 +206,7 @@ namespace stinkytofu
             ir.clear();
         }
 
-        void dump(std::ostream& out) const;
+        void dump() const;
 
         friend class Function;
     };

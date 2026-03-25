@@ -4,12 +4,16 @@
 
 Virtual registers enable template-based code generation in StinkyTofu. They allow you to create reusable instruction sequences with placeholder registers that can be mapped to actual physical registers during instantiation. This is particularly useful for generating activation functions, common code patterns, and library functions that need to work with different register allocations.
 
+### Encoding
+
+Virtual registers are distinguished from physical registers by the MSB (bit 31) of the register index ('reg.idx'). When the MSB is set, the register is virtual; the lower 31 bits hold the virtual index. This means that if a virtual register accidentally reaches the emitter or scheduler without being resolved, the extremely large index value (>= 2^31) will cause obvious failures. Use 'resolveVirtualToPhysical()' to convert virtual registers to physical before emission.
+
 ## Basic Usage
 
 ### Creating Virtual Registers
 
 '''cpp
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyRegister.hpp"
 
 using namespace stinkytofu;
 
@@ -28,33 +32,33 @@ auto sTemp1 = StinkyRegister::VirtualSGPR(1);  // Virtual s1
 '''cpp
 StinkyRegister reg = StinkyRegister::Virtual(0);
 
-if (reg.isVirtualRegister()) {
+if (reg.isVirtualister()) {
     // This is a virtual register needing remapping
 }
 
 // Physical registers return false
 StinkyRegister physical(RegType::V, 10, 1);
-assert(!physical.isVirtualRegister());
+assert(!physical.isVirtualister());
 
 // Literals also return false
 StinkyRegister literal(42);
-assert(!literal.isVirtualRegister());
+assert(!literal.isVirtualister());
 '''
 
-### Remapping Individual Registers
+### Resolving to Physical Registers
 
 '''cpp
 // Create a virtual register
 auto vTemp = StinkyRegister::Virtual(0);
 
-// Remap to physical register v10
-auto v10 = vTemp.withOffset(10);
+// Resolve to physical register v10
+auto v10 = vTemp.resolveVirtualToPhysical(10);
 
-// Remap to physical register v20 (same virtual, different mapping)
-auto v20 = vTemp.withOffset(20);
+// Resolve to physical register v20 (same virtual, different mapping)
+auto v20 = vTemp.resolveVirtualToPhysical(20);
 
-// After remapping, registers are physical
-assert(!v10.isVirtualRegister());
+// After resolving, registers are physical
+assert(!v10.isVirtualister());
 assert(v10.reg.idx == 10);
 '''
 
@@ -81,7 +85,7 @@ inst->remapRegisters(10, 0);  // VGPR offset: 10, SGPR offset: 0
 
 ### In-Place Remapping
 
-Use 'remapVirtualRegisters()' when you want to modify the original module:
+Use 'remapVirtualisters()' when you want to modify the original module:
 
 '''cpp
 StinkyTofu st({9, 4, 2});
@@ -93,7 +97,7 @@ auto v1 = StinkyRegister::Virtual(1);
 module->add(st.VMovB32(v0, v1, "move"));
 
 // Remap in-place: v0->v10, v1->v11
-module->remapVirtualRegisters(10, 0);
+module->remapVirtualisters(10, 0);
 
 std::cout << module->emitAssembly() << std::endl;
 // Output: v_mov_b32 v10, v11
@@ -133,21 +137,21 @@ auto inst4 = templateModule->cloneAndRemap(40, 0);  // Can reuse!
 
 ## Working with VGPR and SGPR Offsets
 
-Both 'remapVirtualRegisters()' and 'cloneAndRemap()' accept separate offsets for VGPRs and SGPRs:
+Both 'remapVirtualisters()' and 'cloneAndRemap()' accept separate offsets for VGPRs and SGPRs:
 
 '''cpp
 StinkyTofu st({9, 4, 2});
 auto module = st.createIRList("test");
 
 // Mix of virtual VGPRs and SGPRs
-auto vDst   = StinkyRegister::Virtual(0);        // Virtual VGPR
-auto vSrc   = StinkyRegister::Virtual(1);        // Virtual VGPR
-auto sConst = StinkyRegister::VirtualSGPR(0);    // Virtual SGPR
+auto vDst   = StinkyRegister::Virtual(0);   // Virtual VGPR
+auto vSrc   = StinkyRegister::Virtual(1);   // Virtual VGPR
+auto sConst = StinkyRegister::VirtualSGPR(0);   // Virtual SGPR
 
 module->add(st.VAddU32(vDst, vSrc, sConst, "add"));
 
 // Remap: VGPRs with offset 10, SGPRs with offset 5
-module->remapVirtualRegisters(10, 5);
+module->remapVirtualisters(10, 5);
 
 // Result: v_add_u32 v10, v11, s5
 '''
@@ -160,14 +164,14 @@ Virtual and physical registers can coexist in the same instruction:
 StinkyTofu st({9, 4, 2});
 auto module = st.createIRList("test");
 
-auto vVirtual  = StinkyRegister::Virtual(0);        // Virtual
+auto vVirtual  = StinkyRegister::Virtual(0);  // Virtual
 auto vPhysical = StinkyRegister(RegType::V, 100, 1); // Physical
 auto literal   = StinkyRegister(42);                 // Literal
 
 module->add(st.VAddU32(vVirtual, vPhysical, literal, "add"));
 
 // Remap only affects virtual registers
-module->remapVirtualRegisters(10, 0);
+module->remapVirtualisters(10, 0);
 
 // Result: v_add_u32 v10, v100, 42
 //         ^ remapped  ^ unchanged  ^ unchanged
@@ -250,8 +254,8 @@ int main() {
 
 | Aspect | TensileLite (Holder) | StinkyTofu (Virtual) |
 |--------|----------------------|----------------------|
-| Template creation | 'Holder(idx)' | 'StinkyRegister::Virtual(idx)' |
-| Single instantiation | 'HolderToGpr(module, base, 'v')' | 'module->remapVirtualRegisters(base, 0)' |
+| Template creation | 'Holder(idx)' | 'StinkyRegister::Virtual(idx)' / 'VirtualReg(type, idx)' |
+| Single instantiation | 'HolderToGpr(module, base, 'v')' | 'module->remapVirtualisters(base, 0)' |
 | Multiple instantiation | Manual clone + 'HolderToGpr' | 'module->cloneAndRemap(base, 0)' |
 | Phase | Two-phase (clone -> transform) | Single-phase (clone+remap) |
 | Type safety | Runtime check | Compile-time + runtime |
@@ -274,13 +278,13 @@ Virtual register remapping does not check for register overflow. Ensure your off
 
 '''cpp
 // BAD: May overflow if architecture only has 256 VGPRs
-module->remapVirtualRegisters(250, 0);
+module->remapVirtualisters(250, 0);
 
 // GOOD: Check available registers first
 int availableVGPRs = getArchMaxVGPRs(archID);
 int requiredVGPRs = getTemplateVGPRCount(template);
 if (baseOffset + requiredVGPRs <= availableVGPRs) {
-    module->remapVirtualRegisters(baseOffset, 0);
+    module->remapVirtualisters(baseOffset, 0);
 }
 '''
 
@@ -296,6 +300,6 @@ if (baseOffset + requiredVGPRs <= availableVGPRs) {
 
 - [Activation Templates User Guide](activation-templates.md) - Practical examples for activation functions
 - [StinkyAsmEmitter User Guide](asm-emitter.md) - Converting IR to assembly
-- API Reference: 'include/stinkytofu/ir/asm/StinkyAsmIR.hpp'
-- Unit Tests: 'tests/unit/VirtualRegisterTest.cpp', 'tests/unit/VirtualRegisterRemappingTest.cpp'
+- API Reference: 'include/stinkytofu/ir/asm/StinkyRegister.hpp'
+- Unit Tests: 'tests/unit/VirtualisterTest.cpp', 'tests/unit/VirtualisterRemappingTest.cpp'
 
