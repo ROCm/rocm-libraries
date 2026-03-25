@@ -245,6 +245,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET";
     case HIPDNN_ATTR_ENGINEHEUR_DEVICEPROP:
         return "HIPDNN_ATTR_ENGINEHEUR_DEVICEPROP";
+    case HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT:
+        return "HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT";
 
     case HIPDNN_ATTR_ENGINECFG_ENGINE:
         return "HIPDNN_ATTR_ENGINECFG_ENGINE";

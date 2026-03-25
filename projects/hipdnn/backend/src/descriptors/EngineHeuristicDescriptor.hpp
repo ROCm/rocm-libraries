@@ -19,6 +19,7 @@ private:
     std::vector<int64_t> _engineIds;
     hipdnnBackendHeurMode_t _heuristicMode = HIPDNN_HEUR_MODE_FALLBACK;
     bool _heuristicModeSet = false;
+    bool _findFirst = false;
 
     void setGraph(hipdnnBackendAttributeType_t attributeType,
                   int64_t elementCount,
@@ -42,6 +43,15 @@ private:
                           int64_t requestedElementCount,
                           int64_t* elementCount,
                           void* arrayOfElements) const;
+
+    void setFindFirst(hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements);
+
+    void getFindFirst(hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements) const;
 
 public:
     void finalize() override;

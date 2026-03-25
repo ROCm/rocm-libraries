@@ -75,7 +75,8 @@ public:
     // MT-unsafe instance methods
     // virtual for gMock testing
     virtual void setStream(hipStream_t stream) const;
-    virtual std::vector<int64_t> getApplicableEngineIds(const GraphDescriptor* graphDesc) const;
+    virtual std::vector<int64_t> getApplicableEngineIds(const GraphDescriptor* graphDesc,
+                                                        bool findFirst = false) const;
     virtual size_t getWorkspaceSize(int64_t engineId,
                                     const hipdnnPluginConstData_t* engineConfig,
                                     const GraphDescriptor* graphDesc) const;

@@ -14,7 +14,8 @@
 #include <stdexcept>
 #include <string>
 
-namespace hipdnn_integration_tests {
+namespace hipdnn_integration_tests
+{
 
 // Methods for determining acceptable tolerance when comparing reference
 // implementation output to the selected engine's output.
@@ -30,17 +31,20 @@ namespace hipdnn_integration_tests {
 // The example config would map to ToleranceMode::GH_12678_TOLERANCE_WORKAROUND
 // which uses default tolerance for all graphs besides batch norm backwards
 // operating on bfloat16 where it returns a wider tolerance.
-enum class ToleranceMode {
-    Default,
+enum class ToleranceMode
+{
+    DEFAULT,
 };
 
 // Singleton class for reading test configuration from JSON file.
-class TestConfig {
-   public:
+class TestConfig
+{
+public:
     // Get singleton instance
-    static TestConfig& get() {
-        static TestConfig instance;
-        return instance;
+    static TestConfig& get()
+    {
+        static TestConfig s_instance;
+        return s_instance;
     }
 
     TestConfig(const TestConfig&) = delete;
@@ -49,79 +53,103 @@ class TestConfig {
     TestConfig& operator=(TestConfig&&) = delete;
 
     // Get tolerance mode for a given engine ID.
-    ToleranceMode getToleranceMode(int64_t engineId) const {
+    ToleranceMode getToleranceMode(int64_t engineId) const
+    {
         std::string engineName;
-        try {
+        try
+        {
             engineName = std::string(hipdnn_data_sdk::utilities::getEngineNameFromId(engineId));
-        } catch (const std::out_of_range&) {
+        }
+        catch(const std::out_of_range&)
+        {
             engineName = "Engine" + std::to_string(engineId);
         }
 
-        if (auto it = _engineTolerances.find(engineName); it != _engineTolerances.end()) {
+        if(auto it = _engineTolerances.find(engineName); it != _engineTolerances.end())
+        {
             return it->second;
         }
-        return ToleranceMode::Default;
+        return ToleranceMode::DEFAULT;
     }
 
     // Check if a full GTest test name is in the expected failures list.
     // Test name format: "TestSuite/Prefix.TestName/ParamName"
-    bool isExpectedFailure(const std::string& testName) {
-        return _expectedFailures.count(testName) > 0;
+    bool isExpectedFailure(const std::string& testName)
+    {
+        return _expectedFailures.contains(testName);
     }
 
     // Get expected plugin names from config (e.g., {"fusilli_plugin",
     // "miopen_provider_plugin"})
-    const std::set<std::string>& getExpectedPluginNames() const {
+    const std::set<std::string>& getExpectedPluginNames() const
+    {
         return _expectedPluginNames;
     }
 
-   private:
-    TestConfig() {
+private:
+    TestConfig()
+    {
         // Get config path
         const char* configPathEnv = std::getenv("HIPDNN_TEST_CONFIG_PATH");
-        if (configPathEnv == nullptr || std::strlen(configPathEnv) == 0) {
+        if(configPathEnv == nullptr || std::strlen(configPathEnv) == 0)
+        {
             throw std::runtime_error("HIPDNN_TEST_CONFIG_PATH environment variable not set");
         }
 
         // Parse config
-        std::filesystem::path configPath = std::filesystem::weakly_canonical(configPathEnv);
+        const std::filesystem::path configPath = std::filesystem::weakly_canonical(configPathEnv);
         std::ifstream configFile(configPath);
-        if (!configFile.is_open()) {
+        if(!configFile.is_open())
+        {
             throw std::runtime_error("Failed to open config file: " + configPath.string());
         }
-        try {
+        try
+        {
             auto config = nlohmann::json::parse(configFile);
 
             // Populate expected failures set from flattened list
-            if (config.contains("expected_failures")) {
-                for (const auto& name : config["expected_failures"]) {
+            if(config.contains("expected_failures"))
+            {
+                for(const auto& name : config["expected_failures"])
+                {
                     _expectedFailures.insert(name.get<std::string>());
                 }
             }
 
             // Populate expected plugin names from plugin definitions
-            if (config.contains("plugins")) {
-                for (const auto& [name, info] : config["plugins"].items()) {
-                    if (info.contains("name")) {
+            if(config.contains("plugins"))
+            {
+                for(const auto& [name, info] : config["plugins"].items())
+                {
+                    if(info.contains("name"))
+                    {
                         _expectedPluginNames.insert(info["name"].get<std::string>());
                     }
                 }
             }
 
             // Populate engine tolerance modes
-            if (config.contains("engines")) {
-                for (const auto& [engineName, engineConfig] : config["engines"].items()) {
-                    if (engineConfig.contains("tolerance")) {
+            if(config.contains("engines"))
+            {
+                for(const auto& [engineName, engineConfig] : config["engines"].items())
+                {
+                    if(engineConfig.contains("tolerance"))
+                    {
                         auto val = engineConfig["tolerance"].get<std::string>();
-                        if (val == "default") {
-                            _engineTolerances[engineName] = ToleranceMode::Default;
-                        } else {
+                        if(val == "default")
+                        {
+                            _engineTolerances[engineName] = ToleranceMode::DEFAULT;
+                        }
+                        else
+                        {
                             throw std::runtime_error("Unknown tolerance mode: " + val);
                         }
                     }
                 }
             }
-        } catch (const nlohmann::json::parse_error& e) {
+        }
+        catch(const nlohmann::json::parse_error& e)
+        {
             throw std::runtime_error("Failed to parse config JSON: " + std::string(e.what()));
         }
     }
@@ -131,4 +159,4 @@ class TestConfig {
     std::map<std::string, ToleranceMode> _engineTolerances;
 };
 
-}  // namespace hipdnn_integration_tests
+} // namespace hipdnn_integration_tests

@@ -78,6 +78,9 @@ typedef enum
     /** @brief Device properties for heuristic evaluation */
     HIPDNN_ATTR_ENGINEHEUR_DEVICEPROP = 104,
 
+    /** @brief Find first mode: stop after finding any applicable engine (bool, extension) */
+    HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT = 105,
+
     /** @} */
 
     /**

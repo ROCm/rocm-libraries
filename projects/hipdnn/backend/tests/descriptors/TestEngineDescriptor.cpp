@@ -68,7 +68,7 @@ public:
         EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
         EXPECT_CALL(*_mockHandle, getPluginResourceManager())
             .WillOnce(Return(_mockEnginePluginResourceManager));
-        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_))
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
             .WillOnce(Return(std::vector<int64_t>{ENGINE_ID}));
         EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
             .WillOnce(Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
@@ -411,7 +411,7 @@ protected:
         EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
         EXPECT_CALL(*_mockHandle, getPluginResourceManager())
             .WillOnce(Return(_mockEnginePluginResourceManager));
-        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_))
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
             .WillOnce(Return(std::vector<int64_t>{0}));
         EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
             .WillOnce(Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* d) {

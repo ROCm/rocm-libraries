@@ -30,6 +30,7 @@ add_executable(
     IntegrationGraphKnobsApi.cpp
     IntegrationCustomOpDescriptorLowering.cpp
     IntegrationGraphLifting.cpp
+    IntegrationGraphSupportCheck.cpp
     IntegrationLayerNormDescriptorLifting.cpp
     IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
