@@ -901,7 +901,8 @@ try
            || (arg.b_type != string_to_hip_datatype("f16_r")
                && arg.b_type != string_to_hip_datatype("f8_fnuz_r")
                && arg.b_type != string_to_hip_datatype("f8_r")
-               && arg.b_type != string_to_hip_datatype("bf16_r"))))
+               && arg.b_type != string_to_hip_datatype("bf16_r")
+               && arg.b_type != string_to_hip_datatype("f4_r"))))
     {
         hipblaslt_cerr << "For swizzle-B, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
         return 1;

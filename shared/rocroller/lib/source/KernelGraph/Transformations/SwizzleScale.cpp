@@ -540,7 +540,7 @@ namespace rocRoller
 
             auto const waveSwizzleM = macTile.swizzleTileSizes.at(0);
             auto const waveSwizzleN = macTile.swizzleTileSizes.at(1);
-            AssertFatal(waveSwizzleM == waveSwizzleN,
+            AssertFatal(waveSwizzleM == waveSwizzleN && waveSwizzleM > 0,
                         "waveSwizzleM is not equal to waveSwizzleN",
                         ShowValue(waveSwizzleM),
                         ShowValue(waveSwizzleN));
