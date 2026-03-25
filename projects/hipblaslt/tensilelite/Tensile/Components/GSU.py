@@ -1421,7 +1421,7 @@ class GSUOn(GSU):
             
             if kernel["ISA"][0] == 12:
                 # Since gfx12 has no s_atomic_dec, here use flat_atomic_dec_u32 instead.
-                # flat_atomic_dec is not a scalar instruction, so we need one dec per wavefront.
+                # flat_atomic_dec is not a scalar instruction, but we only need one dec per wavefront.
                 # Mask exec so that only lane 0 performs the atomic_dec, then restore exec.
                 tmpV01 = writer.vgprPool.checkOut(1, preventOverflow=False)
                 tmpV02 = writer.vgprPool.checkOutAligned(2, 2, preventOverflow=False)

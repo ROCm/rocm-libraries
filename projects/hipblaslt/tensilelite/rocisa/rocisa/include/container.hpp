@@ -144,6 +144,7 @@ namespace rocisa
         {
             auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
             auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
+            auto        hasTHAtomicRtModifier = rocIsa::getInstance().getAsmCaps()["HasTHAtomicRtModifier"];
             std::string kStr;
             if(offset12 != 0)
             {
@@ -169,7 +170,7 @@ namespace rocisa
             {
                 kStr += " lds";
             }
-            if(thAtomicRt)
+            if(hasTHAtomicRtModifier && thAtomicRt)
             {
                 kStr += " th:TH_ATOMIC_RT_RETURN";
             }

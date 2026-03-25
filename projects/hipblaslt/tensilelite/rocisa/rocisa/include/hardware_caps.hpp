@@ -308,6 +308,11 @@ inline std::map<std::string, int>
               assemblerPath,
               "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null, offen offset:0, scope:SCOPE_DEV",
               isDebug);
+    rv["HasTHAtomicRtModifier"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "flat_atomic_dec_u32 v[0], v[10:11], v[0]  th:TH_ATOMIC_RT_RETURN",
+                       isDebug);
     rv["HasMUBUFConst"] = tryAssembler(isaVersion,
                                        assemblerPath,
                                        "buffer_load_dword v40, v36, s[24:27], 1 offen offset:0",
