@@ -1183,8 +1183,8 @@ namespace TensileLite
         assert(defaultStaggerUMapping < 5);
         // StaggerU should be power of 2 and less than 65: [0, 2, 4, 8, 16, 32, 64]
         assert((defaultStaggerU & (defaultStaggerU - 1)) == 0 && defaultStaggerU < 65);
-        // StaggerUStrideShift should be in [0, 5] (shift of 5 = stride multiplier of 32)
-        assert(defaultStaggerUStrideShift <= 5);
+        // StaggerUStrideShift is packed in 5-bit field (bits [12:8]), valid range [0, 31]
+        assert(defaultStaggerUStrideShift <= 31);
 
         return std::make_tuple(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
     }
