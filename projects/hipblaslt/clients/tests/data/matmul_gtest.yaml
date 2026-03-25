@@ -63,7 +63,7 @@ Tests:
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
 
 - name: matmul_one
-  category: quick
+  category: smoke
   function:
     matmul: *real_precisions
   matrix_size: *one_matrix_size_range
@@ -72,7 +72,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
 
 - name: matmul_small
-  category: quick
+  category: smoke
   function:
     - matmul: *real_precisions
     - matmul: *real_precisions_gemm_only
@@ -82,7 +82,7 @@ Tests:
   c_equal_d: [false, true]
 
 - name: matmul_conj_small
-  category: quick
+  category: smoke
   function:
     - matmul: *real_precisions
     - matmul: *real_precisions_gemm_only
@@ -133,7 +133,7 @@ Tests:
   beta: 3
 
 - name: matmul_grid_limit_real
-  category: quick
+  category: smoke
   function:
     matmul: *real_precisions
   matrix_size: *grid_limit_matrix_size_real_mod
