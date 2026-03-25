@@ -23,6 +23,7 @@ add_executable(
     IntegrationGpuBatchnormFwdPlusActive.cpp
     IntegrationGpuBatchnormForwardTraining.cpp
     IntegrationGpuBatchnormFwdTrainingActiv.cpp
+    IntegrationGpuBatchnormUnhappyLayouts.cpp
     IntegrationGpuConvForward.cpp
     IntegrationGpuConvFwdBiasActiv.cpp
     IntegrationGpuConvBackwardData.cpp
