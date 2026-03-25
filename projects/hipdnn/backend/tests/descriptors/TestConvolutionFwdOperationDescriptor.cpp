@@ -3,6 +3,7 @@
 
 #include "DescriptorTestUtils.hpp"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/ConvolutionFwdOperationDescriptor.hpp"
@@ -503,13 +504,14 @@ TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeTensorDescriptor)
     makeFinalized();
     auto desc = getDescriptor();
 
-    HipdnnBackendDescriptor* retrievedX = nullptr;
+    HipdnnBackendDescriptor* rawX = nullptr;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedX));
+                                       static_cast<void*>(&rawX)));
+    const std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedX, nullptr);
@@ -751,6 +753,30 @@ TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeTensorQueryFailsNullEl
                                HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
+TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeOperationTypeReturnsConvForward)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &elementCount, &opType));
+    ASSERT_EQ(elementCount, 1);
+    ASSERT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeOperationTypeQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
 TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeConvModeQueryFailsNullElementCount)
 {
     makeFinalized();
@@ -791,7 +817,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("ConvolutionFwdOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=" + std::to_string(K_TENSOR_X_UID)), std::string::npos);
     ASSERT_NE(str.find("w_uid=" + std::to_string(K_TENSOR_W_UID)), std::string::npos);
@@ -870,7 +896,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -882,6 +908,6 @@ TEST_F(TestConvolutionFwdOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 TEST_F(TestConvolutionFwdOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _xDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }

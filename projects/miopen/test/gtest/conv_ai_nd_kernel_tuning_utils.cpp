@@ -1430,6 +1430,128 @@ TEST_F(GPU_RunAIHeuristics_Integration_FP32, ForwardSolver_NoSplitK)
 }
 
 // ===============================================================================
+// CK Validator Integration Tests
+// ===============================================================================
+
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+
+/**
+ * @brief Test fixture for CK validator integration with RunAIHeuristics
+ *
+ * This fixture tests that RunAIHeuristics correctly uses the ck_validator_creator
+ * parameter to reject invalid kernel+split_k combinations.
+ */
+class GPU_CKValidatorIntegration_FP32 : public GPU_ConvNDKernelTuningAI_Base
+{
+protected:
+    // Shared configuration for WrW solver
+    static constexpr SolverHeuristicConfig kWrwConfig = {
+        "ConvHipImplicitGemmGroupWrwXdlops", // solver_name
+        "ConvHipIgemmGroupXdlops",           // solver_name_ktn
+        2,                                   // spatial_dims
+        true,                                // uses_split_k
+        1,                                   // split_k_min
+        128,                                 // split_k_max
+        false,                               // supports_split_k_autodeduce
+        true                                 // supports_ktn
+    };
+
+    // Shared state variables
+    std::vector<std::string> valid_kernels_;
+    int index_   = 0;
+    int split_k_ = 0;
+    std::string kernel_id_;
+    miopen::conv::ProblemDescription problem_;
+
+    // Shared test kernels
+    std::vector<std::string> test_kernels_ = {
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>",
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,128,32,4,Default,4,2,1,4,4,1,1,1,1,1>",
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256,256,128,4,Default,4,4,2,4,4,4,2,1,1,4>"};
+
+    void SetUp() override
+    {
+        spatial_dim = 2;
+        solver_name = "ConvHipImplicitGemmGroupWrwXdlops";
+        GPU_ConvNDKernelTuningAI_Base::SetUp();
+
+        // Initialize problem description
+        problem_ =
+            GetReusable2DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
+    }
+
+    // Helper: Create HeuristicInitState with fixture members
+    HeuristicInitState CreateState()
+    {
+        return HeuristicInitState(valid_kernels_, index_, split_k_, kernel_id_);
+    }
+};
+
+TEST_F(GPU_CKValidatorIntegration_FP32, RestrictiveValidator_OnlyAcceptsSplitK1And2)
+{
+    if(device_arch != "gfx942" && device_arch != "gfx950")
+    {
+        GTEST_SKIP() << "Test requires gfx942 or gfx950, current: " << device_arch;
+    }
+
+    std::set<int> accepted_split_k = {1, 2};
+    int validator_call_count       = 0;
+    auto state                     = CreateState();
+
+    auto fill_kernels = [this](const miopen::conv::ProblemDescription&) { return test_kernels_; };
+
+    // Create validator with proper capture
+    CKSplitKValidatorCreatorFunc ck_validator_creator =
+        [&accepted_split_k, &validator_call_count](const miopen::conv::ProblemDescription&) {
+            return [&accepted_split_k, &validator_call_count](const std::string&, int sk) {
+                validator_call_count++;
+                return accepted_split_k.count(sk) > 0;
+            };
+        };
+
+    bool result = RunAIHeuristics(
+        kWrwConfig, state, ctx, problem_, false, fill_kernels, nullptr, ck_validator_creator);
+
+    EXPECT_GT(validator_call_count, 0) << "Validator should have been called";
+
+    if(result)
+    {
+        EXPECT_TRUE(accepted_split_k.count(split_k_) > 0)
+            << "Selected split_k=" << split_k_ << " should be in accepted set {1, 2}";
+    }
+}
+
+TEST_F(GPU_CKValidatorIntegration_FP32, RejectAllValidator_ReturnsFalse)
+{
+    if(device_arch != "gfx942" && device_arch != "gfx950")
+    {
+        GTEST_SKIP() << "Test requires gfx942 or gfx950, current: " << device_arch;
+    }
+
+    int validator_call_count = 0;
+    auto state               = CreateState();
+
+    auto fill_kernels = [this](const miopen::conv::ProblemDescription&) { return test_kernels_; };
+
+    // Create validator that rejects all combinations
+    CKSplitKValidatorCreatorFunc ck_validator_creator =
+        [&validator_call_count](const miopen::conv::ProblemDescription&) {
+            return [&validator_call_count](const std::string&, int) {
+                validator_call_count++;
+                return false; // Reject everything
+            };
+        };
+
+    bool result = RunAIHeuristics(
+        kWrwConfig, state, ctx, problem_, false, fill_kernels, nullptr, ck_validator_creator);
+
+    EXPECT_GT(validator_call_count, 0) << "Validator should have been called";
+    EXPECT_FALSE(result) << "RunAIHeuristics should return false when all combinations rejected";
+}
+
+#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+
+// ===============================================================================
 // Parameterized Split_k Validation Tests
 // ===============================================================================
 

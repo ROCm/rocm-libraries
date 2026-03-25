@@ -457,8 +457,8 @@ TEST_P(TestLayernormOperationDescriptorGetTensor, GetAttributeTensorDescriptorRe
     // Ownership is transferred to the caller — delete after use.
     HipdnnBackendDescriptor* retrieved = nullptr;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(
-        desc->getAttribute(tc.attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &elementCount, &retrieved));
+    ASSERT_NO_THROW(desc->getAttribute(
+        tc.attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &elementCount, static_cast<void*>(&retrieved)));
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrieved, nullptr);
@@ -759,7 +759,7 @@ TEST_F(TestLayernormOperationDescriptor, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("LayernormOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=" + std::to_string(K_LAYERNORM_TENSOR_X_UID)), std::string::npos);
     ASSERT_NE(str.find("scale_uid=" + std::to_string(K_LAYERNORM_TENSOR_SCALE_UID)),
@@ -778,7 +778,7 @@ TEST_F(TestLayernormOperationDescriptor, ToStringContainsExpectedInfo)
 TEST_F(TestLayernormOperationDescriptor, ToStringIncludesOptionalTensorsWhenSet)
 {
     makeFinalized();
-    std::string str = getDescriptor()->toString();
+    const std::string str = getDescriptor()->toString();
     ASSERT_NE(str.find("mean_uid=" + std::to_string(K_LAYERNORM_TENSOR_MEAN_UID)),
               std::string::npos);
     ASSERT_NE(str.find("inv_variance_uid=" + std::to_string(K_LAYERNORM_TENSOR_INV_VARIANCE_UID)),
@@ -878,7 +878,7 @@ TEST_F(TestLayernormOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     auto tensors = graphOp->getTensorDescriptors();
@@ -888,7 +888,7 @@ TEST_F(TestLayernormOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 
 TEST_F(TestLayernormOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
-    auto graphOp = _xDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 

@@ -611,13 +611,20 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
             return RunKTNGeneric(*this, c, p);
         };
 
+        auto ck_validator_creator = [](const ProblemDescription& p) {
+            return [p](const std::string& kid, int sk) {
+                return IsCKSplitKSupportedGeneric<conv::DeviceOpGBwdPtrs, CKArgs>(p, kid, sk);
+            };
+        };
+
         if(RunAIHeuristics(kBwdSolverConfig,
                            state,
                            ctx,
                            problem,
                            is_deterministic,
                            fill_valid_kernels,
-                           ktn_runner))
+                           ktn_runner,
+                           ck_validator_creator))
         {
             return;
         }

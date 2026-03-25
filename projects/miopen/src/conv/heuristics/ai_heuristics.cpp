@@ -664,6 +664,26 @@ PredictionResult ProcessPredictions(const std::vector<float>& predictions,
     return result;
 }
 
+static void PromoteSolverToFront(PredictionResult& result, const char* solver_name)
+{
+    const auto solver_id = solver::Id{solver_name};
+    if(!solver_id.IsValid())
+        return;
+
+    const auto target = solver_id.Value();
+    const auto it     = std::find(result.solver_ids.begin(), result.solver_ids.end(), target);
+    if(it == result.solver_ids.end() || it == result.solver_ids.begin())
+        return;
+
+    result.solver_ids.erase(it);
+    result.solver_ids.insert(result.solver_ids.begin(), target);
+
+    result.any_solver_ids.clear();
+    result.any_solver_ids.reserve(result.solver_ids.size());
+    for(const auto id : result.solver_ids)
+        result.any_solver_ids.push_back(id);
+}
+
 /**
  * @brief Common logic for running TunaNet prediction and caching results
  * @param problem Convolution problem description
@@ -684,6 +704,13 @@ ProcessAndCachePredictions(const conv::ProblemDescription& problem,
 
     // Process predictions (sort by probability, filter invalid solvers)
     auto result = ProcessPredictions(predictions, solver_map, use_nd);
+
+    // TunaNet override: promote GemmBwdRest for point-output backward-data problems
+    if(problem.Is3d() && conv::IsBwdDataPointOutput3dStrideEqFilter(problem))
+    {
+        PromoteSolverToFront(result, "GemmBwdRest");
+        MIOPEN_LOG_I2("TunaNet override: promoting GemmBwdRest for point-output backward-data");
+    }
 
     // Cache results for future use
     StorePredictionCache(problem, device, result.any_solver_ids);

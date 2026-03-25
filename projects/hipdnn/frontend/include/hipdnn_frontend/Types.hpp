@@ -13,6 +13,11 @@
  * | PointwiseMode | Activation / element-wise op | relu, gelu, add, mul, etc. |
  * | ConvolutionMode | Filter application method | Cross-correlation vs mathematical convolution |
  * | NormFwdPhase | Training vs inference | Whether to save stats for backward pass |
+ * | DiagonalAlignment | SDPA causal mask alignment | Top-left vs bottom-right diagonal |
+ * | AttentionImplementation | SDPA execution strategy | Auto, composite, or unified kernel |
+ * | HeuristicMode | Engine discovery mode | How engines are ranked |
+ * | BuildPlanPolicy | Plan selection policy | Heuristic choice vs build all |
+ * | KnobValueType | Engine knob data type | int64, float64, or string |
  *
  * This file also contains conversion utilities between frontend types and
  * the internal SDK/backend types.
@@ -37,11 +42,14 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 
+#include <hipdnn_frontend/Error.hpp>
+
 #include <bitset>
 #include <optional>
 #include <ostream>
 #include <set>
 #include <string>
+#include <utility>
 #include <variant>
 
 namespace hipdnn_frontend
@@ -149,20 +157,45 @@ enum class DataType
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
+/**
+ * @enum DiagonalAlignment
+ * @brief Diagonal alignment mode for SDPA causal masking
+ *
+ * Controls which corner of the attention matrix the causal mask diagonal
+ * is anchored to. This affects how the triangular mask is positioned
+ * when query and key sequence lengths differ (S_q != S_kv).
+ *
+ * For equal-length sequences both modes produce the same mask. When
+ * S_q < S_kv, BOTTOM_RIGHT aligns the mask so that each query attends
+ * to the most recent keys rather than the earliest.
+ *
+ * @see hipdnn_frontend::graph::SdpaAttributes::set_diagonal_alignment()
+ */
 enum class DiagonalAlignment
 {
-    TOP_LEFT = 0,
-    BOTTOM_RIGHT = 1,
+    TOP_LEFT = 0, ///< Anchor mask diagonal to the top-left corner of the attention matrix
+    BOTTOM_RIGHT = 1, ///< Anchor mask diagonal to the bottom-right corner of the attention matrix
 };
-typedef DiagonalAlignment DiagonalAlignment_t; // NOLINT(readability-identifier-naming)
+// NOLINTNEXTLINE(readability-identifier-naming)
+typedef DiagonalAlignment DiagonalAlignment_t; ///< @brief Type alias for DiagonalAlignment
 
+/**
+ * @enum AttentionImplementation
+ * @brief Execution strategy for scaled dot-product attention
+ *
+ * Selects how the SDPA computation is mapped to GPU kernels.
+ *
+ * @see hipdnn_frontend::graph::SdpaAttributes::set_implementation()
+ */
 enum class AttentionImplementation
 {
-    AUTO = 0,
-    COMPOSITE = 1,
-    UNIFIED = 2,
+    AUTO = 0, ///< Let the backend choose the best strategy for the given configuration
+    COMPOSITE = 1, ///< Decompose attention into separate matmul, softmax, and matmul kernels
+    UNIFIED = 2, ///< Use a single fused kernel for the entire attention computation
 };
-typedef AttentionImplementation AttentionImplementation_t; // NOLINT(readability-identifier-naming)
+// NOLINTNEXTLINE(readability-identifier-naming)
+typedef AttentionImplementation
+    AttentionImplementation_t; ///< @brief Type alias for AttentionImplementation
 
 /**
  * @enum HeuristicMode
@@ -209,7 +242,8 @@ typedef NormFwdPhase NormFwdPhase_t; ///< @brief Type alias for NormFwdPhase
  * Knobs are configuration parameters for engine execution. This enum
  * indicates what type of value a particular knob expects.
  *
- * @see Knob, KnobSetting
+ * @see hipdnn_frontend::Knob
+ * @see hipdnn_frontend::KnobSetting
  */
 enum class KnobValueType
 {
@@ -309,6 +343,30 @@ inline std::optional<hipdnnConvolutionMode_t> toBackendConvMode(const Convolutio
         return HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
     default:
         return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnConvolutionMode_t to frontend ConvolutionMode
+ *
+ * Maps the backend C API convolution mode enum to the frontend ConvolutionMode enum.
+ *
+ * @param mode The backend hipdnnConvolutionMode_t value
+ * @return A pair of the corresponding ConvolutionMode and an Error (set if the mode is unknown)
+ */
+inline std::pair<ConvolutionMode, Error> fromHipdnnConvMode(hipdnnConvolutionMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION:
+        return {ConvolutionMode::CROSS_CORRELATION, {}};
+    case HIPDNN_CONVOLUTION_MODE_CONVOLUTION:
+        return {ConvolutionMode::CONVOLUTION, {}};
+    default:
+        return {
+            ConvolutionMode::NOT_SET,
+            {ErrorCode::HIPDNN_BACKEND_ERROR,
+             "Unknown hipdnnConvolutionMode_t value: " + std::to_string(static_cast<int>(mode))}};
     }
 }
 
@@ -564,6 +622,7 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
     }
 }
 
+/// @brief Convert frontend DiagonalAlignment to SDK DiagonalAlignment
 inline hipdnn_data_sdk::data_objects::DiagonalAlignment toSdkType(const DiagonalAlignment& type)
 {
     switch(type)
@@ -577,6 +636,7 @@ inline hipdnn_data_sdk::data_objects::DiagonalAlignment toSdkType(const Diagonal
     }
 }
 
+/// @brief Convert SDK DiagonalAlignment to frontend DiagonalAlignment
 inline hipdnn_frontend::DiagonalAlignment
     fromSdkType(const hipdnn_data_sdk::data_objects::DiagonalAlignment& type)
 {
@@ -591,6 +651,7 @@ inline hipdnn_frontend::DiagonalAlignment
     }
 }
 
+/// @brief Convert frontend AttentionImplementation to SDK AttentionImplementation
 inline hipdnn_data_sdk::data_objects::AttentionImplementation
     toSdkType(const AttentionImplementation& type)
 {
@@ -607,6 +668,7 @@ inline hipdnn_data_sdk::data_objects::AttentionImplementation
     }
 }
 
+/// @brief Convert SDK AttentionImplementation to frontend AttentionImplementation
 inline hipdnn_frontend::AttentionImplementation
     fromSdkType(const hipdnn_data_sdk::data_objects::AttentionImplementation& type)
 {
@@ -623,7 +685,12 @@ inline hipdnn_frontend::AttentionImplementation
     }
 }
 
-/// @brief Convert frontend DataType to backend hipdnnDataType_t
+/**
+ * @brief Convert frontend DataType to backend hipdnnDataType_t
+ *
+ * @param type The frontend DataType value
+ * @return The corresponding hipdnnDataType_t value, or std::nullopt if not set
+ */
 inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
 {
     switch(type)
@@ -649,6 +716,43 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
     case DataType::NOT_SET:
     default:
         return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnDataType_t to frontend DataType
+ *
+ * Maps the backend C API data type enum to the frontend DataType enum.
+ *
+ * @param type The backend hipdnnDataType_t value
+ * @return A pair of the corresponding DataType and an Error (set if the type is unknown)
+ */
+inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
+{
+    switch(type)
+    {
+    case HIPDNN_DATA_FLOAT:
+        return {DataType::FLOAT, {}};
+    case HIPDNN_DATA_DOUBLE:
+        return {DataType::DOUBLE, {}};
+    case HIPDNN_DATA_HALF:
+        return {DataType::HALF, {}};
+    case HIPDNN_DATA_INT8:
+        return {DataType::INT8, {}};
+    case HIPDNN_DATA_INT32:
+        return {DataType::INT32, {}};
+    case HIPDNN_DATA_UINT8:
+        return {DataType::UINT8, {}};
+    case HIPDNN_DATA_BFLOAT16:
+        return {DataType::BFLOAT16, {}};
+    case HIPDNN_DATA_FP8_E4M3:
+        return {DataType::FP8_E4M3, {}};
+    case HIPDNN_DATA_FP8_E5M2:
+        return {DataType::FP8_E5M2, {}};
+    default:
+        return {DataType::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnDataType_t value: " + std::to_string(static_cast<int>(type))}};
     }
 }
 
@@ -861,13 +965,118 @@ inline hipdnn_frontend::PointwiseMode
     }
 }
 
+/// @brief Convert backend C-API hipdnnPointwiseMode_t to frontend PointwiseMode
+inline std::pair<PointwiseMode, Error> fromHipdnnPointwiseMode(hipdnnPointwiseMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_POINTWISE_ABS:
+        return {PointwiseMode::ABS, {}};
+    case HIPDNN_POINTWISE_ADD:
+        return {PointwiseMode::ADD, {}};
+    case HIPDNN_POINTWISE_ADD_SQUARE:
+        return {PointwiseMode::ADD_SQUARE, {}};
+    case HIPDNN_POINTWISE_BINARY_SELECT:
+        return {PointwiseMode::BINARY_SELECT, {}};
+    case HIPDNN_POINTWISE_CEIL:
+        return {PointwiseMode::CEIL, {}};
+    case HIPDNN_POINTWISE_CMP_EQ:
+        return {PointwiseMode::CMP_EQ, {}};
+    case HIPDNN_POINTWISE_CMP_GE:
+        return {PointwiseMode::CMP_GE, {}};
+    case HIPDNN_POINTWISE_CMP_GT:
+        return {PointwiseMode::CMP_GT, {}};
+    case HIPDNN_POINTWISE_CMP_LE:
+        return {PointwiseMode::CMP_LE, {}};
+    case HIPDNN_POINTWISE_CMP_LT:
+        return {PointwiseMode::CMP_LT, {}};
+    case HIPDNN_POINTWISE_CMP_NEQ:
+        return {PointwiseMode::CMP_NEQ, {}};
+    case HIPDNN_POINTWISE_DIV:
+        return {PointwiseMode::DIV, {}};
+    case HIPDNN_POINTWISE_ELU_BWD:
+        return {PointwiseMode::ELU_BWD, {}};
+    case HIPDNN_POINTWISE_ELU_FWD:
+        return {PointwiseMode::ELU_FWD, {}};
+    case HIPDNN_POINTWISE_ERF:
+        return {PointwiseMode::ERF, {}};
+    case HIPDNN_POINTWISE_EXP:
+        return {PointwiseMode::EXP, {}};
+    case HIPDNN_POINTWISE_FLOOR:
+        return {PointwiseMode::FLOOR, {}};
+    case HIPDNN_POINTWISE_GELU_APPROX_TANH_BWD:
+        return {PointwiseMode::GELU_APPROX_TANH_BWD, {}};
+    case HIPDNN_POINTWISE_GELU_APPROX_TANH_FWD:
+        return {PointwiseMode::GELU_APPROX_TANH_FWD, {}};
+    case HIPDNN_POINTWISE_GELU_BWD:
+        return {PointwiseMode::GELU_BWD, {}};
+    case HIPDNN_POINTWISE_GELU_FWD:
+        return {PointwiseMode::GELU_FWD, {}};
+    case HIPDNN_POINTWISE_GEN_INDEX:
+        return {PointwiseMode::GEN_INDEX, {}};
+    case HIPDNN_POINTWISE_IDENTITY:
+        return {PointwiseMode::IDENTITY, {}};
+    case HIPDNN_POINTWISE_LOG:
+        return {PointwiseMode::LOG, {}};
+    case HIPDNN_POINTWISE_LOGICAL_AND:
+        return {PointwiseMode::LOGICAL_AND, {}};
+    case HIPDNN_POINTWISE_LOGICAL_NOT:
+        return {PointwiseMode::LOGICAL_NOT, {}};
+    case HIPDNN_POINTWISE_LOGICAL_OR:
+        return {PointwiseMode::LOGICAL_OR, {}};
+    case HIPDNN_POINTWISE_MAX:
+        return {PointwiseMode::MAX, {}};
+    case HIPDNN_POINTWISE_MIN:
+        return {PointwiseMode::MIN, {}};
+    case HIPDNN_POINTWISE_MUL:
+        return {PointwiseMode::MUL, {}};
+    case HIPDNN_POINTWISE_NEG:
+        return {PointwiseMode::NEG, {}};
+    case HIPDNN_POINTWISE_RECIPROCAL:
+        return {PointwiseMode::RECIPROCAL, {}};
+    case HIPDNN_POINTWISE_RELU_BWD:
+        return {PointwiseMode::RELU_BWD, {}};
+    case HIPDNN_POINTWISE_RELU_FWD:
+        return {PointwiseMode::RELU_FWD, {}};
+    case HIPDNN_POINTWISE_RSQRT:
+        return {PointwiseMode::RSQRT, {}};
+    case HIPDNN_POINTWISE_SIGMOID_BWD:
+        return {PointwiseMode::SIGMOID_BWD, {}};
+    case HIPDNN_POINTWISE_SIGMOID_FWD:
+        return {PointwiseMode::SIGMOID_FWD, {}};
+    case HIPDNN_POINTWISE_SIN:
+        return {PointwiseMode::SIN, {}};
+    case HIPDNN_POINTWISE_SOFTPLUS_BWD:
+        return {PointwiseMode::SOFTPLUS_BWD, {}};
+    case HIPDNN_POINTWISE_SOFTPLUS_FWD:
+        return {PointwiseMode::SOFTPLUS_FWD, {}};
+    case HIPDNN_POINTWISE_SQRT:
+        return {PointwiseMode::SQRT, {}};
+    case HIPDNN_POINTWISE_SUB:
+        return {PointwiseMode::SUB, {}};
+    case HIPDNN_POINTWISE_SWISH_BWD:
+        return {PointwiseMode::SWISH_BWD, {}};
+    case HIPDNN_POINTWISE_SWISH_FWD:
+        return {PointwiseMode::SWISH_FWD, {}};
+    case HIPDNN_POINTWISE_TAN:
+        return {PointwiseMode::TAN, {}};
+    case HIPDNN_POINTWISE_TANH_BWD:
+        return {PointwiseMode::TANH_BWD, {}};
+    case HIPDNN_POINTWISE_TANH_FWD:
+        return {PointwiseMode::TANH_FWD, {}};
+    default:
+        return {PointwiseMode::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnPointwiseMode_t value: " + std::to_string(static_cast<int>(mode))}};
+    }
+}
+
 /// @brief Convert frontend HeuristicMode to backend heuristic mode
 inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
     switch(type)
     {
     case HeuristicMode::FALLBACK:
-        return hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK;
     default:
         return hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK;
     }
@@ -894,6 +1103,7 @@ inline const char* to_string(const ConvolutionMode& mode)
     }
 }
 
+/// @brief Stream insertion operator for ConvolutionMode
 inline std::ostream& operator<<(std::ostream& os, const ConvolutionMode& mode)
 {
     return os << to_string(mode);

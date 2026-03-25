@@ -511,6 +511,111 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
         ptrs.begin(), ptrs.end(), [&args](auto& ptr) { return args.IsSupportedBy(ptr); });
 }
 
+/**
+ * @brief Check if a kernel+split_k combination is supported by CK
+ *
+ * This function validates whether a specific CK kernel instance supports
+ * a given split_k value. It uses CK's IsSupportedBySplitK method to check
+ * if the (kernel, split_k) combination is valid.
+ *
+ * @tparam DeviceOpType CK DeviceOp factory type (e.g., DeviceOpGBwdPtrs<float>)
+ * @tparam CKArgsType CK arguments structure type
+ * @tparam ProblemDescriptionType Problem description type
+ *
+ * @param problem The convolution problem description
+ * @param kernel_id The kernel type string (without split_k suffix)
+ * @param split_k The split_k value to validate
+ * @return true if the (kernel_id, split_k) combination is supported by CK
+ *
+ * ## Usage Example
+ * ```cpp
+ * bool supported = IsCKSplitKSupported<DeviceOpGBwdPtrs<float>, CKArgs>(
+ *     problem, "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<...>", 4);
+ * ```
+ */
+template <typename DeviceOpType,
+          typename CKArgsType,
+          typename ProblemDescriptionType = miopen::conv::ProblemDescription>
+bool IsCKSplitKSupported(const ProblemDescriptionType& problem,
+                         const std::string& kernel_id,
+                         int split_k)
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    auto conv_ptrs = DeviceOpType::GetInstances();
+    auto ptr_iter  = FindConvPtrByID(conv_ptrs, kernel_id);
+
+    if(ptr_iter == conv_ptrs.end())
+    {
+        return false;
+    }
+
+    const auto args = CKArgsType{problem};
+    return args.IsSupportedBySplitK(*ptr_iter, split_k);
+#else
+    (void)problem;
+    (void)kernel_id;
+    (void)split_k;
+    return false;
+#endif
+}
+
+/**
+ * @brief Generic CK split_k validator for multiple data types
+ *
+ * This template function creates a validator that checks all supported
+ * data types for a given DeviceOp template. Use this in solvers to
+ * create a CK validator without data type dispatch code.
+ *
+ * @tparam DeviceOpPtrs CK DeviceOp factory template (templated on DataType, ComputeType)
+ * @tparam CKArgs CK argument structure template (templated on DataType, ComputeType)
+ *
+ * @param problem The convolution problem description
+ * @param kernel_id The kernel type string (without split_k suffix)
+ * @param split_k The split_k value to validate
+ * @return true if any data type supports this (kernel_id, split_k) combination
+ */
+template <template <typename, typename> class DeviceOpPtrs,
+          typename CKArgs,
+          typename ProblemDescriptionType = miopen::conv::ProblemDescription>
+bool IsCKSplitKSupportedGeneric(const ProblemDescriptionType& problem,
+                                const std::string& kernel_id,
+                                int split_k)
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    // Check the data type that matches the problem
+    switch(problem.GetInDataType())
+    {
+    case miopenHalf:
+        return IsCKSplitKSupported<DeviceOpPtrs<ck::half_t, ck::half_t>, CKArgs>(
+            problem, kernel_id, split_k);
+
+    case miopenFloat:
+        if(problem.UseTF32())
+        {
+            if(IsCKSplitKSupported<DeviceOpPtrs<float, ck::tf32_t>, CKArgs>(
+                   problem, kernel_id, split_k))
+                return true;
+        }
+        return IsCKSplitKSupported<DeviceOpPtrs<float, float>, CKArgs>(problem, kernel_id, split_k);
+
+    case miopenBFloat16:
+        return IsCKSplitKSupported<DeviceOpPtrs<ck::bhalf_t, ck::bhalf_t>, CKArgs>(
+            problem, kernel_id, split_k);
+
+    case miopenInt8:
+        return IsCKSplitKSupported<DeviceOpPtrs<int8_t, int8_t>, CKArgs>(
+            problem, kernel_id, split_k);
+
+    default: return false;
+    }
+#else
+    (void)problem;
+    (void)kernel_id;
+    (void)split_k;
+    return false;
+#endif
+}
+
 template <typename DeviceOpType,
           typename CKArgsType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>

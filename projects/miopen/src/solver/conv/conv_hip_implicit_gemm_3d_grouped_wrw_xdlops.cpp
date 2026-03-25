@@ -471,9 +471,50 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
                                                         CKArgs>(p);
         };
 
+        // CK validator for split_k support with alpha/beta + data type dispatch
+        // Note: CKArgs is a template in this 3D solver, so we need manual dispatch
+        auto ck_validator_creator = [](const ::miopen::conv::ProblemDescription& p) {
+            return [p](const std::string& kid, int sk) {
+                // Helper lambda to dispatch by alpha/beta case for a given DataType
+                auto check_by_alphabeta = [&](auto data_type_val) {
+                    using DataType = decltype(data_type_val);
+                    switch(p.GetAlphaBetaCase())
+                    {
+                    case BILINEAR:
+                        return IsCKSplitKSupported<DeviceOpGBwdWeightBilinearPtrs<DataType>,
+                                                   CKArgs<DataType>>(p, kid, sk);
+                    case SCALE:
+                        return IsCKSplitKSupported<DeviceOpGBwdWeightScalePtrs<DataType>,
+                                                   CKArgs<DataType>>(p, kid, sk);
+                    default: // DEFAULT
+                        return IsCKSplitKSupported<DeviceOpGBwdWeightDefaultPtrs<DataType>,
+                                                   CKArgs<DataType>>(p, kid, sk);
+                    }
+                };
+
+                // Dispatch by data type
+                switch(p.GetInDataType())
+                {
+                case miopenHalf: return check_by_alphabeta(ck::half_t{});
+                case miopenFloat:
+                    // Note: TF32 uses same kernels as float for IsSupportedBySplitK
+                    return check_by_alphabeta(float{});
+                case miopenBFloat16: return check_by_alphabeta(ck::bhalf_t{});
+                case miopenInt8: return check_by_alphabeta(int8_t{});
+                default: return false;
+                }
+            };
+        };
+
         // Note: No KTN runner needed for 3D (supports_ktn = false)
-        if(RunAIHeuristics(
-               k3DWrwSolverConfig, state, ctx, problem, is_deterministic, fill_valid_kernels))
+        if(RunAIHeuristics(k3DWrwSolverConfig,
+                           state,
+                           ctx,
+                           problem,
+                           is_deterministic,
+                           fill_valid_kernels,
+                           nullptr, // no KTN runner
+                           ck_validator_creator))
         {
             return;
         }
