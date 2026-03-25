@@ -584,10 +584,10 @@ TEST_F(IntegrationRMSNormDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip
 
     // All node tensor UIDs should be distinct
     const std::unordered_set<int64_t> nodeUids = {rmsNode->attributes.get_x()->get_uid(),
-                                            rmsNode->attributes.get_scale()->get_uid(),
-                                            rmsNode->attributes.get_epsilon()->get_uid(),
-                                            rmsNode->attributes.get_y()->get_uid(),
-                                            rmsNode->attributes.get_inv_rms()->get_uid()};
+                                                  rmsNode->attributes.get_scale()->get_uid(),
+                                                  rmsNode->attributes.get_epsilon()->get_uid(),
+                                                  rmsNode->attributes.get_y()->get_uid(),
+                                                  rmsNode->attributes.get_inv_rms()->get_uid()};
     EXPECT_EQ(nodeUids.size(), 5u) << "RMSNorm node tensor UIDs are not distinct";
 }
 
