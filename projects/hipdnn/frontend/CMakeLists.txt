@@ -31,6 +31,12 @@ target_include_directories(
                               $<INSTALL_INTERFACE:${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}>
 )
 
+# Export installed hipdnn_frontend include paths as system include paths.
+set_target_properties(hipdnn_frontend PROPERTIES
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+        "$<INSTALL_INTERFACE:${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}>"
+)
+
 target_compile_definitions(
     hipdnn_frontend INTERFACE
     $<$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>:HIPDNN_FRONTEND_SKIP_JSON_LIB>

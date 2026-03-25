@@ -26,11 +26,19 @@ namespace hipdnn_frontend::graph
  *
  * LayernormAttributes configures a layer normalization operation.
  * Unlike batch normalization which normalizes across the batch dimension,
- * layer normalization normalizes across the feature dimensions.
+ * layer normalization normalizes across the last k feature dimensions.
+ *
+ * The number of normalized dimensions (k) is determined by:
+ * 1. **From scale shape**: k is inferred from the scale tensor. Dimensions
+ *    where scale != 1 are normalized. If scale has fewer dims than X, all
+ *    scale dims are normalized dims.
+ * 2. **Default**: If scale dims are also unset, they are inferred as
+ *    `[1, D1, ..., Dk]` (batch dim = 1), normalizing all non-batch dims.
  *
  * **Tensor Shapes:**
- * - **X** (input): `(N, ...)` — batch first, then feature dims
- * - **Scale, Bias**: `(1, C, H, W)` — batch dim = 1, feature dims match input
+ * - **X** (input): `(N, D1, D2, ..., Dk)` — batch first, then feature dims
+ * - **Scale, Bias**: Full-rank `(1, D1, ..., Dk)` with batch dim = 1,
+ *   or reduced-rank `(D1, ..., Dk)` with batch dims omitted
  * - **Y** (output): Same shape as X
  * - **Mean, InvVariance**: Batch dims from input, normalized dims = 1
  *
@@ -198,6 +206,7 @@ public:
         return _forwardPhase;
     }
 
+    /// @cond INTERNAL
     // NOLINTNEXTLINE(readability-identifier-naming)
     LayernormAttributes& set_normalized_dim_count(int64_t value)
     {
@@ -210,6 +219,7 @@ public:
     {
         return _normalizedDimCount;
     }
+    /// @endcond
 
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::LayernormAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
