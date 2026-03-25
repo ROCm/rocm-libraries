@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,55 +18,52 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "benchmark_rocrand_utils.hpp"
-
-#include <hip/hip_runtime.h>
-
-#include <rocrand/rocrand.h>
+#include "benchmark_utils.hpp"
 
 #include <optional>
 
-enum distribution
-{
-    DISTRIBUTION_UNIFORM,
-    DISTRIBUTION_NORMAL,
-    DISTRIBUTION_LOG_NORMAL,
-    DISTRIBUTION_POISSON,
-};
+#ifdef __HIP__
+constexpr rocrand_status RAND_STATUS_TYPE_ERROR = ROCRAND_STATUS_TYPE_ERROR;
+#else // __HIP__
+constexpr curandStatus_t RAND_STATUS_TYPE_ERROR = CURAND_STATUS_TYPE_ERROR;
+#endif // __HIP__
 
-constexpr const char* distribution_name(distribution distribution)
-{
-    switch(distribution)
-    {
-        case DISTRIBUTION_UNIFORM: return "uniform";
-        case DISTRIBUTION_NORMAL: return "normal";
-        case DISTRIBUTION_LOG_NORMAL: return "log_normal";
-        case DISTRIBUTION_POISSON: return "poisson";
-    }
-}
+#ifdef __HIP__
+using rand_ordering_t = rocrand_ordering;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DEFAULT = ROCRAND_ORDERING_PSEUDO_DEFAULT;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_LEGACY = ROCRAND_ORDERING_PSEUDO_LEGACY;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_BEST = ROCRAND_ORDERING_PSEUDO_BEST;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DYNAMIC = ROCRAND_ORDERING_PSEUDO_DYNAMIC;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_SEEDED = ROCRAND_ORDERING_PSEUDO_SEEDED;
+constexpr rand_ordering_t RAND_ORDERING_QUASI_DEFAULT = ROCRAND_ORDERING_QUASI_DEFAULT;
+#else // __HIP__
+using rand_ordering_t = curandOrdering_t;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DEFAULT = CURAND_ORDERING_PSEUDO_DEFAULT;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_LEGACY = CURAND_ORDERING_PSEUDO_LEGACY;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_BEST = CURAND_ORDERING_PSEUDO_BEST;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DYNAMIC = CURAND_ORDERING_PSEUDO_DYNAMIC;
+constexpr rand_ordering_t RAND_ORDERING_PSEUDO_SEEDED = CURAND_ORDERING_PSEUDO_SEEDED;
+constexpr rand_ordering_t RAND_ORDERING_QUASI_DEFAULT = CURAND_ORDERING_QUASI_DEFAULT;
+#endif // __HIP__
 
-constexpr const char* ordering_name(rocrand_ordering order)
+constexpr const char* ordering_name(ordering_t order)
 {
     switch(order)
     {
-        case ROCRAND_ORDERING_PSEUDO_DEFAULT: return "default";
-        case ROCRAND_ORDERING_PSEUDO_LEGACY: return "legacy";
-        case ROCRAND_ORDERING_PSEUDO_BEST: return "best";
-        case ROCRAND_ORDERING_PSEUDO_DYNAMIC: return "dynamic";
-        case ROCRAND_ORDERING_PSEUDO_SEEDED: return "seeded";
-        case ROCRAND_ORDERING_QUASI_DEFAULT: return "quasi_default";
+        case RAND_ORDERING_PSEUDO_DEFAULT: return "default";
+        case RAND_ORDERING_PSEUDO_LEGACY: return "legacy";
+        case RAND_ORDERING_PSEUDO_BEST: return "best";
+        case RAND_ORDERING_PSEUDO_DYNAMIC: return "dynamic";
+        case RAND_ORDERING_PSEUDO_SEEDED: return "seeded";
+        case RAND_ORDERING_QUASI_DEFAULT: return "quasi_default";
     }
+    return "unknown";
 }
 
 template<typename T, distribution Distribution>
-struct rocrand_host_api_benchmark : public primbench::benchmark_interface
+struct host_api_benchmark : public primbench::benchmark_interface
 {
-    rocrand_host_api_benchmark(rocrand_rng_type      engine,
-                               rocrand_ordering      ordering,
-                               size_t                dimensions,
-                               size_t                offset,
-                               bool                  benchmark_host,
-                               std::optional<double> poisson_lambda = std::nullopt)
+    host_api_benchmark(rng_type_t engine, ordering_t ordering, size_t dimensions, size_t offset, bool benchmark_host, std::optional<double> poisson_lambda = std::nullopt)
         : m_engine(engine)
         , m_ordering(ordering)
         , m_dimensions(dimensions)
@@ -78,7 +75,7 @@ struct rocrand_host_api_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         auto json = primbench::json{}
-                        .add("algo", "rocrand_host_api")
+                        .add("algo", "host_api")
                         .add("type", primbench::name<T>())
                         .add("engine", engine_name(m_engine))
                         .add("ordering", ordering_name(m_ordering))
@@ -99,43 +96,49 @@ struct rocrand_host_api_benchmark : public primbench::benchmark_interface
 
         const size_t items = (input_items / m_dimensions) * m_dimensions;
 
-        T*                data;
-        rocrand_generator generator;
+        T*          data;
+        generator_t generator;
 
         if(m_benchmark_host)
         {
             primbench::log("Creating host generator");
             data = new T[items];
-            ROCRAND_CHECK(rocrand_create_generator_host(&generator, m_engine));
+            CHECK(create_generator_host(&generator, m_engine));
         }
         else
         {
             primbench::log("Creating device generator");
-            HIP_CHECK(hipMalloc(&data, items * sizeof(T)));
-            ROCRAND_CHECK(rocrand_create_generator(&generator, m_engine));
+            PRIMBENCH_CHECK(gpu_malloc(&data, items * sizeof(T)));
+            CHECK(create_generator(&generator, m_engine));
         }
 
         primbench::log("Setting ordering");
-        ROCRAND_CHECK(rocrand_set_ordering(generator, m_ordering));
+        CHECK(set_ordering(generator, m_ordering));
 
         primbench::log("Setting dimensions");
-        rocrand_status status
-            = rocrand_set_quasi_random_generator_dimensions(generator, m_dimensions);
-        if(status != ROCRAND_STATUS_TYPE_ERROR) // If the RNG is not quasi-random
+        auto status = set_quasi_random_generator_dimensions(generator, m_dimensions);
+        if(status != RAND_STATUS_TYPE_ERROR) // If the RNG is not quasi-random
         {
-            ROCRAND_CHECK(status);
+            CHECK(status);
         }
 
         primbench::log("Setting stream");
-        ROCRAND_CHECK(rocrand_set_stream(generator, stream));
+        CHECK(set_stream(generator, stream));
 
         primbench::log("Setting offset");
-        status = rocrand_set_offset(generator, m_offset);
-        if(status != ROCRAND_STATUS_TYPE_ERROR) // If the RNG is not pseudo-random
+        status = set_offset(generator, m_offset);
+        if(status != RAND_STATUS_TYPE_ERROR) // If the RNG is not pseudo-random
         {
-            ROCRAND_CHECK(status);
+            CHECK(status);
         }
 
+        // cuRAND doesn't have generators for:
+        // - char
+        // - short
+        // - uniform half
+        // - normal half
+        // - log normal half
+#ifdef __HIP__
         const auto launch = [&]
         {
             if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, unsigned int>)
@@ -175,13 +178,38 @@ struct rocrand_host_api_benchmark : public primbench::benchmark_interface
             else
                 static_assert(sizeof(T) == 0, "Missing a constexpr elif.");
         };
+#else // __HIP__
+        const auto launch = [&]
+        {
+            if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, unsigned int>)
+                return curandGenerate(generator, data, items);
+            else if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, unsigned long long>)
+                return curandGenerateLongLong(generator, data, items);
+            else if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, float>)
+                return curandGenerateUniform(generator, data, items);
+            else if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, double>)
+                return curandGenerateUniformDouble(generator, data, items);
+            else if constexpr(Distribution == DISTRIBUTION_NORMAL && std::is_same_v<T, float>)
+                return curandGenerateNormal(generator, data, items, 0.0f, 1.0f);
+            else if constexpr(Distribution == DISTRIBUTION_NORMAL && std::is_same_v<T, double>)
+                return curandGenerateNormalDouble(generator, data, items, 0.0, 1.0);
+            else if constexpr(Distribution == DISTRIBUTION_LOG_NORMAL && std::is_same_v<T, float>)
+                return curandGenerateLogNormal(generator, data, items, 0.0f, 1.0f);
+            else if constexpr(Distribution == DISTRIBUTION_LOG_NORMAL && std::is_same_v<T, double>)
+                return curandGenerateLogNormalDouble(generator, data, items, 0.0, 1.0);
+            else if constexpr(Distribution == DISTRIBUTION_POISSON)
+                return curandGeneratePoisson(generator, data, items, *m_poisson_lambda);
+            else
+                static_assert(sizeof(T) == 0, "Missing a constexpr elif.");
+        };
+#endif // __HIP__
 
         state.set_items(items);
         state.add_writes<T>(items);
 
-        state.run([&] { ROCRAND_CHECK(launch()); });
+        state.run([&] { CHECK(launch()); });
 
-        ROCRAND_CHECK(rocrand_destroy_generator(generator));
+        CHECK(destroy_generator(generator));
 
         if(m_benchmark_host)
         {
@@ -189,13 +217,13 @@ struct rocrand_host_api_benchmark : public primbench::benchmark_interface
         }
         else
         {
-            HIP_CHECK(hipFree(data));
+            PRIMBENCH_CHECK(gpu_free(data));
         }
     }
 
 private:
-    rocrand_rng_type      m_engine;
-    rocrand_ordering      m_ordering;
+    rng_type_t            m_engine;
+    ordering_t            m_ordering;
     size_t                m_dimensions;
     size_t                m_offset;
     bool                  m_benchmark_host;
@@ -203,7 +231,7 @@ private:
 };
 
 #define QUEUE_POISSON(engine, ordering, poisson_lambda)                                            \
-    executor.queue<rocrand_host_api_benchmark<unsigned int, DISTRIBUTION_POISSON>>(engine,         \
+    executor.queue<host_api_benchmark<unsigned int, DISTRIBUTION_POISSON>>(engine,         \
                                                                                    ordering,       \
                                                                                    dimensions,     \
                                                                                    offset,         \
@@ -211,12 +239,13 @@ private:
                                                                                    poisson_lambda)
 
 #define QUEUE(T, engine, ordering, Distribution)                            \
-    executor.queue<rocrand_host_api_benchmark<T, Distribution>>(engine,     \
+    executor.queue<host_api_benchmark<T, Distribution>>(engine,     \
                                                                 ordering,   \
                                                                 dimensions, \
                                                                 offset,     \
                                                                 benchmark_host)
 
+#ifdef __HIP__
 #define QUEUE_DISTRIBUTIONS(engine, ordering)                          \
     do                                                                 \
     {                                                                  \
@@ -242,6 +271,33 @@ private:
         }                                                              \
     }                                                                  \
     while(0)
+#else // __HIP__
+#define QUEUE_DISTRIBUTIONS(engine, ordering)                              \
+    do                                                                     \
+    {                                                                      \
+        if(engine != CURAND_RNG_QUASI_SOBOL64 && engine != CURAND_RNG_QUASI_SCRAMBLED_SOBOL64) \
+        { \
+            QUEUE(unsigned int, engine, ordering, DISTRIBUTION_UNIFORM);       \
+        } else {                                                               \
+            QUEUE(unsigned long long, engine, ordering, DISTRIBUTION_UNIFORM); \
+        }                                                                      \
+                                                                               \
+        QUEUE(float, engine, ordering, DISTRIBUTION_UNIFORM);                  \
+        QUEUE(double, engine, ordering, DISTRIBUTION_UNIFORM);                 \
+                                                                               \
+        QUEUE(float, engine, ordering, DISTRIBUTION_NORMAL);                   \
+        QUEUE(double, engine, ordering, DISTRIBUTION_NORMAL);                  \
+                                                                               \
+        QUEUE(float, engine, ordering, DISTRIBUTION_LOG_NORMAL);               \
+        QUEUE(double, engine, ordering, DISTRIBUTION_LOG_NORMAL);              \
+                                                                               \
+        for(auto poisson_lambda : poisson_lambdas)                             \
+        {                                                                      \
+            QUEUE_POISSON(engine, ordering, poisson_lambda);                   \
+        }                                                                      \
+    }                                                                          \
+    while(0)
+#endif // __HIP__
 
 // Quoting programmers-guide.rst:
 // ``ROCRAND_ORDERING_PSEUDO_DYNAMIC`` is not supported for generators
@@ -249,22 +305,23 @@ private:
 #define QUEUE_PSEUDO(engine)                                              \
     do                                                                    \
     {                                                                     \
-        QUEUE_DISTRIBUTIONS(engine, ROCRAND_ORDERING_PSEUDO_DEFAULT);     \
+        QUEUE_DISTRIBUTIONS(engine, RAND_ORDERING_PSEUDO_DEFAULT);     \
         if(!benchmark_host)                                               \
         {                                                                 \
-            QUEUE_DISTRIBUTIONS(engine, ROCRAND_ORDERING_PSEUDO_DYNAMIC); \
+            QUEUE_DISTRIBUTIONS(engine, RAND_ORDERING_PSEUDO_DYNAMIC); \
         }                                                                 \
     }                                                                     \
     while(0)
 
-#define QUEUE_QUASI(engine) QUEUE_DISTRIBUTIONS(engine, ROCRAND_ORDERING_QUASI_DEFAULT)
+#define QUEUE_QUASI(engine) QUEUE_DISTRIBUTIONS(engine, RAND_ORDERING_QUASI_DEFAULT)
 
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
     settings.size = 128 * 1024 * 1024; // In items
-    settings.min_gpu_ms_per_batch = 100;
-    settings.noise_tolerance_percent = 2;
+    settings.min_gpu_ms_per_batch = 1000;
+    settings.batch_window_size = 3;
+    settings.noise_tolerance_percent = 3;
     settings.hot = true;
     primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
@@ -277,10 +334,10 @@ int main(int argc, char* argv[])
         "lambda",
         {10.0},
         "Space-separated list of lambdas of Poisson distribution");
-
     auto benchmark_host
         = executor.get<bool>("host", false, "Run benchmarks on the host instead of on the device");
 
+#ifdef __HIP__
     QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_LFSR113);
     QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_MRG31K3P);
     QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_MRG32K3A);
@@ -296,6 +353,17 @@ int main(int argc, char* argv[])
     QUEUE_QUASI(ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32);
     QUEUE_QUASI(ROCRAND_RNG_QUASI_SOBOL64);
     QUEUE_QUASI(ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64);
+#else // __HIP__
+    QUEUE_PSEUDO(CURAND_RNG_PSEUDO_MRG32K3A);
+    QUEUE_PSEUDO(CURAND_RNG_PSEUDO_MTGP32);
+    QUEUE_DISTRIBUTIONS(CURAND_RNG_PSEUDO_MT19937, CURAND_ORDERING_PSEUDO_DEFAULT);
+    QUEUE_PSEUDO(CURAND_RNG_PSEUDO_PHILOX4_32_10);
+    QUEUE_PSEUDO(CURAND_RNG_PSEUDO_XORWOW);
+    QUEUE_QUASI(CURAND_RNG_QUASI_SOBOL32);
+    QUEUE_QUASI(CURAND_RNG_QUASI_SCRAMBLED_SOBOL32);
+    QUEUE_QUASI(CURAND_RNG_QUASI_SOBOL64);
+    QUEUE_QUASI(CURAND_RNG_QUASI_SCRAMBLED_SOBOL64);
+#endif // __HIP__
 
     executor.run();
 }

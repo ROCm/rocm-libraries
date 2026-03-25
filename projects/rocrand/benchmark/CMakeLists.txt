@@ -89,13 +89,10 @@ function(add_benchmark benchmark_src)
   endif()
 endfunction()
 
-# rocrand
-add_benchmark("rocrand/benchmark_rocrand_host_api.cpp")
-add_benchmark("rocrand/benchmark_rocrand_device_api.cpp")
+add_benchmark("benchmark_host_api.cpp")
 
-# curand
+add_benchmark("rocrand/benchmark_rocrand_device_api.cpp")
 if(HIP_COMPILER STREQUAL "nvcc")
-  add_benchmark("curand/benchmark_curand_host_api.cpp")
   add_benchmark("curand/benchmark_curand_device_api.cpp")
 endif()
 
