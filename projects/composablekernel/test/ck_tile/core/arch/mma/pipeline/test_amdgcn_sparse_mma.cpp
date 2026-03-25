@@ -185,7 +185,7 @@ __global__ void test_sparse_accum_over_k(void* a, void* b, void* c, void* out)
     // Initialize the accumulator
     CVecType result = *reinterpret_cast<CVecType*>(c);
 
-    // Accumulate input AxB over FragK/BlockK iterations
+    // Accumulate input AxB over WaveTileK/FragK iterations
     for(uint32_t i = 0; i < kIters; ++i)
     {
         result = Pipeline::exec(
@@ -206,8 +206,8 @@ TEST(SparseMMATrait, MmaSelector_Sparse_F16_F16_F32_16x16x32_Real)
                                (currentArchId <= amdgcn_target_id::GFX950);
         return ((currentArchId == amdgcn_target_id::HOST) || !(isSupportedWmma || isSupportedMfma));
     };
-    const std::function<fp32_t(uint32_t)> validator = [](uint32_t fragK) {
-        return static_cast<fp32_t>(fragK) / 2;
+    const std::function<fp32_t(uint32_t)> validator = [](uint32_t waveTileK) {
+        return static_cast<fp32_t>(waveTileK) / 2;
     };
     const auto kernel = [](uint32_t waveSize, void* a, void* b, void* c, void* out) {
         test_sparse_accum_over_k<MmaPipelineTest<>::AType,
@@ -223,9 +223,10 @@ TEST(SparseMMATrait, MmaSelector_Sparse_F16_F16_F32_16x16x32_Real)
 template <uint32_t CompressionRatio, typename Vec>
 __global__ void test_sparse_transform(void* a, void* idx)
 {
-    using ResultT        = decltype(SparseCompressTransform<2>::exec(*static_cast<Vec*>(a)));
+    using ResultT =
+        decltype(SparseCompressTransform<CompressionRatio>::exec(*static_cast<Vec*>(a)));
     using FirstT         = std::tuple_element_t<0, ResultT>;
-    const auto& [vec, i] = SparseCompressTransform<2>::exec(*static_cast<Vec*>(a));
+    const auto& [vec, i] = SparseCompressTransform<CompressionRatio>::exec(*static_cast<Vec*>(a));
     *reinterpret_cast<remove_cvref_t<FirstT>*>(a) = vec;
     *reinterpret_cast<int32_t*>(idx)              = i;
 }
@@ -234,6 +235,7 @@ __global__ void test_sparse_transform(void* a, void* idx)
 template <int NUM, int RATIO, typename Type>
 void sparse_transform_test_case()
 {
+    static_assert(RATIO == 2, "Extend functionality if other ratio is used.");
     int devCount;
     hipDevice_t dev;
     HIP_CHECK_ERROR(hipGetDevice(&dev));
