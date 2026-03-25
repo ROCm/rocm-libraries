@@ -125,25 +125,25 @@ Kernel KernelCache::AddKernel(const Handle& h,
         auto program_it = program_map.find(std::make_pair(program_name, params));
         if(program_it != program_map.end())
         {
-            auto& _program = program_it->second;
+            auto& program_ = program_it->second;
 
-            if(program_out != nullptr && !_program.IsCodeObjectInMemory() &&
-               !_program.IsCodeObjectInFile())
+            if(program_out != nullptr && !program_.IsCodeObjectInMemory() &&
+               !program_.IsCodeObjectInFile())
             {
                 // We need the binaries attached to the program.
                 // This may happen if someone calls immediate mode and then find 2.0 with request
                 // for binaries.
-                _program = h.LoadProgram(program_name, params, kernel_src, true);
+                program_ = h.LoadProgram(program_name, params, kernel_src, true);
             }
 
-            return _program;
+            return program_;
         }
         else
         {
-            auto _program = h.LoadProgram(program_name, params, kernel_src, program_out != nullptr);
+            auto program_ = h.LoadProgram(program_name, params, kernel_src, program_out != nullptr);
 
-            program_map[std::make_pair(program_name, params)] = _program;
-            return _program;
+            program_map[std::make_pair(program_name, params)] = program_;
+            return program_;
         }
     }();
 

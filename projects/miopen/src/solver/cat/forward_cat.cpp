@@ -144,11 +144,11 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
                 decltype(auto) kernel_ = handle_.Run(kernels.front());
                 decltype(auto) params  = raw_params.CastTo<miopen::cat::CatInvokeParams>();
 
-                auto ydims_     = params.yDesc.GetLengths();
-                auto dim_       = params.dim;
-                auto stride_    = params.yDesc.GetStrides()[dim_];
-                auto y_dim_size = ydims_[dim_];
-                auto outerSize  = std::accumulate(
+                auto ydims_      = params.yDesc.GetLengths();
+                auto dim_        = params.dim;
+                auto stride_     = params.yDesc.GetStrides()[dim_];
+                auto y_dim_size  = ydims_[dim_];
+                auto outer_size_ = std::accumulate(
                     ydims_.begin(), ydims_.begin() + dim_, 1ULL, std::multiplies<size_t>());
                 auto data_size_ = get_data_size(params.yDesc.GetType());
 
@@ -157,7 +157,7 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
                         params.y,
                         params.GetXDimSize(0),
                         params.GetXDimSize(1),
-                        outerSize,
+                        outer_size_,
                         stride_ * data_size_,
                         y_dim_size);
             };
@@ -170,11 +170,11 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
                 decltype(auto) kernel_ = handle_.Run(kernels.front());
                 decltype(auto) params  = raw_params.CastTo<miopen::cat::CatInvokeParams>();
 
-                auto ydims_     = params.yDesc.GetLengths();
-                auto dim_       = params.dim;
-                auto stride_    = params.yDesc.GetStrides()[dim_];
-                auto y_dim_size = ydims_[dim_];
-                auto outerSize  = std::accumulate(
+                auto ydims_      = params.yDesc.GetLengths();
+                auto dim_        = params.dim;
+                auto stride_     = params.yDesc.GetStrides()[dim_];
+                auto y_dim_size  = ydims_[dim_];
+                auto outer_size_ = std::accumulate(
                     ydims_.begin(), ydims_.begin() + dim_, 1ULL, std::multiplies<size_t>());
                 auto data_size_ = get_data_size(params.yDesc.GetType());
 
@@ -187,7 +187,7 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
                         params.GetXDimSize(1),
                         params.GetXDimSize(2),
                         params.GetXDimSize(3),
-                        outerSize,
+                        outer_size_,
                         stride_ * data_size_,
                         y_dim_size);
             };
@@ -200,11 +200,11 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
                 decltype(auto) kernel_ = handle_.Run(kernels.front());
                 decltype(auto) params  = raw_params.CastTo<miopen::cat::CatInvokeParams>();
 
-                auto ydims_     = params.yDesc.GetLengths();
-                auto dim_       = params.dim;
-                auto stride_    = params.yDesc.GetStrides()[dim_];
-                auto y_dim_size = ydims_[dim_];
-                auto outerSize  = std::accumulate(
+                auto ydims_      = params.yDesc.GetLengths();
+                auto dim_        = params.dim;
+                auto stride_     = params.yDesc.GetStrides()[dim_];
+                auto y_dim_size  = ydims_[dim_];
+                auto outer_size_ = std::accumulate(
                     ydims_.begin(), ydims_.begin() + dim_, 1ULL, std::multiplies<size_t>());
                 auto data_size_ = get_data_size(params.yDesc.GetType());
 
@@ -225,7 +225,7 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
                         params.GetXDimSize(5),
                         params.GetXDimSize(6),
                         params.GetXDimSize(7),
-                        outerSize,
+                        outer_size_,
                         stride_ * data_size_,
                         y_dim_size);
             };
