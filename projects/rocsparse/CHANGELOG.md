@@ -7,7 +7,6 @@ Documentation for rocSPARSE is available at
 ## rocSPARSE 4.6.0 for ROCm 7.13.0
 
 ### Added
-
 * Added the `rocsparse_spic0` and `rocsparse_spilu0` routines for incomplete factorizations, with strided batched computations enabled.
 * Added the `rocsparse_sptrsv_descr_create` and the `rocsparse_sptrsv_descr_destroy` routines.
 * Added the `rocsparse_singularity` enumeration.
