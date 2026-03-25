@@ -24,7 +24,7 @@ public:
     {
     }
 
-private:
+protected:
     void validateBeforeAdding(const EnginePlugin& plugin) override
     {
         using hipdnn_data_sdk::utilities::Version;
