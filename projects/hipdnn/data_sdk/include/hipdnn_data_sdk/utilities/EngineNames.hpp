@@ -135,10 +135,10 @@ struct EngineRegistrar
     inline const int64_t name##_ID = hipdnn_data_sdk::utilities::engineNameToId(#name); \
     inline const hipdnn_data_sdk::utilities::EngineRegistrar name##_registrar{#name};
 
-#define DETAIL_HIPDNN_REGISTER_ENGINE_2(name, displayName)                                    \
-    inline constexpr const char* name##_NAME = displayName;                                   \
-    inline const int64_t name##_ID = hipdnn_data_sdk::utilities::engineNameToId(displayName); \
-    inline const hipdnn_data_sdk::utilities::EngineRegistrar name##_registrar{displayName};
+#define DETAIL_HIPDNN_REGISTER_ENGINE_2(name, value)                                    \
+    inline constexpr const char* name##_NAME = value;                                   \
+    inline const int64_t name##_ID = hipdnn_data_sdk::utilities::engineNameToId(value); \
+    inline const hipdnn_data_sdk::utilities::EngineRegistrar name##_registrar{value};
 
 #define DETAIL_HIPDNN_GET_REGISTER_ENGINE_MACRO(_1, _2, NAME, ...) NAME
 /// @endcond
@@ -154,7 +154,7 @@ struct EngineRegistrar
  * The single-parameter form should be used whenever possible for simplicity.
  *
  * @param name The identifier used for generated constants (e.g., `name_NAME`, `name_ID`)
- * @param displayName (optional) Custom string name for the engine. Defaults to stringified `name`.
+ * @param value (optional) Custom string name for the engine. Defaults to stringified `name`.
  */
 #define HIPDNN_REGISTER_ENGINE(...)                                                            \
     DETAIL_HIPDNN_GET_REGISTER_ENGINE_MACRO(                                                   \
