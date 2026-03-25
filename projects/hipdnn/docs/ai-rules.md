@@ -21,6 +21,19 @@ hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based a
 
 ## Building & Testing
 
+### Windows Build Environment
+
+On Windows, run `scripts/windows/wheel_build_setup.ps1` to fetch the latest ROCm SDK wheels and set up the build environment:
+
+```powershell
+.\scripts\windows\wheel_build_setup.ps1                         # Latest nightlies
+.\scripts\windows\wheel_build_setup.ps1 -SHA "<commit-sha>"     # Specific S3 staging build
+```
+
+The script creates a Python venv, installs ROCm wheels, initializes the SDK, and prints the CMake variables (`CMAKE_PREFIX_PATH`, `CMAKE_PROGRAM_PATH`) needed for the build.
+
+### Build Approaches
+
 Choose the build approach based on what is being changed:
 
 ### 1. hipDNN Only (changes only within `projects/hipdnn/`)
