@@ -939,8 +939,6 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
         
         if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
-            add_subdirectory(kernels/ck_builder)
-            list(APPEND MIOPEN_CK_LINK_FLAGS ck_builder)
             add_definitions(-DCK_EXPERIMENTAL_BUILDER)
         endif()
     endif()
