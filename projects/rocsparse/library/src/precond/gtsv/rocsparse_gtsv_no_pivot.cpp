@@ -287,7 +287,7 @@ namespace rocsparse
         {
             return 4;
         }
-        else if(std::is_same<T, double>() || std::is_same<T, rocsparse_float_complex>())
+        else if constexpr(std::is_same<T, double>() || std::is_same<T, rocsparse_float_complex>())
         {
             return 2;
         }

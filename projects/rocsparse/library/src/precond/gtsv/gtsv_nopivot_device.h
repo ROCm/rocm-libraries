@@ -599,27 +599,31 @@ namespace rocsparse
             T B_prime[M];
 
             // Forward sweep
-            du_prime[0] = du[0] / d[0];
+            const T inv_d0 = static_cast<T>(1) / d[0];
+            du_prime[0]    = du[0] * inv_d0;
             for(int i = 1; i < M - 1; i++)
             {
-                T num       = du[i];
-                T denom     = d[i] - dl[i] * du_prime[i - 1];
-                du_prime[i] = num / denom;
+                // denom = d[i] - dl[i] * du_prime[i-1]
+                const T inv_denom
+                    = static_cast<T>(1) / rocsparse::fma(-dl[i], du_prime[i - 1], d[i]);
+                du_prime[i] = du[i] * inv_denom;
             }
 
-            B_prime[0] = B[ldb * gid + 0] / d[0];
+            B_prime[0] = B[ldb * gid + 0] * inv_d0;
             for(int i = 1; i < M; i++)
             {
-                T num      = B[ldb * gid + i] - dl[i] * B_prime[i - 1];
-                T denom    = d[i] - dl[i] * du_prime[i - 1];
-                B_prime[i] = num / denom;
+                // denom = d[i] - dl[i] * du_prime[i-1]
+                const T inv_denom
+                    = static_cast<T>(1) / rocsparse::fma(-dl[i], du_prime[i - 1], d[i]);
+                // num = B[i] - dl[i] * B_prime[i-1]
+                B_prime[i] = rocsparse::fma(-dl[i], B_prime[i - 1], B[ldb * gid + i]) * inv_denom;
             }
 
             // Backward sweep
             B[ldb * gid + M - 1] = B_prime[M - 1];
             for(int i = M - 2; i >= 0; i--)
             {
-                B[ldb * gid + i] = B_prime[i] - du_prime[i] * B[ldb * gid + i + 1];
+                B[ldb * gid + i] = rocsparse::fma(-du_prime[i], B[ldb * gid + i + 1], B_prime[i]);
             }
         }
     }
