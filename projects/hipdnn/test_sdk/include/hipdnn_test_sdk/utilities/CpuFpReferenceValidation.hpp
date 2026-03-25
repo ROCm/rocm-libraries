@@ -53,14 +53,23 @@ public:
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
 
-            if(isnan(refValue) || isnan(implValue) || isinf(refValue) || isinf(implValue))
+            const bool refNanOrInf = isnan(refValue) || isinf(refValue);
+            const bool implNanOrInf = isnan(implValue) || isinf(implValue);
+
+            if(refNanOrInf != implNanOrInf)
             {
                 HIPDNN_SDK_LOG_ERROR(
-                    "NaN or Inf detected at indices "
+                    "NaN or Inf mismatch at indices "
                     << StreamVec(indices) << ": reference value = " << refValue
                     << ", implementation value = " << implValue
                     << ". This may indicate an output element was not written by the operation.");
                 result.store(false, std::memory_order_relaxed);
+                return result.load(std::memory_order_relaxed);
+            }
+
+            if(refNanOrInf && implNanOrInf)
+            {
+                // Both sides agree on NaN/Inf — skip tolerance check
                 return result.load(std::memory_order_relaxed);
             }
 

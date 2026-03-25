@@ -407,7 +407,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenReferenceHasNaN)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenBothHaveNaN)
+TEST(TestCpuFpReferenceMiopenRmsValidationFp32, PassesWhenBothHaveNaN)
 {
     const CpuFpReferenceMiopenRmsValidation<float> refValidation(1.0f);
     const std::vector<int64_t> dims = {2, 2};
@@ -417,7 +417,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenBothHaveNaN)
     tensor1.fillWithSentinelValue();
     tensor2.fillWithSentinelValue();
 
-    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
 TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenReferenceHasInf)

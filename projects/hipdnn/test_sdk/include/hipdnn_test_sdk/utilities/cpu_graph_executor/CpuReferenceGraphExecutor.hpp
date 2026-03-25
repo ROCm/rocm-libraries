@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
@@ -51,6 +52,9 @@ public:
 
         for(auto& executor : planExecutors)
         {
+            zeroOutputBuffers(executor->getOutputTensorIds(),
+                              variantPackWithVirtualTensorsAdded,
+                              graphWrap.getTensorMap());
             executor->execute(variantPackWithVirtualTensorsAdded);
         }
     }
@@ -69,6 +73,7 @@ private:
             if(attr->virtual_() && updatedVariantPack.find(id) == updatedVariantPack.end())
             {
                 auto tensor = detail::createTensorFromAttribute(*attr);
+                tensor->fillWithSentinelValue();
                 virtualTensors.push_back(std::move(tensor));
                 updatedVariantPack[id] = virtualTensors.back()->rawHostData();
             }
@@ -127,6 +132,25 @@ private:
             return detail::SdpaFwdSignatureKey(node, tensorMap);
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
+        }
+    }
+
+    static void zeroOutputBuffers(
+        const std::vector<int64_t>& outputIds,
+        const std::unordered_map<int64_t, void*>& variantPack,
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+            tensorMap)
+    {
+        for(auto id : outputIds)
+        {
+            auto packIt = variantPack.find(id);
+            if(packIt == variantPack.end())
+            {
+                continue;
+            }
+
+            auto tensor = detail::createTensorFromAttribute(*tensorMap.at(id));
+            std::memset(packIt->second, 0, tensor->elementSpace() * tensor->elementSize());
         }
     }
 

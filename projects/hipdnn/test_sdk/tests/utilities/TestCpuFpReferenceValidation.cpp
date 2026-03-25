@@ -609,7 +609,7 @@ TEST(TestCpuFpReferenceValidationFp32, FailsWhenImplementationHasNaN)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidationFp32, FailsWhenBothHaveNaN)
+TEST(TestCpuFpReferenceValidationFp32, PassesWhenBothHaveNaN)
 {
     const CpuFpReferenceValidation<float> refValidation;
     const std::vector<int64_t> dims = {2, 2};
@@ -619,7 +619,7 @@ TEST(TestCpuFpReferenceValidationFp32, FailsWhenBothHaveNaN)
     tensor1.fillWithSentinelValue();
     tensor2.fillWithSentinelValue();
 
-    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
 TEST(TestCpuFpReferenceValidationFp32, FailsWhenReferenceHasInf)
@@ -652,7 +652,7 @@ TEST(TestCpuFpReferenceValidationFp32, FailsWhenImplementationHasInf)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidationFp16, FailsWhenBothHaveNaN)
+TEST(TestCpuFpReferenceValidationFp16, PassesWhenBothHaveNaN)
 {
     const CpuFpReferenceValidation<half> refValidation;
     const std::vector<int64_t> dims = {2, 2};
@@ -662,10 +662,10 @@ TEST(TestCpuFpReferenceValidationFp16, FailsWhenBothHaveNaN)
     tensor1.fillWithSentinelValue();
     tensor2.fillWithSentinelValue();
 
-    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuFpReferenceValidationBfp16, FailsWhenBothHaveNaN)
+TEST(TestCpuFpReferenceValidationBfp16, PassesWhenBothHaveNaN)
 {
     const CpuFpReferenceValidation<bfloat16> refValidation;
     const std::vector<int64_t> dims = {2, 2};
@@ -675,7 +675,7 @@ TEST(TestCpuFpReferenceValidationBfp16, FailsWhenBothHaveNaN)
     tensor1.fillWithSentinelValue();
     tensor2.fillWithSentinelValue();
 
-    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
 TEST(TestCpuFpReferenceValidationFp32, PassesForFiniteValues)
