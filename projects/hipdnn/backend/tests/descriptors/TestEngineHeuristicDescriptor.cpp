@@ -76,7 +76,7 @@ public:
     {
         setGraph();
         setHeuristicMode();
-        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_))
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
             .WillRepeatedly(Return(std::vector<int64_t>{0, 1, 2}));
         ASSERT_NO_THROW(getEngineHeuristicDescriptor()->finalize());
     }
@@ -437,7 +437,7 @@ TEST_F(TestEngineHeuristicDescriptor, GetEngineConfigsWithNoEngineIds)
     setGraph();
     setHeuristicMode();
 
-    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_))
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
         .WillRepeatedly(Return(std::vector<int64_t>{}));
 
     ASSERT_NO_THROW(heur->finalize());
@@ -554,4 +554,56 @@ TEST_F(TestEngineHeuristicDescriptor, GetGraphReturnsPointerIfFinalized)
     ASSERT_NE(graphPtr, nullptr);
     ASSERT_EQ(static_cast<const IBackendDescriptor*>(graphPtr.get()),
               static_cast<const IBackendDescriptor*>(getMockGraph().get()));
+}
+
+TEST_F(TestEngineHeuristicDescriptor, SetFindFirst)
+{
+    auto heur = getEngineHeuristicDescriptor();
+    bool findFirst = true;
+    ASSERT_NO_THROW(heur->setAttribute(
+        HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT, HIPDNN_TYPE_BOOLEAN, 1, &findFirst));
+}
+
+TEST_F(TestEngineHeuristicDescriptor, SetFindFirstInvalidType)
+{
+    auto heur = getEngineHeuristicDescriptor();
+    bool findFirst = true;
+    ASSERT_THROW_HIPDNN_STATUS(
+        heur->setAttribute(HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT, HIPDNN_TYPE_INT64, 1, &findFirst),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineHeuristicDescriptor, GetFindFirstAfterFinalize)
+{
+    auto heur = getEngineHeuristicDescriptor();
+    bool findFirst = true;
+    ASSERT_NO_THROW(heur->setAttribute(
+        HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT, HIPDNN_TYPE_BOOLEAN, 1, &findFirst));
+
+    setGraph();
+    setHeuristicMode();
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, true))
+        .WillOnce(Return(std::vector<int64_t>{42}));
+    ASSERT_NO_THROW(heur->finalize());
+
+    bool result = false;
+    int64_t count = 0;
+    ASSERT_NO_THROW(heur->getAttribute(
+        HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT, HIPDNN_TYPE_BOOLEAN, 1, &count, &result));
+    ASSERT_TRUE(result);
+    ASSERT_EQ(count, 1);
+}
+
+TEST_F(TestEngineHeuristicDescriptor, FinalizeWithFindFirstPassesToPluginManager)
+{
+    auto heur = getEngineHeuristicDescriptor();
+    bool findFirst = true;
+    ASSERT_NO_THROW(heur->setAttribute(
+        HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT, HIPDNN_TYPE_BOOLEAN, 1, &findFirst));
+
+    setGraph();
+    setHeuristicMode();
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, true))
+        .WillOnce(Return(std::vector<int64_t>{1}));
+    ASSERT_NO_THROW(heur->finalize());
 }
