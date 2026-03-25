@@ -7,7 +7,6 @@
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp>
 #include <memory>
-#include <optional>
 #include <unordered_map>
 
 namespace hipdnn_frontend::detail
