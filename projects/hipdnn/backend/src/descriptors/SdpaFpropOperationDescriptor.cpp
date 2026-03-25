@@ -756,36 +756,30 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     tensors.push_back(_vDesc);
     tensors.push_back(_oDesc);
     // Optional tensors - only include if set
-    auto addIfSet = [&](const std::shared_ptr<TensorDescriptor>& desc) {
-        if(desc)
-        {
-            tensors.push_back(desc);
-        }
-    };
-    addIfSet(_attnMaskDesc);
-    addIfSet(_scaleDesc);
-    addIfSet(_seqLenQDesc);
-    addIfSet(_seqLenKvDesc);
-    addIfSet(_seedDesc);
-    addIfSet(_offsetDesc);
-    addIfSet(_dropoutMaskDesc);
-    addIfSet(_dropoutScaleDesc);
-    addIfSet(_pageTableKDesc);
-    addIfSet(_pageTableVDesc);
-    addIfSet(_blockMaskDesc);
-    addIfSet(_sinkTokenDesc);
-    addIfSet(_descaleQDesc);
-    addIfSet(_descaleKDesc);
-    addIfSet(_descaleVDesc);
-    addIfSet(_descaleSDesc);
-    addIfSet(_scaleSDesc);
-    addIfSet(_scaleODesc);
-    addIfSet(_statsDesc);
-    addIfSet(_maxDesc);
-    addIfSet(_sumExpDesc);
-    addIfSet(_rngDumpDesc);
-    addIfSet(_amaxSDesc);
-    addIfSet(_amaxODesc);
+    addIfSet(tensors, _attnMaskDesc);
+    addIfSet(tensors, _scaleDesc);
+    addIfSet(tensors, _seqLenQDesc);
+    addIfSet(tensors, _seqLenKvDesc);
+    addIfSet(tensors, _seedDesc);
+    addIfSet(tensors, _offsetDesc);
+    addIfSet(tensors, _dropoutMaskDesc);
+    addIfSet(tensors, _dropoutScaleDesc);
+    addIfSet(tensors, _pageTableKDesc);
+    addIfSet(tensors, _pageTableVDesc);
+    addIfSet(tensors, _blockMaskDesc);
+    addIfSet(tensors, _sinkTokenDesc);
+    addIfSet(tensors, _descaleQDesc);
+    addIfSet(tensors, _descaleKDesc);
+    addIfSet(tensors, _descaleVDesc);
+    addIfSet(tensors, _descaleSDesc);
+    addIfSet(tensors, _scaleSDesc);
+    addIfSet(tensors, _scaleODesc);
+    addIfSet(tensors, _statsDesc);
+    addIfSet(tensors, _maxDesc);
+    addIfSet(tensors, _sumExpDesc);
+    addIfSet(tensors, _rngDumpDesc);
+    addIfSet(tensors, _amaxSDesc);
+    addIfSet(tensors, _amaxODesc);
     return tensors;
 }
 
@@ -810,47 +804,31 @@ std::string SdpaFpropOperationDescriptor::toString() const
     str += ", k_uid=" + std::to_string(_data.k_tensor_uid);
     str += ", v_uid=" + std::to_string(_data.v_tensor_uid);
     str += ", o_uid=" + std::to_string(_data.o_tensor_uid);
-    auto optInt64Str = [](const ::flatbuffers::Optional<int64_t>& opt) -> std::string {
-        return opt.has_value() ? std::to_string(*opt) : "null";
-    };
-    auto optBoolStr = [](const ::flatbuffers::Optional<bool>& opt) -> std::string {
-        if(!opt.has_value())
-        {
-            return "null";
-        }
-        return *opt ? "true" : "false";
-    };
-    auto optFloatStr = [](const ::flatbuffers::Optional<float>& opt) -> std::string {
-        return opt.has_value() ? std::to_string(*opt) : "null";
-    };
-    auto optInt32Str = [](const ::flatbuffers::Optional<int32_t>& opt) -> std::string {
-        return opt.has_value() ? std::to_string(*opt) : "null";
-    };
-    str += ", attn_mask_uid=" + optInt64Str(_data.attn_mask_tensor_uid);
-    str += ", scale_uid=" + optInt64Str(_data.scale_tensor_uid);
-    str += ", seq_len_q_uid=" + optInt64Str(_data.seq_len_q_tensor_uid);
-    str += ", seq_len_kv_uid=" + optInt64Str(_data.seq_len_kv_tensor_uid);
-    str += ", seed_uid=" + optInt64Str(_data.seed_tensor_uid);
-    str += ", offset_uid=" + optInt64Str(_data.offset_tensor_uid);
-    str += ", dropout_mask_uid=" + optInt64Str(_data.dropout_mask_tensor_uid);
-    str += ", dropout_scale_uid=" + optInt64Str(_data.dropout_scale_tensor_uid);
-    str += ", page_table_k_uid=" + optInt64Str(_data.page_table_k_tensor_uid);
-    str += ", page_table_v_uid=" + optInt64Str(_data.page_table_v_tensor_uid);
-    str += ", block_mask_uid=" + optInt64Str(_data.block_mask_tensor_uid);
-    str += ", sink_token_uid=" + optInt64Str(_data.sink_token_tensor_uid);
-    str += ", descale_q_uid=" + optInt64Str(_data.descale_q_tensor_uid);
-    str += ", descale_k_uid=" + optInt64Str(_data.descale_k_tensor_uid);
-    str += ", descale_v_uid=" + optInt64Str(_data.descale_v_tensor_uid);
-    str += ", descale_s_uid=" + optInt64Str(_data.descale_s_tensor_uid);
-    str += ", scale_s_uid=" + optInt64Str(_data.scale_s_tensor_uid);
-    str += ", scale_o_uid=" + optInt64Str(_data.scale_o_tensor_uid);
-    str += ", stats_uid=" + optInt64Str(_data.stats_tensor_uid);
-    str += ", max_uid=" + optInt64Str(_data.max_tensor_uid);
-    str += ", sum_exp_uid=" + optInt64Str(_data.sum_exp_tensor_uid);
-    str += ", rng_dump_uid=" + optInt64Str(_data.rng_dump_tensor_uid);
-    str += ", amax_s_uid=" + optInt64Str(_data.amax_s_tensor_uid);
-    str += ", amax_o_uid=" + optInt64Str(_data.amax_o_tensor_uid);
-    str += ", generate_stats=" + optBoolStr(_data.generate_stats);
+    str += ", attn_mask_uid=" + optionalToString(_data.attn_mask_tensor_uid);
+    str += ", scale_uid=" + optionalToString(_data.scale_tensor_uid);
+    str += ", seq_len_q_uid=" + optionalToString(_data.seq_len_q_tensor_uid);
+    str += ", seq_len_kv_uid=" + optionalToString(_data.seq_len_kv_tensor_uid);
+    str += ", seed_uid=" + optionalToString(_data.seed_tensor_uid);
+    str += ", offset_uid=" + optionalToString(_data.offset_tensor_uid);
+    str += ", dropout_mask_uid=" + optionalToString(_data.dropout_mask_tensor_uid);
+    str += ", dropout_scale_uid=" + optionalToString(_data.dropout_scale_tensor_uid);
+    str += ", page_table_k_uid=" + optionalToString(_data.page_table_k_tensor_uid);
+    str += ", page_table_v_uid=" + optionalToString(_data.page_table_v_tensor_uid);
+    str += ", block_mask_uid=" + optionalToString(_data.block_mask_tensor_uid);
+    str += ", sink_token_uid=" + optionalToString(_data.sink_token_tensor_uid);
+    str += ", descale_q_uid=" + optionalToString(_data.descale_q_tensor_uid);
+    str += ", descale_k_uid=" + optionalToString(_data.descale_k_tensor_uid);
+    str += ", descale_v_uid=" + optionalToString(_data.descale_v_tensor_uid);
+    str += ", descale_s_uid=" + optionalToString(_data.descale_s_tensor_uid);
+    str += ", scale_s_uid=" + optionalToString(_data.scale_s_tensor_uid);
+    str += ", scale_o_uid=" + optionalToString(_data.scale_o_tensor_uid);
+    str += ", stats_uid=" + optionalToString(_data.stats_tensor_uid);
+    str += ", max_uid=" + optionalToString(_data.max_tensor_uid);
+    str += ", sum_exp_uid=" + optionalToString(_data.sum_exp_tensor_uid);
+    str += ", rng_dump_uid=" + optionalToString(_data.rng_dump_tensor_uid);
+    str += ", amax_s_uid=" + optionalToString(_data.amax_s_tensor_uid);
+    str += ", amax_o_uid=" + optionalToString(_data.amax_o_tensor_uid);
+    str += ", generate_stats=" + optionalBoolToString(_data.generate_stats);
     str += ", alibi_mask=";
     str += _data.alibi_mask ? "true" : "false";
     str += ", padding_mask=";
@@ -859,11 +837,11 @@ std::string SdpaFpropOperationDescriptor::toString() const
     str += _data.causal_mask ? "true" : "false";
     str += ", causal_mask_bottom_right=";
     str += _data.causal_mask_bottom_right ? "true" : "false";
-    str += ", dropout_probability=" + optFloatStr(_data.dropout_probability);
-    str += ", attn_scale_value=" + optFloatStr(_data.attn_scale_value);
-    str += ", left_bound=" + optInt64Str(_data.left_bound);
-    str += ", right_bound=" + optInt64Str(_data.right_bound);
-    str += ", max_seq_len_kv=" + optInt32Str(_data.max_seq_len_kv);
+    str += ", dropout_probability=" + optionalToString(_data.dropout_probability);
+    str += ", attn_scale_value=" + optionalToString(_data.attn_scale_value);
+    str += ", left_bound=" + optionalToString(_data.left_bound);
+    str += ", right_bound=" + optionalToString(_data.right_bound);
+    str += ", max_seq_len_kv=" + optionalToString(_data.max_seq_len_kv);
     str += ", diagonal_alignment=" + std::to_string(static_cast<int>(_data.diagonal_alignment));
     str += ", mma_core_mode=" + std::to_string(static_cast<int>(_data.mma_core_mode));
     str += ", implementation=" + std::to_string(static_cast<int>(_data.implementation));

@@ -53,6 +53,7 @@
  * - 2807-2899: Block scale dequantize operation attributes
  * - 2900-2913: Batchnorm training forward operation attributes
  * - 3000-3099: Custom op operation attributes
+ * - 3100-3199: SDPA backward propagation operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -966,6 +967,101 @@ typedef enum
 
     /** @brief Compute data type for custom op */
     HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT = 3004,
+
+    /** @} */
+
+    /**
+     * @name SDPA Backward Propagation Operation Attributes (3100-3199)
+     * Attributes for HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Q (query) tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_Q_EXT = 3100,
+
+    /** @brief K (key) tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_K_EXT = 3101,
+
+    /** @brief V (value) tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_V_EXT = 3102,
+
+    /** @brief O (output) tensor from forward pass for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_O_EXT = 3103,
+
+    /** @brief dO (output gradient) tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DO_EXT = 3104,
+
+    /** @brief Stats tensor from forward pass for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_STATS_EXT = 3105,
+
+    /** @brief dQ (query gradient) output tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DQ_EXT = 3106,
+
+    /** @brief dK (key gradient) output tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DK_EXT = 3107,
+
+    /** @brief dV (value gradient) output tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DV_EXT = 3108,
+
+    /** @brief Scale tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SCALE_EXT = 3109,
+
+    /** @brief Attention mask tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_ATTN_MASK_EXT = 3110,
+
+    /** @brief Sequence length Q tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_Q_EXT = 3111,
+
+    /** @brief Sequence length KV tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_KV_EXT = 3112,
+
+    /** @brief Seed tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEED_EXT = 3113,
+
+    /** @brief Offset tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_OFFSET_EXT = 3114,
+
+    /** @brief Dropout mask tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_MASK_EXT = 3115,
+
+    /** @brief Dropout scale tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_EXT = 3116,
+
+    /** @brief Dropout scale inverse tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_INV_EXT = 3117,
+
+    /** @brief dBias (gradient of attention bias) output tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DBIAS_EXT = 3118,
+
+    /** @brief Whether to use ALiBi mask (bool) */
+    HIPDNN_ATTR_SDPA_BPROP_ALIBI_MASK_EXT = 3119,
+
+    /** @brief Whether to use padding mask (bool) */
+    HIPDNN_ATTR_SDPA_BPROP_PADDING_MASK_EXT = 3120,
+
+    /** @brief Whether to use causal mask (bool, deprecated) */
+    HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_EXT = 3121,
+
+    /** @brief Whether to use causal mask bottom-right (bool, deprecated) */
+    HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT = 3122,
+
+    /** @brief Dropout probability (float) */
+    HIPDNN_ATTR_SDPA_BPROP_DROPOUT_PROBABILITY_EXT = 3123,
+
+    /** @brief Attention scale value (float) */
+    HIPDNN_ATTR_SDPA_BPROP_ATTN_SCALE_VALUE_EXT = 3124,
+
+    /** @brief Left bound for sliding window (int64) */
+    HIPDNN_ATTR_SDPA_BPROP_LEFT_BOUND_EXT = 3125,
+
+    /** @brief Right bound for sliding window (int64) */
+    HIPDNN_ATTR_SDPA_BPROP_RIGHT_BOUND_EXT = 3126,
+
+    /** @brief Diagonal alignment mode (hipdnnDiagonalAlignment_t) */
+    HIPDNN_ATTR_SDPA_BPROP_DIAGONAL_ALIGNMENT_EXT = 3127,
+
+    /** @brief Compute data type for SDPA backward */
+    HIPDNN_ATTR_SDPA_BPROP_MATH_PREC_EXT = 3128,
 
     /** @} */
 
