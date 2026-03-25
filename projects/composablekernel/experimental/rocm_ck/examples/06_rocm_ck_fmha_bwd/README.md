@@ -17,7 +17,7 @@ multi-parameter CK Tile kernels with both batch and group (variable-length) mode
 
 ```bash
 cmake -B build -S . -G Ninja \
-    -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ \
+    -DCMAKE_CXX_COMPILER=/llvm-project/build/bin/clang++ \
     -DCMAKE_PREFIX_PATH=/opt/rocm \
     -DGPU_TARGETS="gfx942" \
     -DCMAKE_BUILD_TYPE=Release \

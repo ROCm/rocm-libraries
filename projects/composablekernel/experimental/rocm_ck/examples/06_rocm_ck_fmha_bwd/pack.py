@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Pack per-architecture .hsaco files for FMHA BWD OGradDotO variants into a kpack archive.
+"""Pack per-architecture .hsaco files for all FMHA BWD kernel families into a kpack archive.
 
 Archive format:
 
@@ -34,55 +34,111 @@ HEADER_SIZE = 16  # 4 (magic) + 4 (version) + 8 (toc_offset)
 # Variant metadata mirrors the constexpr ALL_FMHA_BWD_VARIANTS table in
 # rocm_fmha_bwd_registry.hpp.
 VARIANTS = [
+    # --- OGradDotO variants ---
     {
         "name": "fmha_bwd_ograd_dot_o_fp16_d128_batch",
+        "family": "ograd_dot_o",
         "dtype": "fp16",
         "hdim_v": 128,
         "mode": "batch",
-        "pad_seqlen_q": True,
-        "pad_hdim_v": True,
-        "block_per_cu": 2,
         "block_size": 64,
     },
     {
         "name": "fmha_bwd_ograd_dot_o_bf16_d128_batch",
+        "family": "ograd_dot_o",
         "dtype": "bf16",
         "hdim_v": 128,
         "mode": "batch",
-        "pad_seqlen_q": True,
-        "pad_hdim_v": True,
-        "block_per_cu": 2,
         "block_size": 64,
     },
     {
         "name": "fmha_bwd_ograd_dot_o_fp16_d64_batch",
+        "family": "ograd_dot_o",
         "dtype": "fp16",
         "hdim_v": 64,
         "mode": "batch",
-        "pad_seqlen_q": True,
-        "pad_hdim_v": True,
-        "block_per_cu": 2,
         "block_size": 64,
     },
     {
         "name": "fmha_bwd_ograd_dot_o_fp16_d128_group",
+        "family": "ograd_dot_o",
         "dtype": "fp16",
         "hdim_v": 128,
         "mode": "group",
-        "pad_seqlen_q": True,
-        "pad_hdim_v": True,
-        "block_per_cu": 2,
         "block_size": 64,
     },
     {
         "name": "fmha_bwd_ograd_dot_o_fp16_d128_batch_npad",
+        "family": "ograd_dot_o",
         "dtype": "fp16",
         "hdim_v": 128,
         "mode": "batch",
-        "pad_seqlen_q": False,
-        "pad_hdim_v": False,
-        "block_per_cu": 2,
         "block_size": 64,
+    },
+    # --- DqDkDv variants ---
+    {
+        "name": "fmha_bwd_dqdkdv_fp16_d128_batch",
+        "family": "dqdkdv",
+        "dtype": "fp16",
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_dqdkdv_bf16_d128_batch",
+        "family": "dqdkdv",
+        "dtype": "bf16",
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_dqdkdv_fp16_d128_batch_cmask",
+        "family": "dqdkdv",
+        "dtype": "fp16",
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "mode": "batch",
+        "has_mask": True,
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_dqdkdv_fp16_d128_batch_det",
+        "family": "dqdkdv",
+        "dtype": "fp16",
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "mode": "batch",
+        "is_deterministic": True,
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_dqdkdv_fp16_d128_group",
+        "family": "dqdkdv",
+        "dtype": "fp16",
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "mode": "group",
+        "block_size": 256,
+    },
+    # --- ConvertDQ variants ---
+    {
+        "name": "fmha_bwd_convert_dq_fp16_d128_batch_det",
+        "family": "convert_dq",
+        "dtype": "fp16",
+        "hdim_q": 128,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_convert_dq_fp16_d128_group_det",
+        "family": "convert_dq",
+        "dtype": "fp16",
+        "hdim_q": 128,
+        "mode": "group",
+        "block_size": 256,
     },
 ]
 ARCHITECTURES = ["gfx90a", "gfx942", "gfx950"]
@@ -144,19 +200,12 @@ def main() -> None:
         # Build and write the MessagePack TOC
         toc_offset = out.tell()
 
-        # Variant metadata: tuning surface parameters for each variant
+        # Variant metadata: all variant fields except 'name'
         variant_metadata = {}
         for v in VARIANTS:
             if v["name"] in variant_map:
-                variant_metadata[v["name"]] = {
-                    "dtype": v["dtype"],
-                    "hdim_v": v["hdim_v"],
-                    "mode": v["mode"],
-                    "pad_seqlen_q": v["pad_seqlen_q"],
-                    "pad_hdim_v": v["pad_hdim_v"],
-                    "block_per_cu": v["block_per_cu"],
-                    "block_size": v["block_size"],
-                }
+                meta = {k: val for k, val in v.items() if k != "name"}
+                variant_metadata[v["name"]] = meta
 
         toc = {
             "compression_scheme": "none",

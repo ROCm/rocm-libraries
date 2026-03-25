@@ -30,12 +30,31 @@ add_subdirectory(../../rocm_kpack rocm_kpack_build)
 add_subdirectory(../../include rocm_ck_build)
 
 # --- Kernel variants ---
-set(KERNEL_VARIANTS
+set(OGRAD_DOT_O_VARIANTS
     fmha_bwd_ograd_dot_o_fp16_d128_batch
     fmha_bwd_ograd_dot_o_bf16_d128_batch
     fmha_bwd_ograd_dot_o_fp16_d64_batch
     fmha_bwd_ograd_dot_o_fp16_d128_group
     fmha_bwd_ograd_dot_o_fp16_d128_batch_npad
+)
+
+set(DQDKDV_VARIANTS
+    fmha_bwd_dqdkdv_fp16_d128_batch
+    fmha_bwd_dqdkdv_bf16_d128_batch
+    fmha_bwd_dqdkdv_fp16_d128_batch_cmask
+    fmha_bwd_dqdkdv_fp16_d128_batch_det
+    fmha_bwd_dqdkdv_fp16_d128_group
+)
+
+set(CONVERT_DQ_VARIANTS
+    fmha_bwd_convert_dq_fp16_d128_batch_det
+    fmha_bwd_convert_dq_fp16_d128_group_det
+)
+
+set(KERNEL_VARIANTS
+    ${OGRAD_DOT_O_VARIANTS}
+    ${DQDKDV_VARIANTS}
+    ${CONVERT_DQ_VARIANTS}
 )
 
 # --- Compile each variant x architecture into .hsaco code objects ---
@@ -60,9 +79,17 @@ foreach(variant IN LISTS KERNEL_VARIANTS)
                     -o ${hsaco_output}
                     ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
             DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
-                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_dev.hpp
-                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_api.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_common.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_ograd_dot_o_api.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_ograd_dot_o_dev.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_dqdkdv_api.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_dqdkdv_dev.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_convert_dq_api.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_convert_dq_dev.hpp
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/datatype_utils.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/args.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/types.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/ck_type_map.hpp
             COMMENT "Compiling ${variant}.hip -> ${arch}.hsaco"
         )
         list(APPEND HSACO_FILES ${hsaco_output})

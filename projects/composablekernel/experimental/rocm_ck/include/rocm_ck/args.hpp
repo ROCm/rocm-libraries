@@ -53,6 +53,8 @@ union ScalarValue
     int32_t i32;
     uint32_t u32;
     double f64;
+    int64_t i64;
+    uint64_t u64;
 };
 
 /// Generic kernel arguments for all rocm_ck operations.
