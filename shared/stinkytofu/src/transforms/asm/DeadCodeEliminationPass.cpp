@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/ir/asm/DefUseChainUpdater.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
@@ -144,7 +145,7 @@ namespace
                 if(hasDummyDest)
                     continue;
 
-                // Skip in-place operations (ANY dest is also a source)
+                // Skip in-place operations (ANY dest overlaps a source)
                 // e.g., s_add_u32 s10, s10, s20 - these are NOT dead stores!
                 bool isInPlace = false;
                 for(const StinkyRegister& destReg : inst->getDestRegs())
@@ -153,8 +154,7 @@ namespace
                         continue;
                     for(const StinkyRegister& srcReg : inst->getSrcRegs())
                     {
-                        if(srcReg.isRegister() && srcReg.reg.type == destReg.reg.type
-                           && srcReg.reg.idx == destReg.reg.idx)
+                        if(srcReg.isOverlap(destReg))
                         {
                             isInPlace = true;
                             break;
@@ -178,8 +178,7 @@ namespace
                     {
                         for(const StinkyRegister& kDestReg : blockInstructions[k]->getDestRegs())
                         {
-                            if(kDestReg.isRegister() && kDestReg.reg.type == destReg.reg.type
-                               && kDestReg.reg.idx == destReg.reg.idx)
+                            if(kDestReg.isOverlap(destReg))
                             {
                                 assignmentCount++;
                                 break;
@@ -202,8 +201,7 @@ namespace
                         // Check if this register is used as a source
                         for(const StinkyRegister& srcReg : laterInst->getSrcRegs())
                         {
-                            if(srcReg.isRegister() && srcReg.reg.type == destReg.reg.type
-                               && srcReg.reg.idx == destReg.reg.idx)
+                            if(srcReg.isOverlap(destReg))
                             {
                                 usedBeforeNextAssignment = true;
                                 break;
@@ -213,9 +211,7 @@ namespace
                         // Check if this register is reassigned
                         for(const StinkyRegister& laterDestReg : laterInst->getDestRegs())
                         {
-                            if(laterDestReg.isRegister()
-                               && laterDestReg.reg.type == destReg.reg.type
-                               && laterDestReg.reg.idx == destReg.reg.idx)
+                            if(laterDestReg.isOverlap(destReg))
                             {
                                 foundNextAssignment = true;
                                 break;
@@ -241,22 +237,11 @@ namespace
             for(StinkyInstruction* inst : toRemove)
             {
                 // Check if this instruction belongs to current basic block
-                bool inThisBlock = false;
-                for(IRBase& irNode : bb)
-                {
-                    if(&irNode == inst)
-                    {
-                        inThisBlock = true;
-                        break;
-                    }
-                }
+                bool inThisBlock = inst->getParentBlock() == &bb;
 
                 if(inThisBlock)
                 {
-                    // Clean up use-def chains before deletion to prevent dangling pointers
-                    inst->unlinkFromSources();
-                    inst->unlinkFromUsers();
-                    inst->erase();
+                    DefUseChainUpdater::eraseAndUnlink(inst);
                     removedInBB++;
                 }
             }

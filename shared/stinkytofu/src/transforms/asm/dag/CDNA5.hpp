@@ -37,6 +37,7 @@
 #include <unordered_set>
 
 #include "ReadyQueue.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 
 namespace
@@ -385,6 +386,10 @@ namespace
         bool     isWMMALatencyFree(DAGNode* node);
         DAGNode* pickOneFromWMMA();
         bool     findSmallestPickableNonWmma(DAGNode** outNode, int* kindOut) const;
+        /// True if any non-barrier bucket still has work this pick could take (min-id policy +
+        /// tensor throttle). Barriers must not run while this holds — avoids corner cases where
+        /// WMMA heuristics defer compute but the barrier queue would still drain.
+        bool nonBarrierNodesStillReady() const;
 
     public:
         explicit CDNA5ReadyQueue(const PassContext& passCtx)
@@ -551,18 +556,28 @@ namespace
         return true;
     }
 
+    bool CDNA5ReadyQueue::nonBarrierNodesStillReady() const
+    {
+        DAGNode* n    = nullptr;
+        int      kind = -1;
+        if(findSmallestPickableNonWmma(&n, &kind))
+            return true;
+        return !wmmaQueue.empty();
+    }
+
     // Main scheduling orchestration — rules (1)–(5):
     //   Phase A: WMMA if wmmaNodeCounters, wmmaPipelineGapCycles, isWMMALatencyFree, programOrderOk
     //            (vs findSmallestPickableNonWmma), lastPickedWasWMMA / otherQueuesHaveWork, and
     //            !blockWmmaForLoopHeadBalance (rule 5).
     //   Phase B: pop non-WMMA; on ds_load, extend wmmaRegisterLatencyCounters (rule 2).
-    //   Phase C: barriers. Phase D: forced WMMA via pickOneFromWMMA (skips some Phase A gates).
+    //   Phase C: forced WMMA (pickOneFromWMMA) when Phase A skipped it but wmmaQueue still ready.
+    //   Phase D: barriers only after no global/local/other non-WMMA and no schedulable WMMA remains.
     DAGNode* CDNA5ReadyQueue::pickOne()
     {
         // Phase A — try WMMA first if all WMMA-specific gates pass.
         // Phase B — smallest-id non-WMMA among global/local/other.
-        // Phase C — barriers when the min-id queue is empty but barriers remain ready.
-        // Phase D — forced WMMA (only WMMA left in the ready set for this step).
+        // Phase C — WMMA via pickOneFromWMMA if queue non-empty (Phase A may have deferred it).
+        // Phase D — barriers when nothing else above can run this step.
 
         bool otherQueuesHaveWork
             = !globalReadQueue.empty() || !localReadQueue.empty() || !otherQueue.empty();
@@ -625,18 +640,33 @@ namespace
             return node;
         }
 
+        // Forced WMMA (same as block comment Phase C): must drain before barriers.
+        if(!wmmaQueue.empty())
+        {
+            DAGNode* node     = pickOneFromWMMA();
+            lastPickedWasWMMA = true;
+            return node;
+        }
+
+        assert(!nonBarrierNodesStillReady()
+               && "CDNA5 pickOne: barrier only after pickable global/local/other and WMMA are gone");
+
+        // Phase D — movable barriers only when nothing else in the ready set can be issued this step.
         if(!barrierQueue.empty())
         {
             DAGNode* barrier = barrierQueue.top();
             barrierQueue.pop();
             updateWMMAStatus(barrier);
             lastPickedWasWMMA = false;
+            PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] Phase D barrierQueue dagId=" << barrier->id
+                                 << " (non-barrier buckets empty for this pick)\n";
+                       barrier->inst->dump(std::cerr);
+                       std::cerr << "\n");
             return barrier;
         }
 
-        DAGNode* node     = pickOneFromWMMA();
-        lastPickedWasWMMA = true;
-        return node;
+        assert(false && "CDNA5ReadyQueue::pickOne: all buckets empty");
+        return nullptr;
     }
 
     // Scheduling rule (1): route ready DAG nodes into wmmaQueue, globalReadQueue (tensor_load when

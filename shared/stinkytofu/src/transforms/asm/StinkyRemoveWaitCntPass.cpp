@@ -29,7 +29,18 @@ namespace
 {
     using namespace stinkytofu;
 
-    void removeWaitCntsInBlock(BasicBlock& bb)
+    bool tryRemoveTensorWaitCnt(StinkyInstruction* stinkyInst)
+    {
+        const auto& label = stinkyInst->getParent()->getLabel();
+
+        if(stinkyInst && stinkyInst->is(InstFlag::IF_WaitTensorCnt))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    void removeWaitCntsInBlock(BasicBlock& bb, bool removeTensorWaitCnt)
     {
         for(auto it = bb.begin(); it != bb.end();)
         {
@@ -37,9 +48,7 @@ namespace
 
             if(stinkyInst
                && (isWaitCnt(*stinkyInst)
-                   // TODO: Currently don't handle the tensor waitcnt
-                   //|| stinkyInst->is(InstFlag::IF_WaitTensorCnt)
-                   ))
+                   || (removeTensorWaitCnt && tryRemoveTensorWaitCnt(stinkyInst))))
             {
                 it = bb.eraseIR(it);
             }
@@ -53,6 +62,11 @@ namespace
     class StinkyRemoveWaitCntPass : public StinkyInstPass
     {
     public:
+        StinkyRemoveWaitCntPass(bool removeTensorWaitCnt)
+            : removeTensorWaitCnt(removeTensorWaitCnt)
+        {
+        }
+
         static char ID;
 
         const char* getName() const override
@@ -71,10 +85,13 @@ namespace
             {
                 if(passCtx.shouldProcessBasicBlock(bb))
                 {
-                    removeWaitCntsInBlock(bb);
+                    removeWaitCntsInBlock(bb, removeTensorWaitCnt);
                 }
             }
         }
+
+    private:
+        bool removeTensorWaitCnt;
     };
 
     char StinkyRemoveWaitCntPass::ID = 0;
@@ -82,8 +99,8 @@ namespace
 
 namespace stinkytofu
 {
-    std::unique_ptr<Pass> createStinkyRemoveWaitCntPass()
+    std::unique_ptr<Pass> createStinkyRemoveWaitCntPass(bool removeTensorWaitCnt)
     {
-        return std::make_unique<StinkyRemoveWaitCntPass>();
+        return std::make_unique<StinkyRemoveWaitCntPass>(removeTensorWaitCnt);
     }
 }

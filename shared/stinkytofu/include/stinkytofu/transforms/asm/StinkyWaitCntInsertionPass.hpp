@@ -33,11 +33,10 @@ namespace stinkytofu
      * @brief Creates a minimal wait-count insertion pass.
      *
      * Inserts architecture-specific wait instructions so asynchronous memory operations
-     * complete before their results are used and before barriers:
-     * - @c s_wait_dscnt for DS (LDS) read/write dependencies and before barriers when DS
-     *   ops are still outstanding (barriers clear the modeled DS queue only).
-     * - @c s_wait_loadcnt for global buffer load dependencies (per @c isGlobalMemLoad).
+     * complete before their results are used.
+     *
+     * @param insertTensorWaitCnt Whether to insert tensor waitcnt instructions.
      */
-    std::unique_ptr<Pass> createStinkyWaitCntInsertionPass();
+    std::unique_ptr<Pass> createStinkyWaitCntInsertionPass(bool insertTensorWaitCnt = false);
 
 } // namespace stinkytofu

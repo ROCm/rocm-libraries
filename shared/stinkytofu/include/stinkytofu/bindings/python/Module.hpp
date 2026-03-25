@@ -44,8 +44,8 @@
     X(NumGRB, uint32_t)             \
     X(NumGRM, uint32_t)             \
     X(wavefrontSize, int)           \
-    X(SubGroup0, int)               \
-    X(SubGroup1, int)               \
+    X(WaveGroup0, int)              \
+    X(WaveGroup1, int)              \
     X(VectorWidthA, int)            \
     X(VectorWidthB, int)            \
     X(GlobalReadVectorWidthA, int)  \

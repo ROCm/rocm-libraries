@@ -214,15 +214,18 @@ namespace
         // Each LR i must appear before MFMA index scheLRIndices[i]. With numLRPerMFMA LRs
         // issued before MFMA_0 and after each MFMA, LR i sits before MFMA floor(i/N); need
         // floor(i/N) <= S => N >= ceil((i+1)/(S+1)). Take max with the even-spread bound.
-        uint32_t numLRPerMFMAFromDeps = 0;
+        uint32_t numLRPerMFMAFromDeps = 1;
         for(size_t i = 0; i < scheLRIndices.size(); ++i)
         {
             const int      s     = scheLRIndices[i];
-            const uint64_t denom = static_cast<uint64_t>(s) + 1u;
-            const uint64_t numer = static_cast<uint64_t>(i) + 1u;
-            const uint32_t need  = static_cast<uint32_t>((numer + denom - 1u) / denom);
-            //std::cout<<"s: "<<s<<", denom: "<<denom<<", numer: "<<numer<<", need: "<<need<<std::endl;
-            numLRPerMFMAFromDeps = std::max(numLRPerMFMAFromDeps, need);
+            if(s >= 0)
+            {
+                const uint64_t denom = static_cast<uint64_t>(s) + 1u;
+                const uint64_t numer = static_cast<uint64_t>(i) + 1u;
+                const uint32_t need  = static_cast<uint32_t>((numer + denom - 1u) / denom);
+                //std::cout<<"s: "<<s<<", denom: "<<denom<<", numer: "<<numer<<", need: "<<need<<std::endl;
+                numLRPerMFMAFromDeps = std::max(numLRPerMFMAFromDeps, need);
+            }
         }
         uint32_t numLRPerMFMA = std::max(numLRPerMFMAAtLeast, numLRPerMFMAFromDeps);
         //std::cout<<"numLR: "<<numLR<<", numMFMA: "<<numMFMA<<", numLRPerMFMAAtMost: "<<numLRPerMFMAAtMost<<", numLRPerMFMAAtLeast: "<<numLRPerMFMAAtLeast<<", numLRPerMFMAFromDeps: "<<numLRPerMFMAFromDeps<<", numLRPerMFMA: "<<numLRPerMFMA<<std::endl;

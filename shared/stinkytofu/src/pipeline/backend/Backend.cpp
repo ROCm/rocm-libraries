@@ -96,7 +96,8 @@ namespace stinkytofu
         bool success = runPipelineSequence();
 
         // if range is not empty, reinsert waitcnts in the range
-        if(pImpl->optimizedRangeBegin != IntrusiveListIterator<IRBase>()
+        if(module.getModuleOptions().EnableWaitCntInsertion
+           && pImpl->optimizedRangeBegin != IntrusiveListIterator<IRBase>()
            && pImpl->optimizedRangeEnd != IntrusiveListIterator<IRBase>())
         {
             success = reinsertWaitCntsInOptimizedRange();
@@ -252,7 +253,7 @@ namespace stinkytofu
         passManager.setGemmTileConfig(gemmTileConfig);
         passManager.addPass(createCFGBuilderPass());
         passManager.addPass(createStinkyRemoveWaitCntPass());
-        passManager.addPass(createStinkyWaitCntInsertionPass());
+        passManager.addPass(createStinkyWaitCntInsertionPass(true));
         passManager.run(tempFunc);
 
         // Move IR from temporary function back to module

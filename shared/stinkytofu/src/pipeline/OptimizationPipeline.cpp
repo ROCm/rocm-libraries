@@ -285,54 +285,11 @@ namespace stinkytofu
             }
         }
 
-        // ========== Phase 4: WaitCnt Insertion ==========
-        if(config.enableWaitCnt)
-        {
-            if(config.verbose)
-                std::cout << "\nPhase 4: WaitCnt Insertion ("
-                          << (config.waitCntMode == PipelineConfig::WaitCntMode::Conservative
-                                  ? "Conservative"
-                              : config.waitCntMode == PipelineConfig::WaitCntMode::Minimal
-                                  ? "Minimal"
-                              : config.waitCntMode == PipelineConfig::WaitCntMode::Unroll
-                                  ? "Unroll"
-                                  : "Custom")
-                          << ")" << std::endl;
-
-            std::unique_ptr<Pass> waitCntPass;
-            switch(config.waitCntMode)
-            {
-            case PipelineConfig::WaitCntMode::Conservative:
-                waitCntPass = createStinkyConservativeWaitCntPass();
-                break;
-            case PipelineConfig::WaitCntMode::Minimal:
-                waitCntPass = createStinkyMinimalWaitCntPass();
-                break;
-            case PipelineConfig::WaitCntMode::Unroll:
-                waitCntPass = createStinkyUnrollWaitCntPass();
-                break;
-            case PipelineConfig::WaitCntMode::Custom:
-                if(config.customWaitCnt)
-                    waitCntPass = createStinkyCustomWaitCntPass(*config.customWaitCnt);
-                else
-                    waitCntPass = createStinkyConservativeWaitCntPass(); // Fallback
-                break;
-            case PipelineConfig::WaitCntMode::Classical:
-                waitCntPass = createStinkyWaitCntInsertionPass();
-                break;
-            }
-
-            if(waitCntPass)
-            {
-                passManager.addPass(std::move(waitCntPass));
-            }
-        }
-
-        // ========== Phase 5: Custom Passes (After) ==========
+        // ========== Phase 4: Custom Passes (After) ==========
         if(!config.afterPasses.empty())
         {
             if(config.verbose)
-                std::cout << "\nPhase 5: Custom Passes (After Built-in Pipeline)" << std::endl;
+                std::cout << "\nPhase 4: Custom Passes (After Built-in Pipeline)" << std::endl;
 
             for(size_t i = 0; i < config.afterPasses.size(); ++i)
             {

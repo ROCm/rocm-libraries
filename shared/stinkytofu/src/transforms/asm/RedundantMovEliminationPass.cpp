@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
+#include "stinkytofu/ir/asm/DefUseChainUpdater.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
@@ -143,7 +144,8 @@ namespace
                 }
             }
 
-            std::set<StinkyInstruction*> toRemove;
+            // duplicate → original mapping
+            std::vector<std::pair<StinkyInstruction*, StinkyInstruction*>> toReplace;
 
             // For each instruction, check if it's identical to any previous instruction
             for(size_t i = 0; i < blockInstructions.size(); ++i)
@@ -188,24 +190,20 @@ namespace
 
                         if(!srcModified)
                         {
-                            // Found a duplicate! Mark for removal
-                            toRemove.insert(inst);
+                            toReplace.push_back({inst, prevInst});
                             break;
                         }
                     }
                 }
             }
 
-            // Remove duplicate instructions
-            for(StinkyInstruction* inst : toRemove)
+            for(auto [duplicate, original] : toReplace)
             {
-                // Clean up use-def chains before deletion
-                inst->unlinkFromSources();
-                inst->unlinkFromUsers();
-                inst->erase();
+                DefUseChainUpdater::replaceAllUsesWith(duplicate, original);
+                DefUseChainUpdater::eraseAndUnlink(duplicate);
             }
 
-            return toRemove.size();
+            return static_cast<int>(toReplace.size());
         }
     };
 

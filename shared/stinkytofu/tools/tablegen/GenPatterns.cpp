@@ -221,6 +221,7 @@ public:
     /// Result of a successful pattern match and rewrite
     struct RewriteResult {
         std::vector<StinkyInstruction*> instructionsToRemove;
+        StinkyInstruction* replacementInst = nullptr;
         bool applied = false;
     };
 
@@ -542,6 +543,7 @@ public:
         oss << "        // Return result\n";
         oss << "        RewriteResult result;\n";
         oss << "        result.instructionsToRemove = {" << instToRemove << "};\n";
+        oss << "        result.replacementInst = " << instToModify << ";\n";
         oss << "        result.applied = true;\n";
         oss << "        return result;\n";
         oss << "    }\n";

@@ -34,7 +34,9 @@ namespace stinkytofu
      *
      * This pass walks all basic blocks (respecting PassContext basic block filter)
      * and removes every instruction for which isWaitCnt() is true.
+     *
+     * @param removeTensorWaitCnt Whether to remove tensor waitcnt instructions.
      */
-    std::unique_ptr<Pass> createStinkyRemoveWaitCntPass();
+    std::unique_ptr<Pass> createStinkyRemoveWaitCntPass(bool removeTensorWaitCnt = false);
 
 } // namespace stinkytofu

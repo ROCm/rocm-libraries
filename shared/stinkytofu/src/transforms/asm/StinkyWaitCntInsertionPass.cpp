@@ -23,6 +23,7 @@
 
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
@@ -41,7 +42,8 @@ namespace
     /// @p seenPhi avoids infinite recursion on cyclic PHI webs (defensive).
     static void collectSourcesRec(StinkyInstruction*                      inst,
                                   std::unordered_set<StinkyInstruction*>& seenPhi,
-                                  std::vector<StinkyInstruction*>&        out)
+                                  std::unordered_set<StinkyInstruction*>& out,
+                                  std::function<bool(StinkyInstruction*)> filter = nullptr)
     {
         if(inst == nullptr)
         {
@@ -64,23 +66,28 @@ namespace
             }
             if(src->getUnifiedOpcode() == GFX::PHI)
             {
-                collectSourcesRec(src, seenPhi, out);
+                collectSourcesRec(src, seenPhi, out, filter);
             }
             else
             {
-                out.push_back(src);
+                if(filter == nullptr || filter(src))
+                {
+                    out.insert(src);
+                }
             }
         }
     }
 
     /// Collect all sources of the instruction. If a source is a PHI, collect all its sources recursively.
-    std::vector<StinkyInstruction*> collectSources(StinkyInstruction* inst)
+    std::unordered_set<StinkyInstruction*>
+        collectSources(StinkyInstruction*                      inst,
+                       std::function<bool(StinkyInstruction*)> filter = nullptr)
     {
-        std::vector<StinkyInstruction*>        sources;
+        std::unordered_set<StinkyInstruction*> sources;
         std::unordered_set<StinkyInstruction*> seenPhi;
         if(inst != nullptr)
         {
-            collectSourcesRec(inst, seenPhi, sources);
+            collectSourcesRec(inst, seenPhi, sources, filter);
         }
         return sources;
     }
@@ -161,7 +168,7 @@ namespace
                 return false;
             }
 
-            dsQueue.clear();
+            // dsQueue.clear();
             return true;
         }
 
@@ -212,47 +219,6 @@ namespace
         }
     };
 
-    std::unordered_set<StinkyInstruction*> getMemoryOperationSources(StinkyInstruction* inst)
-    {
-        std::unordered_set<StinkyInstruction*> srcs;
-        if(inst == nullptr)
-        {
-            return srcs;
-        }
-
-        for(StinkyInstruction* src : inst->getSources())
-        {
-            if(src == nullptr)
-            {
-                continue;
-            }
-
-            if(src->getUnifiedOpcode() == GFX::PHI)
-            {
-                for(StinkyInstruction* srcPhi : src->getSources())
-                {
-                    if(srcPhi == nullptr)
-                    {
-                        continue;
-                    }
-                    if(isDSMemoryOp(*srcPhi) || isBufferMemoryOp(*srcPhi))
-                    {
-                        srcs.emplace(srcPhi);
-                    }
-                }
-            }
-            else
-            {
-                if(isDSMemoryOp(*src) || isBufferMemoryOp(*src))
-                {
-                    srcs.emplace(src);
-                }
-            }
-        }
-
-        return srcs;
-    }
-
     class StinkyWaitCntInsertionPass : public StinkyInstPass
     {
     public:
@@ -260,6 +226,11 @@ namespace
         using WaitInsertionList = std::vector<std::pair<StinkyInstruction*, WaitCntInstruction>>;
 
     public:
+        StinkyWaitCntInsertionPass(bool insertTensorWaitCnt)
+            : insertTensorWaitCnt(insertTensorWaitCnt)
+        {
+        }
+
         static char ID;
 
         const char* getName() const override
@@ -278,7 +249,7 @@ namespace
                                           passCtx.getGemmTileConfig().arch[1],
                                           passCtx.getGemmTileConfig().arch[2]);
 
-            buildUseDefChain(func, false);
+            buildUseDefChain(func, true);
             rebuildExitMemoryStateForProcessedBlocks(func, passCtx);
 
             traverseCFGInRPO(func, [&](BasicBlock* bb) {
@@ -291,13 +262,18 @@ namespace
             });
 
             // Handle tensor waits for DS reads.
-            // TODO: Currently don't handle the tensor waitcnt.
-            //handleTensorWaits(func, arch, passCtx);
+            if(insertTensorWaitCnt)
+            {
+                // handleTensorWaits(func, arch, passCtx);
+                reinsertTensorWaitsHeuristic(func, arch, passCtx);
+            }
 
             removePHIs(func, passCtx);
         }
 
     private:
+        bool insertTensorWaitCnt;
+
         /// Exit-state queues for each processed block (full block walk, program order).
         std::unordered_map<BasicBlock*, MemoryOperationState> blockStates;
 
@@ -337,6 +313,8 @@ namespace
             MemoryOperationState currentBlockState;
             WaitInsertionList    instructionsNeedWait;
 
+            int lastDSWaitCount     = WaitCntInstruction::kUnused;
+            int lastBufferWaitCount = WaitCntInstruction::kUnused;
             for(auto it = bb.begin(); it != bb.end(); ++it)
             {
                 StinkyInstruction* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -348,15 +326,9 @@ namespace
                 currentBlockState.recordDSOperation(inst);
                 currentBlockState.recordBufferOperation(inst);
 
-                if(currentBlockState.getDSCountToComplete() > 0
-                   && currentBlockState.applyBarrierIfPresent(inst))
-                {
-                    instructionsNeedWait.emplace_back(
-                        inst, WaitCntInstruction(0, WaitCntInstruction::kUnused));
-                    continue;
-                }
-
-                auto srcs = getMemoryOperationSources(inst);
+                auto srcs = collectSources(inst, [](StinkyInstruction* src) {
+                    return isDSMemoryOp(*src) || isBufferMemoryOp(*src);
+                });
                 if(srcs.empty())
                 {
                     continue;
@@ -415,6 +387,7 @@ namespace
                     }
                     instructionsNeedWait.emplace_back(
                         inst, WaitCntInstruction(dsCountBeforeInst, WaitCntInstruction::kUnused));
+                    lastDSWaitCount = dsCountBeforeInst;
                 }
 
                 if(needBufferWait)
@@ -427,8 +400,27 @@ namespace
                     instructionsNeedWait.emplace_back(
                         inst,
                         WaitCntInstruction(WaitCntInstruction::kUnused, bufferCountBeforeInst));
+                    lastBufferWaitCount = bufferCountBeforeInst;
                 }
             }
+
+            if(lastDSWaitCount != WaitCntInstruction::kUnused
+               && lastDSWaitCount < currentBlockState.dsQueue.size())
+            {
+                currentBlockState.dsQueue.erase(currentBlockState.dsQueue.begin(),
+                                                currentBlockState.dsQueue.end() - lastDSWaitCount);
+            }
+
+            if(lastBufferWaitCount != WaitCntInstruction::kUnused
+               && lastBufferWaitCount < currentBlockState.bufferQueue.size())
+            {
+                currentBlockState.bufferQueue.erase(currentBlockState.bufferQueue.begin(),
+                                                    currentBlockState.bufferQueue.end()
+                                                        - lastBufferWaitCount);
+            }
+
+            // assign currentBlockState back to blockStates[&bb]
+            blockStates[&bb] = currentBlockState;
 
             return instructionsNeedWait;
         }
@@ -491,27 +483,98 @@ namespace
                     SWaitTensorCntData waitCntData;
                     waitCntData.tlcnt = waitCntInstruction.tensorCount;
                     waitInst->addModifier<SWaitTensorCntData>(waitCntData);
+
+                    // // insert s_barrier_signal and s_barrier_wait
+                    // StinkyInstruction* barrierSignalInst
+                    //     = irBuilder.create(getMCIDByUOp(GFX::s_barrier_signal, arch), inst);
+                    // barrierSignalInst->addSrcReg(StinkyRegister(-1));
+                    // StinkyInstruction* barrierWaitInst
+                    //     = irBuilder.create(getMCIDByUOp(GFX::s_barrier_wait, arch), inst);
+                    // barrierWaitInst->addSrcReg(StinkyRegister(-1));
                 }
             }
+        }
+
+        /// heuristic reinsert tensor waitcnts
+        /// 1. remove tensor waitcnts in LoopBeginL and LoopEndL basic blocks
+        /// 2. insert tensor waitcnts before first barrier in LoopBeginL and LoopEndL basic blocks
+        void reinsertTensorWaitsHeuristic(Function& func, GfxArchID arch, PassContext& passCtx)
+        {
+            // handle only for label_LoopBeginL and label_LoopEndL basic block
+            std::unordered_set<std::string> processedLabels
+                = {"label_LoopBeginL", "label_LoopEndL"};
+
+            traverseCFGInRPO(func, [&](BasicBlock* bb) {
+                if(!passCtx.shouldProcessBasicBlock(*bb)
+                   || processedLabels.find(bb->getLabel()) == processedLabels.end())
+                {
+                    return;
+                }
+
+                for(auto it = bb->begin(); it != bb->end();)
+                {
+                    auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                    if(inst && inst->is(InstFlag::IF_WaitTensorCnt))
+                    {
+                        it = bb->eraseIR(it);
+                    }
+                    else
+                    {
+                        ++it;
+                    }
+                }
+            });
+
+            traverseCFGInRPO(func, [&](BasicBlock* bb) {
+                if(!passCtx.shouldProcessBasicBlock(*bb)
+                   || processedLabels.find(bb->getLabel()) == processedLabels.end())
+                {
+                    return;
+                }
+
+                // insert tensor waitcnt before first barrier
+
+                WaitInsertionList tensorWaits;
+                for(auto it = bb->begin(); it != bb->end(); ++it)
+                {
+                    auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                    if(inst && isBarrier(*inst))
+                    {
+                        tensorWaits.emplace_back(inst,
+                                                 WaitCntInstruction(WaitCntInstruction::kUnused,
+                                                                    WaitCntInstruction::kUnused,
+                                                                    0));
+                        break;
+                    }
+                }
+
+                insertWaitsForBlock(*bb, arch, tensorWaits);
+            });
         }
 
         /// Handle tensor waits for DS reads.
         void handleTensorWaits(Function& func, GfxArchID arch, PassContext& passCtx)
         {
-            std::unordered_map<BasicBlock*, std::unordered_map<StinkyInstruction*, int>>
-                dsReadSourcesByBlock;
+            struct TensorLoadBlockState
+            {
+                std::unordered_map<StinkyInstruction*, int> dsReadSources;
+                std::deque<StinkyInstruction*>              tensorLoadQueue;
+            };
+
+            std::unordered_map<BasicBlock*, TensorLoadBlockState> tensorLoadStates;
+
             traverseCFGInRPO(func, [&](BasicBlock* bb) {
                 if(!passCtx.shouldProcessBasicBlock(*bb))
                 {
                     return;
                 }
 
-                if(dsReadSourcesByBlock.find(bb) == dsReadSourcesByBlock.end())
+                if(tensorLoadStates.find(bb) == tensorLoadStates.end())
                 {
-                    dsReadSourcesByBlock.emplace(bb, std::unordered_map<StinkyInstruction*, int>());
+                    tensorLoadStates.emplace(bb, TensorLoadBlockState());
                 }
 
-                auto& dsReadSources = dsReadSourcesByBlock[bb];
+                auto& tensorLoadState = tensorLoadStates[bb];
                 for(auto it = bb->begin(); it != bb->end(); ++it)
                 {
                     auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -527,9 +590,10 @@ namespace
                         {
                             for(StinkyInstruction* src : sources)
                             {
-                                if(dsReadSources.find(src) == dsReadSources.end())
+                                if(tensorLoadState.dsReadSources.find(src)
+                                   == tensorLoadState.dsReadSources.end())
                                 {
-                                    dsReadSources.emplace(src, -1);
+                                    tensorLoadState.dsReadSources.emplace(src, -1);
                                 }
                             }
                         }
@@ -543,22 +607,22 @@ namespace
                     {
                         continue;
                     }
-                    auto& predDsReadSources = dsReadSourcesByBlock[pred];
-                    for(auto& [inst, count] : predDsReadSources)
+                    auto& predTensorLoadState = tensorLoadStates[pred];
+                    for(auto& [inst, count] : predTensorLoadState.dsReadSources)
                     {
-                        dsReadSources[inst] = count;
+                        tensorLoadState.dsReadSources[inst] = count;
                     }
                 }
             });
 
-            std::unordered_map<BasicBlock*, std::deque<StinkyInstruction*>> tensorLoadBlockQueue;
             traverseCFGInRPO(func, [&](BasicBlock* bb) {
                 if(!passCtx.shouldProcessBasicBlock(*bb))
                 {
                     return;
                 }
 
-                auto& currentDsReadSources = dsReadSourcesByBlock[bb];
+                auto& currentTensorLoadState = tensorLoadStates[bb];
+                auto& currentDsReadSources   = currentTensorLoadState.dsReadSources;
                 for(auto& [inst, _] : currentDsReadSources)
                 {
                     std::vector<int> counts;
@@ -568,10 +632,11 @@ namespace
                         {
                             continue;
                         }
-                        auto& predDsReadSources = dsReadSourcesByBlock[pred];
-                        if(predDsReadSources.find(inst) != predDsReadSources.end())
+                        auto& predTensorLoadState = tensorLoadStates[pred];
+                        if(predTensorLoadState.dsReadSources.find(inst)
+                           != predTensorLoadState.dsReadSources.end())
                         {
-                            counts.push_back(predDsReadSources[inst]);
+                            counts.push_back(predTensorLoadState.dsReadSources[inst]);
                         }
                     }
 
@@ -582,24 +647,19 @@ namespace
                     }
                 }
 
-                if(tensorLoadBlockQueue.find(bb) == tensorLoadBlockQueue.end())
-                {
-                    tensorLoadBlockQueue.emplace(bb, std::deque<StinkyInstruction*>());
-                }
-
                 // propagate to this block from predecessors
-                auto& tensorLoadQueue = tensorLoadBlockQueue[bb];
+                auto& tensorLoadQueue = currentTensorLoadState.tensorLoadQueue;
                 for(BasicBlock* pred : bb->getPredecessors())
                 {
                     if(pred == bb)
                     {
                         continue;
                     }
-                    auto& predTensorLoadQueue = tensorLoadBlockQueue[pred];
-                    for(StinkyInstruction* inst : predTensorLoadQueue)
+                    auto& predTensorLoadQueue = tensorLoadStates[pred].tensorLoadQueue;
+                    for(auto* inst : predTensorLoadQueue)
                     {
-                        if(std::find(tensorLoadQueue.begin(), tensorLoadQueue.end(), inst)
-                           == tensorLoadQueue.end())
+                        auto it = std::find(tensorLoadQueue.begin(), tensorLoadQueue.end(), inst);
+                        if(it == tensorLoadQueue.end())
                         {
                             tensorLoadQueue.push_back(inst);
                         }
@@ -608,16 +668,16 @@ namespace
 
                 WaitInsertionList                      tensorWaits;
                 std::unordered_set<StinkyInstruction*> visited;
-
                 for(auto it = bb->begin(); it != bb->end(); ++it)
                 {
                     auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                    if(inst == nullptr)
+                    if(inst == nullptr || inst->getUnifiedOpcode() == GFX::PHI)
                     {
                         continue;
                     }
 
                     visited.emplace(inst);
+
                     if(isTensorLoad(*inst))
                     {
                         tensorLoadQueue.push_back(inst);
@@ -639,11 +699,16 @@ namespace
                                 if(currentDsReadSources[src] == -1)
                                 {
                                     currentDsReadSources[src] += 1;
-                                    tensorWaits.emplace_back(
-                                        inst,
-                                        WaitCntInstruction(WaitCntInstruction::kUnused,
-                                                           WaitCntInstruction::kUnused,
-                                                           0));
+                                    if(!tensorLoadQueue.empty())
+                                    {
+                                        tensorLoadQueue.clear();
+                                        // insert tensor waitcnt
+                                        tensorWaits.emplace_back(
+                                            inst,
+                                            WaitCntInstruction(WaitCntInstruction::kUnused,
+                                                               WaitCntInstruction::kUnused,
+                                                               0));
+                                    }
                                 }
                             }
                         }
@@ -685,8 +750,8 @@ namespace
 
 namespace stinkytofu
 {
-    std::unique_ptr<Pass> createStinkyWaitCntInsertionPass()
+    std::unique_ptr<Pass> createStinkyWaitCntInsertionPass(bool insertTensorWaitCnt)
     {
-        return std::make_unique<StinkyWaitCntInsertionPass>();
+        return std::make_unique<StinkyWaitCntInsertionPass>(insertTensorWaitCnt);
     }
 }
