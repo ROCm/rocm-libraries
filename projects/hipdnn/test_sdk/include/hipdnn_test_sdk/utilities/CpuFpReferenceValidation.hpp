@@ -24,9 +24,11 @@ public:
         : _absoluteTolerance(absoluteTolerance)
         , _relativeTolerance(relativeTolerance)
     {
-        if(absoluteTolerance < 0.0f || relativeTolerance < 0.0f)
+        if(absoluteTolerance < 0.0f || relativeTolerance < 0.0f || std::isnan(absoluteTolerance)
+           || std::isnan(relativeTolerance) || std::isinf(absoluteTolerance)
+           || std::isinf(relativeTolerance))
         {
-            throw std::invalid_argument("Tolerances must be non-negative");
+            throw std::invalid_argument("Tolerances must be finite and non-negative");
         }
     }
 
@@ -53,23 +55,14 @@ public:
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
 
-            const bool refNanOrInf = isnan(refValue) || isinf(refValue);
-            const bool implNanOrInf = isnan(implValue) || isinf(implValue);
-
-            if(refNanOrInf != implNanOrInf)
+            if(isnan(refValue) || isinf(refValue) || isnan(implValue) || isinf(implValue))
             {
                 HIPDNN_SDK_LOG_ERROR(
-                    "NaN or Inf mismatch at indices "
+                    "NaN or Inf detected at indices "
                     << StreamVec(indices) << ": reference value = " << refValue
                     << ", implementation value = " << implValue
                     << ". This may indicate an output element was not written by the operation.");
                 result.store(false, std::memory_order_relaxed);
-                return result.load(std::memory_order_relaxed);
-            }
-
-            if(refNanOrInf && implNanOrInf)
-            {
-                // Both sides agree on NaN/Inf — skip tolerance check
                 return result.load(std::memory_order_relaxed);
             }
 

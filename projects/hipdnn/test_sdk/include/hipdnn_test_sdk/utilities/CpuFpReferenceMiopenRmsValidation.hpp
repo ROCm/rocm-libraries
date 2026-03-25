@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
+#include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 namespace hipdnn_test_sdk::utilities
@@ -24,9 +25,11 @@ public:
     CpuFpReferenceMiopenRmsValidation(T relativeTolerance = std::numeric_limits<T>::epsilon())
         : _relativeTolerance(static_cast<double>(relativeTolerance))
     {
-        if(relativeTolerance < T{0.0})
+        using hipdnn_data_sdk::types::isinf;
+        using hipdnn_data_sdk::types::isnan;
+        if(relativeTolerance < T{0.0} || isnan(relativeTolerance) || isinf(relativeTolerance))
         {
-            throw std::invalid_argument("Tolerances must be non-negative");
+            throw std::invalid_argument("Tolerance must be finite and non-negative");
         }
     }
 
@@ -61,22 +64,14 @@ public:
             T refValueT = refView.getHostValue(indices);
             T implValueT = implView.getHostValue(indices);
 
-            const bool refNanOrInf = isnan(refValueT) || isinf(refValueT);
-            const bool implNanOrInf = isnan(implValueT) || isinf(implValueT);
-
-            if(refNanOrInf != implNanOrInf)
+            if(isnan(refValueT) || isinf(refValueT) || isnan(implValueT) || isinf(implValueT))
             {
                 HIPDNN_SDK_LOG_ERROR(
-                    "NaN or Inf mismatch: reference value = "
-                    << refValueT << ", implementation value = " << implValueT
+                    "NaN or Inf detected at indices "
+                    << StreamVec(indices) << ": reference value = " << refValueT
+                    << ", implementation value = " << implValueT
                     << ". This may indicate an output element was not written by the operation.");
                 hasNanOrInf.store(true, std::memory_order_relaxed);
-                return;
-            }
-
-            if(refNanOrInf && implNanOrInf)
-            {
-                // Both sides agree on NaN/Inf — skip accumulation
                 return;
             }
 

@@ -52,9 +52,6 @@ public:
 
         for(auto& executor : planExecutors)
         {
-            zeroOutputBuffers(executor->getOutputTensorIds(),
-                              variantPackWithVirtualTensorsAdded,
-                              graphWrap.getTensorMap());
             executor->execute(variantPackWithVirtualTensorsAdded);
         }
     }
@@ -132,25 +129,6 @@ private:
             return detail::SdpaFwdSignatureKey(node, tensorMap);
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
-        }
-    }
-
-    static void zeroOutputBuffers(
-        const std::vector<int64_t>& outputIds,
-        const std::unordered_map<int64_t, void*>& variantPack,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-            tensorMap)
-    {
-        for(auto id : outputIds)
-        {
-            auto packIt = variantPack.find(id);
-            if(packIt == variantPack.end())
-            {
-                continue;
-            }
-
-            auto tensor = detail::createTensorFromAttribute(*tensorMap.at(id));
-            std::memset(packIt->second, 0, tensor->elementSpace() * tensor->elementSize());
         }
     }
 
