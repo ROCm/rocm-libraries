@@ -260,7 +260,7 @@ void check_integer(const T* a)
         auto val = *a;
         if(val != std::round(val))
         {
-            std::cerr << "Value is not an integer: " << val;
+            std::cerr << "Value is not an integer: " << val << std::endl;
             exit(EXIT_FAILURE);
         }
     }
