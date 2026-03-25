@@ -43,8 +43,10 @@ constexpr int64_t K_TEST_SCALE_UID = 73;
 constexpr int64_t K_TEST_BIAS_UID = 74;
 constexpr int64_t K_TEST_Y_UID = 75;
 
-constexpr std::array<int64_t, 4> K_TEST_DIMS = {1, 64, 32, 32};
-constexpr std::array<int64_t, 4> K_TEST_STRIDES = {65536, 1024, 32, 1};
+constexpr std::array<int64_t, 4> K_TEST_SPATIAL_DIMS = {1, 64, 32, 32};
+constexpr std::array<int64_t, 4> K_TEST_SPATIAL_STRIDES = {65536, 1024, 32, 1};
+constexpr std::array<int64_t, 4> K_TEST_CHANNEL_DIMS = {1, 64, 1, 1};
+constexpr std::array<int64_t, 4> K_TEST_CHANNEL_STRIDES = {64, 1, 1, 1};
 
 // Lifts a frontend graph via build_operation_graph(handle), then
 // reconstructs it with fromBackendDescriptor() for verification.
@@ -85,25 +87,25 @@ protected:
 
         auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_TEST_X_UID).set_name("x").set_data_type(DataType::FLOAT);
-        x->set_dim(toVec(K_TEST_DIMS)).set_stride(toVec(K_TEST_STRIDES));
+        x->set_dim(toVec(K_TEST_SPATIAL_DIMS)).set_stride(toVec(K_TEST_SPATIAL_STRIDES));
 
         auto mean = std::make_shared<TensorAttributes>();
         mean->set_uid(K_TEST_MEAN_UID).set_name("mean").set_data_type(DataType::FLOAT);
-        mean->set_dim(toVec(K_TEST_DIMS)).set_stride(toVec(K_TEST_STRIDES));
+        mean->set_dim(toVec(K_TEST_CHANNEL_DIMS)).set_stride(toVec(K_TEST_CHANNEL_STRIDES));
 
         auto invVariance = std::make_shared<TensorAttributes>();
         invVariance->set_uid(K_TEST_INV_VARIANCE_UID)
             .set_name("inv_variance")
             .set_data_type(DataType::FLOAT);
-        invVariance->set_dim(toVec(K_TEST_DIMS)).set_stride(toVec(K_TEST_STRIDES));
+        invVariance->set_dim(toVec(K_TEST_CHANNEL_DIMS)).set_stride(toVec(K_TEST_CHANNEL_STRIDES));
 
         auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_TEST_SCALE_UID).set_name("scale").set_data_type(DataType::FLOAT);
-        scale->set_dim(toVec(K_TEST_DIMS)).set_stride(toVec(K_TEST_STRIDES));
+        scale->set_dim(toVec(K_TEST_CHANNEL_DIMS)).set_stride(toVec(K_TEST_CHANNEL_STRIDES));
 
         auto bias = std::make_shared<TensorAttributes>();
         bias->set_uid(K_TEST_BIAS_UID).set_name("bias").set_data_type(DataType::FLOAT);
-        bias->set_dim(toVec(K_TEST_DIMS)).set_stride(toVec(K_TEST_STRIDES));
+        bias->set_dim(toVec(K_TEST_CHANNEL_DIMS)).set_stride(toVec(K_TEST_CHANNEL_STRIDES));
 
         BatchnormInferenceAttributes attrs;
         attrs.set_name("test_op");
@@ -146,46 +148,46 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, BasicBatchnormInferenceRo
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_GE(tensorMap.size(), 6u);
 
-    // Verify x tensor
+    // Verify x tensor (spatial dims)
     ASSERT_NE(tensorMap.count(K_TEST_X_UID), 0u);
     EXPECT_EQ(tensorMap[K_TEST_X_UID]->get_uid(), K_TEST_X_UID);
-    EXPECT_EQ(tensorMap[K_TEST_X_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_X_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    EXPECT_EQ(tensorMap[K_TEST_X_UID]->get_dim(), toVec(K_TEST_SPATIAL_DIMS));
+    EXPECT_EQ(tensorMap[K_TEST_X_UID]->get_stride(), toVec(K_TEST_SPATIAL_STRIDES));
     EXPECT_EQ(tensorMap[K_TEST_X_UID]->get_data_type(), DataType::FLOAT);
 
-    // Verify mean tensor
+    // Verify mean tensor (channel dims)
     ASSERT_NE(tensorMap.count(K_TEST_MEAN_UID), 0u);
     EXPECT_EQ(tensorMap[K_TEST_MEAN_UID]->get_uid(), K_TEST_MEAN_UID);
-    EXPECT_EQ(tensorMap[K_TEST_MEAN_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_MEAN_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    EXPECT_EQ(tensorMap[K_TEST_MEAN_UID]->get_dim(), toVec(K_TEST_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_TEST_MEAN_UID]->get_stride(), toVec(K_TEST_CHANNEL_STRIDES));
     EXPECT_EQ(tensorMap[K_TEST_MEAN_UID]->get_data_type(), DataType::FLOAT);
 
-    // Verify inv_variance tensor
+    // Verify inv_variance tensor (channel dims)
     ASSERT_NE(tensorMap.count(K_TEST_INV_VARIANCE_UID), 0u);
     EXPECT_EQ(tensorMap[K_TEST_INV_VARIANCE_UID]->get_uid(), K_TEST_INV_VARIANCE_UID);
-    EXPECT_EQ(tensorMap[K_TEST_INV_VARIANCE_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_INV_VARIANCE_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    EXPECT_EQ(tensorMap[K_TEST_INV_VARIANCE_UID]->get_dim(), toVec(K_TEST_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_TEST_INV_VARIANCE_UID]->get_stride(), toVec(K_TEST_CHANNEL_STRIDES));
     EXPECT_EQ(tensorMap[K_TEST_INV_VARIANCE_UID]->get_data_type(), DataType::FLOAT);
 
-    // Verify scale tensor
+    // Verify scale tensor (channel dims)
     ASSERT_NE(tensorMap.count(K_TEST_SCALE_UID), 0u);
     EXPECT_EQ(tensorMap[K_TEST_SCALE_UID]->get_uid(), K_TEST_SCALE_UID);
-    EXPECT_EQ(tensorMap[K_TEST_SCALE_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_SCALE_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    EXPECT_EQ(tensorMap[K_TEST_SCALE_UID]->get_dim(), toVec(K_TEST_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_TEST_SCALE_UID]->get_stride(), toVec(K_TEST_CHANNEL_STRIDES));
     EXPECT_EQ(tensorMap[K_TEST_SCALE_UID]->get_data_type(), DataType::FLOAT);
 
-    // Verify bias tensor
+    // Verify bias tensor (channel dims)
     ASSERT_NE(tensorMap.count(K_TEST_BIAS_UID), 0u);
     EXPECT_EQ(tensorMap[K_TEST_BIAS_UID]->get_uid(), K_TEST_BIAS_UID);
-    EXPECT_EQ(tensorMap[K_TEST_BIAS_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_BIAS_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    EXPECT_EQ(tensorMap[K_TEST_BIAS_UID]->get_dim(), toVec(K_TEST_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_TEST_BIAS_UID]->get_stride(), toVec(K_TEST_CHANNEL_STRIDES));
     EXPECT_EQ(tensorMap[K_TEST_BIAS_UID]->get_data_type(), DataType::FLOAT);
 
-    // Verify y tensor
+    // Verify y tensor (spatial dims, inferred from x)
     ASSERT_NE(tensorMap.count(K_TEST_Y_UID), 0u);
     EXPECT_EQ(tensorMap[K_TEST_Y_UID]->get_uid(), K_TEST_Y_UID);
-    EXPECT_EQ(tensorMap[K_TEST_Y_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_Y_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    EXPECT_EQ(tensorMap[K_TEST_Y_UID]->get_dim(), toVec(K_TEST_SPATIAL_DIMS));
+    EXPECT_EQ(tensorMap[K_TEST_Y_UID]->get_stride(), toVec(K_TEST_SPATIAL_STRIDES));
     EXPECT_EQ(tensorMap[K_TEST_Y_UID]->get_data_type(), DataType::FLOAT);
 
     // Verify sub-node count and type
@@ -290,23 +292,23 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, BatchnormInferenceLiftWit
     ASSERT_GE(tensorMap.size(), 6u);
 
     ASSERT_NE(tensorMap.count(K_TEST_X_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TEST_X_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_X_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    EXPECT_EQ(tensorMap[K_TEST_X_UID]->get_dim(), toVec(K_TEST_SPATIAL_DIMS));
+    EXPECT_EQ(tensorMap[K_TEST_X_UID]->get_stride(), toVec(K_TEST_SPATIAL_STRIDES));
     ASSERT_NE(tensorMap.count(K_TEST_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TEST_MEAN_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_MEAN_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    EXPECT_EQ(tensorMap[K_TEST_MEAN_UID]->get_dim(), toVec(K_TEST_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_TEST_MEAN_UID]->get_stride(), toVec(K_TEST_CHANNEL_STRIDES));
     ASSERT_NE(tensorMap.count(K_TEST_INV_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TEST_INV_VARIANCE_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_INV_VARIANCE_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    EXPECT_EQ(tensorMap[K_TEST_INV_VARIANCE_UID]->get_dim(), toVec(K_TEST_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_TEST_INV_VARIANCE_UID]->get_stride(), toVec(K_TEST_CHANNEL_STRIDES));
     ASSERT_NE(tensorMap.count(K_TEST_SCALE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TEST_SCALE_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_SCALE_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    EXPECT_EQ(tensorMap[K_TEST_SCALE_UID]->get_dim(), toVec(K_TEST_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_TEST_SCALE_UID]->get_stride(), toVec(K_TEST_CHANNEL_STRIDES));
     ASSERT_NE(tensorMap.count(K_TEST_BIAS_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TEST_BIAS_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_BIAS_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    EXPECT_EQ(tensorMap[K_TEST_BIAS_UID]->get_dim(), toVec(K_TEST_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_TEST_BIAS_UID]->get_stride(), toVec(K_TEST_CHANNEL_STRIDES));
     ASSERT_NE(tensorMap.count(K_TEST_Y_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TEST_Y_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_Y_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    EXPECT_EQ(tensorMap[K_TEST_Y_UID]->get_dim(), toVec(K_TEST_SPATIAL_DIMS));
+    EXPECT_EQ(tensorMap[K_TEST_Y_UID]->get_stride(), toVec(K_TEST_SPATIAL_STRIDES));
 }
 
 } // namespace
