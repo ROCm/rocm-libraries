@@ -52,8 +52,8 @@ const auto should_skip = [](amdgcn_target_id currentArchId) {
         (currentArchId >= amdgcn_target_id::GFX942) && (currentArchId <= amdgcn_target_id::GFX950);
     return ((currentArchId == amdgcn_target_id::HOST) || !(isSupportedWmma || isSupportedMfma));
 };
-const std::function<fp32_t(uint32_t)> validator = [](uint32_t fragK) {
-    return static_cast<fp32_t>(fragK);
+const std::function<fp32_t(uint32_t)> validator = [](uint32_t waveTileK) {
+    return static_cast<fp32_t>(waveTileK);
 };
 } // namespace
 

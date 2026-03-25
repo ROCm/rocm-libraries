@@ -47,10 +47,13 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     using Base = MmaPipelineBase<sparse::detail::getPipelineFlags(), SparseMmaPipeline<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
 
+    static_assert(!Base::template hasFlag<MmaPipelineOptionFlag::C_TRANSPOSE>(),
+                  "Cannot transpose C in sparse intrinsics.");
+
     using MmaOp = MmaOp_; // Expose the selected MmaOp
 
     // Calculate the uncompressed A vector type
-    struct InternalAVecCalculator
+    struct ExternalAVecCalculator
     {
         using AVecTraits               = vector_traits<typename MmaOp::AVecType>;
         static constexpr index_t ASize = AVecTraits::vector_size * MmaOp::kCompressionRatio;
@@ -58,7 +61,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     };
 
     // Expose caller-side vector types
-    using AVecType = typename InternalAVecCalculator::AVecType;
+    using AVecType = typename ExternalAVecCalculator::AVecType;
     using BVecType = typename MmaOp::BVecType;
     using CVecType = typename MmaOp::CVecType;
 
@@ -77,8 +80,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     CK_TILE_DEVICE static void
     execImpl(std::tuple<ATransformResult, BTransformResult, CTransformResult>& vecs)
     {
-        static_assert(
-            std::is_same_v<ATransformResult, decltype(ATransform::exec(InternalAVecT{}))>);
+        static_assert(std::is_same_v<ATransformResult, decltype(ATransform::exec(AVecType{}))>);
         auto& [a_result, b_vec, c_vec] = vecs;
         auto& [a_vec, idx]             = a_result;
         c_vec                          = MmaOp::exec(a_vec, b_vec, c_vec, idx);
