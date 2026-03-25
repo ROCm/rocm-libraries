@@ -10,6 +10,8 @@
 
 #include "rocm_fmha_bwd_api.hpp"
 
+#include <iterator> // std::size
+
 namespace rocm_ck {
 
 // =========================================================================
@@ -47,8 +49,7 @@ static constexpr FmhaBwdOGradDotOVariant ALL_OGRAD_DOT_O_VARIANTS[] = {
 };
 // clang-format on
 
-static constexpr int ALL_OGRAD_DOT_O_VARIANTS_COUNT =
-    sizeof(ALL_OGRAD_DOT_O_VARIANTS) / sizeof(ALL_OGRAD_DOT_O_VARIANTS[0]);
+static constexpr int ALL_OGRAD_DOT_O_VARIANTS_COUNT = std::size(ALL_OGRAD_DOT_O_VARIANTS);
 
 /// Find the best OGradDotO variant matching the given config.
 constexpr const FmhaBwdOGradDotOVariant* findVariant(FmhaBwdOGradDotOConfig cfg)
@@ -120,8 +121,7 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
 };
 // clang-format on
 
-static constexpr int ALL_DQDKDV_VARIANTS_COUNT =
-    sizeof(ALL_DQDKDV_VARIANTS) / sizeof(ALL_DQDKDV_VARIANTS[0]);
+static constexpr int ALL_DQDKDV_VARIANTS_COUNT = std::size(ALL_DQDKDV_VARIANTS);
 
 /// Find the best DqDkDv variant matching the given config.
 /// Matches on signature (dtype, hdim_q, hdim_v, mode) and feature flags.
@@ -171,8 +171,7 @@ static constexpr FmhaBwdConvertDQVariant ALL_CONVERT_DQ_VARIANTS[] = {
 };
 // clang-format on
 
-static constexpr int ALL_CONVERT_DQ_VARIANTS_COUNT =
-    sizeof(ALL_CONVERT_DQ_VARIANTS) / sizeof(ALL_CONVERT_DQ_VARIANTS[0]);
+static constexpr int ALL_CONVERT_DQ_VARIANTS_COUNT = std::size(ALL_CONVERT_DQ_VARIANTS);
 
 /// Find the best ConvertDQ variant matching the given config.
 constexpr const FmhaBwdConvertDQVariant* findVariant(FmhaBwdConvertDQConfig cfg)

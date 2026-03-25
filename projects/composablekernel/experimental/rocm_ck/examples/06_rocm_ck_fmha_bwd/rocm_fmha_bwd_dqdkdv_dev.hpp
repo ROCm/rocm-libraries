@@ -90,6 +90,12 @@ struct FmhaBwdDQDKDVTypes
                                               K.has_bias_grad, // kHasBiasGrad
                                               K.block_per_cu>; // kBlockPerCu
 
+    // Guard: tile geometry is only valid for d128. Other hdim values need
+    // different tile configs (see fmha_bwd.py get_dq_dk_dv_tiles()).
+    static_assert(K.hdim_q == 128 && K.hdim_v == 128,
+                  "Tile geometry is hardcoded for d128. Other hdim values "
+                  "require different tile configs.");
+
     // --- Tile shape (hardcoded for d128 gfx9 — Config 4 from fmha_bwd.py) ---
     //
     // From the gfx9 tile table for fp16/bf16 d128:
@@ -513,7 +519,7 @@ __device__ void runFmhaBwdDQDKDV(Args args)
             const float rp_undrop     = args.scalars[S::RP_UNDROP].f32;
             kargs.rp_undrop           = rp_undrop;
             kargs.scale_rp_undrop     = rp_undrop * raw_scale;
-            kargs.p_undrop_in_uint8_t = static_cast<uint8_t>(p_undrop * 255.0f);
+            kargs.p_undrop_in_uint8_t = static_cast<uint8_t>(__builtin_floorf(p_undrop * 255.0f));
 
             kargs.drop_seed.val                 = args.scalars[S::DROP_SEED].u64;
             kargs.drop_offset.val               = args.scalars[S::DROP_OFFSET].u64;
