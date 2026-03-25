@@ -725,7 +725,7 @@ TEST(TestCpuIntReferenceValidationInt32, FailsWhenImplementationHasSentinel)
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
-TEST(TestCpuIntReferenceValidationInt32, PassesWhenBothHaveSentinel)
+TEST(TestCpuIntReferenceValidationInt32, FailsWhenBothHaveSentinel)
 {
     const CpuIntReferenceValidation<int32_t> refValidation;
     const std::vector<int64_t> dims = {2, 2};
@@ -735,7 +735,7 @@ TEST(TestCpuIntReferenceValidationInt32, PassesWhenBothHaveSentinel)
     tensor1.fillWithSentinelValue();
     tensor2.fillWithSentinelValue();
 
-    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
 
 /* ================================================= */

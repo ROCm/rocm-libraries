@@ -130,23 +130,15 @@ public:
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
 
-            const bool refIsSentinel = (refValue == std::numeric_limits<T>::max());
-            const bool implIsSentinel = (implValue == std::numeric_limits<T>::max());
-
-            if(refIsSentinel != implIsSentinel)
+            if(refValue == std::numeric_limits<T>::max()
+               || implValue == std::numeric_limits<T>::max())
             {
                 HIPDNN_SDK_LOG_ERROR(
-                    "Sentinel value mismatch at indices "
+                    "Sentinel value detected at indices "
                     << StreamVec(indices) << ": reference value = " << refValue
                     << ", implementation value = " << implValue
                     << ". This may indicate an output element was not written by the operation.");
                 result.store(false, std::memory_order_relaxed);
-                return result.load(std::memory_order_relaxed);
-            }
-
-            if(refIsSentinel && implIsSentinel)
-            {
-                // Both sides agree on sentinel — skip comparison
                 return result.load(std::memory_order_relaxed);
             }
 
