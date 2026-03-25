@@ -262,6 +262,7 @@ TEST_F(TestUnpackOperation, FailsImmediatelyOnUnpackError)
 // createNodeForType tests
 // ---------------------------------------------------------------------------
 
+// Uncomment when unpack_from_descriptor() is implemented in the lifting PR:
 TEST(TestCreateNodeForType, CreatesBatchnormNode)
 {
     const GraphAttributes graphAttrs;
