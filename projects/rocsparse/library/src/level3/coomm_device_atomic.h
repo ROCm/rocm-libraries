@@ -264,7 +264,7 @@ namespace rocsparse
             {
                 if(slid >= j)
                 {
-                    if(current_row == shared_row[slid - j])
+                    if(current_row == shared_row[(BLOCKSIZE / WF_SIZE) * swid + slid - j])
                     {
                         sum = sum + shared_val[(BLOCKSIZE / WF_SIZE) * swid + slid - j];
                     }
@@ -276,7 +276,8 @@ namespace rocsparse
 
             if(slid < ((BLOCKSIZE / WF_SIZE) - 1))
             {
-                if(current_row != shared_row[slid + 1] && current_row >= 0)
+                if(current_row != shared_row[(BLOCKSIZE / WF_SIZE) * swid + slid + 1]
+                   && current_row >= 0)
                 {
                     if((l + swid) < n)
                     {
