@@ -1,0 +1,16 @@
+MetaVersion: 1
+Source:
+  Origin: rocroller
+  Repository: https://github.com/ROCm/rocroller
+Target:
+  ISA: gfx942
+Kernels:
+  ? RRGEMM_TN_half_half_half_half_float_WGTS64x64x64_WGS128x2_WGMXCC0_LABufferToLDS_LBBufferToLDS_SD1_LSABufferToVGPR_LSBBufferToVGPR_UNROLL0x0_SwizzleScale00_SwizzleTileSize0x0X0x0_PF4x1m1_M_98fd6c3c16c08d0e
+  : Version: 1.0.0
+    ContentHash: sha256:d385115a07f826daeae51c02df6c5e1aaedbde7ffa8781cb69c071ecae234a91
+    Features:
+      SupportsUserArgs: false
+      SupportsBias: false
+      SupportsActivation: false
+      SupportsScaleAlpha: false
+      SupportsGSU: false

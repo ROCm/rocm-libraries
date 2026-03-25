@@ -243,6 +243,7 @@ def argUpdatedGlobalParameters(args):
     if args.debug:
         print1("# Command-line override: Debug")
         rv["CMakeBuildType"] = "Debug"
+        rv["ValidateManifests"] = True
     if args.client_lock:
         rv["ClientExecutionLockPath"] = args.client_lock
     if args.prebuilt_client:

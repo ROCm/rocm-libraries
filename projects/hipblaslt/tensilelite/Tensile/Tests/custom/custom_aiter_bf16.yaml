@@ -14,6 +14,7 @@ GlobalParameters:
   CSVMergeSameProblemID: 1
   Device: 0
   PrintSolutionRejectionReason: True
+  ValidateManifests: True
   DeviceLDS: 163840
   MaxLDS: 163840
 

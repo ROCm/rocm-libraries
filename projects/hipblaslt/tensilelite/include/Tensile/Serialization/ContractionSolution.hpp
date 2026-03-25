@@ -75,6 +75,23 @@ namespace TensileLite
         };
 
         template <typename IO>
+        struct MappingTraits<CustomKernelMetadata, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, CustomKernelMetadata& s)
+            {
+                iot::mapOptional(io, "version", s.version);
+                iot::mapOptional(io, "contentHash", s.contentHash);
+                iot::mapOptional(io, "sourceOrigin", s.sourceOrigin);
+                iot::mapOptional(io, "sourceCommit", s.sourceCommit);
+                iot::mapOptional(io, "scheduleParams", s.scheduleParams);
+                iot::mapOptional(io, "features", s.features);
+            }
+
+            const static bool flow = false;
+        };
+
+        template <typename IO>
         struct MappingTraits<CustomKernel, IO>
         {
             using iot = IOTraits<IO>;
@@ -88,6 +105,7 @@ namespace TensileLite
                 iot::mapOptional(io, "workspaceType", s.workspaceType);
                 iot::mapOptional(io, "workspaceSizePerElemC", s.workspaceSizePerElemC);
                 iot::mapOptional(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
+                iot::mapOptional(io, "metadata", s.metadata);
             }
 
             const static bool flow = false;

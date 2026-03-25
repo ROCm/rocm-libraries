@@ -25,6 +25,7 @@
 from . import CUSTOM_KERNEL_PATH
 from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters, newMIValidParameters
 
+import hashlib
 import re
 import yaml
 
@@ -84,6 +85,10 @@ _ACTIVATION_ARG_INDEX = {
     "activationGamma": 2,
     "activationDelta": 3,
 }
+
+MANIFEST_FILENAME = "manifest.yaml"
+MANIFEST_VERSION = 1
+_INHERITABLE_SECTIONS = ("Source", "Toolchain", "Target")
 
 def isCustomKernelConfig(config):
     if "CustomKernel" in config and config["CustomKernel"]["name"]:
@@ -310,3 +315,122 @@ def getCustomKernelConfig(
     kernelConfig["CustomKernelName"] = kernelName
 
     return kernelConfig
+
+
+################################################################################
+# Manifest schema and read/validate functions
+################################################################################
+
+def getManifestFilepath(kernelPath):
+    """Returns the manifest.yaml path in the same directory as the given kernel file."""
+    return os.path.join(os.path.dirname(os.path.abspath(kernelPath)), MANIFEST_FILENAME)
+
+def readManifest(directory):
+    """Loads and validates the manifest YAML from the given directory.
+
+    Returns the parsed manifest dict, or None if no manifest file exists.
+    Raises RuntimeError on schema violations.
+    """
+    manifestPath = os.path.join(directory, MANIFEST_FILENAME)
+    if not os.path.isfile(manifestPath):
+        return None
+
+    with open(manifestPath) as f:
+        manifest = yaml.safe_load(f)
+
+    if not isinstance(manifest, dict):
+        raise RuntimeError(f"Invalid manifest at {manifestPath}: expected a YAML mapping")
+    if "MetaVersion" not in manifest:
+        raise RuntimeError(f"Invalid manifest at {manifestPath}: missing required field 'MetaVersion'")
+    if manifest["MetaVersion"] != MANIFEST_VERSION:
+        raise RuntimeError(
+            f"Unsupported MetaVersion {manifest['MetaVersion']} in {manifestPath} "
+            f"(expected {MANIFEST_VERSION})"
+        )
+    if "Kernels" not in manifest or not isinstance(manifest.get("Kernels"), dict):
+        raise RuntimeError(f"Invalid manifest at {manifestPath}: missing or invalid 'Kernels' mapping")
+
+    for kernelName, entry in manifest["Kernels"].items():
+        if not isinstance(entry, dict):
+            raise RuntimeError(
+                f"Invalid manifest at {manifestPath}: entry for '{kernelName}' must be a mapping"
+            )
+        if "Version" not in entry:
+            raise RuntimeError(
+                f"Invalid manifest at {manifestPath}: kernel '{kernelName}' missing required 'Version'"
+            )
+        if "ContentHash" not in entry:
+            raise RuntimeError(
+                f"Invalid manifest at {manifestPath}: kernel '{kernelName}' missing required 'ContentHash'"
+            )
+
+    return manifest
+
+def readKernelMetadata(name, directory=CUSTOM_KERNEL_PATH):
+    """Loads the manifest and returns the fully-merged entry for the named kernel.
+
+    Top-level Source, Toolchain, and Target sections are inherited by the kernel
+    entry, with per-kernel values taking precedence.
+
+    Returns the merged metadata dict, or None if no manifest or no entry exists.
+    """
+    kernelPath = getCustomKernelFilepath(name, directory)
+    kernelDir = os.path.dirname(os.path.abspath(kernelPath))
+    manifest = readManifest(kernelDir)
+    if manifest is None:
+        return None
+
+    kernels = manifest.get("Kernels", {})
+    if name not in kernels:
+        return None
+
+    entry = dict(kernels[name])
+
+    for section in _INHERITABLE_SECTIONS:
+        if section in manifest:
+            topLevel = manifest[section]
+            if section in entry:
+                merged = dict(topLevel)
+                merged.update(entry[section])
+                entry[section] = merged
+            else:
+                entry[section] = dict(topLevel)
+
+    return entry
+
+def computeContentHash(name, directory=CUSTOM_KERNEL_PATH):
+    """Computes the SHA256 content hash of the kernel's .s file.
+
+    Returns a string in the form 'sha256:<hex_digest>'.
+    """
+    filepath = getCustomKernelFilepath(name, directory)
+    h = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return "sha256:" + h.hexdigest()
+
+def validateKernelMetadata(name, directory=CUSTOM_KERNEL_PATH):
+    """Validates the manifest entry for a kernel against its .s file on disk.
+
+    Checks that a manifest entry exists and that the ContentHash matches.
+
+    Returns:
+        (bool, str): A tuple of (is_valid, message).
+    """
+    metadata = readKernelMetadata(name, directory)
+    if metadata is None:
+        return False, f"No manifest entry found for kernel '{name}'"
+
+    expectedHash = metadata.get("ContentHash")
+    if not expectedHash:
+        return False, f"Manifest entry for '{name}' has no ContentHash"
+
+    actualHash = computeContentHash(name, directory)
+    if actualHash != expectedHash:
+        return False, (
+            f"Content hash mismatch for '{name}': "
+            f"manifest={expectedHash}, actual={actualHash}"
+        )
+
+    return True, f"Kernel '{name}' metadata is valid"

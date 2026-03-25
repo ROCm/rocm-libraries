@@ -14,7 +14,8 @@ GlobalParameters:
   CSVMergeSameProblemID: 1
   Device: 0
   PrintSolutionRejectionReason: True
-  
+  ValidateManifests: True
+
   # PrintTensorA: 1
   # PrintTensorB: 1
   # PrintTensorD: 2

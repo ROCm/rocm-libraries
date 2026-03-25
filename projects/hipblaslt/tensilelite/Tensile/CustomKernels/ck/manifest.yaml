@@ -1,0 +1,16 @@
+MetaVersion: 1
+Source:
+  Origin: composable_kernel
+  Repository: https://github.com/ROCm/composable_kernel
+Target:
+  ISA: gfx942
+Kernels:
+  c_ck_gemm_basic_hip_amdgcn_amd_amdhsa_gfx942:
+    Version: 1.0.0
+    ContentHash: sha256:e711c0e4c481db8b77397238e26b6f7cd68e0697b04dc70ba8851a58bc9e448a
+    Features:
+      SupportsUserArgs: false
+      SupportsBias: false
+      SupportsActivation: false
+      SupportsScaleAlpha: false
+      SupportsGSU: false

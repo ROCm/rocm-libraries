@@ -31,7 +31,14 @@ from pathlib import Path
 from typing import List, Union, NamedTuple
 
 from Tensile.Common import print2
+from Tensile.Common.GlobalParameters import globalParameters
 from Tensile.Common.Architectures import isaToGfx
+from Tensile.CustomKernels import (
+    validateKernelMetadata,
+    readManifest,
+    MANIFEST_FILENAME,
+)
+from Tensile import CUSTOM_KERNEL_PATH
 from ..SolutionStructs import Solution
 
 from .Component import Assembler, Linker, Bundler
@@ -47,6 +54,49 @@ def makeAssemblyToolchain(assembler_path, bundler_path, co_version, build_id_kin
    linker = Linker(assembler_path, build_id_kind)
    bundler = Bundler(bundler_path)
    return AssemblyToolchain(compiler, linker, bundler)
+
+
+def validateCustomKernelManifests(kernels, directory=CUSTOM_KERNEL_PATH):
+    """Validates manifest entries for all custom kernels in the build.
+
+    Logs warnings for kernels with missing manifests or stale content hashes.
+    Returns the number of validation issues found.
+    """
+    import os
+
+    issues = 0
+    validated = set()
+
+    for k in kernels:
+        ck = k.get("CustomKernel", None)
+        if not ck or not ck.get("name"):
+            continue
+
+        name = ck["name"]
+        if name in validated:
+            continue
+        validated.add(name)
+
+        valid, msg = validateKernelMetadata(name, directory)
+        if not valid:
+            print2(f"WARNING: Manifest validation: {msg}")
+            issues += 1
+        else:
+            print2(f"Manifest OK: {name}")
+
+    if not validated:
+        return 0
+
+    dirs_checked = set()
+    for root, dirs, files in os.walk(directory):
+        if MANIFEST_FILENAME not in files:
+            s_files = [f for f in files if f.endswith(".s")]
+            if s_files and root not in dirs_checked:
+                print2(f"WARNING: No {MANIFEST_FILENAME} in {root} ({len(s_files)} kernel(s))")
+                issues += 1
+        dirs_checked.add(root)
+
+    return issues
 
 
 def buildAssemblyCodeObjectFiles(
@@ -67,6 +117,11 @@ def buildAssemblyCodeObjectFiles(
         asmDir: The directory containing the assembly files.
         compress: Whether to compress the code object files.
     """
+
+    if globalParameters["ValidateManifests"]:
+        issues = validateCustomKernelManifests(kernels)
+        if issues:
+            print2(f"WARNING: {issues} manifest validation issue(s) found")
 
     extObj = ".o"
     extCo = ".co"

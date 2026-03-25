@@ -301,6 +301,7 @@ globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
 )
+globalParameters["ValidateManifests"] = False  # Set to True to validate manifest.yaml hashes at build time
 
 globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the performance metric
 
