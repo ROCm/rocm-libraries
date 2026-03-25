@@ -803,7 +803,7 @@ ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
         result.invoker_factory =
             [N, C, H, W, K, n_groups, ss_kernel_info_ = std::move(ss_kernel_info)](
                 const std::vector<Kernel>& kernels) mutable {
-                return [=, ss_kernel_infO = std::move(ss_kernel_info_)](
+                return [=, ss_kernel_info2 = std::move(ss_kernel_info_)](
                            const Handle& handle, const AnyInvokeParams& primitive_params) {
                     const auto main_kernel = handle.Run(kernels[0]);
                     const auto& invoke_params =
@@ -816,21 +816,21 @@ ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
 
                     if(invoke_params.type != InvokeType::AutoTune)
                     {
-                        auto&& ss_kernels = handle.GetKernels(ss_kernel_infO.kernel_name,
-                                                              ss_kernel_infO.comp_options);
+                        auto&& ss_kernels = handle.GetKernels(ss_kernel_info2.kernel_name,
+                                                              ss_kernel_info2.comp_options);
                         if(!ss_kernels.empty())
                         {
                             ss_kernels.front()(x, workSpace);
                         }
                         else
                         {
-                            handle.AddKernel(ss_kernel_infO.kernel_name,
-                                             ss_kernel_infO.comp_options,
-                                             ss_kernel_infO.kernel_file,
-                                             ss_kernel_infO.kernel_name,
-                                             ss_kernel_infO.l_wk,
-                                             ss_kernel_infO.g_wk,
-                                             ss_kernel_infO.comp_options)(x, workSpace);
+                            handle.AddKernel(ss_kernel_info2.kernel_name,
+                                             ss_kernel_info2.comp_options,
+                                             ss_kernel_info2.kernel_file,
+                                             ss_kernel_info2.kernel_name,
+                                             ss_kernel_info2.l_wk,
+                                             ss_kernel_info2.g_wk,
+                                             ss_kernel_info2.comp_options)(x, workSpace);
                         }
                         if(handle.IsProfilingEnabled())
                             elapsed += handle.GetKernelTime();

@@ -129,8 +129,8 @@ ConvSolution MaxForward::GetSolution(const ExecutionContext&,
 
     result.invoker_factory = [](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kerneL = handle_.Run(kernels.front());
-            decltype(auto) params = raw_params.CastTo<miopen::reduce::ExtremeInvokeParams>();
+            decltype(auto) kernel_ = handle_.Run(kernels.front());
+            decltype(auto) params  = raw_params.CastTo<miopen::reduce::ExtremeInvokeParams>();
 
             auto xdims_ = params.xDesc->GetLengths();
             auto ydims_ = params.yDesc->GetLengths();
@@ -143,7 +143,7 @@ ConvSolution MaxForward::GetSolution(const ExecutionContext&,
             auto inner_size = std::accumulate(
                 xdims_.begin() + dim + 1, xdims_.end(), 1ULL, std::multiplies<size_t>());
 
-            kerneL(params.x, params.y, params.indice, output_numel, reduce_size, inner_size);
+            kernel_(params.x, params.y, params.indice, output_numel, reduce_size, inner_size);
         };
     };
 

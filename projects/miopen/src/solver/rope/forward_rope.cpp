@@ -100,8 +100,8 @@ ConvSolution RoPEForward::GetSolution(const ExecutionContext&,
 
     result.invoker_factory = [](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kerneL = handle_.Run(kernels.front());
-            decltype(auto) params = raw_params.CastTo<miopen::rope::FwdInvokeParams>();
+            decltype(auto) kernel_ = handle_.Run(kernels.front());
+            decltype(auto) params  = raw_params.CastTo<miopen::rope::FwdInvokeParams>();
 
             auto ydims_  = params.yDesc->GetLengths();
             auto cosdims = params.cosDesc->GetLengths();
@@ -111,7 +111,7 @@ ConvSolution RoPEForward::GetSolution(const ExecutionContext&,
             auto rotary_numel =
                 std::accumulate(cosdims.begin(), cosdims.end(), 1ULL, std::multiplies<size_t>());
 
-            kerneL(params.x, params.cos, params.sin, params.y, output_numel_, rotary_numel);
+            kernel_(params.x, params.cos, params.sin, params.y, output_numel_, rotary_numel);
         };
     };
 
