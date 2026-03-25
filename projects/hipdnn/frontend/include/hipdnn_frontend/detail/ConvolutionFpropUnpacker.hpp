@@ -40,23 +40,29 @@ namespace hipdnn_frontend::detail
 
     // Unpack convolution parameters
     std::vector<int64_t> prePadding;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrVec(
-        opDesc, HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, prePadding, "conv pre_padding"));
+    HIPDNN_CHECK_ERROR(getDescriptorAttrVec(opDesc,
+                                            HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
+                                            HIPDNN_TYPE_INT64,
+                                            prePadding,
+                                            "conv pre_padding"));
     attributes.set_pre_padding(std::move(prePadding));
 
     std::vector<int64_t> postPadding;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrVec(
-        opDesc, HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS, postPadding, "conv post_padding"));
+    HIPDNN_CHECK_ERROR(getDescriptorAttrVec(opDesc,
+                                            HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS,
+                                            HIPDNN_TYPE_INT64,
+                                            postPadding,
+                                            "conv post_padding"));
     attributes.set_post_padding(std::move(postPadding));
 
     std::vector<int64_t> stride;
     HIPDNN_CHECK_ERROR(getDescriptorAttrVec(
-        opDesc, HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES, stride, "conv stride"));
+        opDesc, HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES, HIPDNN_TYPE_INT64, stride, "conv stride"));
     attributes.set_stride(std::move(stride));
 
     std::vector<int64_t> dilation;
-    HIPDNN_CHECK_ERROR(
-        getDescriptorAttrVec(opDesc, HIPDNN_ATTR_CONVOLUTION_DILATIONS, dilation, "conv dilation"));
+    HIPDNN_CHECK_ERROR(getDescriptorAttrVec(
+        opDesc, HIPDNN_ATTR_CONVOLUTION_DILATIONS, HIPDNN_TYPE_INT64, dilation, "conv dilation"));
     attributes.set_dilation(std::move(dilation));
 
     // Unpack convolution mode

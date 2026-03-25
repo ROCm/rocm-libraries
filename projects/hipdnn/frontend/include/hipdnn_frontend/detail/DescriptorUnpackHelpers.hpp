@@ -37,15 +37,19 @@ namespace hipdnn_frontend::detail
     return {};
 }
 
-/// Gets a vector-valued int64 attribute (queries count first, then allocates and queries values).
+/// Gets a vector-valued attribute (queries count first, then allocates and queries values).
+template <typename T>
 [[nodiscard]] inline Error getDescriptorAttrVec(hipdnnBackendDescriptor_t desc,
                                                 hipdnnBackendAttributeName_t attrName,
-                                                std::vector<int64_t>& values,
+                                                hipdnnBackendAttributeType_t attrType,
+                                                std::vector<T>& values,
                                                 const std::string& errorContext)
 {
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "getDescriptorAttrVec requires a trivially copyable type");
+
     int64_t count = 0;
-    HIPDNN_CHECK_ERROR(
-        getDescriptorAttrCount(desc, attrName, HIPDNN_TYPE_INT64, count, errorContext));
+    HIPDNN_CHECK_ERROR(getDescriptorAttrCount(desc, attrName, attrType, count, errorContext));
 
     if(count <= 0)
     {
@@ -57,7 +61,7 @@ namespace hipdnn_frontend::detail
     int64_t actualCount = 0;
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendGetAttribute(
-            desc, attrName, HIPDNN_TYPE_INT64, count, &actualCount, values.data()),
+            desc, attrName, attrType, count, &actualCount, values.data()),
         "Failed to get " + errorContext);
     if(actualCount != count)
     {
@@ -281,13 +285,13 @@ template <typename T>
 
     // Read dimensions
     std::vector<int64_t> dims;
-    HIPDNN_CHECK_ERROR(
-        getDescriptorAttrVec(tensorDesc, HIPDNN_ATTR_TENSOR_DIMENSIONS, dims, "tensor dimensions"));
+    HIPDNN_CHECK_ERROR(getDescriptorAttrVec(
+        tensorDesc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, dims, "tensor dimensions"));
 
     // Read strides
     std::vector<int64_t> strides;
-    HIPDNN_CHECK_ERROR(
-        getDescriptorAttrVec(tensorDesc, HIPDNN_ATTR_TENSOR_STRIDES, strides, "tensor strides"));
+    HIPDNN_CHECK_ERROR(getDescriptorAttrVec(
+        tensorDesc, HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, strides, "tensor strides"));
 
     // Read is_virtual
     bool isVirtual = false;

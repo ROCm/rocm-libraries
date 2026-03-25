@@ -46,31 +46,14 @@ namespace hipdnn_frontend::detail
     attributes.set_y(yTensor);
 
     // Unpack block_size (int32 vector)
-    {
-        int64_t count = 0;
-        HIPDNN_CHECK_ERROR(
-            getDescriptorAttrCount(opDesc,
-                                   HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
-                                   HIPDNN_TYPE_INT32,
-                                   count,
-                                   "block_scale_dequantize block_size"));
-
-        if(count > 0)
-        {
-            std::vector<int32_t> blockSize(static_cast<size_t>(count));
-            int64_t actualCount = 0;
-            HIPDNN_RETURN_ON_BACKEND_FAILURE(
-                hipdnnBackend()->backendGetAttribute(
-                    opDesc,
-                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
-                    HIPDNN_TYPE_INT32,
-                    count,
-                    &actualCount,
-                    blockSize.data()),
-                "Failed to get block_scale_dequantize block_size");
-            attributes.set_block_size(blockSize);
-        }
-    }
+    std::vector<int32_t> blockSize;
+    HIPDNN_CHECK_ERROR(
+        getDescriptorAttrVec(opDesc,
+                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+                             HIPDNN_TYPE_INT32,
+                             blockSize,
+                             "block_scale_dequantize block_size"));
+    attributes.set_block_size(blockSize);
 
     // Unpack is_negative_scale
     {
