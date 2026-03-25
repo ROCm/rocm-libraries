@@ -26,7 +26,7 @@ static void removeFromUnorderedList(std::vector<EventId> &list,
 
 void Workgroup::retireLdsEvent(EventId eventId) {
   const auto &info = eventRegistry[eventId.value];
-  if (info.type == MemoryEventType::VGPR_TO_LDS) {
+  if (isToLds(info.type)) {
     removeFromUnorderedList(ldsWriteEvents, eventId);
     adjustByteCounts(info.ldsIntervals, byteWriteCounts, -1);
   } else if (info.type == MemoryEventType::LDS_TO_VGPR) {

@@ -239,6 +239,10 @@ public:
   void registerVgprToLdsEvent(int pc, const std::vector<uint32_t> &registers,
                               const IntervalSet &ldsIntervals);
 
+  // Called by buffer_load ... lds (direct-to-LDS). No VGPR registers involved,
+  // only LDS intervals. Counted against vmcnt.
+  void registerGlobalToLdsEvent(int pc, const IntervalSet &ldsIntervals);
+
   // Check if there are any outstanding memory events FROM a specific vgpr, and
   // in a specific lane.
   bool isOutstandingFromVgpr(int lane, int reg) const;

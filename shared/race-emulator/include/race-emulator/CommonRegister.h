@@ -13,6 +13,7 @@ enum class MemoryEventType {
   VGPR_TO_GLOBAL,
   LDS_TO_VGPR,
   VGPR_TO_LDS,
+  GLOBAL_TO_LDS,
   N
 };
 
@@ -21,6 +22,11 @@ enum class MemoryEventType {
 inline bool isToVgpr(MemoryEventType t) {
   return t == MemoryEventType::GLOBAL_TO_VGPR ||
          t == MemoryEventType::LDS_TO_VGPR;
+}
+
+inline bool isToLds(MemoryEventType t) {
+  return t == MemoryEventType::VGPR_TO_LDS ||
+         t == MemoryEventType::GLOBAL_TO_LDS;
 }
 
 inline bool isFromVgpr(MemoryEventType t) {

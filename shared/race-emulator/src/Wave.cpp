@@ -150,6 +150,14 @@ void Wave::registerVgprToLdsEvent(int pc, const std::vector<uint32_t> &wave,
   waveMemoryEvents.push_back(eventId);
 }
 
+void Wave::registerGlobalToLdsEvent(int pc, const IntervalSet &ldsIntervals) {
+  Workgroup &wg = getWorkgroup();
+  auto currentMaskValue = getExecU64();
+  auto eventId = wg.allocateEventId(waveId, pc, MemoryEventType::GLOBAL_TO_LDS,
+                                    {}, currentMaskValue, 0xF, ldsIntervals);
+  waveMemoryEvents.push_back(eventId);
+}
+
 uint8_t Wave::getVgprByte(int reg, int lane, int byteIdx) const {
   assert(byteIdx >= 0 && byteIdx < 4);
   int32_t index = reg * waveSize + lane;
@@ -512,7 +520,8 @@ void Wave::resolveWaitCnt(int limit,
     // Will completely empty bucket at s_barrier.
     auto eventType = getWorkgroup().getEventType(eventId);
     if (eventType == MemoryEventType::VGPR_TO_LDS ||
-        eventType == MemoryEventType::LDS_TO_VGPR) {
+        eventType == MemoryEventType::LDS_TO_VGPR ||
+        eventType == MemoryEventType::GLOBAL_TO_LDS) {
       waveCompleteMemoryEvents.push_back(eventId);
     }
 
@@ -526,9 +535,15 @@ void Wave::sWaitCntVmcnt(int vmcnt) {
       vmcnt,
       [](MemoryEventType type) {
         return type == MemoryEventType::GLOBAL_TO_VGPR ||
-               type == MemoryEventType::VGPR_TO_GLOBAL;
+               type == MemoryEventType::VGPR_TO_GLOBAL ||
+               type == MemoryEventType::GLOBAL_TO_LDS;
       },
-      nullptr);
+      [&](EventId eventId) {
+        if (getWorkgroup().getEventType(eventId) ==
+            MemoryEventType::GLOBAL_TO_LDS) {
+          getWorkgroup().markEventWaveComplete(eventId);
+        }
+      });
 }
 
 void Wave::sWaitCntLgkmcnt(int lgkmcnt) {

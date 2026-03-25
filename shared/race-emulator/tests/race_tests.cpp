@@ -1,4 +1,5 @@
 #include "race-emulator/Emulator.h"
+#include "race-emulator/IntervalSet.h"
 #include <cstring> // For std::memcpy
 #include <gtest/gtest.h>
 #include <numeric>
@@ -1134,4 +1135,161 @@ TEST_F(RaceTestFixture, ExecMask_CrossWave_MissingBarrier1) {
 // other wave's write 2 as unsafe → race.
 TEST_F(RaceTestFixture, ExecMask_CrossWave_MissingBarrier2) {
   ExpectRace(crossWavePartialExecCode(2, 0, true, false), "LDS race", 0, 2);
+}
+
+// ============================================================================
+// GLOBAL_TO_LDS (direct-to-LDS) event lifecycle tests.
+//
+// These test the event tracking API directly without instruction parsing.
+// GLOBAL_TO_LDS is the event type for `buffer_load ... lds` instructions,
+// which load data from global memory and write directly to LDS. Unlike
+// VGPR_TO_LDS, these events have no VGPR registers and are counted by vmcnt
+// (not lgkmcnt).
+// ============================================================================
+
+// registerGlobalToLdsEvent creates an event in waveMemoryEvents and routes it
+// into the Workgroup's ldsWriteEvents.
+TEST(GlobalToLds, EventRegistration) {
+  Workgroup wg;
+  wg.resizeLds(1024);
+  wg.setRaceChecks(true);
+  Wave wave(/*vgprCount=*/4, /*sgprCount=*/4, /*waveSize=*/64, wg);
+  wave.setRaceChecks(true);
+
+  EXPECT_TRUE(wave.getWaveMemoryEvents().empty());
+  EXPECT_TRUE(wg.getLdsWriteEvents().empty());
+
+  IntervalSet intervals;
+  intervals.append(0, 64);
+  wave.registerGlobalToLdsEvent(/*pc=*/10, intervals);
+
+  EXPECT_EQ(wave.getWaveMemoryEvents().size(), 1u);
+  EXPECT_EQ(wg.getLdsWriteEvents().size(), 1u);
+
+  EventId eid = wave.getWaveMemoryEvents()[0];
+  EXPECT_EQ(wg.getEventType(eid), MemoryEventType::GLOBAL_TO_LDS);
+  EXPECT_EQ(wg.getEventStatus(eid), EventStatus::ACTIVE);
+  EXPECT_TRUE(wg.getEventRegisters(eid).empty());
+  EXPECT_EQ(wg.getEventPc(eid), 10);
+}
+
+// sWaitCntVmcnt(0) retires GLOBAL_TO_LDS events, marks them WAVE_COMPLETE,
+// and pushes them to waveCompleteMemoryEvents.
+TEST(GlobalToLds, VmcntRetirement) {
+  Workgroup wg;
+  wg.resizeLds(1024);
+  wg.setRaceChecks(true);
+  Wave wave(/*vgprCount=*/4, /*sgprCount=*/4, /*waveSize=*/64, wg);
+  wave.setRaceChecks(true);
+
+  IntervalSet intervals;
+  intervals.append(0, 64);
+  wave.registerGlobalToLdsEvent(/*pc=*/10, intervals);
+
+  EventId eid = wave.getWaveMemoryEvents()[0];
+  EXPECT_EQ(wg.getEventStatus(eid), EventStatus::ACTIVE);
+
+  wave.sWaitCntVmcnt(0);
+
+  // Event removed from waveMemoryEvents, pushed to waveCompleteMemoryEvents.
+  EXPECT_TRUE(wave.getWaveMemoryEvents().empty());
+  EXPECT_EQ(wave.getWaveCompleteMemoryEvents().size(), 1u);
+  EXPECT_EQ(wg.getEventStatus(eid), EventStatus::WAVE_COMPLETE);
+
+  // Still in ldsWriteEvents until barrier retires it.
+  EXPECT_EQ(wg.getLdsWriteEvents().size(), 1u);
+}
+
+// After vmcnt retires a GLOBAL_TO_LDS event (WAVE_COMPLETE), the owning wave
+// can safely read the same LDS range without a race.
+TEST(GlobalToLds, OwningWaveCanReadAfterVmcnt) {
+  Workgroup wg;
+  wg.resizeLds(1024);
+  wg.setRaceChecks(true);
+  Wave wave(/*vgprCount=*/4, /*sgprCount=*/4, /*waveSize=*/64, wg);
+  wave.setRaceChecks(true);
+
+  IntervalSet intervals;
+  intervals.append(0, 64);
+  wave.registerGlobalToLdsEvent(/*pc=*/10, intervals);
+  wave.sWaitCntVmcnt(0);
+
+  // Owning wave reads LDS — should not throw.
+  EXPECT_NO_THROW(wg.readLds<uint32_t>(0, WaveId{0}, 0));
+}
+
+// Before vmcnt, the owning wave reading LDS in the same range is a race
+// (event is still ACTIVE).
+TEST(GlobalToLds, OwningWaveRaceBeforeVmcnt) {
+  Workgroup wg;
+  wg.resizeLds(1024);
+  wg.setRaceChecks(true);
+  Wave wave(/*vgprCount=*/4, /*sgprCount=*/4, /*waveSize=*/64, wg);
+  wave.setRaceChecks(true);
+
+  IntervalSet intervals;
+  intervals.append(0, 64);
+  wave.registerGlobalToLdsEvent(/*pc=*/10, intervals);
+
+  // Event is ACTIVE — reading overlapping LDS is a race even for owning wave.
+  EXPECT_THROW(wg.readLds<uint32_t>(0, WaveId{0}, 0), RaceConditionException);
+}
+
+// Cross-wave race: wave 0 does GLOBAL_TO_LDS, wave 1 reads same LDS range.
+// Even after vmcnt, the event is only WAVE_COMPLETE (safe for wave 0) but
+// still unsafe for wave 1 until barrier.
+TEST(GlobalToLds, CrossWaveRace) {
+  const std::map<std::string, int> labels;
+  const std::map<std::string, Macro> macros;
+  Workgroup wg;
+  wg.resizeLds(1024);
+  wg.setRaceChecks(true);
+
+  // Create two waves sharing the same workgroup.
+  Wave wave0(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4,
+             /*waveSize=*/64, WaveId{0}, wg, &labels, &macros);
+  Wave wave1(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4,
+             /*waveSize=*/64, WaveId{1}, wg, &labels, &macros);
+  wave0.setRaceChecks(true);
+  wave1.setRaceChecks(true);
+
+  IntervalSet intervals;
+  intervals.append(0, 64);
+  wave0.registerGlobalToLdsEvent(/*pc=*/10, intervals);
+  wave0.sWaitCntVmcnt(0);
+
+  // Wave 0 can read safely (WAVE_COMPLETE for its own wave).
+  EXPECT_NO_THROW(wg.readLds<uint32_t>(0, WaveId{0}, 0));
+
+  // Wave 1 cannot — event is WAVE_COMPLETE but not RETIRED (no barrier).
+  EXPECT_THROW(wg.readLds<uint32_t>(0, WaveId{1}, 0), RaceConditionException);
+}
+
+// After barrier (flushWaveCompleteMemoryEvents), the event is fully retired
+// and other waves can safely access the LDS range.
+TEST(GlobalToLds, CrossWaveSafeAfterBarrier) {
+  const std::map<std::string, int> labels;
+  const std::map<std::string, Macro> macros;
+  Workgroup wg;
+  wg.resizeLds(1024);
+  wg.setRaceChecks(true);
+
+  Wave wave0(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4,
+             /*waveSize=*/64, WaveId{0}, wg, &labels, &macros);
+  Wave wave1(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4,
+             /*waveSize=*/64, WaveId{1}, wg, &labels, &macros);
+  wave0.setRaceChecks(true);
+  wave1.setRaceChecks(true);
+
+  IntervalSet intervals;
+  intervals.append(0, 64);
+  wave0.registerGlobalToLdsEvent(/*pc=*/10, intervals);
+  wave0.sWaitCntVmcnt(0);
+
+  // Simulate barrier: flush all wave-complete events.
+  wave0.flushWaveCompleteMemoryEvents();
+
+  // Now wave 1 can safely read.
+  EXPECT_NO_THROW(wg.readLds<uint32_t>(0, WaveId{1}, 0));
+  EXPECT_TRUE(wg.getLdsWriteEvents().empty());
 }

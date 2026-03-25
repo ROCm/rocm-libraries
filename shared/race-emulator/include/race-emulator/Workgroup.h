@@ -46,8 +46,9 @@ enum class EventStatus {
 ///
 /// Event lifecycle:
 ///   1. Wave issues a memory instruction → allocateEventId() allocates an
-///      event. LDS events (VGPR_TO_LDS, LDS_TO_VGPR) are automatically
-///      added to the appropriate live event list (writes or reads).
+///      event. LDS events (VGPR_TO_LDS, GLOBAL_TO_LDS, LDS_TO_VGPR) are
+///      automatically added to the appropriate live event list (writes or
+///      reads).
 ///   2. s_waitcnt → markEventWaveComplete() transitions the event to
 ///      WAVE_COMPLETE. The owning wave may now safely access the same
 ///      LDS bytes, but other waves may not.
@@ -65,8 +66,8 @@ enum class EventStatus {
 ///
 /// The event lists are split by direction so that validateRead only scans
 /// write events (RAW check) and validateWrite only scans read events
-/// (WAR check). This will extend naturally to GLOBAL_TO_LDS when
-/// direct-to-LDS copies are supported.
+/// (WAR check). GLOBAL_TO_LDS (direct-to-LDS) events are routed into
+/// ldsWriteEvents alongside VGPR_TO_LDS.
 class Workgroup {
 
   /// Per-event metadata, stored once in the event registry (not per byte).
@@ -90,8 +91,9 @@ class Workgroup {
   };
 
   /// Check for RAW (read-after-write) hazards: confirms no outstanding
-  /// VGPR_TO_LDS write events overlap [addr, addr+nBytes). Uses per-byte
-  /// counts for fast-path, then interval scanning if counts are non-zero.
+  /// LDS write events (VGPR_TO_LDS, GLOBAL_TO_LDS) overlap
+  /// [addr, addr+nBytes). Uses per-byte counts for fast-path, then interval
+  /// scanning if counts are non-zero.
   void validateRead(int addr, WaveId wave, int lane, int nBytes) const;
 
   /// Check for WAR (write-after-read) hazards: confirms no outstanding
@@ -175,7 +177,7 @@ public:
     EventId eid{id};
     if (hasLds) {
       const auto &ivs = eventRegistry[id].ldsIntervals;
-      if (type == MemoryEventType::VGPR_TO_LDS) {
+      if (isToLds(type)) {
         ldsWriteEvents.push_back(eid);
         adjustByteCounts(ivs, byteWriteCounts, +1);
       } else if (type == MemoryEventType::LDS_TO_VGPR) {
@@ -249,13 +251,14 @@ private:
 
   // Live LDS events, split by direction. validateRead scans only writes,
   // validateWrite scans only reads. Retired at s_barrier.
-  std::vector<EventId> ldsWriteEvents; // VGPR_TO_LDS
+  std::vector<EventId> ldsWriteEvents; // VGPR_TO_LDS, GLOBAL_TO_LDS
   std::vector<EventId> ldsReadEvents;  // LDS_TO_VGPR
 
   // Per-byte event counts for fast-path validation. If count is zero for all
   // bytes in a read/write range, no race is possible — skip interval scanning.
-  std::vector<int> byteWriteCounts; // VGPR_TO_LDS events per byte
-  std::vector<int> byteReadCounts;  // LDS_TO_VGPR events per byte
+  std::vector<int>
+      byteWriteCounts; // VGPR_TO_LDS / GLOBAL_TO_LDS events per byte
+  std::vector<int> byteReadCounts; // LDS_TO_VGPR events per byte
 
   // Per-event metadata, indexed by eventId (sequential from 0).
   std::vector<EventInfo> eventRegistry;
