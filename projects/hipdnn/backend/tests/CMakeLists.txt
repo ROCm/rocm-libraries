@@ -32,6 +32,7 @@ add_executable(
     descriptors/TestGraphDescriptorCustomOp.cpp
     descriptors/TestConvolutionFwdOperationDescriptor.cpp
     descriptors/TestConvolutionWrwOperationDescriptor.cpp
+    descriptors/TestConvolutionWrwOperationFromNode.cpp
     descriptors/TestGraphDescriptorConvolutionWrw.cpp
     descriptors/TestBatchnormInferenceOperationDescriptor.cpp
     descriptors/TestBatchnormOperationDescriptor.cpp
