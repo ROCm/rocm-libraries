@@ -81,8 +81,6 @@ foreach(arch IN LISTS archs)
         COMMAND_EXPAND_LISTS
     )
 
-    # Output the per-arch .dat and .co into library/<arch>/ so each shard's
-    # artifacts compose additively on overlay (no last-writer-wins conflict).
     add_custom_target(extop-library-${arch} ALL
         DEPENDS
             "${output_code_object_file}"

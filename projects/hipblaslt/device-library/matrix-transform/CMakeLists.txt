@@ -28,8 +28,6 @@ list(REMOVE_DUPLICATES archs)
 
 set(matrix_transform_cpp "${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform.cpp")
 
-# Build one .hsaco per arch and place it in library/<arch>/ so each shard's
-# artifact is additive on overlay (no last-writer-wins conflict).
 foreach(arch IN LISTS archs)
     set(output_library "${CMAKE_CURRENT_BINARY_DIR}/hipblasltTransform_${arch}.hsaco")
     add_custom_command(

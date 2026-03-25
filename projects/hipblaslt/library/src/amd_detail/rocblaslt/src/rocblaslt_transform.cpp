@@ -53,10 +53,6 @@ namespace
             = "/opt/rocm/lib/hipblaslt/library/hipblasltTransform.hsaco";
 #endif
 
-        // Probe for per-arch layout: library/<arch>/hipblasltTransform.hsaco
-        // This is the layout produced by per-shard TheRock builds, where each
-        // shard places its arch-specific artifacts in an arch-named subdirectory
-        // so shard install trees can be overlaid without last-writer-wins conflicts.
         int             deviceId{};
         hipDeviceProp_t props{};
         if(hipGetDevice(&deviceId) == hipSuccess
@@ -74,7 +70,6 @@ namespace
                 return *perArchPath;
         }
 
-        // Fall back to legacy flat layout: library/hipblasltTransform.hsaco
         auto path = rocblaslt_find_library_relative_path(
             std::filesystem::path("hipblasltTransform.hsaco"));
         if(path)
