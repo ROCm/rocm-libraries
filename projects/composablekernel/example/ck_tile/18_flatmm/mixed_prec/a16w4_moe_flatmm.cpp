@@ -180,7 +180,6 @@ float a16w4_moe_gemm(const MoeFlatmmHostArgs& args, const ck_tile::stream_config
                                                  FlatmmConfig::NumWaveGroups,
                                                  false,
                                                  1,
-                                                 false,
                                                  BlockedXDLN_PerWarp>>>;
 
         using CodegenFlatmmPipeline = std::conditional_t<

@@ -123,7 +123,6 @@ float mx_flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
                                                                    FlatmmConfig::NumWaveGroups,
                                                                    false, // FixedVectorSize
                                                                    1,     // VectorSizeC
-                                                                   false,
                                                                    BlockedXDLN_PerWarp>>>;
 
     using Kernel = ck_tile::MXFlatmmKernel<TilePartitioner, MXFlatmmPipeline, GemmEpilogue>;

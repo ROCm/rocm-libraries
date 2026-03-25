@@ -204,7 +204,6 @@ float moe_gemm(const ck_tile::MoeFlatmmHostArgs<ScaleM, ScaleN>& args,
                                                  FlatmmConfig::NumWaveGroups,
                                                  false,
                                                  1,
-                                                 false,
                                                  BlockedXDLN_PerWarp>>>;
 
         using CodegenFlatmmPipeline =

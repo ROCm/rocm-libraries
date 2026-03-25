@@ -142,31 +142,17 @@ class TestGemmPersistentAsyncInput : public ::testing::Test
         using DsLayout   = ck_tile::tuple<>;
         using DsDataType = ck_tile::tuple<>;
 
-        using GemmEpilogue = ck_tile::CShuffleEpilogue<
-            ck_tile::CShuffleEpilogueProblem<ADataType,
-                                             BDataType,
-                                             DsDataType,
-                                             AccDataType,
-                                             CDataType,
-                                             DsLayout,
-                                             CLayout,
-                                             ck_tile::element_wise::PassThrough,
-                                             TilePartitioner::MPerBlock,
-                                             TilePartitioner::NPerBlock,
-                                             M_Warp,
-                                             N_Warp,
-                                             M_Warp_Tile,
-                                             N_Warp_Tile,
-                                             K_Warp_Tile,
-                                             UniversalGemmProblem::TransposeC,
-                                             1,     // kNumWaveGroups_
-                                             false, // FixedVectorSize_
-                                             1,     // VectorSizeC_
-                                             false, // TiledMMAPermuteN_
-                                             1,     // BlockedXDLN_PerWarp_
-                                             DoubleSmemBuffer>>;
+        using GemmEpilogue =
+            ck_tile::CShuffleEpilogue < ck_tile::CShuffleEpilogueProblem < ADataType,
+              BDataType, DsDataType, AccDataType, CDataType, DsLayout, CLayout,
+              ck_tile::element_wise::PassThrough, TilePartitioner::MPerBlock,
+              TilePartitioner::NPerBlock, M_Warp, N_Warp, M_Warp_Tile, N_Warp_Tile, K_Warp_Tile,
+              UniversalGemmProblem::TransposeC,
+              1,   // kNumWaveGroups_
+            false, // FixedVectorSize_
+            1,     // VectorSizeC_
 
-        using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+            using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 
         // Calculate tiles and chunks for async scheduler.
         // Uses modulo wraparound like PyTorch - chunk_idx = (iM + pivot) / tiles_per_chunk %

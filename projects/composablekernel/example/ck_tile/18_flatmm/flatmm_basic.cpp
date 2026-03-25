@@ -248,6 +248,7 @@ float flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
                       << "Shape: " << CodegenFlatmmShape::GetName() << "\n"
                       << "problem: " << CodegenPipelineProblem::GetName() << "\n"
                       << "pipeline: " << CodegenFlatmmPipeline::GetName() << "\n"
+                      << "epilogue: " << GemmEpilogue::GetName() << "\n"
                       << "grid: {" << grids.x << ", " << grids.y << ", " << grids.z << "}"
                       << ", blocks: {" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}"
                       << std::endl;

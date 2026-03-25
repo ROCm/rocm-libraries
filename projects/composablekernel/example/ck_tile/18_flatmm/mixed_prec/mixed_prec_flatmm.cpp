@@ -149,7 +149,6 @@ float mixed_prec_flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>&
                                                  FlatmmConfig::NumWaveGroups,
                                                  false, // FixedVectorSize
                                                  1,     // VectorSizeC
-                                                 false,
                                                  BlockedXDLN_PerWarp>>>;
 
         using Kernel =
