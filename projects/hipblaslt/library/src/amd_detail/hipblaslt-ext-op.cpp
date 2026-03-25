@@ -137,6 +137,23 @@ namespace
             return libPath;
         }
 
+        // Probe for per-arch layout: library/<arch>/hipblasltExtOpLibrary.dat
+        // This is the layout produced by per-shard TheRock builds, where each
+        // shard places its arch-specific artifacts in an arch-named subdirectory
+        // so shard install trees can be overlaid without last-writer-wins conflicts.
+        int              deviceId{};
+        hipDeviceProp_t  props{};
+        if(hipGetDevice(&deviceId) == hipSuccess
+           && hipGetDeviceProperties(&props, deviceId) == hipSuccess)
+        {
+            const std::string archName = trimArchName(props.gcnArchName);
+            auto perArchPath = rocblaslt_find_library_relative_path(
+                std::filesystem::path(archName) / "hipblasltExtOpLibrary.dat");
+            if(perArchPath)
+                return perArchPath->string();
+        }
+
+        // Fall back to legacy flat layout: library/hipblasltExtOpLibrary.dat
         auto path = rocblaslt_find_library_relative_path(
             std::filesystem::path("hipblasltExtOpLibrary.dat"));
         if(path)

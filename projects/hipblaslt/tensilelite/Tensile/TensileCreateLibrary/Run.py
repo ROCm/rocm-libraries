@@ -440,9 +440,14 @@ def writeSolutionsAndKernelsTCL(
     removeTemporaries: bool=True
 ):
     outputPath = Path(outputPath)
-    destLibPath = ensurePath(
-        outputPath / "library"
-    )  # Destination for code object library files (.co)
+    # When building for exactly one arch (single-shard TheRock build), place all
+    # outputs in library/<arch>/ so each shard's artifacts are additive on overlay.
+    # The runtime already checks for this subdirectory (tensile_host.cpp:2424-2426).
+    if len(cmdlineArchs) == 1:
+        destLibPath = ensurePath(outputPath / "library" / cmdlineArchs[0])
+    else:
+        destLibPath = ensurePath(outputPath / "library")
+    destLibPath  # Destination for code object library files (.co)
     buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())
     assemblyTmpPath = ensurePath(
         buildTmpPath / "assembly"
@@ -858,7 +863,12 @@ def run():
         for arch in targetIsas
         if isaInfoMap[arch].asmCaps["SupportedISA"]
     ]
-    newLibraryDir = ensurePath(os.path.join(outputPath, "library"))
+    # Mirror the per-arch subdirectory logic from writeSolutionsAndKernelsTCL:
+    # single-arch builds get library/<arch>/ so shards compose additively on overlay.
+    if len(archs) == 1:
+        newLibraryDir = ensurePath(os.path.join(outputPath, "library", archs[0]))
+    else:
+        newLibraryDir = ensurePath(os.path.join(outputPath, "library"))
     splitGSU = False
 
     start_pki = timer()
