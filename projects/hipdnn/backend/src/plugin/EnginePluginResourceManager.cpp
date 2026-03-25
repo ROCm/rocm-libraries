@@ -365,7 +365,8 @@ void EnginePluginResourceManager::setStream(hipStream_t stream) const
 }
 
 std::vector<int64_t>
-    EnginePluginResourceManager::getApplicableEngineIds(const GraphDescriptor* graphDesc) const
+    EnginePluginResourceManager::getApplicableEngineIds(const GraphDescriptor* graphDesc,
+                                                        bool findFirst) const
 {
     THROW_IF_NULL(graphDesc, HIPDNN_STATUS_INTERNAL_ERROR, "Graph descriptor cannot be null");
 
@@ -392,6 +393,11 @@ std::vector<int64_t>
                                       "Engine ID " + std::to_string(id)
                                           + " is already associated with a different plugin");
             }
+        }
+
+        if(findFirst && !engineIds.empty())
+        {
+            break;
         }
     }
 
