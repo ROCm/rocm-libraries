@@ -82,6 +82,8 @@ consteval auto visit_op(const Op& op, F&& f)
         return f(std::get<SoftmaxOp>(op));
     if(std::holds_alternative<ScaleOp>(op))
         return f(std::get<ScaleOp>(op));
+    if(std::holds_alternative<FmhaBwdOp>(op))
+        return f(std::get<FmhaBwdOp>(op));
     return f(std::get<std::monostate>(op));
 }
 
@@ -189,6 +191,21 @@ register_slots(const Op& op, const Signature& sig, auto& find_or_add, auto& set_
             set_if_unknown(find_or_add(typed_op.out), 2, Layout::Row);
             return typed_op.out;
         }
+        else if constexpr(std::is_same_v<T, FmhaBwdOp>)
+        {
+            // FmhaBwdOp: 6 inputs + 3 outputs, all rank 2 except
+            // LSE and D (rank 1). Outputs are dQ, dK, dV.
+            set_if_unknown(find_or_add(typed_op.q), 2, Layout::Row);
+            set_if_unknown(find_or_add(typed_op.k), 2, Layout::Row);
+            set_if_unknown(find_or_add(typed_op.v), 2, Layout::Row);
+            find_or_add(typed_op.lse); // rank 1, no layout default
+            set_if_unknown(find_or_add(typed_op.do_), 2, Layout::Row);
+            find_or_add(typed_op.d); // rank 1, no layout default
+            set_if_unknown(find_or_add(typed_op.dq), 2, Layout::Row);
+            set_if_unknown(find_or_add(typed_op.dk), 2, Layout::Row);
+            set_if_unknown(find_or_add(typed_op.dv), 2, Layout::Row);
+            return typed_op.dq; // first output
+        }
         else if constexpr(std::is_same_v<T, ScaleOp>)
         {
             // ScaleOp is unary + scalar reference validation
@@ -243,10 +260,11 @@ consteval void propagate_slots(const Op& op, auto& propagate_binary, auto& propa
     visit_op(op, [&](const auto& typed_op) {
         using T = std::remove_cvref_t<decltype(typed_op)>;
 
-        if constexpr(std::is_same_v<T, std::monostate> || std::is_same_v<T, GemmOp>)
+        if constexpr(std::is_same_v<T, std::monostate> || std::is_same_v<T, GemmOp> ||
+                     std::is_same_v<T, FmhaBwdOp>)
         {
             // monostate: nothing to do
-            // GemmOp: rank/layout already set in register_slots
+            // GemmOp/FmhaBwdOp: rank/layout already set in register_slots
         }
         else if constexpr(BinaryOpLike<T>)
         {
@@ -587,6 +605,41 @@ static_assert(scaled_gemm_resolved.scalar_index("beta") == 1);
 static_assert(resolve(Signature{
     .dtype = DataType::FP16,
     .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).num_scalars == 0);
+
+// --- FmhaBwdOp: resolves to 9 tensors with correct rank/layout ---
+constexpr ResolvedSignature fmha_bwd_resolved = resolve(Signature{
+    .dtype = DataType::FP16,
+    .tensors = {Tensor{.name = "LSE", .dtype = DataType::FP32},
+                Tensor{.name = "D", .dtype = DataType::FP32},
+                Tensor{.name = "DQ_ACC", .dtype = DataType::FP32}},
+    .scalars = {Scalar{.name = "raw_scale"},
+                Scalar{.name = "scale"},
+                Scalar{.name = "num_head_q"},
+                Scalar{.name = "nhead_ratio_qk"}},
+    .ops = {FmhaBwdOp{.q = "Q", .k = "K", .v = "V",
+                       .lse = "LSE", .do_ = "dO", .d = "D",
+                       .dq = "DQ_ACC", .dk = "dK", .dv = "dV"}}});
+
+static_assert(fmha_bwd_resolved.num_tensors == 9);
+static_assert(fmha_bwd_resolved.tensor("Q").rank == 2);
+static_assert(fmha_bwd_resolved.tensor("Q").dtype == DataType::FP16);
+static_assert(fmha_bwd_resolved.tensor("LSE").dtype == DataType::FP32);
+static_assert(fmha_bwd_resolved.tensor("D").dtype == DataType::FP32);
+static_assert(fmha_bwd_resolved.tensor("DQ_ACC").dtype == DataType::FP32);
+static_assert(fmha_bwd_resolved.tensor("dK").dtype == DataType::FP16);
+static_assert(fmha_bwd_resolved.tensor("dV").dtype == DataType::FP16);
+static_assert(fmha_bwd_resolved.tensor_index("Q") == 0);
+static_assert(fmha_bwd_resolved.tensor_index("K") == 1);
+static_assert(fmha_bwd_resolved.tensor_index("V") == 2);
+static_assert(fmha_bwd_resolved.tensor_index("LSE") == 3);
+static_assert(fmha_bwd_resolved.tensor_index("dO") == 4);
+static_assert(fmha_bwd_resolved.tensor_index("D") == 5);
+static_assert(fmha_bwd_resolved.tensor_index("DQ_ACC") == 6);
+static_assert(fmha_bwd_resolved.tensor_index("dK") == 7);
+static_assert(fmha_bwd_resolved.tensor_index("dV") == 8);
+static_assert(fmha_bwd_resolved.num_scalars == 4);
+static_assert(fmha_bwd_resolved.scalar_index("raw_scale") == 0);
+static_assert(fmha_bwd_resolved.scalar_index("num_head_q") == 2);
 
 // Error cases (uncommenting any would produce consteval compile errors):
 //

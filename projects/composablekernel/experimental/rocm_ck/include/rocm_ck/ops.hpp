@@ -98,6 +98,29 @@ struct ScaleOp
     std::string_view scale;
 };
 
+/// FMHA backward dQ/dK/dV: fused 5-GEMM backward attention kernel.
+///
+/// Names input/output tensors without decomposing the internal compute
+/// graph. Feature flags (mask, dropout, bias, deterministic) belong in
+/// the Algorithm, not in the op.
+struct FmhaBwdOp
+{
+    // Inputs
+    std::string_view q;   // query           [seqlen_q, hdim_q]
+    std::string_view k;   // key             [seqlen_k, hdim_q]
+    std::string_view v;   // value           [seqlen_k, hdim_v]
+    std::string_view lse; // log-sum-exp     [seqlen_q] (from forward)
+    std::string_view do_; // output gradient [seqlen_q, hdim_v]
+    std::string_view d;   // OGradDotO       [seqlen_q]
+
+    // Outputs
+    std::string_view dq; // query gradient  [seqlen_q, hdim_q]
+    std::string_view dk; // key gradient    [seqlen_k, hdim_q]
+    std::string_view dv; // value gradient  [seqlen_k, hdim_v]
+
+    DataType acc_dtype = DataType::FP32;
+};
+
 /// Variant of all operator types. std::monostate marks empty slots.
 using Op = std::variant<std::monostate,
                         GemmOp,
@@ -109,6 +132,7 @@ using Op = std::variant<std::monostate,
                         SiluOp,
                         SigmoidOp,
                         SoftmaxOp,
-                        ScaleOp>;
+                        ScaleOp,
+                        FmhaBwdOp>;
 
 } // namespace rocm_ck
