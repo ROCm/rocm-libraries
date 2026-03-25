@@ -43,6 +43,13 @@ function(add_fp8_fp8_benchmark M N M_WAVE N_WAVE M_XDL N_XDL K_XDL)
         ${M} ${N} ${M_WAVE} ${N_WAVE} ${M_XDL} ${N_XDL} ${K_XDL} ${CONFIG})
 endfunction()
 
+function(add_fp32_benchmark M N M_WAVE N_WAVE M_XDL N_XDL K_XDL)
+    set(NAME "bench_lds_fp32_${M_XDL}x${N_XDL}x${K_XDL}_${M_WAVE}x${N_WAVE}")
+    set(CONFIG "FP32_${M_XDL}x${N_XDL}x${K_XDL}_${M_WAVE}x${N_WAVE}")
+    add_cshuffle_lds_benchmark(${NAME} "float" "float" "float" "float"
+        ${M} ${N} ${M_WAVE} ${N_WAVE} ${M_XDL} ${N_XDL} ${K_XDL} ${CONFIG})
+endfunction()
+
 # Helper to add benchmarks for all wave layouts of a given MFMA tile
 # Block tile M = M_XDL * M_WAVE, N = N_XDL * N_WAVE (must be divisible, here we use single iteration)
 macro(add_benchmarks_for_mfma FUNC M_XDL N_XDL K_XDL)
@@ -54,6 +61,13 @@ macro(add_benchmarks_for_mfma FUNC M_XDL N_XDL K_XDL)
         cmake_language(CALL ${FUNC} ${M} ${N} ${M_WAVE} ${N_WAVE} ${M_XDL} ${N_XDL} ${K_XDL})
     endforeach()
 endmacro()
+
+#
+# FP32 benchmarks
+#
+# MFMA tiles: 32x32x2, 16x16x4
+add_benchmarks_for_mfma(add_fp32_benchmark 32 32 2)
+add_benchmarks_for_mfma(add_fp32_benchmark 16 16 4)
 
 #
 # FP16 benchmarks
