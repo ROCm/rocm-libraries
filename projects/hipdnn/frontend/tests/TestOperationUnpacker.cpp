@@ -286,8 +286,7 @@ TEST_F(TestUnpackOperation, FailsImmediatelyOnUnpackError)
 TEST(TestCreateNodeForType, CreatesBatchnormInferenceNode)
 {
     const GraphAttributes graphAttrs;
-    auto [node, err]
-        = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE, graphAttrs);
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
     auto typedNode = std::dynamic_pointer_cast<BatchnormInferenceNode>(node);
@@ -441,5 +440,3 @@ TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
     EXPECT_TRUE(err.get_message().find("999") != std::string::npos)
         << "Error should include the unsupported type id, got: " << err.get_message();
 }
-
-
