@@ -13961,13 +13961,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -13976,9 +13976,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -14195,13 +14195,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -14246,13 +14246,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -14261,9 +14261,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -14480,13 +14480,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -14531,13 +14531,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -14546,9 +14546,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -14765,13 +14765,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -14816,13 +14816,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -14831,9 +14831,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -15050,13 +15050,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -15101,13 +15101,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -15116,9 +15116,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -15335,13 +15335,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -15386,13 +15386,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -15401,9 +15401,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -15620,13 +15620,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -15671,13 +15671,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -15686,9 +15686,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -15905,13 +15905,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -15956,13 +15956,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -15971,9 +15971,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -16190,13 +16190,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -16241,13 +16241,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -16256,9 +16256,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -16475,13 +16475,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -16526,13 +16526,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -16541,9 +16541,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -16760,13 +16760,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -16811,13 +16811,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -16826,9 +16826,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -17045,13 +17045,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -17096,13 +17096,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -17111,9 +17111,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -17330,13 +17330,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -17381,13 +17381,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -17396,9 +17396,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -17615,13 +17615,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -17666,13 +17666,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -17681,9 +17681,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -17900,13 +17900,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -17951,13 +17951,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -17966,9 +17966,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -18185,13 +18185,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -18236,13 +18236,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -18251,9 +18251,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -18470,13 +18470,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -18521,13 +18521,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -18536,9 +18536,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -18755,13 +18755,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -18806,13 +18806,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -18821,9 +18821,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -19040,13 +19040,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -19091,13 +19091,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -19106,9 +19106,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -19325,13 +19325,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -19376,13 +19376,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -19391,9 +19391,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -19610,13 +19610,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -19661,13 +19661,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -19676,9 +19676,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -19895,13 +19895,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -19946,13 +19946,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -19961,9 +19961,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -20180,13 +20180,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -20231,13 +20231,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -20246,9 +20246,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -20465,13 +20465,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -20516,13 +20516,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -20531,9 +20531,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -20750,13 +20750,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -20801,13 +20801,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -20816,9 +20816,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -21035,13 +21035,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -21086,13 +21086,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -21101,9 +21101,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -21320,13 +21320,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -21371,13 +21371,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -21386,9 +21386,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -21605,13 +21605,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -21656,13 +21656,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -21671,9 +21671,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -21890,13 +21890,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -21941,13 +21941,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -21956,9 +21956,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -22175,13 +22175,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -22226,13 +22226,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -22241,9 +22241,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -22460,13 +22460,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -22511,13 +22511,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -22526,9 +22526,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -22745,13 +22745,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -22796,13 +22796,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -22811,9 +22811,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -23030,13 +23030,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -23081,13 +23081,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -23096,9 +23096,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -23315,13 +23315,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -23366,13 +23366,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -23381,9 +23381,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -23600,13 +23600,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -23651,13 +23651,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -23666,9 +23666,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -23885,13 +23885,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -23936,13 +23936,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -23951,9 +23951,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -24170,13 +24170,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -24221,13 +24221,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -24236,9 +24236,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -24455,13 +24455,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -24506,13 +24506,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -24521,9 +24521,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -24740,13 +24740,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -24791,13 +24791,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -24806,9 +24806,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -25025,13 +25025,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -25076,13 +25076,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -25091,9 +25091,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -25310,13 +25310,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -25361,13 +25361,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -25376,9 +25376,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -25595,13 +25595,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -25646,13 +25646,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -25661,9 +25661,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -25880,13 +25880,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -25931,13 +25931,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -25946,9 +25946,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -26165,13 +26165,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -26216,13 +26216,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -26231,9 +26231,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -26450,13 +26450,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -26501,13 +26501,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -26516,9 +26516,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -26735,13 +26735,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -26786,13 +26786,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -26801,9 +26801,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -27020,13 +27020,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -27071,13 +27071,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -27086,9 +27086,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -27305,13 +27305,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -27356,13 +27356,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -27371,9 +27371,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -27590,13 +27590,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -27641,13 +27641,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -27656,9 +27656,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -27875,13 +27875,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -27926,13 +27926,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -27941,9 +27941,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -28160,13 +28160,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -28211,13 +28211,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -28226,9 +28226,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -28445,13 +28445,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -28496,13 +28496,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -28511,9 +28511,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -28730,13 +28730,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -28781,13 +28781,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -28796,9 +28796,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -29015,13 +29015,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -29066,13 +29066,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -29081,9 +29081,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -29300,13 +29300,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -29351,13 +29351,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -29366,9 +29366,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -29585,13 +29585,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -29636,13 +29636,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -29651,9 +29651,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -29870,13 +29870,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -29921,13 +29921,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -29936,9 +29936,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -30155,13 +30155,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -30206,13 +30206,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -30221,9 +30221,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -30440,13 +30440,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -30491,13 +30491,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -30506,9 +30506,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -30725,13 +30725,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -30776,13 +30776,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -30791,9 +30791,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -31010,13 +31010,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -31061,13 +31061,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -31076,9 +31076,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -31295,13 +31295,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -31346,13 +31346,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -31361,9 +31361,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -31580,13 +31580,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -31631,13 +31631,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -31646,9 +31646,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -31865,13 +31865,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -31916,13 +31916,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -31931,9 +31931,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -32150,13 +32150,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -32201,13 +32201,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -32216,9 +32216,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 2
   GlobalSplitU: 0
@@ -32435,13 +32435,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 15
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -32486,13 +32486,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -32501,9 +32501,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 2
   GlobalSplitU: 0
@@ -32720,13 +32720,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 13
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -32771,13 +32771,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -32786,9 +32786,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 2
   GlobalSplitU: 0
@@ -33005,13 +33005,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 11
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -33056,13 +33056,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -33071,9 +33071,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 2
   GlobalSplitU: 0
@@ -33290,13 +33290,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 9
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -33341,13 +33341,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -33356,9 +33356,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 2
   GlobalSplitU: 0
@@ -33575,13 +33575,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -33626,13 +33626,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -33641,9 +33641,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 2
   GlobalSplitU: 0
@@ -33860,13 +33860,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -33911,13 +33911,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -33926,9 +33926,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 2
   GlobalSplitU: 0
@@ -34145,13 +34145,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -34196,13 +34196,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -34211,9 +34211,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 2
   GlobalSplitU: 0
@@ -34430,13 +34430,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -34481,13 +34481,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -34496,9 +34496,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 2
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -34715,13 +34715,13 @@ Solutions:
   ThreadTileA: 60
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -34766,13 +34766,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -34781,9 +34781,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 2
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -35000,13 +35000,13 @@ Solutions:
   ThreadTileA: 52
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -35051,13 +35051,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -35066,9 +35066,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 2
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -35285,13 +35285,13 @@ Solutions:
   ThreadTileA: 44
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -35336,13 +35336,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -35351,9 +35351,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 2
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -35570,13 +35570,13 @@ Solutions:
   ThreadTileA: 36
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -35621,13 +35621,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -35636,9 +35636,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 2
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -35855,13 +35855,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -35906,13 +35906,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -35921,9 +35921,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 2
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -36140,13 +36140,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -36191,13 +36191,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -36206,9 +36206,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 2
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -36425,13 +36425,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -36476,13 +36476,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 32
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -36491,9 +36491,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 2
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -36710,13 +36710,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -36761,13 +36761,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -36776,9 +36776,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -36995,13 +36995,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -37046,13 +37046,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -37061,9 +37061,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -37280,13 +37280,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -37331,13 +37331,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -37346,9 +37346,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -37565,13 +37565,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -37616,13 +37616,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -37631,9 +37631,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -37850,13 +37850,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -37901,13 +37901,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -37916,9 +37916,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -38135,13 +38135,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -38186,13 +38186,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -38201,9 +38201,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -38420,13 +38420,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -38471,13 +38471,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -38486,9 +38486,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -38705,13 +38705,13 @@ Solutions:
   ThreadTileA: 32
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -38756,13 +38756,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -38771,9 +38771,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -38990,13 +38990,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -39041,13 +39041,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -39056,9 +39056,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -39275,13 +39275,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -39326,13 +39326,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -39341,9 +39341,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -39560,13 +39560,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -39611,13 +39611,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -39626,9 +39626,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -39845,13 +39845,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -39896,13 +39896,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -39911,9 +39911,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -40130,13 +40130,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -40181,13 +40181,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -40196,9 +40196,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -40415,13 +40415,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -40466,13 +40466,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -40481,9 +40481,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -40700,13 +40700,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -40751,13 +40751,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -40766,9 +40766,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -40985,13 +40985,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -41036,13 +41036,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -41051,9 +41051,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -41270,13 +41270,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -41321,13 +41321,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -41336,9 +41336,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -41555,13 +41555,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -41606,13 +41606,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -41621,9 +41621,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -41840,13 +41840,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -41891,13 +41891,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -41906,9 +41906,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -42125,13 +42125,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -42176,13 +42176,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -42191,9 +42191,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -42410,13 +42410,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -42461,13 +42461,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -42476,9 +42476,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -42695,13 +42695,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -42746,13 +42746,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -42761,9 +42761,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -42980,13 +42980,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -43031,13 +43031,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -43046,9 +43046,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -43265,13 +43265,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -43316,13 +43316,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -43331,9 +43331,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -43550,13 +43550,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -43601,13 +43601,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -43616,9 +43616,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -43835,13 +43835,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -43886,13 +43886,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -43901,9 +43901,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -44120,13 +44120,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -44171,13 +44171,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -44186,9 +44186,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -44405,13 +44405,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -44456,13 +44456,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -44471,9 +44471,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -44690,13 +44690,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -44741,13 +44741,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -44756,9 +44756,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -44975,13 +44975,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -45026,13 +45026,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -45041,9 +45041,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -45260,13 +45260,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -45311,13 +45311,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -45326,9 +45326,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -45545,13 +45545,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -45596,13 +45596,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -45611,9 +45611,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -45830,13 +45830,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -45881,13 +45881,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -45896,9 +45896,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -46115,13 +46115,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -46166,13 +46166,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -46181,9 +46181,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -46400,13 +46400,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -46451,13 +46451,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -46466,9 +46466,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -46685,13 +46685,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -46736,13 +46736,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -46751,9 +46751,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -46970,13 +46970,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -47021,13 +47021,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -47036,9 +47036,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -47255,13 +47255,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -47306,13 +47306,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -47321,9 +47321,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -47540,13 +47540,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -47591,13 +47591,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -47606,9 +47606,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -47825,13 +47825,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -47876,13 +47876,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -47891,9 +47891,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -48110,13 +48110,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -48161,13 +48161,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -48176,9 +48176,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -48395,13 +48395,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -48446,13 +48446,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -48461,9 +48461,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -48680,13 +48680,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -48731,13 +48731,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -48746,9 +48746,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -48965,13 +48965,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -49016,13 +49016,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -49031,9 +49031,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -49250,13 +49250,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -49301,13 +49301,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -49316,9 +49316,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -49535,13 +49535,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -49586,13 +49586,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -49601,9 +49601,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -49820,13 +49820,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -49871,13 +49871,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -49886,9 +49886,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -50105,13 +50105,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -50156,13 +50156,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -50171,9 +50171,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -50390,13 +50390,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -50441,13 +50441,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -50456,9 +50456,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -50675,13 +50675,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -50726,13 +50726,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -50741,9 +50741,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -50960,13 +50960,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -51011,13 +51011,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -51026,9 +51026,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -51245,13 +51245,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -51296,13 +51296,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -51311,9 +51311,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -51530,13 +51530,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -51581,13 +51581,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -51596,9 +51596,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -51815,13 +51815,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -51866,13 +51866,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -51881,9 +51881,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -52100,13 +52100,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -52151,13 +52151,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -52166,9 +52166,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -52385,13 +52385,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -52436,13 +52436,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -52451,9 +52451,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -52670,13 +52670,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 8
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -52721,13 +52721,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -52736,9 +52736,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -52955,13 +52955,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -53006,13 +53006,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -53021,9 +53021,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -53240,13 +53240,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -53291,13 +53291,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -53306,9 +53306,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -53525,13 +53525,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -53576,13 +53576,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -53591,9 +53591,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -53810,13 +53810,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -53861,13 +53861,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -53876,9 +53876,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -54095,13 +54095,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -54146,13 +54146,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -54161,9 +54161,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -54380,13 +54380,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -54431,13 +54431,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -54446,9 +54446,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -54665,13 +54665,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -54716,13 +54716,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -54731,9 +54731,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -54950,13 +54950,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 15
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -55001,13 +55001,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -55016,9 +55016,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -55235,13 +55235,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 13
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -55286,13 +55286,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -55301,9 +55301,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -55520,13 +55520,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 11
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -55571,13 +55571,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -55586,9 +55586,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -55805,13 +55805,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 9
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -55856,13 +55856,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -55871,9 +55871,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -56090,13 +56090,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 7
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -56141,13 +56141,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -56156,9 +56156,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -56375,13 +56375,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -56426,13 +56426,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -56441,9 +56441,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -56660,13 +56660,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -56711,13 +56711,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -56726,9 +56726,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 4
   GlobalSplitU: 0
@@ -56945,13 +56945,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -56996,13 +56996,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -57011,9 +57011,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -57230,13 +57230,13 @@ Solutions:
   ThreadTileA: 36
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -57281,13 +57281,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -57296,9 +57296,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -57515,13 +57515,13 @@ Solutions:
   ThreadTileA: 28
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -57566,13 +57566,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -57581,9 +57581,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -57800,13 +57800,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -57851,13 +57851,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -57866,9 +57866,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -58085,13 +58085,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -58136,13 +58136,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 64
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -58151,9 +58151,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 4
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -58370,13 +58370,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -58421,13 +58421,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -58436,9 +58436,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -58655,13 +58655,13 @@ Solutions:
   ThreadTileA: 24
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -58706,13 +58706,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -58721,9 +58721,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -58940,13 +58940,13 @@ Solutions:
   ThreadTileA: 20
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -58991,13 +58991,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -59006,9 +59006,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -59225,13 +59225,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -59276,13 +59276,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -59291,9 +59291,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -59510,13 +59510,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -59561,13 +59561,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -59576,9 +59576,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -59795,13 +59795,13 @@ Solutions:
   ThreadTileA: 16
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -59846,13 +59846,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -59861,9 +59861,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -60080,13 +60080,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -60131,13 +60131,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -60146,9 +60146,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -60365,13 +60365,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -60416,13 +60416,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -60431,9 +60431,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -60650,13 +60650,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -60701,13 +60701,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -60716,9 +60716,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -60935,13 +60935,13 @@ Solutions:
   ThreadTileA: 12
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -60986,13 +60986,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -61001,9 +61001,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -61220,13 +61220,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -61271,13 +61271,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -61286,9 +61286,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -61505,13 +61505,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -61556,13 +61556,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -61571,9 +61571,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -61790,13 +61790,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -61841,13 +61841,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -61856,9 +61856,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -62075,13 +62075,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -62126,13 +62126,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -62141,9 +62141,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -62360,13 +62360,13 @@ Solutions:
   ThreadTileA: 8
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -62411,13 +62411,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -62426,9 +62426,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -62645,13 +62645,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 6
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -62696,13 +62696,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -62711,9 +62711,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -62930,13 +62930,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 5
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -62981,13 +62981,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -62996,9 +62996,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -63215,13 +63215,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 4
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -63266,13 +63266,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -63281,9 +63281,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -63500,13 +63500,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 3
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -63551,13 +63551,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -63566,9 +63566,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -63785,13 +63785,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 2
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
@@ -63836,13 +63836,13 @@ Solutions:
   BufferLoad: true
   BufferStore: true
   CUCount: null
-  ClusterLocalRead: true
+  ClusterLocalRead: 1
   CodeObjectVersion: '4'
   ConvertAfterDS: false
   CustomKernelName: ''
   DebugStreamK: 0
   DepthU: 128
-  DirectToLds: false
+  DirectToLds: 0
   DirectToLdsA: false
   DirectToLdsB: false
   DirectToVgprA: false
@@ -63851,9 +63851,9 @@ Solutions:
   EdgeType: ShiftPtr
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: true
-  ExpandPointerSwap: 0
+  ExpandPointerSwap: false
   ForceDisableShadowInit: false
-  GlobalReadPerMfma: 1
+  GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: 8
   GlobalReadVectorWidthB: 8
   GlobalSplitU: 0
@@ -64070,13 +64070,13 @@ Solutions:
   ThreadTileA: 4
   ThreadTileB: 1
   TransposeLDS: 1
-  TransposeLDSMetadata: true
+  TransposeLDSMetadata: 1
   ULSGRODoubleG2L: 0
   UnrollLoopSwapGlobalReadOrder: 0
   UnrollMajorLDSA: false
   UnrollMajorLDSB: true
   UnrollMajorLDSMetadata: true
-  Use64bShadowLimit: 1
+  Use64bShadowLimit: true
   UseInstOffsetForGRO: 0
   UseSgprForGRO: 0
   Valid: true
