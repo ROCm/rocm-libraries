@@ -1019,23 +1019,8 @@ int main(int argc, const char* argv[])
             throw std::runtime_error("--print-kernel-args requires --target-arch");
 
         auto processor = AMDGPU::toProcessor(targetArch);
-
-        int cuCount = 0;
-        if(processor == AMDGPU::Processor::gfx942)
-        {
-            cuCount = 304; // MI300X: 8 XCDs × 38 CUs
-        }
-        else if(processor == AMDGPU::Processor::gfx1151)
-        {
-            // TODO: verify correct CU count for gfx1151
-            cuCount = 20;
-        }
-        else
-        {
-            throw std::runtime_error(
-                "--print-kernel-args: no default CU count for " + targetArch
-                + ". Add it to the lookup in main.cpp.");
-        }
+        auto arch      = raceemulator::architectureFromTarget(targetArch);
+        int  cuCount   = arch->getCuCount();
 
         auto hardware = std::make_shared<AMDGPU>(processor, cuCount, targetArch);
         auto library  = LoadSolutionLibrary(args);

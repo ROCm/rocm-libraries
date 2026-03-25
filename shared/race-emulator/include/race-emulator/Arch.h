@@ -12,6 +12,7 @@ public:
   virtual ~Architecture() = default;
   virtual int getMaxLdsSize() const = 0;
   virtual int getWaveSize() const = 0;
+  virtual int getCuCount() const = 0;
   virtual std::string getName() const = 0;
 };
 
@@ -19,6 +20,7 @@ class Gfx942 : public Architecture {
 public:
   int getMaxLdsSize() const override { return 65536; }
   int getWaveSize() const override { return 64; }
+  int getCuCount() const override { return 304; } // MI300X: 8 XCDs × 38 CUs
   std::string getName() const override { return "gfx942"; }
 };
 
@@ -26,6 +28,7 @@ class Gfx950 : public Architecture {
 public:
   int getMaxLdsSize() const override { return 163840; }
   int getWaveSize() const override { return 64; }
+  int getCuCount() const override { return 256; } // MI350X: 8 XCDs × 32 CUs
   std::string getName() const override { return "gfx950"; }
 };
 
@@ -33,6 +36,7 @@ class Gfx1151 : public Architecture {
 public:
   int getMaxLdsSize() const override { return 65536; }
   int getWaveSize() const override { return 32; }
+  int getCuCount() const override { return 20; } // TODO: verify
   std::string getName() const override { return "gfx1151"; }
 };
 

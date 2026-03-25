@@ -840,6 +840,34 @@ TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_CustomKernel) {
 //
 // Skipped in debug builds (~12x slower). RELEASE_BUILD is defined by CMake
 // for Release and RelWithDebInfo configurations (see tests/CMakeLists.txt).
+//
+// YAML: tests/sources/tensilelite/gfx950/tensilelite_dtl_f16_mfma_tn.yaml
+// Assembly: tests/asm/gfx950/tensilelite_dtl_f16_mfma_tn_m256n256k128.s
+// Direct-to-LDS (DTL) f16 TN MFMA GEMM on gfx950 (MI350X).
+// Uses buffer_load ... lds to load A and B directly into LDS.
+// MT32x32x64, wave64, 4 waves/WG, 64 workgroups.
+TEST(Gfx950, MatMul_TensileLite_F16_MFMA_TN_DTL_256x256x128) {
+  GemmDims dims{256, 256, 128, 1};
+
+  TensileKernelArgs args;
+  args.preamble = {1, 18874369, 1275133960, 64, 256, 256, 1, 128};
+  args.metadata = {256, 65536, 256, 65536, 128, 32768, 128, 32768};
+  args.alpha = 1.0f;
+  args.beta = 0.0f;
+
+  TensileGemmRunner<uint16_t> runner(
+      "gfx950/tensilelite_dtl_f16_mfma_tn_m256n256k128.s",
+      std::make_shared<Gfx950>(), 64,
+      /*useF16=*/true, /*transposeA=*/true);
+  runner.enableProfiling(true);
+
+  // 4 waves per WG (256 threads / 64), 64 workgroups
+  auto optString = runner.run(dims, args, 4, 64);
+  if (optString) {
+    FAIL() << *optString;
+  }
+}
+
 TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_128x128x8192) {
 #ifndef RELEASE_BUILD
   GTEST_SKIP() << "Large kernel test, release builds only";
