@@ -174,15 +174,15 @@
                 "OddC": 4
             },
             "015_BlkGemmPipelineScheduler": {
-                "Interwave": 0,
-                "Intrawave": 1
+                "BlkGemmPipelineScheduler:Interwave": 0,
+                "BlkGemmPipelineScheduler:Intrawave": 1
             },
             "016_BlkGemmPipelineVersion": {
-                "v1": 0,
-                "v2": 1,
-                "v3": 2,
-                "v4": 3,
-                "v5": 4
+                "BlkGemmPipelineVersion:v1": 0,
+                "BlkGemmPipelineVersion:v2": 1,
+                "BlkGemmPipelineVersion:v3": 2,
+                "BlkGemmPipelineVersion:v4": 3,
+                "BlkGemmPipelineVersion:v5": 4
             }
         }
     },

@@ -243,15 +243,15 @@
                 "1": "DeviceBatchedGemmXdlUniversal<MNKPadding, CRR>"
             },
             "012_BlkGemmPipelineScheduler": {
-                "0": "Interwave",
-                "1": "Intrawave"
+                "0": "BlkGemmPipelineScheduler: Interwave",
+                "1": "BlkGemmPipelineScheduler: Intrawave"
             },
             "013_BlkGemmPipelineVersion": {
-                "0": "v1",
-                "1": "v2",
-                "2": "v3",
-                "3": "v4",
-                "4": "v5"
+                "0": "BlkGemmPipelineVersion: v1",
+                "1": "BlkGemmPipelineVersion: v2",
+                "2": "BlkGemmPipelineVersion: v3",
+                "3": "BlkGemmPipelineVersion: v4",
+                "4": "BlkGemmPipelineVersion: v5"
             },
             "016_ConvBackwardWeightSpecialization": {
                 "0": "Default",
