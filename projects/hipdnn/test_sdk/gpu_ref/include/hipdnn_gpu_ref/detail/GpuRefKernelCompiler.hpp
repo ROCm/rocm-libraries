@@ -16,7 +16,9 @@ namespace hipdnn_gpu_ref::detail
 class CompiledKernel
 {
 public:
-    CompiledKernel(const std::string& typeDefine, const std::string& functionName);
+    CompiledKernel(const std::string& sourceName,
+                   const std::vector<std::string>& compileDefines,
+                   const std::string& functionName);
     ~CompiledKernel();
 
     CompiledKernel(const CompiledKernel&) = delete;
@@ -40,7 +42,8 @@ class GpuRefKernelCompiler
 public:
     static GpuRefKernelCompiler& instance();
 
-    const CompiledKernel& getOrCompile(const std::string& typeDefine,
+    const CompiledKernel& getOrCompile(const std::string& sourceName,
+                                       const std::vector<std::string>& compileDefines,
                                        const std::string& functionName);
 
     GpuRefKernelCompiler(const GpuRefKernelCompiler&) = delete;

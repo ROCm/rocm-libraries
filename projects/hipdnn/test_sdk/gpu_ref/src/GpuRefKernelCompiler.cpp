@@ -37,10 +37,12 @@ void throwOnRtcError(hiprtcResult err, const char* call)
 #define GPU_REF_RTC_CHECK(call) throwOnRtcError((call), #call)
 // NOLINTEND(cppcoreguidelines-macro-usage)
 
-CompiledKernel::CompiledKernel(const std::string& typeDefine, const std::string& functionName)
+CompiledKernel::CompiledKernel(const std::string& sourceName,
+                               const std::vector<std::string>& compileDefines,
+                               const std::string& functionName)
 {
-    // Get the kernel source
-    auto kernelSrc = hipdnn_gpu_ref::getGpuRefKernelSrc("GpuRefConvFwd.cpp");
+    // Get the kernel source by name
+    auto kernelSrc = hipdnn_gpu_ref::getGpuRefKernelSrc(sourceName.c_str());
 
     // Get include headers
     std::vector<std::string_view> includeTexts;
@@ -58,14 +60,18 @@ CompiledKernel::CompiledKernel(const std::string& typeDefine, const std::string&
     hiprtcProgram prog;
     GPU_REF_RTC_CHECK(hiprtcCreateProgram(&prog,
                                           kernelSrc.data(),
-                                          "GpuRefConvFwd.cpp",
+                                          sourceName.c_str(),
                                           static_cast<int>(headersData.size()),
                                           headersData.data(),
                                           includeNames.data()));
 
-    // Build compile options
-    std::string typeOpt = "-DDATA_TYPE=" + typeDefine;
-    std::vector<const char*> optPtrs = {typeOpt.c_str()};
+    // Build compile options from defines vector
+    std::vector<const char*> optPtrs;
+    optPtrs.reserve(compileDefines.size());
+    for(const auto& def : compileDefines)
+    {
+        optPtrs.push_back(def.c_str());
+    }
 
     auto result = hiprtcCompileProgram(prog, static_cast<int>(optPtrs.size()), optPtrs.data());
     if(result != HIPRTC_SUCCESS)
@@ -79,8 +85,15 @@ CompiledKernel::CompiledKernel(const std::string& typeDefine, const std::string&
             hiprtcGetProgramLog(prog, log.data());
         }
         hiprtcDestroyProgram(&prog);
-        throw std::runtime_error("HipRTC compilation failed for DATA_TYPE=" + typeDefine + ": "
-                                 + hiprtcGetErrorString(result) + "\nCompilation log:\n" + log);
+
+        std::string defStr;
+        for(const auto& def : compileDefines)
+        {
+            defStr += " " + def;
+        }
+        throw std::runtime_error("HipRTC compilation failed for " + sourceName + " with defines"
+                                 + defStr + ": " + hiprtcGetErrorString(result)
+                                 + "\nCompilation log:\n" + log);
     }
 
     // Extract binary
@@ -110,10 +123,22 @@ GpuRefKernelCompiler& GpuRefKernelCompiler::instance()
     return s_instance;
 }
 
-const CompiledKernel& GpuRefKernelCompiler::getOrCompile(const std::string& typeDefine,
-                                                         const std::string& functionName)
+const CompiledKernel&
+    GpuRefKernelCompiler::getOrCompile(const std::string& sourceName,
+                                       const std::vector<std::string>& compileDefines,
+                                       const std::string& functionName)
 {
-    std::string key = typeDefine + "::" + functionName;
+    // Build cache key: sourceName::define1,define2,...::functionName
+    std::string key = sourceName + "::";
+    for(size_t i = 0; i < compileDefines.size(); ++i)
+    {
+        if(i > 0)
+        {
+            key += ",";
+        }
+        key += compileDefines[i];
+    }
+    key += "::" + functionName;
 
     std::lock_guard<std::mutex> lock(_mutex);
     auto it = _cache.find(key);
@@ -122,7 +147,7 @@ const CompiledKernel& GpuRefKernelCompiler::getOrCompile(const std::string& type
         return *it->second;
     }
 
-    auto kernel = std::make_unique<CompiledKernel>(typeDefine, functionName);
+    auto kernel = std::make_unique<CompiledKernel>(sourceName, compileDefines, functionName);
     auto& ref = *kernel;
     _cache.emplace(std::move(key), std::move(kernel));
     return ref;
