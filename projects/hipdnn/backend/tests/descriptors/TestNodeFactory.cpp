@@ -5,15 +5,18 @@
 #include "descriptors/ConvolutionFwdOperationDescriptor.hpp"
 #include "descriptors/LayernormOperationDescriptor.hpp"
 #include "descriptors/NodeFactory.hpp"
+#include "descriptors/SdpaBpropOperationDescriptor.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/layernorm_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/constants/LayernormConstants.hpp>
+#include <hipdnn_test_sdk/constants/SdpaBpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <memory>
@@ -145,6 +148,77 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeLayernorm)
     EXPECT_EQ(desc->getData().x_tensor_uid, K_LAYERNORM_TENSOR_X_UID);
     EXPECT_EQ(desc->getData().normalized_dim_count, 3);
     EXPECT_EQ(desc->getData().forward_phase, NormFwdPhase::TRAINING);
+}
+
+TEST_F(TestNodeFactory, CreateOperationFromNodeSdpaBprop)
+{
+    // Set up tensor map with 9 required SDPA bprop tensors
+    auto makeTensor =
+        [](int64_t uid, const std::array<int64_t, 4>& dims, const std::array<int64_t, 4>& strides) {
+            TensorAttributesT t;
+            t.uid = uid;
+            t.data_type = DataType::FLOAT;
+            t.dims = toVec(dims);
+            t.strides = toVec(strides);
+            return TensorDescriptor::fromFlatBuffer(t);
+        };
+
+    std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> sdpaTensorMap;
+    sdpaTensorMap[K_SDPA_BPROP_TENSOR_Q_UID] = makeTensor(
+        K_SDPA_BPROP_TENSOR_Q_UID, K_SDPA_BPROP_TENSOR_Q_DIMS, K_SDPA_BPROP_TENSOR_Q_STRIDES);
+    sdpaTensorMap[K_SDPA_BPROP_TENSOR_K_UID] = makeTensor(
+        K_SDPA_BPROP_TENSOR_K_UID, K_SDPA_BPROP_TENSOR_K_DIMS, K_SDPA_BPROP_TENSOR_K_STRIDES);
+    sdpaTensorMap[K_SDPA_BPROP_TENSOR_V_UID] = makeTensor(
+        K_SDPA_BPROP_TENSOR_V_UID, K_SDPA_BPROP_TENSOR_V_DIMS, K_SDPA_BPROP_TENSOR_V_STRIDES);
+    sdpaTensorMap[K_SDPA_BPROP_TENSOR_O_UID] = makeTensor(
+        K_SDPA_BPROP_TENSOR_O_UID, K_SDPA_BPROP_TENSOR_O_DIMS, K_SDPA_BPROP_TENSOR_O_STRIDES);
+    sdpaTensorMap[K_SDPA_BPROP_TENSOR_DO_UID] = makeTensor(
+        K_SDPA_BPROP_TENSOR_DO_UID, K_SDPA_BPROP_TENSOR_DO_DIMS, K_SDPA_BPROP_TENSOR_DO_STRIDES);
+    sdpaTensorMap[K_SDPA_BPROP_TENSOR_STATS_UID] = makeTensor(K_SDPA_BPROP_TENSOR_STATS_UID,
+                                                              K_SDPA_BPROP_TENSOR_STATS_DIMS,
+                                                              K_SDPA_BPROP_TENSOR_STATS_STRIDES);
+    sdpaTensorMap[K_SDPA_BPROP_TENSOR_DQ_UID] = makeTensor(
+        K_SDPA_BPROP_TENSOR_DQ_UID, K_SDPA_BPROP_TENSOR_DQ_DIMS, K_SDPA_BPROP_TENSOR_DQ_STRIDES);
+    sdpaTensorMap[K_SDPA_BPROP_TENSOR_DK_UID] = makeTensor(
+        K_SDPA_BPROP_TENSOR_DK_UID, K_SDPA_BPROP_TENSOR_DK_DIMS, K_SDPA_BPROP_TENSOR_DK_STRIDES);
+    sdpaTensorMap[K_SDPA_BPROP_TENSOR_DV_UID] = makeTensor(
+        K_SDPA_BPROP_TENSOR_DV_UID, K_SDPA_BPROP_TENSOR_DV_DIMS, K_SDPA_BPROP_TENSOR_DV_STRIDES);
+
+    // Create SDPA backward attributes
+    SdpaBackwardAttributesT sdpaAttrs;
+    sdpaAttrs.q_tensor_uid = K_SDPA_BPROP_TENSOR_Q_UID;
+    sdpaAttrs.k_tensor_uid = K_SDPA_BPROP_TENSOR_K_UID;
+    sdpaAttrs.v_tensor_uid = K_SDPA_BPROP_TENSOR_V_UID;
+    sdpaAttrs.o_tensor_uid = K_SDPA_BPROP_TENSOR_O_UID;
+    sdpaAttrs.do_tensor_uid = K_SDPA_BPROP_TENSOR_DO_UID;
+    sdpaAttrs.stats_tensor_uid = K_SDPA_BPROP_TENSOR_STATS_UID;
+    sdpaAttrs.dq_tensor_uid = K_SDPA_BPROP_TENSOR_DQ_UID;
+    sdpaAttrs.dk_tensor_uid = K_SDPA_BPROP_TENSOR_DK_UID;
+    sdpaAttrs.dv_tensor_uid = K_SDPA_BPROP_TENSOR_DV_UID;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(sdpaAttrs);
+
+    auto graphOp = NodeFactory::createOperationFromNode(node, sdpaTensorMap);
+    ASSERT_NE(graphOp, nullptr);
+
+    auto* op = graphOp->asGraphOperation();
+    ASSERT_NE(op, nullptr);
+    auto rebuiltNode = op->buildNode();
+    ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaBackwardAttributes);
+
+    auto desc = std::static_pointer_cast<SdpaBpropOperationDescriptor>(graphOp);
+    ASSERT_TRUE(desc->isFinalized());
+    EXPECT_EQ(desc->getData().q_tensor_uid, K_SDPA_BPROP_TENSOR_Q_UID);
+    EXPECT_EQ(desc->getData().k_tensor_uid, K_SDPA_BPROP_TENSOR_K_UID);
+    EXPECT_EQ(desc->getData().v_tensor_uid, K_SDPA_BPROP_TENSOR_V_UID);
+    EXPECT_EQ(desc->getData().o_tensor_uid, K_SDPA_BPROP_TENSOR_O_UID);
+    EXPECT_EQ(desc->getData().do_tensor_uid, K_SDPA_BPROP_TENSOR_DO_UID);
+    EXPECT_EQ(desc->getData().stats_tensor_uid, K_SDPA_BPROP_TENSOR_STATS_UID);
+    EXPECT_EQ(desc->getData().dq_tensor_uid, K_SDPA_BPROP_TENSOR_DQ_UID);
+    EXPECT_EQ(desc->getData().dk_tensor_uid, K_SDPA_BPROP_TENSOR_DK_UID);
+    EXPECT_EQ(desc->getData().dv_tensor_uid, K_SDPA_BPROP_TENSOR_DV_UID);
 }
 
 TEST_F(TestNodeFactory, CreateOperationFromNodeUnsupportedType)
