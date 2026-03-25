@@ -81,8 +81,10 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     desc->setAttribute(HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     if(!name.empty())
     {
-        desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, name.size(), name.data());
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                           HIPDNN_TYPE_CHAR,
+                           static_cast<int64_t>(name.size()),
+                           name.data());
     }
 
     desc->finalize();

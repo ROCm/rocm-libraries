@@ -583,7 +583,7 @@ TEST_F(IntegrationRMSNormDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip
     EXPECT_TRUE(uids.count(rmsNode->attributes.get_inv_rms()->get_uid()) > 0);
 
     // All node tensor UIDs should be distinct
-    std::unordered_set<int64_t> nodeUids = {rmsNode->attributes.get_x()->get_uid(),
+    const std::unordered_set<int64_t> nodeUids = {rmsNode->attributes.get_x()->get_uid(),
                                             rmsNode->attributes.get_scale()->get_uid(),
                                             rmsNode->attributes.get_epsilon()->get_uid(),
                                             rmsNode->attributes.get_y()->get_uid(),
