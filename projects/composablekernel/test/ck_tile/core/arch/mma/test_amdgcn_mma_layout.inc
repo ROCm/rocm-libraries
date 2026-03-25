@@ -94,7 +94,12 @@ struct MmaLayoutTestKernel
                 {
                     a_frag[v] = 1;
 
-                    // Calc an appropriate sparse idx value for a single 1 in position k.
+                    // Calc an appropriate sparse idx value for a single 1 in position k. We use a
+                    // baseline index of 0x88888888. This sends each compressed index i to
+                    // uncompressed index i * 2. If k is odd, we should send it to i * 2 + 1
+                    // instead. We update only the absolutely necessary pair of bits for this
+                    // (idx[v*2:v*2+1]). Note that this simple calculation works for any 4:2 sparse
+                    // intrinsic with up to 16 packed k elements per lane.
                     sparse_idx = 0x88888888 | ((k % 2) << (v * 2));
                 }
             }
@@ -119,8 +124,8 @@ struct MmaLayoutTestKernel
 
             // TODO: this tolerance might not be suitable for all data types and
             // should be revisited if we add more configurations
-            const float tol = 1.0e-1f;
-            index_t err     = 0;
+            const float tolerance = 1.0e-1f;
+            index_t err           = 0;
 
             for(index_t v = 0; v < c_vec_size; ++v)
             {
@@ -128,7 +133,7 @@ struct MmaLayoutTestKernel
 
                 const float expected = (c_coords[0] == m && c_coords[1] == n) ? 1 : 0;
                 const float value    = static_cast<float>(c_frag[v]);
-                if(fabsf(value - expected) > tol)
+                if(fabsf(value - expected) > tolerance)
                 {
                     err = 1;
                 }
@@ -198,7 +203,7 @@ void run_mma_layout_test()
     }
 }
 
-// List of intrinsics to test.
+// Lists of intrinsics to test.
 // clang-format off
 using Gfx9Intrinsics = ::testing::Types<
     amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_16x16x16f16
