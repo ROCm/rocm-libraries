@@ -119,6 +119,10 @@ struct MmaPipelineBase
             return formatBufferTupleImpl<DstT>(std::forward<SrcT>(inputBuffer),
                                                std::make_index_sequence<tuple_size - 1>{});
         }
+        else if constexpr(std::is_array_v<DecayedSrcT> || std::is_pointer_v<DecayedSrcT>)
+        {
+            return std::forward<SrcT>(inputBuffer);
+        }
         else
         {
             static_assert(sizeof(DstT) == sizeof(DecayedSrcT), "Size mismatch in formatBuffer");
@@ -175,8 +179,9 @@ struct MmaPipelineBase
         static_assert(!is_tuple<decltype(c_result)>::value,
                       "If CTransform returns more than the vector, update this function.");
 
-        return postApplyTransform<std::decay_t<CTransformResult>, typename Derived::DTransform>(
-            c_result);
+        using CVecT      = typename Derived::CVecType;
+        using DTransform = typename Derived::DTransform;
+        return postApplyTransform<CVecT, DTransform>(c_result);
     }
 
     public:
