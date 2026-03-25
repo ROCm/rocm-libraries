@@ -594,31 +594,20 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
             auto a_copy_dram_window =
                 PipelinePolicy::template MakeADramWindow<Problem>(a_dram_block_window_tmp);
 
-            constexpr auto write_a_lds_block_desc =
-                PipelinePolicy::template MakeWriteALdsBlockDescriptor<Problem>();
-            constexpr auto read_a_lds_block_desc =
-                PipelinePolicy::template MakeReadALdsBlockDescriptor<Problem>();
+            constexpr auto a_lds_block_desc =
+                PipelinePolicy::template MakeALdsBlockDescriptor<Problem>();
 
-            auto write_a_lds_blocks = generate_tuple(
+            auto a_lds_blocks = generate_tuple(
                 [&](auto i) {
                     ADataType* p_a_lds = reinterpret_cast<ADataType*>(smem01[i]);
-                    return make_tensor_view<address_space_enum::lds>(p_a_lds,
-                                                                     write_a_lds_block_desc);
-                },
-                number<NumLdsBuffers>{});
-
-            auto read_a_lds_blocks = generate_tuple(
-                [&](auto i) {
-                    ADataType* p_a_lds = reinterpret_cast<ADataType*>(smem01[i]);
-                    return make_tensor_view<address_space_enum::lds>(p_a_lds,
-                                                                     read_a_lds_block_desc);
+                    return make_tensor_view<address_space_enum::lds>(p_a_lds, a_lds_block_desc);
                 },
                 number<NumLdsBuffers>{});
 
             auto a_copy_lds_windows = generate_tuple(
                 [&](auto i) {
                     return make_tile_window(
-                        write_a_lds_blocks[i],
+                        a_lds_blocks[i],
                         make_tuple(number<MPerBlock>{}, number<KPerBlock>{}),
                         {0, 0},
                         PipelinePolicy::template MakeADramTileDistribution<Problem>());
@@ -633,7 +622,7 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
             auto a_load_windows = generate_tuple(
                 [&](auto i) -> decltype(auto) {
                     auto window =
-                        make_tile_window(read_a_lds_blocks[i],
+                        make_tile_window(a_lds_blocks[i],
                                          make_tuple(number<MPerBlock>{}, number<KPerBlock>{}),
                                          {0, 0});
                     return block_weight_preshuffle.MakeALoadWindows(window);
@@ -743,9 +732,6 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
                 index_t i_global_read = amd_wave_read_first_lane(2);
                 do
                 {
-                    __builtin_amdgcn_sched_barrier(0);
-                    asm volatile(";; HotLoop Start ;;");
-                    __builtin_amdgcn_sched_barrier(0);
                     {
                         Base::GlobalPrefetch(
                             b_global_tile[1], b_flat_dram_window, b_dram_tile_window_step);
@@ -793,9 +779,6 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
                         block_weight_preshuffle.LocalPrefetch(a_load_windows[I0]);
                         HotLoopScheduler();
                     }
-                    __builtin_amdgcn_sched_barrier(0);
-                    asm volatile(";; HotLoop End ;;");
-                    __builtin_amdgcn_sched_barrier(0);
                     i_global_read += 2;
                 } while(i_global_read < num_loop);
             }
