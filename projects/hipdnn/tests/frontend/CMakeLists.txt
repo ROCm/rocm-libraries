@@ -9,35 +9,28 @@ add_executable(
     hipdnn_public_frontend_tests
     main.cpp
     IntegrationBatchnormBackwardDescriptorLowering.cpp
-    # IntegrationBatchnormBackwardDescriptorLifting.cpp
     IntegrationBatchnormDescriptorLifting.cpp
     IntegrationBatchnormDescriptorLowering.cpp
     IntegrationBatchnormForwardInference.cpp
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
     IntegrationBatchnormInferenceDescriptorLowering.cpp
-    # IntegrationBatchnormInferenceDescriptorLifting.cpp
     IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
-    # IntegrationBatchnormInferenceNodeVarianceExtDescriptorLifting.cpp
     IntegrationBlockScaleDequantize.cpp
     IntegrationBlockScaleDequantizeDescriptorLowering.cpp
-    # IntegrationBlockScaleDequantizeDescriptorLifting.cpp
     IntegrationBlockScaleQuantize.cpp
     IntegrationBlockScaleQuantizeDescriptorLowering.cpp
-    # IntegrationBlockScaleQuantizeDescriptorLifting.cpp
     IntegrationConvForward.cpp
     IntegrationConvFpropDescriptorLifting.cpp
     IntegrationConvFpropDescriptorLowering.cpp
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
     IntegrationConvolutionDgradDescriptorLowering.cpp
-    # IntegrationConvolutionDgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
     IntegrationCustomOpDescriptorLowering.cpp
-    # IntegrationCustomOpDescriptorLifting.cpp
     IntegrationGraphLifting.cpp
     IntegrationGraphSupportCheck.cpp
     IntegrationLayerNormDescriptorLifting.cpp
@@ -45,17 +38,14 @@ add_executable(
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp
     IntegrationMatmulDescriptorLowering.cpp
-    # IntegrationMatmulDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLowering.cpp
-    # IntegrationRMSNormDescriptorLifting.cpp
     IntegrationRMSNormForward.cpp
     IntegrationSetPluginPathsExt.cpp
     IntegrationSdpaBpropDescriptorLowering.cpp
     IntegrationSdpaBpropLifting.cpp
     IntegrationSdpaFpropDescriptorLowering.cpp
-    # IntegrationSdpaFpropDescriptorLifting.cpp
 )
 
 target_compile_options(hipdnn_public_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
