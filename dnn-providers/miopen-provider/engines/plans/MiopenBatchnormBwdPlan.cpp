@@ -9,6 +9,22 @@
 namespace miopen_plugin
 {
 
+namespace
+{
+
+int64_t getRequiredOptionalUid(const flatbuffers::Optional<int64_t>& opt,
+                               const std::string& fieldName)
+{
+    if(!opt.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, fieldName + " tensor uid is required but not set");
+    }
+    return *opt;
+}
+
+} // namespace
+
 // We have made the intentional decision to hardcode the batchnorm mode to miopenBNSpatial
 // rather than making it configurable and adding extra complexity.
 const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE = miopenBNSpatial;
@@ -43,7 +59,9 @@ BatchnormBwdParams::BatchnormBwdParams(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.x_tensor_uid()))
-    , _dy(miopen_utils::createTensor(tensorMap, pointwiseAttributes.in_1_tensor_uid().value()))
+    , _dy(miopen_utils::createTensor(
+          tensorMap,
+          getRequiredOptionalUid(pointwiseAttributes.in_1_tensor_uid(), "Pointwise in_1")))
     , _dx(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.dx_tensor_uid()))
     , _scale(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.scale_tensor_uid()))
     , _dscale(

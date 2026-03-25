@@ -10,10 +10,16 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Computation of different matrix norms
     * LANGE
     * LANGE_64
+* Computation of different matrix condition numbers
+    * GECON
+    * GECON_64
 
 ### Changed
 ### Removed
 ### Optimized
+
+* Improved the performance of POTF2 and downstream functions such as POTRF.
+
 ### Resolved issues
 
 * Fixed a synchronization issue in STEBZ and downstream functions, such as SYEVX and SYEVDX.

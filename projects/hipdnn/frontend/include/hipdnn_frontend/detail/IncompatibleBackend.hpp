@@ -87,9 +87,14 @@ public:
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
-    hipdnnStatus_t versionExt(const char** /*version*/) override
+    hipdnn_data_sdk::utilities::Version version() override
     {
-        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+        return hipdnn_data_sdk::utilities::Version{-1, 0, 0};
+    }
+
+    const char* versionString() override
+    {
+        return "";
     }
 
     void loggingCallbackExt(hipdnnSeverity_t /*severity*/, const char* /*msg*/) override {}
@@ -97,6 +102,14 @@ public:
     hipdnnStatus_t setEnginePluginPathsExt(size_t /*numPaths*/,
                                            const char* const* /*pluginPaths*/,
                                            hipdnnPluginLoadingMode_ext_t /*mode*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t getLoadedEnginePluginPathsExt(hipdnnHandle_t /*handle*/,
+                                                 size_t* /*numPluginPaths*/,
+                                                 char** /*pluginPaths*/,
+                                                 size_t* /*maxStringLen*/) override
     {
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }

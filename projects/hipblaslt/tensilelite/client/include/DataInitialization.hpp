@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/hip/HipUtils.hpp>
@@ -38,8 +38,6 @@
 #include <random>
 
 #include "RunListener.hpp"
-
-namespace po = boost::program_options;
 
 namespace TensileLite
 {
@@ -2261,7 +2259,7 @@ namespace TensileLite
         template <>
         inline bool DataInitialization::isBadOutput<BFloat16>(BFloat16 value)
         {
-            return std::isinf(value);
+            return std::isinf(static_cast<float>(value));
         }
 
         template <>

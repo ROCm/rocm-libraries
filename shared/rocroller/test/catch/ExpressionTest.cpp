@@ -986,36 +986,37 @@ namespace ExpressionTest
         auto litFloat  = Expression::literal(5.0f);
         auto litDouble = Expression::literal(5.0);
 
-        Expression::ResultType rVgprFloat{Register::Type::Vector, DataType::Float};
-        Expression::ResultType rVgprDouble{Register::Type::Vector, DataType::Double};
-        Expression::ResultType rVgprInt32{Register::Type::Vector, DataType::Int32};
-        Expression::ResultType rVgprInt64{Register::Type::Vector, DataType::Int64};
-        Expression::ResultType rVgprUInt32{Register::Type::Vector, DataType::UInt32};
-        Expression::ResultType rVgprUInt64{Register::Type::Vector, DataType::UInt64};
-        Expression::ResultType rVgprHalf{Register::Type::Vector, DataType::Half};
-        Expression::ResultType rVgprHalfx2{Register::Type::Vector, DataType::Halfx2};
-        Expression::ResultType rVgprBool32{Register::Type::Vector, DataType::Bool32};
+        Expression::ResultType rVgprFloat{Register::Type::Vector, DataType::Float, 1};
+        Expression::ResultType rVgprDouble{Register::Type::Vector, DataType::Double, 1};
+        Expression::ResultType rVgprInt32{Register::Type::Vector, DataType::Int32, 1};
+        Expression::ResultType rVgprInt64{Register::Type::Vector, DataType::Int64, 1};
+        Expression::ResultType rVgprUInt32{Register::Type::Vector, DataType::UInt32, 1};
+        Expression::ResultType rVgprUInt64{Register::Type::Vector, DataType::UInt64, 1};
+        Expression::ResultType rVgprHalf{Register::Type::Vector, DataType::Half, 1};
+        Expression::ResultType rVgprHalfx2{Register::Type::Vector, DataType::Halfx2, 2};
+        Expression::ResultType rVgprBool32{Register::Type::Vector, DataType::Bool32, 1};
 
-        Expression::ResultType rSgprFloat{Register::Type::Scalar, DataType::Float};
-        Expression::ResultType rSgprDouble{Register::Type::Scalar, DataType::Double};
-        Expression::ResultType rSgprInt32{Register::Type::Scalar, DataType::Int32};
-        Expression::ResultType rSgprInt64{Register::Type::Scalar, DataType::Int64};
-        Expression::ResultType rSgprUInt32{Register::Type::Scalar, DataType::UInt32};
-        Expression::ResultType rSgprUInt64{Register::Type::Scalar, DataType::UInt64};
-        Expression::ResultType rSgprHalf{Register::Type::Scalar, DataType::Half};
-        Expression::ResultType rSgprHalfx2{Register::Type::Scalar, DataType::Halfx2};
-        Expression::ResultType rSgprBool32{Register::Type::Scalar, DataType::Bool32};
-        Expression::ResultType rSgprBool64{Register::Type::Scalar, DataType::Bool64};
-        Expression::ResultType rSgprBool{Register::Type::Scalar, DataType::Bool};
+        Expression::ResultType rSgprFloat{Register::Type::Scalar, DataType::Float, 1};
+        Expression::ResultType rSgprDouble{Register::Type::Scalar, DataType::Double, 1};
+        Expression::ResultType rSgprInt32{Register::Type::Scalar, DataType::Int32, 1};
+        Expression::ResultType rSgprInt64{Register::Type::Scalar, DataType::Int64, 1};
+        Expression::ResultType rSgprUInt32{Register::Type::Scalar, DataType::UInt32, 1};
+        Expression::ResultType rSgprUInt64{Register::Type::Scalar, DataType::UInt64, 1};
+        Expression::ResultType rSgprHalf{Register::Type::Scalar, DataType::Half, 1};
+        Expression::ResultType rSgprHalfx2{Register::Type::Scalar, DataType::Halfx2, 2};
+        Expression::ResultType rSgprBool32{Register::Type::Scalar, DataType::Bool32, 1};
+        Expression::ResultType rSgprBool64{Register::Type::Scalar, DataType::Bool64, 1};
+        Expression::ResultType rSgprBool{Register::Type::Scalar, DataType::Bool, 1};
         Expression::ResultType rSgprWavefrontSized{
             Register::Type::Scalar,
-            context.get()->kernel()->wavefront_size() == 64 ? DataType::Bool64 : DataType::Bool32};
+            context.get()->kernel()->wavefront_size() == 64 ? DataType::Bool64 : DataType::Bool32,
+            1};
 
-        Expression::ResultType rVCC{Register::Type::VCC, DataType::Bool32};
-        Expression::ResultType rSCC{Register::Type::SCC, DataType::Bool};
+        Expression::ResultType rVCC{Register::Type::VCC, DataType::Bool32, 1};
+        Expression::ResultType rSCC{Register::Type::SCC, DataType::Bool, 1};
 
-        Expression::ResultType rAgprFloat{Register::Type::Accumulator, DataType::Float};
-        Expression::ResultType rAgprDouble{Register::Type::Accumulator, DataType::Double};
+        Expression::ResultType rAgprFloat{Register::Type::Accumulator, DataType::Float, 1};
+        Expression::ResultType rAgprDouble{Register::Type::Accumulator, DataType::Double, 1};
 
         SECTION("Value expressions")
         {
@@ -1112,7 +1113,9 @@ namespace ExpressionTest
             CHECK(rVgprInt32 == resultType(op(vgprUInt32)));
             CHECK(rVgprInt32 == resultType(op(vgprUInt64)));
             CHECK(rVgprInt32 == resultType(op(vgprHalf)));
-            CHECK(rVgprInt32 == resultType(op(vgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rVgprInt32.regType, rVgprInt32.varType, rVgprInt32.valueCount * 2)
+                  == resultType(op(vgprHalfx2)));
             CHECK(rVgprInt32 == resultType(op(vgprBool32)));
 
             CHECK(rSgprInt32 == resultType(op(sgprFloat)));
@@ -1122,7 +1125,9 @@ namespace ExpressionTest
             CHECK(rSgprInt32 == resultType(op(sgprUInt32)));
             CHECK(rSgprInt32 == resultType(op(sgprUInt64)));
             CHECK(rSgprInt32 == resultType(op(sgprHalf)));
-            CHECK(rSgprInt32 == resultType(op(sgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rSgprInt32.regType, rSgprInt32.varType, rSgprInt32.valueCount * 2)
+                  == resultType(op(sgprHalfx2)));
             CHECK(rSgprInt32 == resultType(op(sgprBool32)));
         }
 
@@ -1136,7 +1141,9 @@ namespace ExpressionTest
             CHECK(rVgprUInt32 == resultType(op(vgprUInt32)));
             CHECK(rVgprUInt32 == resultType(op(vgprUInt64)));
             CHECK(rVgprUInt32 == resultType(op(vgprHalf)));
-            CHECK(rVgprUInt32 == resultType(op(vgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rVgprUInt32.regType, rVgprUInt32.varType, rVgprUInt32.valueCount * 2)
+                  == resultType(op(vgprHalfx2)));
             CHECK(rVgprUInt32 == resultType(op(vgprBool32)));
 
             CHECK(rSgprUInt32 == resultType(op(sgprFloat)));
@@ -1146,7 +1153,9 @@ namespace ExpressionTest
             CHECK(rSgprUInt32 == resultType(op(sgprUInt32)));
             CHECK(rSgprUInt32 == resultType(op(sgprUInt64)));
             CHECK(rSgprUInt32 == resultType(op(sgprHalf)));
-            CHECK(rSgprUInt32 == resultType(op(sgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rSgprUInt32.regType, rSgprUInt32.varType, rSgprUInt32.valueCount * 2)
+                  == resultType(op(sgprHalfx2)));
             CHECK(rSgprUInt32 == resultType(op(sgprBool32)));
         }
 
@@ -1167,7 +1176,10 @@ namespace ExpressionTest
             CHECK(rSgprWavefrontSized == resultType(op(vgprUInt32, vgprUInt32)));
             CHECK(rSgprWavefrontSized == resultType(op(vgprUInt64, vgprUInt64)));
             CHECK(rSgprWavefrontSized == resultType(op(vgprHalf, vgprHalf)));
-            CHECK(rSgprWavefrontSized == resultType(op(vgprHalfx2, vgprHalfx2)));
+            CHECK(Expression::ResultType(rSgprWavefrontSized.regType,
+                                         rSgprWavefrontSized.varType,
+                                         rSgprWavefrontSized.valueCount * 2)
+                  == resultType(op(vgprHalfx2, vgprHalfx2)));
             CHECK(rSgprWavefrontSized == resultType(op(vgprBool32, vgprBool32)));
             CHECK(rSgprWavefrontSized == resultType(op(vgprBool, vgprBool)));
 
@@ -1178,7 +1190,9 @@ namespace ExpressionTest
             CHECK(rSgprBool == resultType(op(sgprUInt32, sgprUInt32)));
             CHECK(rSgprBool == resultType(op(sgprUInt64, sgprUInt64)));
             CHECK(rSgprBool == resultType(op(sgprHalf, sgprHalf)));
-            CHECK(rSgprBool == resultType(op(sgprHalfx2, sgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rSgprBool.regType, rSgprBool.varType, rSgprBool.valueCount * 2)
+                  == resultType(op(sgprHalfx2, sgprHalfx2)));
             CHECK(rSgprBool == resultType(op(sgprBool32, sgprBool32)));
             CHECK(rSgprBool == resultType(op(sgprBool, sgprBool)));
         }
@@ -1453,6 +1467,7 @@ namespace ExpressionTest
 
         SECTION("Arguments")
         {
+            size_t       valueCount = 1;
             VariableType doubleVal{DataType::Double, PointerType::Value};
             auto         ca = std::make_shared<CommandArgument>(nullptr, doubleVal, 0);
             auto         cb = std::make_shared<CommandArgument>(nullptr, doubleVal, 8);
@@ -1471,7 +1486,7 @@ namespace ExpressionTest
             } args;
             RuntimeArguments runtimeArgs((uint8_t*)&args, sizeof(args));
 
-            Expression::ResultType expected{Register::Type::Literal, DataType::Double};
+            Expression::ResultType expected{Register::Type::Literal, DataType::Double, valueCount};
             CHECK(expected == resultType(expr2));
             CHECK(6.0 == std::get<double>(evaluate(expr2, runtimeArgs)));
 
@@ -1493,6 +1508,7 @@ namespace ExpressionTest
 
     TEST_CASE("Expression test evaluate mixed types", "[expression]")
     {
+        size_t valueCount = 1;
         using Expression::literal;
         auto one          = literal(1.0);
         auto two          = literal(2.0f);
@@ -1546,9 +1562,9 @@ namespace ExpressionTest
         auto eight75Half = convert(DataType::Half, eightPoint75);
         CHECK(Half(8.75) == std::get<Half>(evaluate(eight75Half)));
 
-        Expression::ResultType litDouble{Register::Type::Literal, DataType::Double};
-        Expression::ResultType litFloat{Register::Type::Literal, DataType::Float};
-        Expression::ResultType litBool{Register::Type::Literal, DataType::Bool};
+        Expression::ResultType litDouble{Register::Type::Literal, DataType::Double, valueCount};
+        Expression::ResultType litFloat{Register::Type::Literal, DataType::Float, valueCount};
+        Expression::ResultType litBool{Register::Type::Literal, DataType::Bool, valueCount};
 
         CHECK(litDouble == resultType(exprSix));
         // Result type not (yet?) defined for mixed integral/floating point types.

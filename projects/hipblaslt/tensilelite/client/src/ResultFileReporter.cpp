@@ -25,8 +25,10 @@
  *******************************************************************************/
 
 #include <ResultFileReporter.hpp>
+#include "TimingInstrumentation.hpp"
 
 #include <cstddef>
+#include <sstream>
 
 namespace TensileLite
 {
@@ -60,7 +62,9 @@ namespace TensileLite
         template <typename T>
         void ResultFileReporter::reportValue(std::string const& key, T const& value)
         {
-            std::string valueStr = boost::lexical_cast<std::string>(value);
+            std::ostringstream oss;
+            oss << value;
+            std::string valueStr = oss.str();
 
             if(key == ResultKey::Validation)
             {
@@ -303,6 +307,7 @@ namespace TensileLite
 
         void ResultFileReporter::postSolution()
         {
+            ScopedTimer timer("post_solution_result_file");
             m_solutionName    = "";
             m_invalidSolution = false;
         }

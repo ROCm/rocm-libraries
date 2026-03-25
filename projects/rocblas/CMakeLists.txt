@@ -33,6 +33,12 @@ unset(ENV{ROCM_BUILD_ID})
 
 project( rocblas LANGUAGES CXX )
 
+# ROCm libraries root (for shared/ctest and other shared resources)
+# Only set default when not already defined (e.g. by superproject / rocm-libraries).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Append our library helper cmake path and the cmake path for hip (for convenience)
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 include(build-options) # library and client
@@ -68,7 +74,7 @@ get_os_id(OS_ID)
 message (STATUS "OS detected is ${OS_ID}")
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "5.3.0" )
+set ( VERSION_STRING "5.4.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
@@ -147,7 +153,7 @@ set( AMDGPU_TARGETS "${GPU_TARGETS}" CACHE STRING "List of GPUs (gfx targets) to
 
 option( BUILD_WITH_HIPBLASLT "Build with HipBLASLt" ON )
 set( hipblaslt_path "/opt/rocm" CACHE PATH "Use local HipBLASLt directory" )
-set( HIPBLASLT_VERSION 1.2.0 CACHE STRING "The version of HipBLASLt to be used" )
+set( HIPBLASLT_VERSION 1.2.2 CACHE STRING "The version of HipBLASLt to be used" )
 
 if( NOT BUILD_WITH_TENSILE )
   set( BUILD_WITH_HIPBLASLT OFF )
@@ -176,7 +182,7 @@ if(NOT SKIP_LIBRARY)
     set( Tensile_ARCHITECTURE "${GPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
     list_replace( Tensile_ARCHITECTURE "gfx90a" "gfx90a:xnack+\;gfx90a:xnack-")
 
-    set( TENSILE_VERSION 4.45.0 CACHE STRING "The version of Tensile to be used")
+    set( TENSILE_VERSION 4.47.0 CACHE STRING "The version of Tensile to be used")
 
     set( Tensile_NO_ENUMERATE ON CACHE BOOL "Disable enumerating GPU targets for Tensile builds" FORCE)
     
@@ -251,6 +257,9 @@ if( BUILD_WITH_HIPBLASLT )
 endif()
 
 if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
+  if(BUILD_CLIENTS_TESTS)
+    enable_testing()
+  endif()
   if(NOT CLIENTS_OS)
     rocm_set_os_id(CLIENTS_OS)
     string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)

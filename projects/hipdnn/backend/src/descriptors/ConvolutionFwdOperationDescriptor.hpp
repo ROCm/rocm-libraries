@@ -4,10 +4,11 @@
 #pragma once
 
 #include "BackendDescriptor.hpp"
-#include "HipdnnConvolutionMode.h"
 #include "IGraphOperation.hpp"
 #include "TensorDescriptor.hpp"
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <unordered_map>
 
 namespace hipdnn_backend
 {
@@ -60,6 +61,13 @@ public:
     std::vector<std::shared_ptr<TensorDescriptor>> getTensorDescriptors() const override;
     std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT> buildNode() const override;
 
+    // Creates a finalized ConvolutionFwdOperationDescriptor directly from a FlatBuffer NodeT.
+    // Casts nodeT.attributes to ConvolutionFwdAttributesT internally, then directly assigns
+    // the data struct, looks up tensor descriptors from the tensor map, and calls finalize().
+    static std::shared_ptr<ConvolutionFwdOperationDescriptor>
+        fromNode(const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+                 const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap);
+
     static hipdnnBackendDescriptorType_t getStaticType();
 
     std::string toString() const override;
@@ -76,27 +84,7 @@ private:
     hipdnn_data_sdk::data_objects::DataType _computeDataType
         = hipdnn_data_sdk::data_objects::DataType::UNSET;
 
-    // Private setAttribute helpers
-    void setTensorDesc(hipdnnBackendAttributeName_t attributeName,
-                       hipdnnBackendAttributeType_t attributeType,
-                       int64_t elementCount,
-                       const void* arrayOfElements);
-
-    void setConvMode(hipdnnBackendAttributeType_t attributeType,
-                     int64_t elementCount,
-                     const void* arrayOfElements);
-
-    // Private getAttribute helpers
-    void getTensorDesc(hipdnnBackendAttributeName_t attributeName,
-                       hipdnnBackendAttributeType_t attributeType,
-                       int64_t requestedElementCount,
-                       int64_t* elementCount,
-                       void* arrayOfElements) const;
-
-    void getConvMode(hipdnnBackendAttributeType_t attributeType,
-                     int64_t requestedElementCount,
-                     int64_t* elementCount,
-                     void* arrayOfElements) const;
+    std::string _name;
 };
 
 } // namespace hipdnn_backend

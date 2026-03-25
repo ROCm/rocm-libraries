@@ -35,7 +35,7 @@ TEST_F(TestEngineNames, EngineIdToNameMappingConsistent)
     // Verify each mapping is consistent
     for(const auto& [id, name] : idToName)
     {
-        auto calculatedId = engineNameToId(name.data());
+        auto calculatedId = engineNameToId(name);
         EXPECT_EQ(id, calculatedId)
             << "ID mismatch for engine: " << name << " (stored: 0x" << std::hex << id
             << ", calculated: 0x" << calculatedId << std::dec << ")";
@@ -63,7 +63,7 @@ TEST_F(TestEngineNames, GetEngineNameFromId)
     EXPECT_EQ(getEngineNameFromId(FUSILLI_ENGINE_ID), "FUSILLI_ENGINE");
 
     // Test with non-existent ID - should throw
-    int64_t nonExistentId = 0xDEADBEEF;
+    const int64_t nonExistentId = 0xDEADBEEF;
     EXPECT_THROW(getEngineNameFromId(nonExistentId), std::out_of_range);
 }
 
@@ -79,10 +79,47 @@ TEST_F(TestEngineNames, EngineCountMatches)
     // Also verify all names in one are in the other
     for(const auto& name : allEngines)
     {
-        auto id = engineNameToId(name.data());
+        auto id = engineNameToId(name);
         EXPECT_NE(idToName.find(id), idToName.end())
             << "Engine '" << name << "' is in getAllEngineNames but not in getEngineIdToNameMap";
     }
+}
+
+TEST_F(TestEngineNames, RegistrarSucceedsForNewUniqueName)
+{
+    // Registering a brand-new unique engine name should not throw
+    EXPECT_NO_THROW(EngineRegistrar{"TEST_UNIQUE_ENGINE_FOR_REGISTRAR"});
+
+    // Verify it was registered
+    EXPECT_TRUE(isEngineNameRegistered("TEST_UNIQUE_ENGINE_FOR_REGISTRAR"));
+    auto id = engineNameToId("TEST_UNIQUE_ENGINE_FOR_REGISTRAR");
+    EXPECT_EQ(getEngineNameFromId(id), "TEST_UNIQUE_ENGINE_FOR_REGISTRAR");
+}
+
+TEST_F(TestEngineNames, RegistrarThrowsOnDuplicateName)
+{
+    // These names are already in the map from HIPDNN_REGISTER_ENGINE static initialization.
+    // Re-registering should throw to catch accidental duplicate engine definitions.
+    const std::string_view miopenName{MIOPEN_ENGINE_NAME};
+    const std::string_view fusilliName{FUSILLI_ENGINE_NAME};
+    EXPECT_THROW(EngineRegistrar{miopenName}, std::runtime_error);
+    EXPECT_THROW(EngineRegistrar{fusilliName}, std::runtime_error);
+}
+
+TEST_F(TestEngineNames, RegistrarDetectsCollision)
+{
+    // Simulate a collision by inserting a fake entry into the ID map
+    // with the same ID that "COLLISION_TEST_ENGINE" would generate,
+    // but mapped to a different name
+    auto collisionId = engineNameToId("COLLISION_TEST_ENGINE");
+    detail::getMutableEngineIdToNameMap()[collisionId] = "SOME_OTHER_ENGINE";
+
+    // Now registering "COLLISION_TEST_ENGINE" should throw because the ID
+    // is already taken by "SOME_OTHER_ENGINE"
+    EXPECT_THROW(EngineRegistrar{"COLLISION_TEST_ENGINE"}, std::runtime_error);
+
+    // Clean up: remove the fake entry so other tests aren't affected
+    detail::getMutableEngineIdToNameMap().erase(collisionId);
 }
 
 TEST_F(TestEngineNames, EnsureAllEngineNameToIdsBehaveTheSame)
