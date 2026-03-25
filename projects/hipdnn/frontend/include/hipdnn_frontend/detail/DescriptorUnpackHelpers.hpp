@@ -369,7 +369,8 @@ template <typename T>
     return {};
 }
 
-/// Unpacks an optional tensor attribute. Returns nullptr if the attribute has no elements set.
+/// Unpacks an optional tensor attribute. Returns nullptr if the attribute has no
+/// elements set or is not supported by the backend.
 [[nodiscard]] inline Error unpackOptionalTensor(
     hipdnnBackendDescriptor_t opDesc,
     hipdnnBackendAttributeName_t tensorAttrName,
@@ -378,17 +379,28 @@ template <typename T>
     const std::string& errorContext)
 {
     int64_t count = 0;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrCount(
-        opDesc, tensorAttrName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, count, errorContext));
-    if(count == 0)
+    auto status = hipdnnBackend()->backendGetAttribute(
+        opDesc, tensorAttrName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &count, nullptr);
+
+    if(status == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
     {
         outTensor = nullptr;
         return {};
     }
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
+        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Failed to query count for optional " + errorContext
+                    + " Backend error: " + backendErrMsg.data()};
+    }
+
     return unpackAndRegisterTensor(opDesc, tensorAttrName, tensorMap, outTensor, errorContext);
 }
 
-/// Gets an optional scalar attribute. Returns std::nullopt if the attribute has no elements set.
+/// Gets an optional scalar attribute. Returns std::nullopt if the attribute has no
+/// elements set or is not supported by the backend.
 template <typename T>
 [[nodiscard]] inline Error getDescriptorAttrOptionalScalar(hipdnnBackendDescriptor_t desc,
                                                            hipdnnBackendAttributeName_t attrName,
@@ -397,11 +409,20 @@ template <typename T>
                                                            const std::string& errorContext)
 {
     int64_t count = 0;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrCount(desc, attrName, attrType, count, errorContext));
-    if(count == 0)
+    auto status
+        = hipdnnBackend()->backendGetAttribute(desc, attrName, attrType, 0, &count, nullptr);
+    if(status == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
     {
         value = std::nullopt;
         return {};
+    }
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
+        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Failed to get count for " + errorContext
+                    + " Backend error: " + backendErrMsg.data()};
     }
     T raw{};
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(desc, attrName, attrType, raw, errorContext));
