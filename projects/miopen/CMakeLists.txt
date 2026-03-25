@@ -102,11 +102,18 @@ set(MIOPEN_ENABLE_SQLITE_BACKOFF On CACHE BOOL "")
 option( BUILD_DEV "Build for development only" OFF)
 option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen"  OFF)
 option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIOPEN_ENABLE_FIN})
+option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 option(MIOPEN_CK_BUILDER_EXPERIMENTAL "Enable experimental support for CK Builder" OFF)
 
 option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
 if(MIOPEN_INCBIN)
     enable_language(ASM)
+endif()
+
+# Strip symbols for release
+if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
+    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -s")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
 rocm_setup_version(VERSION 3.5.1)
@@ -651,7 +658,7 @@ endfunction()
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
 set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx1030)
-set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE STRING "List of AMDGPU targets for which to install databases")
+set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project
 set(KDB_BZ2_FILES gfx942.kdb.bz2 gfx90a.kdb.bz2 gfx1030.kdb.bz2 gfx908.kdb.bz2 gfx906.kdb.bz2 gfx900.kdb.bz2)
