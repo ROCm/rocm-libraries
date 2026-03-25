@@ -170,32 +170,4 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
     return cases;
 }
 
-inline std::vector<ActivTestCase> createBatchnormBwdActivationTestCases()
-{
-    return {// ReLU Backward: d/dx Max(0, x) = 1 * (x > 0)
-            ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
-                          0.0f,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt),
-            // Clipped ReLU Backward: d/dx Clamp(x, -inf, upper)
-            ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
-                          std::nullopt,
-                          0.5f,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt),
-            // CLAMP Backward: d/dx Clamp(x, lower, upper)
-            ActivTestCase(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
-                          0.1f,
-                          0.5f,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt,
-                          std::nullopt)};
-}
-
 } // namespace test_activation_common

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdInferenceWithVariancePlan.hpp"
+#include "PlanUtils.hpp"
 
 #include "hip/IKernelCompiler.hpp"
 
@@ -119,29 +120,6 @@ size_t BatchnormFwdInferenceWithVariancePlan::getWorkspaceSize(
     return 0;
 }
 
-namespace
-{
-
-size_t computeVectorSize(bool isLayoutNHWC, int channels, unsigned int inCstride)
-{
-    if(isLayoutNHWC)
-    {
-        if(channels % 4 == 0)
-        {
-            return 4;
-        }
-        return channels % 2 == 0 ? 2 : 1;
-    }
-
-    if(inCstride % 4 == 0)
-    {
-        return 4;
-    }
-    return inCstride % 2 == 0 ? 2 : 1;
-}
-
-} // namespace
-
 void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kernelCompiler,
                                                     const hipDeviceProp_t& deviceProperties)
 {
@@ -206,7 +184,7 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     bool isLayoutNHWC = (xStrides->Get(1) == 1);
 
     // Calculate vector size based on layout
-    auto vectorsize = computeVectorSize(isLayoutNHWC, c, inCstride);
+    auto vectorsize = batchnorm::computeVectorSize(isLayoutNHWC, c, inCstride);
 
     // Calculate block and grid dimensions
     size_t xlocalsize = 0;
@@ -274,7 +252,8 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
         auto rocmIncludeArg = "-I" + rocmPath + "/include";
         options.emplace_back(rocmIncludeArg);
         HIPDNN_PLUGIN_LOG_INFO(
-            "BatchnormFwdInferencePlan: HIPRTC compile ROCm include path: " << rocmIncludeArg);
+            "BatchnormFwdInferenceWithVariancePlan: HIPRTC compile ROCm include path: "
+            << rocmIncludeArg);
     }
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP16=") + (useFp16Mix ? "1" : "0"));
@@ -323,7 +302,7 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipKernelHandle& handl
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "BatchnormFwdInferencePlan::execute() called before compile()");
+            "BatchnormFwdInferenceWithVariancePlan::execute() called before compile()");
     }
 
     // Get device buffer pointers

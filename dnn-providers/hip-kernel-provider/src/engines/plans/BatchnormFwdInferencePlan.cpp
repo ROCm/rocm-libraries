@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdInferencePlan.hpp"
+#include "PlanUtils.hpp"
 
 #include "hip/IKernelCompiler.hpp"
 
@@ -98,29 +99,6 @@ size_t BatchnormFwdInferencePlan::getWorkspaceSize(
     return 0;
 }
 
-namespace
-{
-
-size_t computeVectorSize(bool isLayoutNhwc, int channels, unsigned int inCstride)
-{
-    if(isLayoutNhwc)
-    {
-        if(channels % 4 == 0)
-        {
-            return 4;
-        }
-        return channels % 2 == 0 ? 2 : 1;
-    }
-
-    if(inCstride % 4 == 0)
-    {
-        return 4;
-    }
-    return inCstride % 2 == 0 ? 2 : 1;
-}
-
-} // namespace
-
 void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
                                         const hipDeviceProp_t& deviceProperties)
 {
@@ -184,7 +162,7 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     bool isLayoutNhwc = hip_kernel_utils::isChannelLastLayout(_inferenceParams.x());
 
     // Calculate vector size based on layout
-    auto vectorsize = computeVectorSize(isLayoutNhwc, c, inCstride);
+    auto vectorsize = batchnorm::computeVectorSize(isLayoutNhwc, c, inCstride);
 
     // Calculate block and grid dimensions
     size_t xlocalsize = 0;

@@ -81,7 +81,7 @@ bool batchnormFwdFusionCheckTensorsLogErrors(
     }
 }
 
-void batchnormFwdFusionCheckTensors(
+void batchnormFwdWithVarianceFusionCheckTensors(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
@@ -130,7 +130,7 @@ void batchnormFwdFusionCheckTensors(
     }
 }
 
-bool batchnormFwdFusionCheckTensorsLogErrors(
+bool batchnormFwdWithVarianceFusionCheckTensorsLogErrors(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
@@ -138,7 +138,7 @@ bool batchnormFwdFusionCheckTensorsLogErrors(
 {
     try
     {
-        batchnormFwdFusionCheckTensors(bnInfAttr, actAttr, tensorMap);
+        batchnormFwdWithVarianceFusionCheckTensors(bnInfAttr, actAttr, tensorMap);
         return true;
     }
     catch(const std::exception& e)
@@ -276,7 +276,8 @@ bool BatchnormPlanBuilder::isApplicable(
             const auto& actAttr
                 = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
-            if(!batchnormFwdFusionCheckTensorsLogErrors(bnInfAttr, actAttr, opGraph.getTensorMap()))
+            if(!batchnormFwdWithVarianceFusionCheckTensorsLogErrors(
+                   bnInfAttr, actAttr, opGraph.getTensorMap()))
             {
                 return false;
             }
