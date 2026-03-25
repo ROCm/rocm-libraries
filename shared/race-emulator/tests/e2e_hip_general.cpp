@@ -36,21 +36,24 @@ std::string load_kernel_file(const std::string &filename) {
 
 // Architecture parameter for multi-arch tests.
 struct ArchParam {
-  std::string asmDir; // e.g. "gfx942", "gfx1151"
-  int waveSize;       // 64 for CDNA, 32 for RDNA
+  std::shared_ptr<Architecture> arch;
+  int waveSize;
+
+  ArchParam(std::string_view target)
+      : arch(architectureFromTarget(target)), waveSize(arch->getWaveSize()) {}
 };
 
 Emulator loadEmulator(const ArchParam &arch, const std::string &filename) {
-  std::string path = arch.asmDir + "/" + filename;
+  std::string path = arch.arch->getName() + "/" + filename;
   std::string assembly = load_kernel_file(path);
-  auto archPtr = architectureFromTarget(arch.asmDir);
-  auto e = Emulator(assembly, archPtr);
+  auto e = Emulator(assembly, arch.arch);
   e.setRaceChecks(true);
   return e;
 }
 
-const ArchParam kGfx942{"gfx942", 64};
-const ArchParam kGfx1151{"gfx1151", 32};
+const ArchParam kGfx942("gfx942");
+const ArchParam kGfx950("gfx950");
+const ArchParam kGfx1151("gfx1151");
 
 // ============================================================================
 // Shared test logic (called by the explicit TEST declarations below)
@@ -63,7 +66,7 @@ const ArchParam kGfx1151{"gfx1151", 32};
 //   }
 void runCopyKernel(const ArchParam &arch) {
   auto emulator = loadEmulator(arch, "copy.s");
-  EXPECT_EQ(emulator.getArch().getName(), arch.asmDir);
+  EXPECT_EQ(emulator.getArch().getName(), arch.arch->getName());
 
   int N = 128;
   std::vector<int> h_in(N);
@@ -563,6 +566,7 @@ void runF16RoundTrip(const ArchParam &arch) {
 
 // --- Tests running on both gfx942 and gfx1151 ---
 TEST(Gfx942, CopyKernel) { runCopyKernel(kGfx942); }
+TEST(Gfx950, CopyKernel) { runCopyKernel(kGfx950); }
 TEST(Gfx1151, CopyKernel) { runCopyKernel(kGfx1151); }
 
 TEST(Gfx942, CopyIndexed) { runCopyIndexed(kGfx942); }
