@@ -80,9 +80,6 @@ private:
     std::shared_ptr<TensorDescriptor> _scaleDesc;
     std::shared_ptr<TensorDescriptor> _yDesc;
 
-    // Block size stored as int32 (matches the FBS schema type)
-    std::vector<int32_t> _blockSize;
-
     // Compute data type for this operation (stored at node level in graph)
     hipdnn_data_sdk::data_objects::DataType _computeDataType
         = hipdnn_data_sdk::data_objects::DataType::UNSET;
