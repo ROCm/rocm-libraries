@@ -58,7 +58,6 @@ namespace
         if(hipGetDevice(&deviceId) == hipSuccess
            && hipGetDeviceProperties(&props, deviceId) == hipSuccess)
         {
-            // Strip xnack/sramecc qualifiers (e.g. "gfx942:sramecc+:xnack-" -> "gfx942")
             std::string archName = props.gcnArchName;
             auto        colonPos = archName.find(':');
             if(colonPos != std::string::npos)
