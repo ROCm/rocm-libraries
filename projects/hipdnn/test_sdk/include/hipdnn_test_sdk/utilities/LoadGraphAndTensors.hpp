@@ -9,7 +9,9 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Visitor.hpp>
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
+#endif
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
@@ -54,7 +56,7 @@ struct GraphAndTensorMap
 
         for(auto& [uid, tensor] : tensorMap)
         {
-            hipdnnPluginDeviceBuffer_t deviceBuffer{uid, tensor->rawDeviceData()};
+            const hipdnnPluginDeviceBuffer_t deviceBuffer{uid, tensor->rawDeviceData()};
             deviceBuffers.push_back(deviceBuffer);
         }
         return deviceBuffers;
@@ -67,7 +69,7 @@ struct GraphAndTensorMap
             outputTensorMap;
 
         auto tensorAttributeMap = createGraphWrapper().getTensorMap();
-        for(int64_t uid : outputTensorUids)
+        for(const int64_t uid : outputTensorUids)
         {
             auto dataType = tensorAttributeMap[uid]->data_type();
             auto& outputTensorPtr = tensorMap[uid];
@@ -110,14 +112,14 @@ struct GraphAndTensorMap
                     using DataType = decltype(dataType);
 
                     auto validator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<DataType>{
-                        static_cast<DataType>(absTolerance), static_cast<DataType>(relTolerance)};
+                        absTolerance, relTolerance};
                     return validator.allClose(*referenceTensorPtr, *tensorMap.at(uid));
                 },
                 [&](int) {
                     throw std::runtime_error("validateTensors: Cannot validate integer tensors");
                     return false;
                 }};
-            bool passedValidation = std::visit(
+            const bool passedValidation = std::visit(
                 validatorFunc, hipdnn_test_sdk::utilities::datatypeToNativeVariant(dataType));
             if(!passedValidation)
             {
@@ -139,6 +141,8 @@ struct GraphAndTensorMap
         return bufferMap;
     }
 };
+
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
 
 inline std::vector<int64_t> getOutputTensorUidsFromGraph(nlohmann::json graph)
 {
@@ -165,7 +169,7 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
     auto basePath = path;
     basePath.replace_extension();
 
-    nlohmann::json graphJson = [](const auto& path) {
+    const nlohmann::json graphJson = [](const auto& path) {
         std::ifstream graphFileStream(path);
         if(!graphFileStream)
         {
@@ -199,4 +203,7 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
 
     return {graphBuilder.Release(), std::move(tensorMap), outputTensorUids};
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 }

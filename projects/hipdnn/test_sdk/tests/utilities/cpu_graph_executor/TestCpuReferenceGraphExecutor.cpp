@@ -15,11 +15,10 @@
 #include "PointwiseTensorBundles.hpp"
 
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -31,6 +30,8 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
 
 class TestCpuReferenceGraphExecutor
 {
@@ -40,9 +41,9 @@ public:
                                     hipdnn_data_sdk::data_objects::DataType meanVarianceDataType,
                                     hipdnn_data_sdk::data_objects::DataType computeDataType)
     {
-        unsigned int seed = getGlobalTestSeed();
+        const unsigned int seed = getGlobalTestSeed();
 
-        std::vector<int64_t> dims = {1, 3, 14, 14};
+        const std::vector<int64_t> dims = {1, 3, 14, 14};
         auto graph = buildBatchnormFwdInferenceGraph(inputDataType,
                                                      scaleBiasDataType,
                                                      meanVarianceDataType,
@@ -55,7 +56,7 @@ public:
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
         BatchnormFwdTensorBundle tensorBundle(
             graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
@@ -77,7 +78,7 @@ public:
         auto meanVarianceDataType = nativeTypeToDataType<MeanVarianceType>();
         auto computeDataType = nativeTypeToDataType<ComputeType>();
 
-        std::vector<int64_t> dims = {1, 3, 14, 14};
+        const std::vector<int64_t> dims = {1, 3, 14, 14};
         BatchnormBwdTensorBundle<InputType, ScaleBiasType, MeanVarianceType> tensorBundle(
             dims, 1, TensorLayout::NCHW);
 
@@ -107,7 +108,7 @@ public:
         auto meanVarianceDataType = nativeTypeToDataType<MeanVarianceType>();
         auto computeDataType = nativeTypeToDataType<ComputeType>();
 
-        std::vector<int64_t> dims = {1, 3, 14, 14};
+        const std::vector<int64_t> dims = {1, 3, 14, 14};
         BatchnormTrainTensorBundle<InputType, ScaleBiasType, MeanVarianceType> tensorBundle(
             dims, 1, TensorLayout::NCHW, useOptionalTensors);
 
@@ -134,9 +135,9 @@ public:
     static void runConvolutionFwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
                                       hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
     {
-        std::vector<int64_t> xDims = {1, 1, 2, 2};
-        std::vector<int64_t> wDims = {1, 1, 1, 1};
-        std::vector<int64_t> yDims = {1, 1, 2, 2};
+        const std::vector<int64_t> xDims = {1, 1, 2, 2};
+        const std::vector<int64_t> wDims = {1, 1, 1, 1};
+        const std::vector<int64_t> yDims = {1, 1, 2, 2};
         ConvolutionFwdTensorBundle<InputType> tensorBundle(
             xDims, wDims, yDims, 1, TensorLayout::NCHW);
 
@@ -159,9 +160,9 @@ public:
     static void runConvolutionBwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
                                       hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
     {
-        std::vector<int64_t> dxDims = {1, 1, 2, 2};
-        std::vector<int64_t> wDims = {1, 1, 1, 1};
-        std::vector<int64_t> dyDims = {1, 1, 2, 2};
+        const std::vector<int64_t> dxDims = {1, 1, 2, 2};
+        const std::vector<int64_t> wDims = {1, 1, 1, 1};
+        const std::vector<int64_t> dyDims = {1, 1, 2, 2};
         ConvolutionBwdTensorBundle<InputType> tensorBundle(
             dxDims, wDims, dyDims, 1, TensorLayout::NCHW);
 
@@ -184,9 +185,9 @@ public:
     static void runConvolutionWrwTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
                                       hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
     {
-        std::vector<int64_t> xDims = {1, 1, 2, 2};
-        std::vector<int64_t> dwDims = {1, 1, 1, 1};
-        std::vector<int64_t> dyDims = {1, 1, 2, 2};
+        const std::vector<int64_t> xDims = {1, 1, 2, 2};
+        const std::vector<int64_t> dwDims = {1, 1, 1, 1};
+        const std::vector<int64_t> dyDims = {1, 1, 2, 2};
         ConvolutionWrwTensorBundle<InputType> tensorBundle(
             xDims, dwDims, dyDims, 1, TensorLayout::NCHW);
 
@@ -209,9 +210,9 @@ public:
     static void runMatmulTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
                               hipdnn_data_sdk::data_objects::DataType computeDataType)
     {
-        std::vector<int64_t> aDims = {2, 5, 3};
-        std::vector<int64_t> bDims = {2, 3, 4};
-        std::vector<int64_t> cDims = {2, 5, 4};
+        const std::vector<int64_t> aDims = {2, 5, 3};
+        const std::vector<int64_t> bDims = {2, 3, 4};
+        const std::vector<int64_t> cDims = {2, 5, 4};
         MatmulTensorBundle<inputType> tensorBundle(aDims, bDims, cDims, false, false, 1);
 
         auto graphTuple = buildMatmulGraph(tensorBundle, inputDataType, computeDataType);
@@ -270,8 +271,7 @@ TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllHalfs)
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllBFloat16)
 {
-    TestCpuReferenceGraphExecutor::
-        runBatchnormBwdTest<hip_bfloat16, hip_bfloat16, hip_bfloat16, hip_bfloat16>();
+    TestCpuReferenceGraphExecutor::runBatchnormBwdTest<bfloat16, bfloat16, bfloat16, bfloat16>();
 }
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllFloats)
@@ -288,8 +288,7 @@ TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllHalfs)
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllBFloat16)
 {
-    TestCpuReferenceGraphExecutor::
-        runBatchnormTrainTest<hip_bfloat16, hip_bfloat16, hip_bfloat16, hip_bfloat16>();
+    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<bfloat16, bfloat16, bfloat16, bfloat16>();
 }
 
 TEST(TestCpuReferenceGraphExecutor, ConvolutionFwdAllFloats)
@@ -304,8 +303,8 @@ TEST(TestCpuReferenceGraphExecutor, ConvolutionFwdAllHalfs)
 }
 TEST(TestCpuReferenceGraphExecutor, ConvolutionFwdAllBFloat16)
 {
-    TestCpuReferenceGraphExecutor::runConvolutionFwdTest<hip_bfloat16, float>(DataType::BFLOAT16,
-                                                                              DataType::FLOAT);
+    TestCpuReferenceGraphExecutor::runConvolutionFwdTest<bfloat16, float>(DataType::BFLOAT16,
+                                                                          DataType::FLOAT);
 }
 
 TEST(TestCpuReferenceGraphExecutor, ConvolutionBwdAllFloats)
@@ -320,8 +319,8 @@ TEST(TestCpuReferenceGraphExecutor, ConvolutionBwdAllHalfs)
 }
 TEST(TestCpuReferenceGraphExecutor, ConvolutionBwdAllBFloat16)
 {
-    TestCpuReferenceGraphExecutor::runConvolutionBwdTest<hip_bfloat16, float>(DataType::BFLOAT16,
-                                                                              DataType::FLOAT);
+    TestCpuReferenceGraphExecutor::runConvolutionBwdTest<bfloat16, float>(DataType::BFLOAT16,
+                                                                          DataType::FLOAT);
 }
 
 TEST(TestCpuReferenceGraphExecutor, ConvolutionWrwAllFloats)
@@ -336,8 +335,8 @@ TEST(TestCpuReferenceGraphExecutor, ConvolutionWrwAllHalfs)
 }
 TEST(TestCpuReferenceGraphExecutor, ConvolutionWrwAllBFloat16)
 {
-    TestCpuReferenceGraphExecutor::runConvolutionWrwTest<hip_bfloat16, float>(DataType::BFLOAT16,
-                                                                              DataType::FLOAT);
+    TestCpuReferenceGraphExecutor::runConvolutionWrwTest<bfloat16, float>(DataType::BFLOAT16,
+                                                                          DataType::FLOAT);
 }
 
 TEST(TestCpuReferenceGraphExecutor, MatmulAllFloats)
@@ -350,14 +349,14 @@ TEST(TestCpuReferenceGraphExecutor, MatmulAllHalfs)
 }
 TEST(TestCpuReferenceGraphExecutor, MatmulAllBFloat16)
 {
-    TestCpuReferenceGraphExecutor::runMatmulTest<hip_bfloat16, float>(DataType::BFLOAT16,
-                                                                      DataType::FLOAT);
+    TestCpuReferenceGraphExecutor::runMatmulTest<bfloat16, float>(DataType::BFLOAT16,
+                                                                  DataType::FLOAT);
 }
 
 TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)
 {
-    std::vector<int64_t> inputDims = {1, 3, 2, 2};
-    std::vector<int64_t> outputDims = {1, 3, 2, 2};
+    const std::vector<int64_t> inputDims = {1, 3, 2, 2};
+    const std::vector<int64_t> outputDims = {1, 3, 2, 2};
 
     auto [graph, tensorBundle, variantPack]
         = buildPointwiseBinaryGraph(inputDims,

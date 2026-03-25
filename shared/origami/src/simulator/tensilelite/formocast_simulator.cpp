@@ -36,7 +36,7 @@ namespace origami
         //issue 2nd prefetch
         double grCycles2 = numGRA * 4 / waveNum;
         grCycles2 += numGRB * 4 / waveNum;
-        return (grCycles2 + others + 1024*depthU/64) / math_frequency;                       
+        return (grCycles2 + others + 1024*depthU/64) / math_frequency;
     }
 
 
@@ -68,20 +68,20 @@ namespace origami
         // TODO: migrate to use the original hardware_t
         if(arch == hardware_t::architecture_t::gfx950)
         {
-            unsigned char magic[208] = {0, 0, 0, 0, 0, 0, 224, 64, 0, 0, 0, 0, 0, 0, 80, 65, 0, 0, 0, 0, 0, 0, 176, 65, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 8, 64, 0, 0, 0, 0, 0, 176, 157, 64, 189, 134, 242, 26, 202, 171, 152, 64, 189, 134, 242, 26, 202, 171, 168, 64, 0, 0, 0, 0, 0, 32, 156, 64, 0, 0, 0, 0, 0, 92, 162, 64, 205, 204, 204, 204, 204, 204, 4, 64, 205, 204, 204, 204, 204, 204, 0, 64, 0, 0, 0, 0, 0, 0, 176, 64, 0, 0, 0, 0, 0, 0, 112, 64, 0, 0, 0, 0, 0, 0, 80, 64, 205, 204, 204, 204, 204, 204, 236, 63, 0, 0, 0, 0, 0, 0, 232, 63, 8, 0, 0, 0, 14, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 6, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0};
-            hw = archConstantMap(magic, 208);
+            unsigned char magic[232] = {0, 0, 0, 0, 0, 0, 224, 64, 0, 0, 0, 0, 0, 0, 80, 65, 0, 0, 0, 0, 0, 0, 176, 65, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 8, 64, 0, 0, 0, 0, 0, 176, 157, 64, 189, 134, 242, 26, 202, 171, 152, 64, 189, 134, 242, 26, 202, 171, 168, 64, 0, 0, 0, 0, 0, 32, 156, 64, 0, 0, 0, 0, 0, 92, 162, 64, 205, 204, 204, 204, 204, 204, 4, 64, 205, 204, 204, 204, 204, 204, 0, 64, 0, 0, 0, 0, 0, 0, 176, 64, 0, 0, 0, 0, 0, 0, 112, 64, 0, 0, 0, 0, 0, 0, 80, 64, 205, 204, 204, 204, 204, 204, 236, 63, 0, 0, 0, 0, 0, 0, 232, 63, 8, 0, 0, 0, 14, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 6, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0};
+            hw = archConstantMap(magic, 232);
             hw.architecture = hardware_t::architecture_t::gfx950;
         }
         else if(arch == hardware_t::architecture_t::gfx942)
         {
-            unsigned char magic[208] = {0, 0, 0, 0, 0, 0, 224, 64, 0, 0, 0, 0, 0, 0, 80, 65, 0, 0, 0, 0, 0, 0, 176, 65, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 8, 64, 0, 0, 0, 0, 0, 80, 148, 64, 118, 98, 39, 118, 98, 7, 162, 64, 118, 98, 39, 118, 98, 7, 178, 64, 0, 0, 0, 0, 0, 48, 145, 64, 1, 96, 132, 2, 0, 0, 0, 0, 154, 153, 153, 153, 153, 153, 5, 64, 64, 96, 132, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 160, 64, 0, 0, 0, 0, 0, 0, 115, 64, 0, 0, 0, 0, 0, 0, 80, 64, 205, 204, 204, 204, 204, 204, 236, 63, 143, 194, 245, 40, 92, 143, 226, 63, 8, 0, 0, 0, 10, 0, 0, 0, 5, 0, 0, 0, 2, 0, 0, 0, 6, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0};
-            hw = archConstantMap(magic, 208);
+            unsigned char magic[232] = {0, 0, 0, 0, 0, 0, 224, 64, 0, 0, 0, 0, 0, 0, 80, 65, 0, 0, 0, 0, 0, 0, 176, 65, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 8, 64, 0, 0, 0, 0, 0, 80, 148, 64, 118, 98, 39, 118, 98, 7, 162, 64, 118, 98, 39, 118, 98, 7, 178, 64, 0, 0, 0, 0, 0, 48, 145, 64, 0, 0, 0, 0, 0, 48, 161, 64, 154, 153, 153, 153, 153, 153, 5, 64, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 160, 64, 0, 0, 0, 0, 0, 0, 115, 64, 0, 0, 0, 0, 0, 0, 80, 64, 205, 204, 204, 204, 204, 204, 236, 63, 143, 194, 245, 40, 92, 143, 226, 63, 8, 0, 0, 0, 10, 0, 0, 0, 5, 0, 0, 0, 2, 0, 0, 0, 6, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0};
+            hw = archConstantMap(magic, 232);
             hw.architecture = hardware_t::architecture_t::gfx942;
         }
         else if(arch == hardware_t::architecture_t::gfx1201)
         {
-            unsigned char magic[208] = {0, 0, 0, 0, 0, 0, 224, 64, 0, 0, 0, 0, 0, 0, 96, 65, 0, 0, 0, 0, 0, 0, 144, 65, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 228, 63, 0, 0, 0, 0, 0, 168, 147, 64, 20, 174, 71, 225, 122, 132, 78, 64, 104, 145, 237, 124, 63, 119, 123, 64, 0, 0, 0, 0, 0, 92, 162, 64, 0, 0, 0, 0, 0, 136, 163, 64, 51, 51, 51, 51, 51, 51, 45, 64, 205, 204, 204, 204, 204, 204, 44, 64, 0, 0, 0, 0, 0, 0, 160, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 64, 64, 205, 204, 204, 204, 204, 204, 236, 63, 0, 0, 0, 0, 0, 0, 232, 63, 1, 0, 0, 0, 14, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 6, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0};
-            hw = archConstantMap(magic, 208);
+            unsigned char magic[232] = {0, 0, 0, 0, 0, 0, 224, 64, 0, 0, 0, 0, 0, 0, 96, 65, 0, 0, 0, 0, 0, 0, 144, 65, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 96, 64, 0, 0, 0, 0, 0, 0, 228, 63, 0, 0, 0, 0, 0, 168, 147, 64, 20, 174, 71, 225, 122, 132, 78, 64, 104, 145, 237, 124, 63, 119, 123, 64, 0, 0, 0, 0, 0, 92, 162, 64, 0, 0, 0, 0, 0, 136, 163, 64, 51, 51, 51, 51, 51, 51, 45, 64, 205, 204, 204, 204, 204, 204, 44, 64, 0, 0, 0, 0, 0, 0, 160, 64, 0, 0, 0, 0, 0, 0, 80, 64, 0, 0, 0, 0, 0, 0, 64, 64, 205, 204, 204, 204, 204, 204, 236, 63, 0, 0, 0, 0, 0, 0, 232, 63, 1, 0, 0, 0, 14, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 6, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0};
+            hw = archConstantMap(magic, 232);
             hw.architecture = hardware_t::architecture_t::gfx1201;
         }
         else
@@ -154,7 +154,7 @@ namespace origami
             MT0, MT1, bpeA, bpeB, NTA, NTB, GRVWA, GRVWB, DTVA, DTVB,
             isSwizzleA, isSwizzleB, VWA, VWB, transA, transB, lda, ldb,
             NLCA, NLCB, threadnum, NumWave0, NumWave1, hw.architecture == hardware_t::architecture_t::gfx942);
-        
+
         L1CacheHitRate result;
         result.tile0HitRate = hr.tile0HitRate;
         result.tile1HitRate = hr.tile1HitRate;
@@ -169,7 +169,7 @@ namespace origami
         auto hr = simulator::computeL3CacheHitRate(
             M, N, K, hw.L3CacheCapacity, hw.NumCUs, bpeA, bpeB, NTA, NTB,
             N_WGs_total, M_WGs_total, N_WGs_per_tile, M_WGs_per_tile);
-        
+
         L3CacheHitRate result;
         result.totalHitRate = hr.totalHitRate;
         result.tile0HitRate = hr.tile0HitRate;
@@ -186,7 +186,7 @@ namespace origami
                                                         double storeGSU) const
     {
         double gsu_overall = 0.0;
-        
+
         if(gsuMethod == 2 && GlobalSplitU > 1) //MB
         {
             gsu_overall = simulator::getMultipleBufferOverhead(
@@ -216,7 +216,7 @@ namespace origami
                                                      ProblemInfo problem,
                                                      const HardwareConstants& hw_consts) const
     {
-        return simulator::getLocalSplitKOverhead(MT0, MT1, lsu, svw, numThreads, 
+        return simulator::getLocalSplitKOverhead(MT0, MT1, lsu, svw, numThreads,
                                          problem.bpeCompute, hw_consts.math_frequency);
     }
 
@@ -298,7 +298,7 @@ namespace origami
     bool Formocast::isBetter(ProblemInfo problem, TieBreakerInfo previousSolution) const
     {
         auto currSol = getTieBreakerInfo();
-        
+
         // Call standalone tie-breaker function
         return compareConfigTieBreaker(
             problem.M, problem.N, problem.K, problem.NumBatches,
@@ -557,8 +557,8 @@ namespace origami
         // Calculate load requests and memory access costs before calling calculateMemoryAccessCosts
         double tcc_ea0_coalscedA;
         double tcc_ea0_coalscedB;
-        double A_L1_req = simulator::getLoadRequest(std::min(MT0, M), depthU, hw_consts.L1CacheLineSize, 
-                                         GRVWA, bpeA, DTVA, 
+        double A_L1_req = simulator::getLoadRequest(std::min(MT0, M), depthU, hw_consts.L1CacheLineSize,
+                                         GRVWA, bpeA, DTVA,
                                          transA,           // isTransposed
                                          isSwizzleA,    // isSwizzled (for transposed case)
                                          VWA,           // VW (for transposed case)
@@ -567,8 +567,8 @@ namespace origami
                                          NumWave1,      // numWaveX (for non-transposed case)
                                          tcc_ea0_coalscedA);
 
-        double B_L1_req = simulator::getLoadRequest(std::min(MT1, N), depthU, hw_consts.L1CacheLineSize, 
-                                         GRVWB, bpeB, DTVB, 
+        double B_L1_req = simulator::getLoadRequest(std::min(MT1, N), depthU, hw_consts.L1CacheLineSize,
+                                         GRVWB, bpeB, DTVB,
                                          !transB,          // isTransposed (B is transposed when trB=false)
                                          isSwizzleB,    // isSwizzled (for transposed case)
                                          VWB,           // VW (for transposed case)
@@ -667,334 +667,6 @@ namespace origami
         return pp;
     }
 
-    Formocast::IntermediatePerformanceMetrics
-    Formocast::calculateIntermediateMetrics() const
-    {
-        IntermediatePerformanceMetrics metrics;
-
-        // 1. Problem Dimension Calculation
-        double M = problem.M;
-        double N = problem.N;
-        double NumBatches = problem.NumBatches;
-        double K = problem.K;
-        bool transA = problem.transA;
-        bool transB = problem.transB;
-        uint32_t bpeA    = problem.bpeA;
-        uint32_t bpeB    = problem.bpeB;
-        uint32_t bpeD    = problem.bpeD;
-        // swizzle settings
-        bool     isSwizzleA = problem.swizzleTensorA;
-        bool     isSwizzleB = problem.swizzleTensorB;
-
-        // 2. Variables directly from sizeMapping
-        // Basic tile and workgroup configuration
-        double MT0 = sizeMapping.macroTile[0];
-        double MT1 = sizeMapping.macroTile[1];
-        int      WGM = sizeMapping.workGroupMapping != 0 ? sizeMapping.workGroupMapping : 1;
-        int      CUOccupancy = sizeMapping.CUOccupancy;
-        uint32_t depthU = sizeMapping.depthU;
-
-        // Global split
-        bool     isGSUWGMRR = sizeMapping.globalSplitUWorkGroupMappingRoundRobin;
-        uint32_t gsuMethod = sizeMapping.globalAccumulation;
-
-        // Prefetch and memory access configuration
-        int      PGR = sizeMapping.PrefetchGlobalRead;
-
-        // Wave and global read configuration
-        uint32_t GRVWA = sizeMapping.grvwA;
-        uint32_t GRVWB = sizeMapping.grvwB;
-        uint32_t GWVWD = sizeMapping.gwvwD;
-        uint32_t VWA   = sizeMapping.VectorWidthA;
-        uint32_t VWB   = sizeMapping.VectorWidthB;
-        uint32_t waveNum  = sizeMapping.waveNum;
-        uint32_t NumWave0 = sizeMapping.waveGroup[0];
-        uint32_t NumWave1 = sizeMapping.waveGroup[1];
-        uint32_t NumThreads = hw_consts.wavefrontSize * waveNum;
-
-        // Matrix instruction and VGPR configuration
-        int miSize = sizeMapping.matrixInstruction[0];
-        bool DTVA = sizeMapping.DirectToVgprA;
-        bool DTVB = sizeMapping.DirectToVgprB;
-
-        // NLCA/B is used for non-TN cases to calculate load requests.
-        int NLCA = sizeMapping.NumLoadsCoalescedA;
-        int NLCB = sizeMapping.NumLoadsCoalescedB;
-
-        //GlobalSplitU
-        uint32_t GlobalSplitU = sizeMapping.globalSplitU;
-        //LocalSplitU
-        int LSU = sizeMapping.LocalSplitU;
-
-        //DirectToLdsA
-        bool DirectToLdsA = sizeMapping.DirectToLdsA;
-        //DirectToLdsB
-        bool DirectToLdsB = sizeMapping.DirectToLdsB;
-
-        // Clock calculation
-        double math_clk = sizeMapping.MathClocksUnrolledLoop;
-
-        // 3. Derived Problem/Workgroup Dimensions
-        double K_AfterGSU = safe_ceil_div(static_cast<uint32_t>(K), static_cast<uint32_t>(GlobalSplitU));
-        uint32_t M_WGs_total = safe_ceil_div(static_cast<uint32_t>(M), static_cast<uint32_t>(MT0));
-        uint32_t N_WGs_total = safe_ceil_div(static_cast<uint32_t>(N), static_cast<uint32_t>(MT1));
-        int N_WGs_per_tile_XCD = std::min((uint32_t)WGM, N_WGs_total);
-        int M_WGs_per_tile_XCD
-            = std::min(M_WGs_total, static_cast<uint32_t>(safe_ceil_div(int(hw_consts.NumCUs / hw_consts.NumXCDs), N_WGs_per_tile_XCD)));
-        int M_WGs_per_tile = std::min(M_WGs_total, static_cast<uint32_t>(safe_ceil_div(int(hw_consts.NumCUs), N_WGs_per_tile_XCD)));
-        int N_WGs_per_tile
-            = std::min(N_WGs_total, static_cast<uint32_t>(N_WGs_per_tile_XCD * safe_ceil_div(M_WGs_per_tile, M_WGs_total)));
-        uint32_t numberWGs = M_WGs_total * N_WGs_total * NumBatches * GlobalSplitU;
-        uint32_t WGs_per_tile = std::min(uint32_t(hw_consts.NumCUs), numberWGs);
-        uint32_t WGs_per_tile_XCD = safe_ceil_div(WGs_per_tile, hw_consts.NumXCDs);
-        uint32_t num_tiles = safe_ceil_div(numberWGs, uint32_t(hw_consts.NumCUs));
-        uint32_t loopCnt = K_AfterGSU / depthU;
-        uint32_t K_tail = K_AfterGSU - (loopCnt * depthU);
-
-        PGR = (std::floor(K_AfterGSU/depthU > 1)) ? sizeMapping.PrefetchGlobalRead : int(K_AfterGSU/depthU);
-
-        // 4. Cache Hit Rates and Bandwidths
-        CacheHitRates cache_hits;
-        L1CacheHitRate l1 = computeL1CacheHitRate(hw_consts,
-                                                MT0, MT1, bpeA, bpeB,
-                                                0, 0, GRVWA, GRVWB,
-                                                DTVA, DTVB, isSwizzleA, isSwizzleB,
-                                                VWA, VWB, transA, transB,
-                                                M, N, NLCA, NLCB,
-                                                NumThreads, NumWave0, NumWave1);
-        L2CacheHitRate l2 = computeL2CacheHitRate(M,
-                                                N,
-                                                K_AfterGSU,
-                                                hw_consts,
-                                                GlobalSplitU,
-                                                WGM,
-                                                NumBatches,
-                                                bpeA,
-                                                bpeB,
-                                                0,
-                                                0,
-                                                isGSUWGMRR);
-        L3CacheHitRate l3 = computeL3CacheHitRate(M, N, K, hw_consts,
-                                                bpeA, bpeB, 0, 0,
-                                                N_WGs_total, M_WGs_total, N_WGs_per_tile, M_WGs_per_tile);
-
-        cache_hits.A_L1_hit = l1.tile0HitRate;
-        cache_hits.B_L1_hit = l1.tile1HitRate;
-        cache_hits.A_L2_hit = l2.tile0HitRate;
-        cache_hits.B_L2_hit = l2.tile1HitRate;
-        cache_hits.A_L3_hit = l3.tile0HitRate;
-        cache_hits.B_L3_hit = l3.tile1HitRate;
-        cache_hits.totalL2HitRate = l2.totalHitRate;
-        cache_hits.totalL3HitRate = l3.totalHitRate;
-
-        // 5. Calculate Store Performance (D matrix writes)
-        double store, store_edge;
-        calculateStorePerformance(M, N, NumBatches, MT0, MT1, GWVWD, bpeD, hw_consts, WGs_per_tile, WGs_per_tile_XCD, store, store_edge);
-        metrics.output_write_cost = store;
-        metrics.output_write_cost_edge = store_edge;
-
-        // 6. Calculate GSU Overhead
-        double storeGSU = store * 2; //FIXME: incorrect
-        auto vgprUsageCheck = MT0 * MT1 / miSize / miSize;
-        double gsu_overall = calculateGlobalSplitUOverhead(M, N, K, NumBatches, GlobalSplitU, gsuMethod,
-                                                  problem, hw_consts, WGs_per_tile, WGs_per_tile_XCD,
-                                                  MT0, MT1, numberWGs, vgprUsageCheck, storeGSU);
-        metrics.split_accumulation_overhead = gsu_overall;
-
-        // 7. Calculate LSU Overhead
-        double lsu_overall = calculateLocalSplitUOverhead(MT0, MT1, LSU, GWVWD, NumThreads, problem, hw_consts);
-        metrics.local_split_overhead = lsu_overall;
-
-        // 8. Calculate Memory Access and Math Costs
-        double L2BandWidthPerCU     = hw_consts.L2ReadArbEff * 128 * 16 / WGs_per_tile_XCD; //90% eff
-        if (L2BandWidthPerCU > hw_consts.L2ReadArbEff * 128 * 16 / (hw_consts.NumCUs/hw_consts.NumXCDs))
-            L2BandWidthPerCU = hw_consts.L2ReadArbEff * 128 * 16 / (hw_consts.NumCUs/hw_consts.NumXCDs);
-        double L3BandWidthPerCU     = hw_consts.L3BandWidth / WGs_per_tile;
-        double HBMBandWidthPerCU    = hw_consts.hbmBandWidth / WGs_per_tile;
-
-        // Calculate load requests and memory access costs
-        double tcc_ea0_coalscedA;
-        double tcc_ea0_coalscedB;
-        double A_L1_req = simulator::getLoadRequest(std::min(MT0, M), depthU, hw_consts.L1CacheLineSize, 
-                                         GRVWA, bpeA, DTVA, 
-                                         transA,           // isTransposed
-                                         isSwizzleA,    // isSwizzled (for transposed case)
-                                         VWA,           // VW (for transposed case)
-                                         hw_consts.L1BusWidthPerCU,  // L1BusWidthPerCU (for non-transposed case)
-                                         NLCA,          // NumLoadsCoalesced (for non-transposed case)
-                                         NumWave1,      // numWaveX (for non-transposed case)
-                                         tcc_ea0_coalscedA);
-
-        double B_L1_req = simulator::getLoadRequest(std::min(MT1, N), depthU, hw_consts.L1CacheLineSize, 
-                                         GRVWB, bpeB, DTVB, 
-                                         !transB,          // isTransposed (B is transposed when trB=false)
-                                         isSwizzleB,    // isSwizzled (for transposed case)
-                                         VWB,           // VW (for transposed case)
-                                         hw_consts.L1BusWidthPerCU,  // L1BusWidthPerCU (for non-transposed case)
-                                         NLCB,          // NumLoadsCoalesced (for non-transposed case)
-                                         NumWave0,      // numWaveX (for non-transposed case)
-                                         tcc_ea0_coalscedB);
-
-        double A_L2_req = A_L1_req * (1 - cache_hits.A_L1_hit) / 2 * tcc_ea0_coalscedA;
-        double A_L3_req = A_L2_req * (1 - cache_hits.A_L2_hit) / tcc_ea0_coalscedA;
-        double A_hbm_req = A_L3_req * (1 - cache_hits.A_L3_hit);
-        double B_L2_req = B_L1_req * (1 - cache_hits.B_L1_hit) / 2 * tcc_ea0_coalscedB;
-        double B_L3_req = B_L2_req * (1 - cache_hits.B_L2_hit) / tcc_ea0_coalscedB;
-        double B_hbm_req = B_L3_req * (1 - cache_hits.B_L3_hit);
-
-        metrics.tile0_l1_request = A_L1_req;
-        metrics.tile0_l2_request = A_L2_req;
-        metrics.tile0_l3_request = A_L3_req;
-        metrics.tile0_mem_request = A_hbm_req;
-        metrics.tile1_l1_request = B_L1_req;
-        metrics.tile1_l2_request = B_L2_req;
-        metrics.tile1_l3_request = B_L3_req;
-        metrics.tile1_mem_request = B_hbm_req;
-
-        // 9. Calculate Prefetch Performance
-        int numAccPerWave = MT0 * MT1 / waveNum / hw_consts.wavefrontSize;
-        double prefetch      = getPrefetchPerformance(GRVWA,
-                                                 GRVWB,
-                                                 bpeA,
-                                                 bpeB,
-                                                 depthU,
-                                                 waveNum,
-                                                 MT0,
-                                                 MT1,
-                                                 hw_consts.math_frequency,
-                                                 numAccPerWave);
-        metrics.prefetch_cost = prefetch;
-        metrics.startup_cost = hw_consts.initialCost;
-
-        // Store cache hits and compute cycles for final calculation
-        metrics.compute_cycles = math_clk;
-        metrics.cache_hits = cache_hits;
-
-        return metrics;
-    }
-
-    Formocast::PredictedPerformance
-    Formocast::calculateFinalPerformance(const IntermediatePerformanceMetrics& metrics) const
-    {
-        PredictedPerformance pp;
-
-        // Re-calculate all necessary values from problem, sizeMapping, and hw_consts
-        double M = problem.M;
-        double N = problem.N;
-        double NumBatches = problem.NumBatches;
-        double K = problem.K;
-        bool isSwizzleA = problem.swizzleTensorA;
-        bool isSwizzleB = problem.swizzleTensorB;
-
-        double MT0 = sizeMapping.macroTile[0];
-        double MT1 = sizeMapping.macroTile[1];
-        int WGM = sizeMapping.workGroupMapping != 0 ? sizeMapping.workGroupMapping : 1;
-        int CUOccupancy = sizeMapping.CUOccupancy;
-        uint32_t depthU = sizeMapping.depthU;
-        uint32_t GlobalSplitU = sizeMapping.globalSplitU;
-        uint32_t GWVWD = sizeMapping.gwvwD;
-
-        double K_AfterGSU = safe_ceil_div(static_cast<uint32_t>(K), static_cast<uint32_t>(GlobalSplitU));
-        uint32_t M_WGs_total = safe_ceil_div(static_cast<uint32_t>(M), static_cast<uint32_t>(MT0));
-        uint32_t N_WGs_total = safe_ceil_div(static_cast<uint32_t>(N), static_cast<uint32_t>(MT1));
-        int N_WGs_per_tile_XCD = std::min((uint32_t)WGM, N_WGs_total);
-        uint32_t numberWGs = M_WGs_total * N_WGs_total * NumBatches * GlobalSplitU;
-        uint32_t WGs_per_tile = std::min(uint32_t(hw_consts.NumCUs), numberWGs);
-        uint32_t WGs_per_tile_XCD = safe_ceil_div(WGs_per_tile, hw_consts.NumXCDs);
-        uint32_t num_tiles = safe_ceil_div(numberWGs, uint32_t(hw_consts.NumCUs));
-        uint32_t loopCnt = K_AfterGSU / depthU;
-        uint32_t K_tail = K_AfterGSU - (loopCnt * depthU);
-
-        int PGR = sizeMapping.PrefetchGlobalRead;
-        PGR = (std::floor(K_AfterGSU/depthU > 1)) ? sizeMapping.PrefetchGlobalRead : int(K_AfterGSU/depthU);
-
-        double L2BandWidthPerCU = hw_consts.L2ReadArbEff * 128 * 16 / WGs_per_tile_XCD;
-        if (L2BandWidthPerCU > hw_consts.L2ReadArbEff * 128 * 16 / (hw_consts.NumCUs/hw_consts.NumXCDs))
-            L2BandWidthPerCU = hw_consts.L2ReadArbEff * 128 * 16 / (hw_consts.NumCUs/hw_consts.NumXCDs);
-        double L3BandWidthPerCU = hw_consts.L3BandWidth / WGs_per_tile;
-        double HBMBandWidthPerCU = hw_consts.hbmBandWidth / WGs_per_tile;
-
-        double store = metrics.output_write_cost;
-        double store_edge = metrics.output_write_cost_edge;
-
-        // 1. Calculate Memory Access Costs using intermediate metrics
-        MemoryAccessCosts mem_costs = calculateMemoryAccessCosts(
-            std::min(MT0, M), std::min(MT1, N),
-            hw_consts,
-            metrics.cache_hits,
-            L2BandWidthPerCU, L3BandWidthPerCU, HBMBandWidthPerCU,
-            isSwizzleA, isSwizzleB,
-            metrics.tile0_l1_request, metrics.tile1_l1_request,
-            metrics.tile0_l2_request, metrics.tile0_l3_request, metrics.tile0_mem_request,
-            metrics.tile1_l2_request, metrics.tile1_l3_request, metrics.tile1_mem_request);
-
-        // 2. Calculate loop Performance
-        double math_overall = metrics.compute_cycles / hw_consts.math_frequency;
-        double loop_overall = getLoopOverall(mem_costs, math_overall, loopCnt, PGR);
-
-        loop_overall += loopCnt * 0.2;
-
-        // 3. Handle Tail Loop
-        double tail_overall = 0.0;
-        if (K_tail > 0)
-        {
-            tail_overall = (mem_costs.mem_overall * K_tail / depthU + math_overall) + metrics.prefetch_cost * 2;
-        }
-
-        // 4. Calculate preLoopCost
-        double preLoopCost = metrics.startup_cost + metrics.prefetch_cost;
-
-        // 5. Aggregate Performance: pre-loop + unrolled-loop + post-loop
-        double perf = preLoopCost + loop_overall + store;
-        if (num_tiles > 1)
-        {
-            // consider edge percentage
-            double edge_percentage = 0.0;
-            if (M_WGs_total * MT0 > M)
-            {
-                edge_percentage = 1 / (double)M_WGs_total;
-            }
-            store = edge_percentage * store_edge + (1 - edge_percentage) * store;
-            perf = preLoopCost + loop_overall + store;
-        }
-        else { store = std::max(store_edge, store); perf = metrics.prefetch_cost + loop_overall + store;}
-
-        // 6. Add tail loop cost
-        perf += tail_overall;
-
-        // 7. Add LSU Reduction Part
-        perf += metrics.local_split_overhead;
-
-        // 8. Apply CU Occupancy
-        perf = resolveOccupancy(hw_consts, perf, metrics.prefetch_cost, loop_overall + tail_overall, store, num_tiles, CUOccupancy);
-
-        // 9. Add GSU Reduction Part
-        perf += metrics.split_accumulation_overhead;
-
-        if (int(M) % int(MT0) != 0)
-            perf = perf + std::max(store_edge, store);
-
-        pp.microSeconds = perf;
-        pp.hitRate = metrics.cache_hits.totalL2HitRate * 100;
-
-        // Update perfInfo (mutable member)
-        perfInfo.memory = mem_costs;
-        perfInfo.math = math_overall;
-        perfInfo.svw = GWVWD;
-        perfInfo.perf = perf;
-        perfInfo.preloop = preLoopCost;
-        perfInfo.loop = loop_overall;
-        perfInfo.tail = tail_overall;
-        perfInfo.store = store;
-        perfInfo.gsu = metrics.split_accumulation_overhead;
-        perfInfo.lsu = metrics.local_split_overhead;
-        perfInfo.mt0 = MT0;
-        perfInfo.mt1 = MT1;
-        perfInfo.du = depthU;
-
-        return pp;
-    }
-
     Formocast::L2CacheHitRate
         Formocast::computeL2CacheHitRate(uint32_t M,
                                                    uint32_t N,
@@ -1013,10 +685,14 @@ namespace origami
         uint32_t MT1 = sizeMapping.macroTile[1];
         uint32_t depthU = sizeMapping.depthU;
 
+        // can't make these two unsigned, they could be -1 in special cases
+        int XCC = sizeMapping.workGroupMappingXCC;
+        int XCCG = (sizeMapping.workGroupMappingXCCGroup < 0)? hw.NumCUs : sizeMapping.workGroupMappingXCCGroup;
+
         auto hr = simulator::computeL2CacheHitRate(
             M, N, K, MT0, MT1, depthU, hw.L2CacheCapacity, hw.NumCUs, hw.NumXCDs,
-            gsu, wgm, batches, bpeA, bpeB, NTA, NTB, isGSUWGMRR);
-        
+            XCC, XCCG, gsu, wgm, batches, bpeA, bpeB, NTA, NTB, isGSUWGMRR);
+
         L2CacheHitRate hitRate;
         hitRate.totalHitRate = hr.totalHitRate;
         hitRate.tile0HitRate = hr.tile0HitRate;
@@ -1043,9 +719,9 @@ namespace origami
         hw_consts = getHardwareConstants(hw);
     }
 
-    int Formocast::getGlobalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall) const
+    int Formocast::getGlobalReadQueueFullStallCycles(int currentCycle, std::deque<int>& fifo, int bpRead, int numWaves, bool isStall, bool isSgprOffset) const
     {
-        return simulator::getGlobalReadQueueFullStallCycles(currentCycle, fifo, bpRead, numWaves, isStall);
+        return simulator::getGlobalReadQueueFullStallCycles(currentCycle, fifo, bpRead, numWaves, isStall, isSgprOffset);
     }
 
     int Formocast::getLocalReadCompletionCycle(int currentCycle, std::queue<int>& fifo, int numLR) const
@@ -1069,20 +745,50 @@ namespace origami
         return simulator::getLocalReadQueueFullStallCycles(currentCycle, fifo, bpRead, numWaves, lrStallLatencyBuffer);
     }
 
-    void Formocast::pushLocalRead(int currentCycle, std::queue<int>& fifo, int bpr, bool isGfx950)
+    int Formocast::getLocalWriteQueueFullStallCycles(int currentCycle, int previousLW, int issueCycles, int bpWrite, int numWaves) const
     {
-        simulator::pushLocalRead(currentCycle, fifo, bpr, isGfx950);
+        int issuePenality = 0;
+        if(numWaves == 4)
+        {
+            // only 2 simds can be issued at the same time. if 4 simds, need 1 extra issue cycle.
+            issuePenality = issueCycles;
+        }
+        if(currentCycle - previousLW >= issueCycles)
+        {
+            // if the space is enough, no stall.
+            return currentCycle + issueCycles;
+        }
+        return currentCycle + issueCycles + issuePenality;
     }
 
-    void Formocast::pushLocalReadWrite(int currentCycle, std::queue<int>& fifo, int bpr, double bankConflict)
+    void Formocast::pushLocalReadWrite(int currentCycle, std::queue<int>& fifo, int bpr, double bankConflict, bool isLocalRead, int numPreviousLRs)
     {
         int lrMemLatency;
-        if (bpr == 16) {
-            lrMemLatency = simulator::getLocalReadLatency(hw_consts.LocalReadBaseLatencyB128, hw_consts.LocalReadConflictMultiplierB128, bankConflict);
-        } else if (bpr == 8) {
-            lrMemLatency = simulator::getLocalReadLatency(hw_consts.LocalReadBaseLatencyB64, hw_consts.LocalReadConflictMultiplierB64, bankConflict);
-        } else {
-            lrMemLatency = simulator::getLocalReadLatency(hw_consts.LocalReadBaseLatencyB32, hw_consts.LocalReadConflictMultiplierB32, bankConflict);
+        if (isLocalRead) {
+            if (bpr == 16) {
+                lrMemLatency = simulator::getLocalReadLatency(hw_consts.LocalReadBaseLatencyB128, hw_consts.LocalReadConflictMultiplierB128, bankConflict);
+                if (numPreviousLRs <= 4) {
+                    lrMemLatency += 2 * numPreviousLRs;
+                }
+                else {
+                    // Maximum 4 * 2 latency for previous local reads
+                    lrMemLatency += 2 * 4;
+                }
+            } else if (bpr == 8) {
+                lrMemLatency = simulator::getLocalReadLatency(hw_consts.LocalReadBaseLatencyB64, hw_consts.LocalReadConflictMultiplierB64, bankConflict);
+            } else {
+                lrMemLatency = simulator::getLocalReadLatency(hw_consts.LocalReadBaseLatencyB32, hw_consts.LocalReadConflictMultiplierB32, bankConflict);
+            }
+        }
+        else {
+            // Local write latency
+            if (bpr == 16) {
+                lrMemLatency = simulator::getLocalWriteLatency(hw_consts.LocalWriteBaseLatencyB128, hw_consts.LocalWriteConflictMultiplierB128, bankConflict);
+            } else if (bpr == 8) {
+                lrMemLatency = simulator::getLocalWriteLatency(hw_consts.LocalWriteBaseLatencyB64, hw_consts.LocalWriteConflictMultiplierB64, bankConflict);
+            } else {
+                lrMemLatency = simulator::getLocalWriteLatency(hw_consts.LocalWriteBaseLatencyB32, hw_consts.LocalWriteConflictMultiplierB32, bankConflict);
+            }
         }
         fifo.push(currentCycle + lrMemLatency);
     }
@@ -1125,7 +831,7 @@ namespace origami
         // No preference - configurations are considered equal
         return false;
     }
-    
+
     // Helper function to analyze bank conflicts from VGPR states
     Formocast::BankConflictResult Formocast::analyzeBankConflictsFromVGPR(
         const std::vector<std::unordered_map<std::string, int64_t>>& vgprState,

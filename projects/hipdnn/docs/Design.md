@@ -12,6 +12,7 @@ hipDNN is a graph-based deep learning library that enables multi-operation fusio
 - **Performance through Fusion**: Multiple operations can be fused into single kernels for better performance
 - **Engine Selection**: Heuristics will be implemented as plugins, allowing extensibility without modifying the core library, and benchmarking will be implemented as an extensible frontend API allowing customized engine selection logic
 - **Industry Standard API**: Provides a familiar interface that matches established deep learning library conventions
+- **No RTTI in public headers**: Public SDK headers (frontend, data_sdk, plugin_sdk) do not use `typeid`, `dynamic_cast`, or `dynamic_pointer_cast`. This allows consumers and plugins to compile with `-fno-rtti` (`/GR-` on MSVC) if desired. RTTI-free compilation is enforced in CI via the `HIPDNN_NO_RTTI_OPTIONS` CMake variable applied to the backend and select test targets.
 
 ## Memory Management
 
@@ -59,7 +60,7 @@ hipDNN provides three header-only SDK libraries that serve as the foundation for
 
 The Data SDK contains FlatBuffers schemas and data structures for graph representation.
 
-- **Dependencies**: FlatBuffers and spdlog
+- **Dependencies**: FlatBuffers
 - **Purpose**: Provides data structures and serialization for graphs, tensors, and configurations
 - **Expected Usage**: Consumed by Frontend, Backend, and Plugins for graph data handling
 - **Core Functionality**:
@@ -283,4 +284,4 @@ hipdnnEnginePluginExecuteOpGraph(handle, context, workspace, buffers, num_buffer
 See [Plugin Development](./PluginDevelopment.md) for advanced information on developing and using plugins.
 
 ### Reference Implementation: CPU Graph Executor
-The CPU Graph Executor is a reference graph execution implementation build for graph verification and testing. See the [CPU Graph Executor Design Document](./CpuGraphExecutorDesign.md) for more details.
+The CPU Graph Executor is a reference graph execution implementation build for graph verification and testing. See the [CPU Graph Executor Design Document](./rfcs/0001_CpuGraphExecutorDesign.md) for more details.

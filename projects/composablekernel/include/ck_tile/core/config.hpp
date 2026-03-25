@@ -24,6 +24,9 @@
     defined(__gfx1152__) || defined(__gfx1153__) || defined(__gfx11_generic__)
 #define __gfx11__
 #endif
+#if defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)
+#define __gfx115__
+#endif
 #if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__)
 #define __gfx12__
 #endif
@@ -73,7 +76,7 @@
 #define CK_TILE_FLOAT_TO_BFLOAT16_RTA_ASM 4
 
 #ifndef CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT
-#define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT CK_TILE_FLOAT_TO_BFLOAT16_TRUNCATE
+#define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT CK_TILE_FLOAT_TO_BFLOAT16_STANDARD
 #endif
 
 #define CK_TILE_FLOAT_TO_FP8_STANDARD 0

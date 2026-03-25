@@ -3,6 +3,8 @@
 
 #pragma once
 
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 #include <gtest/gtest.h>
 #include <unordered_map>
 #include <vector>
@@ -54,7 +56,7 @@ protected:
     }
 };
 
-auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
+inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
     return testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
         hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data"
@@ -62,3 +64,5 @@ auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
         ".json"));
 }
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB

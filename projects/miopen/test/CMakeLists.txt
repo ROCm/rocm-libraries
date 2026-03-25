@@ -215,7 +215,8 @@ else()
     add_definitions(-DMIOPEN_TEST_DRIVER_MODE=1)
 endif()
 
-add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR})
+# Exclude *_suite tests added as part of test filter standardization(#3513) from check target to avoid running them during build.
+add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR} --exclude-regex ".*_suite")
 add_custom_target(tests)
 
 if(MIOPEN_TEST_GPU_DETECTION_FAILED AND NOT (MIOPEN_NO_GPU))
@@ -299,13 +300,12 @@ elseif(MIOPEN_TEST_BFLOAT16)
               test_deepbench_conv test_conv_igemm_dynamic_xdlops_nhwc_wrw_bf16
               test_conv_igemm_dynamic_xdlops_nhwc_fwd_bf16
               test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16
-              test_pooling2d_bfp16 test_pooling3d_bfp16)
+              test_pooling2d test_pooling3d)
 endif()
 
 if(MIOPEN_NO_GPU)
     set(SKIP_ALL_EXCEPT_TESTS
-            test_sqlite_perfdb
-            test_perfdb)
+            test_sqlite_perfdb)
 endif()
 
 #TODO WORKAROUND_ISSUE_1424
@@ -322,9 +322,6 @@ if (MIOPEN_TEST_GFX115X)
     list(APPEND SKIP_TESTS test_ctc)
 endif()
 
-if(NOT MIOPEN_TEST_BFLOAT16)
-    list(APPEND SKIP_TESTS test_pooling2d_bfp16 test_pooling3d_bfp16)
-endif()
 
 # The usage is non-trivial, see function add_test_command.
 if(SKIP_TESTS)
@@ -464,9 +461,7 @@ set(LONG_TESTS
     test_conv3d_extra
     test_conv_3d
     test_pooling2d
-    test_pooling2d_bfp16
     test_pooling3d
-    test_pooling3d_bfp16
     test_conv_ck_igemm_fwd_v6r1_dlops_nchw
     )
 
@@ -510,7 +505,6 @@ endforeach()
 if(MIOPEN_TEST_ENABLE_TEST_SQLITE_PERFDB)
     set_tests_properties(test_sqlite_perfdb PROPERTIES RUN_SERIAL On)
 endif()
-set_tests_properties(test_perfdb PROPERTIES RUN_SERIAL On)
 
 # add_sanitize_test(perfdb.cpp)
 # add_sanitize_test(cache.cpp)

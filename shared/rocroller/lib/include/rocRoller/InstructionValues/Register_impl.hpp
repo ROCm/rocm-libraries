@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -638,7 +615,8 @@ namespace rocRoller
         {
             AssertFatal(canUseAsOperand(),
                         "Tried to use unallocated register value!",
-                        ShowValue(this->toString()));
+                        ShowValue(this->toString()),
+                        ShowValue(this->valueCount()));
         }
 
         inline void Value::specialString(std::ostream& os) const
@@ -1073,28 +1051,38 @@ namespace rocRoller
             : m_context(context)
             , m_regType(regType)
             , m_variableType(variableType)
-            , m_options(options)
             , m_valueCount(count)
         {
             AssertFatal(context != nullptr);
 
             setRegisterCount();
-            if(options.contiguousChunkWidth == Register::FULLY_CONTIGUOUS)
+
+            setOptions(options);
+        }
+
+        inline void Allocation::setOptions(AllocationOptions opts)
+        {
+            m_options = opts;
+
+            if(m_options.contiguousChunkWidth == Register::FULLY_CONTIGUOUS)
             {
                 m_options.contiguousChunkWidth = m_registerCount;
             }
-            else if(options.contiguousChunkWidth == Register::VALUE_CONTIGUOUS)
+            else if(m_options.contiguousChunkWidth == Register::VALUE_CONTIGUOUS)
             {
-                m_options.contiguousChunkWidth = CeilDivide<int>(variableType.getElementSize(), 4);
+                m_options.contiguousChunkWidth
+                    = CeilDivide<int>(m_variableType.getElementSize(), 4);
             }
 
-            if(options.alignment <= 0)
+            if(m_options.alignment <= 0)
             {
-                m_options.alignment = m_variableType.registerAlignment(
-                    m_regType, m_options.contiguousChunkWidth, context->targetArchitecture());
+                m_options.alignment
+                    = m_variableType.registerAlignment(m_regType,
+                                                       m_options.contiguousChunkWidth,
+                                                       m_context.lock()->targetArchitecture());
             }
 
-            if(options.contiguousChunkWidth != Register::MANUAL)
+            if(m_options.contiguousChunkWidth != Register::MANUAL)
             {
                 AssertFatal(m_options.alignment <= m_options.contiguousChunkWidth,
                             ShowValue(m_options),

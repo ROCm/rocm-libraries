@@ -10,7 +10,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
@@ -107,10 +107,13 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::dgrad(
             dxRefTensor, wTensor, dyTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
-        auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceBwd<InputType>();
+        auto absoluteTolerance = hipdnn_test_sdk::utilities::conv::
+            calculateConvDgradTolerance<InputType, InputType, float>(
+                0.0, 1.0, 0.0, 1.0, wAttr->get_dim());
+        constexpr float relativeTolerance = 0.01f;
 
-        auto dxValidator
-            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+        auto dxValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
+            absoluteTolerance, relativeTolerance);
 
         bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
 
@@ -128,14 +131,10 @@ int main(int argc, char* argv[])
 {
     auto config = parseCommandLineArgs(argc, argv);
 
-    initializeFrontendLogging();
+    auto [handle, handleError] = createHipdnnHandle();
+    HIPDNN_FE_CHECK(handleError);
 
-    hipdnnHandle_t handle;
-    HIPDNN_CHECK(hipdnnCreate(&handle));
-
-    bool allPassed = run(SampleRunner{handle, config});
-
-    HIPDNN_CHECK(hipdnnDestroy(handle));
+    bool allPassed = run(SampleRunner{*handle, config});
 
     if(allPassed)
     {

@@ -40,6 +40,7 @@
 #include "../../shared/concurrency.h"
 #include "../../shared/device_properties.h"
 #include "../../shared/environment.h"
+#include "../../shared/fft_enums.h"
 #include "../../shared/hostbuf.h"
 #include "../../shared/rocfft_accuracy_test.h"
 #include "../../shared/sys_mem.h"
@@ -144,7 +145,7 @@ void init_gtest_flags()
     std::swap(temp_list_tests, testing::GTEST_FLAG(list_tests));
 
     // move stdout to devnull
-#ifdef WIN32
+#ifdef _WIN32
     int stdout_fd   = _fileno(stdout);
     int devnull     = _open("NUL", _O_WRONLY);
     int stdout_copy = _dup(stdout_fd);
@@ -159,7 +160,7 @@ void init_gtest_flags()
     (void)RUN_ALL_TESTS();
 
     // put stdout back
-#ifdef WIN32
+#ifdef _WIN32
     _dup2(stdout_copy, stdout_fd);
     _close(stdout_copy);
     _close(devnull);
@@ -332,7 +333,6 @@ int main(int argc, char* argv[])
     app.add_option("--ngpus", ngpus, "Number of GPUs to use per rank")
         ->default_val(-1)
         ->check(CLI::NonNegativeNumber);
-    app.add_option("--gpus", n_random_tests, "Number of extra randomized tests")->default_val(0);
     app.add_option("--test_prob", test_prob, "Probability of running individual tests")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
@@ -647,9 +647,12 @@ int main(int argc, char* argv[])
     fftwf_plan_with_nthreads(rocfft_concurrency());
 #endif
 
-    // Set host memory limit from command-line options
-    host_memory::singleton().set_limit_gbytes(ramgb);
-    std::cout << "Host memory limit: " << ramgb << " GiB" << std::endl;
+    // Set host memory limit from command-line options (if more restrictive)
+    const auto usable_bytes = host_memory::singleton().get_usable_bytes();
+    if(ramgb * ONE_GiB < usable_bytes)
+        host_memory::singleton().set_limit_gbytes(ramgb);
+    std::cout << "Usable host memory: " << bytes_to_GiB(host_memory::singleton().get_usable_bytes())
+              << " GiB" << std::endl;
 
     if(use_fftw_wisdom)
     {
@@ -799,8 +802,8 @@ TEST(manual, vs_fftw) // MANUAL TESTS HERE
         std::vector<unsigned int> deviceGrid(params.length.size() + 1, 1);
         deviceGrid[1] = manual_devices;
 
-        params.distribute_input(manual_devices, deviceGrid);
-        params.distribute_output(manual_devices, deviceGrid);
+        params.distribute_field<fft_io::fft_io_in>(manual_devices, deviceGrid);
+        params.distribute_field<fft_io::fft_io_out>(manual_devices, deviceGrid);
     }
 
     // Run an individual test using the provided command-line parameters.

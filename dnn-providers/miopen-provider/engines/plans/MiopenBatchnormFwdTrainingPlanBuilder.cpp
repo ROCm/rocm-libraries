@@ -6,7 +6,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenHandle.hpp"
 #include "MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 #include "MiopenUtils.hpp"
 #include "engines/plans/MiopenBatchnormApplicabilityChecks.hpp"
@@ -247,7 +247,7 @@ void checkTensorVirtuality2Node(
 } // namespace
 
 bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1 && opGraph.nodeCount() != 2)
@@ -307,19 +307,28 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
     }
 }
 
-size_t MiopenBatchnormFwdTrainingPlanBuilder::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+size_t MiopenBatchnormFwdTrainingPlanBuilder::getMaxWorkspaceSize(
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const HipdnnMiopenSettings& executionSettings) const
 {
     // No workspace needed for batchnorm forward training
     return 0;
 }
 
+void MiopenBatchnormFwdTrainingPlanBuilder::initializeExecutionSettings(
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] HipdnnMiopenSettings& executionSettings) const
+{
+}
+
 void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    HipdnnEnginePluginExecutionContext& executionContext) const
+    HipdnnMiopenContext& executionContext) const
 {
     if(opGraph.nodeCount() == 1)
     {
@@ -330,7 +339,7 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
 
         BatchnormFwdTrainingParams params(bnAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
-            std::move(params), executionContext.benchmarkingEnabled());
+            std::move(params), executionContext.executionSettings());
         executionContext.setPlan(std::move(plan));
     }
     else if(opGraph.nodeCount() == 2)
@@ -345,7 +354,7 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
 
         BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
-            std::move(params), executionContext.benchmarkingEnabled());
+            std::move(params), executionContext.executionSettings());
         executionContext.setPlan(std::move(plan));
     }
     else
@@ -358,7 +367,7 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT>
     MiopenBatchnormFwdTrainingPlanBuilder::getCustomKnobs(
-        [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+        [[maybe_unused]] const HipdnnMiopenHandle& handle,
         [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};

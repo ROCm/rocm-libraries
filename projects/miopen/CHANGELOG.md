@@ -2,14 +2,21 @@
 # Change Log for MIOpen
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
+## MIOpen 3.5.1 for ROCm 7.13.0
+### Added
+* Added `MIOPEN_LOG_BUFFER_SIZE` option: when set to non-zero, dumps recent MIOpen logs to file on error.
+
+## MIOpen 3.5.1 for ROCm 7.12.0
+### Added
+* [Conv] Enabled CK wrw and bwd solvers with split-k disabled in deterministic mode.
+* [Conv] Added `ConvDepthwiseFwd2D` solver for optimizing specific depthwise convolutions.
+
 ## MIOpen 3.5.1 for ROCm 7.11.0
 ### Added
 * [BatchNorm] Added V3 batch normalization API with separate running statistics buffers (prevResultRunningMean/Variance and nextResultRunningMean/Variance)
 * [BatchNorm] New API entry-points `miopenBatchNormalizationForwardInferenceInvVariance` and
   `miopenBatchNormForwardInferenceActivationInvVariance` to support hipDNN.
-* [Conv] Enabled CK wrw and bwd solvers with split-k disabled in deterministic mode.
 * [Conv] Added initial Composable Kernel (CK) support for RDNA3.X and RDNA4
-* [Conv] Added `ConvDepthwiseFwd2D` solver for optimizing specific depthwise convolutions.
 
 ### Changed
 * Ported additional OCL kernels to HIP

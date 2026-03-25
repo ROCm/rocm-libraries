@@ -5,10 +5,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <limits>
 #include <numeric>
+#include <stdexcept>
 #include <thread>
 #include <tuple>
 #include <type_traits>
@@ -16,17 +18,19 @@
 
 namespace hipdnn_test_sdk::detail
 {
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
 
-// Type trait to validate tensor types (arithmetic types + half + hip_bfloat16)
+// Type trait to validate tensor types (arithmetic types + half + bfloat16)
 template <typename T>
-constexpr bool IS_VALID_TENSOR_TYPE_V = std::
-    disjunction_v<std::is_arithmetic<T>, std::is_same<T, half>, std::is_same<T, hip_bfloat16>>;
+constexpr bool IS_VALID_TENSOR_TYPE_V
+    = std::disjunction_v<std::is_arithmetic<T>, std::is_same<T, half>, std::is_same<T, bfloat16>>;
 
 /**
  * @brief Safely convert between types while avoiding implicit precision loss warnings
  *
  * This function handles type conversions that may trigger compiler warnings about
- * implicit precision loss, particularly when converting from double to hip_bfloat16
+ * implicit precision loss, particularly when converting from double to bfloat16
  * or half. It makes the conversion path explicit to eliminate warnings.
  *
  * @tparam TargetType The type to convert to
@@ -37,16 +41,10 @@ constexpr bool IS_VALID_TENSOR_TYPE_V = std::
 template <typename TargetType, typename SourceType>
 inline TargetType safeConvert(const SourceType& value)
 {
-    if constexpr(std::is_same_v<TargetType, hip_bfloat16>)
+    if constexpr(std::is_same_v<TargetType, bfloat16> || std::is_same_v<TargetType, half>)
     {
-        // For hip_bfloat16, explicitly convert through float to avoid precision warnings
-        // hip_bfloat16 lacks direct constructor from double, only from float
-        return static_cast<TargetType>(static_cast<float>(value));
-    }
-    else if constexpr(std::is_same_v<TargetType, half>)
-    {
-        // For half, explicitly convert through float to avoid precision warnings
-        // half lacks direct constructor from double, only from float
+        // For bfloat16/half, explicitly convert through float to avoid precision warnings
+        // These types lack direct constructors from double, only from float
         return static_cast<TargetType>(static_cast<float>(value));
     }
     else
@@ -54,6 +52,46 @@ inline TargetType safeConvert(const SourceType& value)
         // For all other types, direct cast is fine
         return static_cast<TargetType>(value);
     }
+}
+
+/**
+ * @brief Safely cast test values with range validation.
+ *
+ * This helper validates source values against the representable range of
+ * TargetType and throws if out-of-range (or non-finite for floating-like sources).
+ *
+ * @tparam TargetType The type to cast to
+ * @tparam SourceType The type to cast from
+ * @param value The value to cast
+ * @return The safely cast value
+ */
+template <typename TargetType, typename SourceType>
+inline TargetType safeTestTypeCast(SourceType value)
+{
+    static_assert(std::numeric_limits<std::remove_cv_t<SourceType>>::is_specialized,
+                  "safeTestTypeCast: SourceType must define numeric_limits");
+    static_assert(std::numeric_limits<std::remove_cv_t<TargetType>>::is_specialized,
+                  "safeTestTypeCast: TargetType must define numeric_limits");
+
+    const auto src = safeConvert<double>(value);
+
+    // If SourceType is not integral, treat it as floating-like and reject NaN/Inf.
+    if constexpr(!std::is_integral_v<std::remove_cv_t<SourceType>>)
+    {
+        if(!std::isfinite(src))
+        {
+            throw std::out_of_range("safeTestTypeCast: non-finite source value");
+        }
+    }
+
+    const auto lo = safeConvert<double>(std::numeric_limits<TargetType>::lowest());
+    const auto hi = safeConvert<double>(std::numeric_limits<TargetType>::max());
+    if(src < lo || src > hi)
+    {
+        throw std::out_of_range("safeTestTypeCast: value out of representable range");
+    }
+
+    return safeConvert<TargetType>(src);
 }
 
 struct JoinableThread : std::thread
@@ -134,14 +172,14 @@ struct ParallelTensorFunctorDynamic
             return;
         }
 
-        std::size_t workPerThread = (totalElements + numThreads - 1) / numThreads;
+        const std::size_t workPerThread = (totalElements + numThreads - 1) / numThreads;
 
         std::vector<JoinableThread> threads(numThreads);
 
         for(std::size_t threadIdx = 0; threadIdx < numThreads; ++threadIdx)
         {
-            std::size_t workBegin = threadIdx * workPerThread;
-            std::size_t workEnd = std::min((threadIdx + 1) * workPerThread, totalElements);
+            const std::size_t workBegin = threadIdx * workPerThread;
+            const std::size_t workEnd = std::min((threadIdx + 1) * workPerThread, totalElements);
 
             auto threadFunc = [=, *this] {
                 for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)

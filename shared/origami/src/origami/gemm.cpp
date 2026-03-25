@@ -15,13 +15,21 @@
 
 #include "origami/hardware.hpp"
 #include "origami/heuristics.hpp"
+#include "origami/logger.hpp"
 #include "origami/math.hpp"
 #include "origami/types.hpp"
 
 #include "origami/gemm.hpp"
 #include "origami/streamk.hpp"
+#include "origami/simulator/tensilelite/formocast_simulator.hpp"
 
 namespace origami {
+
+// Forward declaration for internal Formocast latency computation
+static double compute_formocast_latency(const problem_t& problem,
+                                        const hardware_t& hardware,
+                                        const config_t& config);
+
 double calculate_work_utilization(const problem_t& problem, const config_t& config) {
   const size_t M = problem.size.m;
   const size_t N = problem.size.n;
@@ -552,7 +560,7 @@ double compute_l2_hit_rate_global(const problem_t& problem,
 inline size_t round_up_mul(size_t x, size_t m) { return (x + m - 1) / m * m; }
 
 size_t round_elements_to_128B(size_t elements, size_t element_size_bits) {
-  const size_t transaction_bits = 128u * 8u;  // 1024
+  const size_t transaction_bits = 128u * 8u;  // 1024 bits = 128 bytes
   const size_t g                = std::gcd(element_size_bits, transaction_bits);
   const size_t E_block          = transaction_bits / g;  // elements per 128B-aligned chunk
   return round_up_mul(elements, E_block);
@@ -564,6 +572,9 @@ double compute_memory_latency(const problem_t& problem,
                               const config_t& config,
                               size_t num_active_cus,
                               size_t splitting_factor) {
+  
+  bool debug = runtime_options::get().debug_enabled;
+
   // Extract parameters from structured types
   const auto a_bytes = data_type_to_bytes(problem.a_dtype);
   const auto b_bytes = data_type_to_bytes(problem.b_dtype);
@@ -682,6 +693,25 @@ double compute_memory_latency(const problem_t& problem,
                            L_mem_mem_mall * heuristic.weight_mem_mall,
                            L_mem_mem_dram * heuristic.weight_mem_dram});
 
+  if(debug)
+  {
+    OLOG_DEBUG("Ld_CU_bytes: " << Ld_CU_bytes);
+    OLOG_DEBUG("total_Ld: " << total_Ld);
+    OLOG_DEBUG("H_mem_l2: " << H_mem_l2);
+    OLOG_DEBUG("H_mem_l2_global: " << H_mem_l2_global);
+    OLOG_DEBUG("H_mem_mall: " << H_mem_mall);
+    OLOG_DEBUG("Ld_mem_dram: " << Ld_mem_dram);
+    OLOG_DEBUG("Ld_mem_mall: " << Ld_mem_mall);
+    OLOG_DEBUG("bw_limited: " << bw_limited);
+    OLOG_DEBUG("L_mem_mem_mall: " << L_mem_mem_mall);
+    OLOG_DEBUG("L_mem_mem_dram: " << L_mem_mem_dram);
+    OLOG_DEBUG("L_mem: " << L_mem);
+    OLOG_DEBUG("grid_m: " << int(grid_m));
+    OLOG_DEBUG("grid_n: " << int(grid_n));
+    OLOG_DEBUG("mall_m: " << int(mall_m));
+    OLOG_DEBUG("mall_n: " << int(mall_n));
+    OLOG_DEBUG("config.workgroup_mapping: " << int(config.workgroup_mapping));
+  }
   return L_mem;
 }
 
@@ -693,6 +723,9 @@ double compute_tile_latency(const problem_t& problem,
                             const config_t& config,
                             size_t num_active_cus,
                             size_t splitting_factor) {
+  
+  bool debug = runtime_options::get().debug_enabled;
+
   // Extract parameters from structured types
   const size_t K = problem.size.k;
   size_t batch   = problem.batch;
@@ -741,20 +774,37 @@ double compute_tile_latency(const problem_t& problem,
   L_prologue *= occupancy_factor;
 
   // 3-2) Epilogue: writes from all active CUs with limited bandwidth
-  double mem_bw_occ            = compute_mem_bw_from_occupancy(hardware, num_active_cus);
-  double mem_bw_occ_limited    = hardware.mem3_perf_ratio * mem_bw_occ;
-  size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, datatype_to_bits(problem.a_dtype));
+  double mem_bw_occ         = compute_mem_bw_from_occupancy(hardware, num_active_cus);
+  double mem_bw_occ_limited = hardware.mem3_perf_ratio * mem_bw_occ;
+  // Round to cache line (128B) for memory system alignment
+  int d_bits = datatype_to_bits(problem.d_dtype);
+  size_t MT_M_rounded = (d_bits > 0) ? round_elements_to_128B(MT_M, static_cast<size_t>(d_bits))
+                                     : round_elements_to_128B(MT_M, 16);  // fallback to 16-bit
 
   // Each block can be independently calculated and reordered
   epilogue_components_t epilogue_comp = {};
 
   // Block 1: Initial memory write latency
   epilogue_comp.initial_memory_write = (static_cast<double>(num_active_cus / splitting_factor) *
-                                        MT_M_rounded_128bytes * MT_N * d_bytes) /
+                                        MT_M_rounded * MT_N * d_bytes) /
                                        mem_bw_occ_limited;
 
   // Block 2: One compute iteration in the epilogue
   epilogue_comp.compute_iteration = L_compute * effective_tile_penalty;
+
+  if(debug)
+  {
+    OLOG_DEBUG("mem_bw_occ: " << mem_bw_occ);
+    OLOG_DEBUG("mem_bw_occ_limited: " << mem_bw_occ_limited);
+    OLOG_DEBUG("utilization: " << utilization);
+    OLOG_DEBUG("output_utilization: " << output_utilization);
+    OLOG_DEBUG("effective_tile_penalty: " << effective_tile_penalty);
+    OLOG_DEBUG("output_utilization_penalty: " << output_utilization_penalty);
+    OLOG_DEBUG("config.occupancy: " << config.occupancy);
+    OLOG_DEBUG("real_occupancy: " << real_occupancy);
+    OLOG_DEBUG("num_active_cus: " << int(num_active_cus));
+    OLOG_DEBUG("splitting_factor: " << int(splitting_factor));
+  }
 
   // Block 3: K-split reduction (if applicable)
   if (splitting_factor > 1) {
@@ -762,11 +812,11 @@ double compute_tile_latency(const problem_t& problem,
 
     // Only the reduction CU reads from all splits.
     double partial_read_bytes =
-        grid_m * grid_n * n_partials * MT_M_rounded_128bytes * MT_N * static_cast<double>(d_bytes);
+        grid_m * grid_n * n_partials * MT_M_rounded * MT_N * static_cast<double>(d_bytes);
 
     // All CUs write (once for each partial, and once by the reduction CU for the output.)
     double partial_write_bytes =
-        grid_m * grid_n * MT_M_rounded_128bytes * MT_N * static_cast<double>(d_bytes);
+        grid_m * grid_n * MT_M_rounded * MT_N * static_cast<double>(d_bytes);
 
     double partial_readwrite_bytes = partial_read_bytes + partial_write_bytes;
 
@@ -778,11 +828,20 @@ double compute_tile_latency(const problem_t& problem,
     double L_reduce                      = partial_readwrite_bytes / (mem_bw_occ_limited);
     epilogue_comp.k_split_reduction      = L_reduce + partial_adds;
     epilogue_comp.k_split_overhead_const = heuristic.k_split_reduction_overhead;
+    if(debug)
+    {
+        OLOG_DEBUG("partial_read_bytes: " << partial_read_bytes);
+        OLOG_DEBUG("partial_write_bytes: " << partial_write_bytes);
+        OLOG_DEBUG("partial_readwrite_bytes: " << partial_readwrite_bytes);
+        OLOG_DEBUG("partial_adds: " << partial_adds);
+        OLOG_DEBUG("L_reduce: " << L_reduce);
+    }
   }
 
   // Block 4: K-padding penalty (if applicable)
+  double problem_k_quant = 0.0;
   if (K % MT_K != 0) {
-    const double problem_k_quant = static_cast<double>(K % MT_K) / static_cast<double>(K);
+    problem_k_quant = static_cast<double>(K % MT_K) / static_cast<double>(K);
     epilogue_comp.k_padding      = problem_k_quant * heuristic.k_padding_penalty;
   }
 
@@ -820,7 +879,20 @@ double compute_tile_latency(const problem_t& problem,
 
   // Apply final tile total weight
   L_tile_total *= heuristic.weight_tile_total;
-
+  
+  if(debug)
+  {
+    OLOG_DEBUG("L_mem: " << L_mem);
+    OLOG_DEBUG("L_compute: " << L_compute);
+    OLOG_DEBUG("L_cvt: " << L_cvt);
+    OLOG_DEBUG("k_per_split: " << k_per_split);
+    OLOG_DEBUG("num_iter: " << int(num_iter));
+    OLOG_DEBUG("problem_k_quant: " << problem_k_quant);
+    OLOG_DEBUG("L_prologue: " << L_prologue);
+    OLOG_DEBUG("L_tile_single: " << L_tile_single);
+    OLOG_DEBUG("L_epilogue: " << L_epilogue);
+    OLOG_DEBUG("L_tile_total: " << L_tile_total);
+  }
   return L_tile_total;
 }
 
@@ -841,6 +913,12 @@ double compute_total_latency(const problem_t& problem,
                              const config_t& config,
                              size_t max_cus) {
   assert(config.is_valid());
+  bool debug = runtime_options::get().debug_enabled;
+
+  // Use Formocast simulation model if prediction_mode is set to simulation
+  if (config.prediction_mode == prediction_modes_t::simulation) {
+    return compute_formocast_latency(problem, hardware, config);
+  }
 
   // Extract parameters from structured types
   size_t M     = problem.size.m;
@@ -896,7 +974,16 @@ double compute_total_latency(const problem_t& problem,
       return std::numeric_limits<double>::max();
     }
   }
-
+  if(debug)
+  {
+    OLOG_DEBUG("======== Origami Debug Info ========");
+    OLOG_DEBUG("Problem size: " << int(M) << "x" << int(N) << "x" << int(K));
+    OLOG_DEBUG("batch: " << int(batch));
+    OLOG_DEBUG("Macrotile: " << int(MT_M) << "x" << int(MT_N) << "x" << int(MT_K));
+    OLOG_DEBUG("MatrixInstruction: " << int(MI_M) << "x" << int(MI_N) << "x" << int(MI_K));
+    OLOG_DEBUG("Element size A (bits): " << int(a_bits));
+    OLOG_DEBUG("Element size B (bits): " << int(b_bits));
+  }
   // 1-1) To compute the latency, use default WGM. And WGM can't be greater than one
   int defaultWGM =
       batch > 1 ? 1 : static_cast<int>(ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD)));
@@ -913,8 +1000,93 @@ double compute_total_latency(const problem_t& problem,
 
   // Compute latency for all timesteps and return it as the latency for the MT/problem
   double total_latency = L_timestep * num_timesteps;
-
+  if (debug)
+  {
+    OLOG_DEBUG("num_timesteps: " << num_timesteps);
+    OLOG_DEBUG("total_latency: " << total_latency);
+    OLOG_DEBUG("=================================");
+  }
   return total_latency;
+}
+
+static double compute_formocast_latency(const problem_t& problem,
+                                        const hardware_t& hardware,
+                                        const config_t& config) {
+  // Create Formocast simulator instance
+  Formocast formocast;
+
+  // Convert problem_t to Formocast::ProblemInfo
+  Formocast::ProblemInfo prob_info;
+  prob_info.M = static_cast<double>(problem.size.m);
+  prob_info.N = static_cast<double>(problem.size.n);
+  prob_info.K = static_cast<double>(problem.size.k);
+  prob_info.NumBatches = static_cast<double>(problem.batch);
+  prob_info.bpeA = static_cast<uint32_t>(datatype_to_bits(problem.a_dtype) / 8);
+  prob_info.bpeB = static_cast<uint32_t>(datatype_to_bits(problem.b_dtype) / 8);
+  prob_info.bpeD = static_cast<uint32_t>(datatype_to_bits(problem.d_dtype) / 8);
+  prob_info.bpeCompute = static_cast<uint32_t>(datatype_to_bits(problem.mi_dtype) / 8);
+  prob_info.transA = (problem.a_transpose == transpose_t::T);
+  prob_info.transB = (problem.b_transpose == transpose_t::T);
+  prob_info.swizzleTensorA = config.tensile().swizzle_a;
+  prob_info.swizzleTensorB = config.tensile().swizzle_b;
+  prob_info.dataType = problem.mi_dtype;
+
+  // Convert config_t to Formocast::SizeMapping
+  Formocast::SizeMapping size_mapping;
+  size_mapping.macroTile[0] = static_cast<int>(config.mt.m);
+  size_mapping.macroTile[1] = static_cast<int>(config.mt.n);
+  size_mapping.macroTile[2] = static_cast<int>(config.mt.k);
+  size_mapping.matrixInstruction[0] = static_cast<int>(config.mi.m);
+  size_mapping.matrixInstruction[1] = static_cast<int>(config.mi.n);
+  size_mapping.matrixInstruction[2] = static_cast<int>(config.mi.k);
+  size_mapping.matrixInstruction[3] = 1;  // Default
+
+  // Use depth_u if set, otherwise use mt.k
+  size_mapping.depthU = (config.tensile().depth_u > 0) ? config.tensile().depth_u : config.mt.k;
+
+  size_mapping.globalSplitU = config.tensile().global_split_u;
+  size_mapping.globalAccumulation = config.tensile().global_accumulation;
+  size_mapping.LocalSplitU = config.tensile().local_split_u;
+
+  size_mapping.grvwA = config.grvw_a;
+  size_mapping.grvwB = config.grvw_b;
+  size_mapping.gwvwD = config.gwvw_d;
+  size_mapping.gwvwC = config.gwvw_d;  // Typically same as D
+
+  size_mapping.DirectToVgprA = config.tensile().direct_to_vgpr_a;
+  size_mapping.DirectToVgprB = config.tensile().direct_to_vgpr_b;
+  size_mapping.DirectToLdsA = config.tensile().direct_to_lds_a;
+  size_mapping.DirectToLdsB = config.tensile().direct_to_lds_b;
+
+  size_mapping.NumLoadsCoalescedA = config.tensile().num_loads_coalesced_a;
+  size_mapping.NumLoadsCoalescedB = config.tensile().num_loads_coalesced_b;
+  size_mapping.VectorWidthA = config.vector_width_a;
+  size_mapping.VectorWidthB = config.vector_width_b;
+
+  size_mapping.waveNum = config.tensile().wave_num;
+  size_mapping.waveGroup[0] = config.tensile().wave_group_m;
+  size_mapping.waveGroup[1] = config.tensile().wave_group_n;
+
+  size_mapping.workGroupMapping = config.workgroup_mapping;
+  size_mapping.workGroupMappingXCC = config.tensile().workgroup_mapping_xcc;
+  size_mapping.workGroupMappingXCCGroup = config.tensile().workgroup_mapping_xcc_group;
+  size_mapping.globalSplitUCoalesced = config.tensile().global_split_u_coalesced;
+  size_mapping.globalSplitUWorkGroupMappingRoundRobin = config.tensile().global_split_u_wgm_round_robin;
+
+  size_mapping.CUOccupancy = config.occupancy;
+  size_mapping.PrefetchGlobalRead = config.tensile().prefetch_global_read;
+  size_mapping.MathClocksUnrolledLoop = config.tensile().math_clocks_unrolled_loop;
+
+  // Set problem, solution, and hardware in Formocast
+  formocast.setProblem(prob_info);
+  formocast.setSolution(size_mapping);
+  formocast.setHardware(hardware.arch);
+
+  // Get predicted performance
+  Formocast::PredictedPerformance perf = formocast.predictedPerformance();
+
+  // Return latency in microseconds
+  return perf.microSeconds;
 }
 
 }  // namespace origami

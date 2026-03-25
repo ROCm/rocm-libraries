@@ -91,7 +91,7 @@
     ConvertAfterDS: false
     CustomKernelName: ''
     DepthU: 8
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprSparseMetadata: false
@@ -100,7 +100,7 @@
     EnableMatrixInstruction: false
     ExpandPointerSwap: true
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 1
     GlobalSplitU: 1
@@ -189,15 +189,15 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 0
-    PreloadKernArgs: 0
+    PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 1
     ScheduleLocalWrite: 1
     SolutionIndex: 0
-    SolutionNameMin: Cijk_Ailk_Bljk_SB_Bias_HAS_SAV_UserArgs_MT8x8x8_SN_GSU1_SU32_SUM0_SUS256_TT1_1_WGM1
+    SolutionNameMin: Cijk_Ailk_Bljk_SB_Bias_HAS_SAV_UserArgs_MT8x8x8_SN_GSU1_SU32_SUM1_SUS256_TT1_1_WGM1
     SourceSwap: false
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -214,11 +214,11 @@
     ThreadTileA: 1
     ThreadTileB: 1
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -261,7 +261,7 @@
     ConvertAfterDS: false
     CustomKernelName: ''
     DepthU: 8
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprSparseMetadata: false
@@ -270,7 +270,7 @@
     EnableMatrixInstruction: false
     ExpandPointerSwap: true
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 1
     GlobalSplitU: 1
@@ -359,15 +359,15 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 0
-    PreloadKernArgs: 0
+    PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 1
     ScheduleLocalWrite: 1
     SolutionIndex: 1
-    SolutionNameMin: Cijk_Ailk_Bljk_SB_Bias_HAS_SAV_UserArgs_MT16x16x8_SN_GSU1_SU32_SUM0_SUS256_TT2_2_WGM1
+    SolutionNameMin: Cijk_Ailk_Bljk_SB_Bias_HAS_SAV_UserArgs_MT16x16x8_SN_GSU1_SU32_SUM1_SUS256_TT2_2_WGM1
     SourceSwap: false
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -384,11 +384,11 @@
     ThreadTileA: 2
     ThreadTileB: 2
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -431,7 +431,7 @@
     ConvertAfterDS: false
     CustomKernelName: ''
     DepthU: 16
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprSparseMetadata: false
@@ -440,7 +440,7 @@
     EnableMatrixInstruction: false
     ExpandPointerSwap: true
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 1
     GlobalSplitU: 1
@@ -529,15 +529,15 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 0
-    PreloadKernArgs: 0
+    PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 1
     ScheduleLocalWrite: 1
     SolutionIndex: 2
-    SolutionNameMin: Cijk_Ailk_Bljk_SB_Bias_HAS_SAV_UserArgs_MT8x8x16_SN_GSU1_SU32_SUM0_SUS256_TT1_1_WGM1
+    SolutionNameMin: Cijk_Ailk_Bljk_SB_Bias_HAS_SAV_UserArgs_MT8x8x16_SN_GSU1_SU32_SUM1_SUS256_TT1_1_WGM1
     SourceSwap: false
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -554,11 +554,11 @@
     ThreadTileA: 1
     ThreadTileB: 1
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -601,7 +601,7 @@
     ConvertAfterDS: false
     CustomKernelName: ''
     DepthU: 16
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprSparseMetadata: false
@@ -610,7 +610,7 @@
     EnableMatrixInstruction: false
     ExpandPointerSwap: true
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 1
     GlobalSplitU: 1
@@ -699,15 +699,15 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 1
     PrefetchLocalRead: 0
-    PreloadKernArgs: 0
+    PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 1
     ScheduleLocalWrite: 1
     SolutionIndex: 3
-    SolutionNameMin: Cijk_Ailk_Bljk_SB_Bias_HAS_SAV_UserArgs_MT16x16x16_SN_GSU1_SU32_SUM0_SUS256_TT2_2_WGM1
+    SolutionNameMin: Cijk_Ailk_Bljk_SB_Bias_HAS_SAV_UserArgs_MT16x16x16_SN_GSU1_SU32_SUM1_SUS256_TT2_2_WGM1
     SourceSwap: false
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -724,11 +724,11 @@
     ThreadTileA: 2
     ThreadTileB: 2
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true

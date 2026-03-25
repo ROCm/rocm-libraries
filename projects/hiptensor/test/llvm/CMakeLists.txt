@@ -25,11 +25,17 @@
  ###############################################################################
 
 # Find / configure LLVM
+if(WIN32)
+    # On Windows, LLVM is built with static dependencies and has a transitive dependency
+    # on zstd::libzstd_static, requiring the explicit find_packages below.
+    find_package(ZLIB REQUIRED)
+    find_package(zstd CONFIG REQUIRED)
+endif()
 find_package(LLVM CONFIG HINTS ${ROCM_DIR}/../../..)
 
 if (NOT LLVM_DIR)
     message(FATAL_ERROR "HipTensor requires LLVM version 7.0 or higher,"
-        " which cannot be found. Please install rocm-llvm-dev package first." )
+        " which cannot be found. Please install rocm-llvm-dev package first.")
 endif()
 
 # Required:
@@ -54,7 +60,7 @@ if(LLVM_VERSION_MAJOR VERSION_LESS "7")
 endif()
 
 if(NOT LLVMObjectYAML_LIBRARY)
-    message(ERROR "Could not find library: LLVMObjectYAML" )
+    message(ERROR "Could not find library: LLVMObjectYAML")
 endif()
 if(NOT LLVMSupport_LIBRARY)
     message(ERROR "Could not find library: LLVMSupport")
@@ -74,6 +80,8 @@ set(HIPTENSOR_LLVM_INCLUDES ${LLVM_INCLUDE_DIRS}
                             ${PROJECT_SOURCE_DIR}/library/src/include
                             ${PROJECT_SOURCE_DIR}/library/src
                             ${PROJECT_SOURCE_DIR}/test
+                            ${PROJECT_BINARY_DIR}/include/hiptensor
+                            ${PROJECT_BINARY_DIR}/include
                             )
 
 # Sources for this static object
@@ -91,3 +99,14 @@ target_include_directories(${LIBRARY_NAME} PRIVATE ${HIPTENSOR_LLVM_INCLUDES})
 target_include_directories(${LIBRARY_NAME} INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(${LIBRARY_NAME} PRIVATE -fno-rtti ${CLANG_DRIVER_MODE})
 target_link_options(${LIBRARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
+
+if(WIN32)
+    # Set static define to disable dllimport/export since llvm is built as a static library on Windows
+    # Use PUBLIC so it applies to this target AND propagates to targets that link with this library
+    target_compile_definitions(${LIBRARY_NAME} PUBLIC HIPTENSOR_STATIC_DEFINE)
+
+    # -Wno-ignored-attributes to avoid warning: __declspec attribute 'dllimport' is not supported [-Wignored-attributes] which is used by msvc compiler
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(${LIBRARY_NAME} PRIVATE -Wno-ignored-attributes)
+    endif()
+endif()

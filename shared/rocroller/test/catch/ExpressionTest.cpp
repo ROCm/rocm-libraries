@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 #include <memory>
@@ -269,38 +246,38 @@ namespace ExpressionTest
         expected += R"(
              // BitFieldExtract<0,16>(rb: VGPR Value: Halfx2 x 1: v1)
              // Allocated : 2 VGPRs (Value: Half): v3, v2
-              v_bfe_u32 v11, v7, 0, 16
-              v_bfe_u32 v10, v7, 16, 16
+              v_bfe_u32 v10, v7, 0, 16
+              v_bfe_u32 v11, v7, 16, 16
 
              // BitFieldExtract<0,16>(rb: VGPR Value: BFloat16x2 x 1: v1)
              // Allocated : 2 VGPRs (Value: BFloat16): v3, v2
-             v_bfe_u32 v11, v7, 0, 16
-             v_bfe_u32 v10, v7, 16, 16
+             v_bfe_u32 v10, v7, 0, 16
+             v_bfe_u32 v11, v7, 16, 16
 
              // BitFieldExtract<0,8>(rb: VGPR Value: FP8x4 x 1: v1)
              // Allocated : 4 VGPRs (Value: FP8): v5, v4, v3, v2
-             v_bfe_u32 v13, v7, 0, 8
-             v_bfe_u32 v12, v7, 8, 8
-             v_bfe_u32 v11, v7, 16, 8
-             v_bfe_u32 v10, v7, 24, 8
+             v_bfe_u32 v10, v7, 0, 8
+             v_bfe_u32 v11, v7, 8, 8
+             v_bfe_u32 v12, v7, 16, 8
+             v_bfe_u32 v13, v7, 24, 8
 
              // BitFieldExtract<0,8>(rb: VGPR Value: BF8x4 x 1: v1)
              // Allocated : 4 VGPRs (Value: BF8): v5, v4, v3, v2
-             v_bfe_u32 v13, v7, 0, 8
-             v_bfe_u32 v12, v7, 8, 8
-             v_bfe_u32 v11, v7, 16, 8
-             v_bfe_u32 v10, v7, 24, 8
+             v_bfe_u32 v10, v7, 0, 8
+             v_bfe_u32 v11, v7, 8, 8
+             v_bfe_u32 v12, v7, 16, 8
+             v_bfe_u32 v13, v7, 24, 8
 
              // BitFieldExtract<0,4>(rb: VGPR Value: FP4x8 x 1: v1)
              // Allocated : 8 VGPRs (Value: FP4): v9, v8, v7, v6, v5, v4, v3, v2
-             v_bfe_u32 v17, v7, 0, 4
-             v_bfe_u32 v16, v7, 4, 4
-             v_bfe_u32 v15, v7, 8, 4
-             v_bfe_u32 v14, v7, 12, 4
-             v_bfe_u32 v13, v7, 16, 4
-             v_bfe_u32 v12, v7, 20, 4
-             v_bfe_u32 v11, v7, 24, 4
-             v_bfe_u32 v10, v7, 28, 4
+             v_bfe_u32 v10, v7, 0, 4
+             v_bfe_u32 v11, v7, 4, 4
+             v_bfe_u32 v12, v7, 8, 4
+             v_bfe_u32 v13, v7, 12, 4
+             v_bfe_u32 v14, v7, 16, 4
+             v_bfe_u32 v15, v7, 20, 4
+             v_bfe_u32 v16, v7, 24, 4
+             v_bfe_u32 v17, v7, 28, 4
         )";
 
         {
@@ -375,6 +352,9 @@ namespace ExpressionTest
         )";
 
         CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+
+        auto bfe1 = Expression::BitFieldExtract{{.arg{a}}, DataType::UInt8, 300u, 8u};
+        CHECK(bfe1.offset == 300u);
     }
 
     TEST_CASE("Expression comments", "[expression][comments][codegen]")
@@ -1006,36 +986,37 @@ namespace ExpressionTest
         auto litFloat  = Expression::literal(5.0f);
         auto litDouble = Expression::literal(5.0);
 
-        Expression::ResultType rVgprFloat{Register::Type::Vector, DataType::Float};
-        Expression::ResultType rVgprDouble{Register::Type::Vector, DataType::Double};
-        Expression::ResultType rVgprInt32{Register::Type::Vector, DataType::Int32};
-        Expression::ResultType rVgprInt64{Register::Type::Vector, DataType::Int64};
-        Expression::ResultType rVgprUInt32{Register::Type::Vector, DataType::UInt32};
-        Expression::ResultType rVgprUInt64{Register::Type::Vector, DataType::UInt64};
-        Expression::ResultType rVgprHalf{Register::Type::Vector, DataType::Half};
-        Expression::ResultType rVgprHalfx2{Register::Type::Vector, DataType::Halfx2};
-        Expression::ResultType rVgprBool32{Register::Type::Vector, DataType::Bool32};
+        Expression::ResultType rVgprFloat{Register::Type::Vector, DataType::Float, 1};
+        Expression::ResultType rVgprDouble{Register::Type::Vector, DataType::Double, 1};
+        Expression::ResultType rVgprInt32{Register::Type::Vector, DataType::Int32, 1};
+        Expression::ResultType rVgprInt64{Register::Type::Vector, DataType::Int64, 1};
+        Expression::ResultType rVgprUInt32{Register::Type::Vector, DataType::UInt32, 1};
+        Expression::ResultType rVgprUInt64{Register::Type::Vector, DataType::UInt64, 1};
+        Expression::ResultType rVgprHalf{Register::Type::Vector, DataType::Half, 1};
+        Expression::ResultType rVgprHalfx2{Register::Type::Vector, DataType::Halfx2, 2};
+        Expression::ResultType rVgprBool32{Register::Type::Vector, DataType::Bool32, 1};
 
-        Expression::ResultType rSgprFloat{Register::Type::Scalar, DataType::Float};
-        Expression::ResultType rSgprDouble{Register::Type::Scalar, DataType::Double};
-        Expression::ResultType rSgprInt32{Register::Type::Scalar, DataType::Int32};
-        Expression::ResultType rSgprInt64{Register::Type::Scalar, DataType::Int64};
-        Expression::ResultType rSgprUInt32{Register::Type::Scalar, DataType::UInt32};
-        Expression::ResultType rSgprUInt64{Register::Type::Scalar, DataType::UInt64};
-        Expression::ResultType rSgprHalf{Register::Type::Scalar, DataType::Half};
-        Expression::ResultType rSgprHalfx2{Register::Type::Scalar, DataType::Halfx2};
-        Expression::ResultType rSgprBool32{Register::Type::Scalar, DataType::Bool32};
-        Expression::ResultType rSgprBool64{Register::Type::Scalar, DataType::Bool64};
-        Expression::ResultType rSgprBool{Register::Type::Scalar, DataType::Bool};
+        Expression::ResultType rSgprFloat{Register::Type::Scalar, DataType::Float, 1};
+        Expression::ResultType rSgprDouble{Register::Type::Scalar, DataType::Double, 1};
+        Expression::ResultType rSgprInt32{Register::Type::Scalar, DataType::Int32, 1};
+        Expression::ResultType rSgprInt64{Register::Type::Scalar, DataType::Int64, 1};
+        Expression::ResultType rSgprUInt32{Register::Type::Scalar, DataType::UInt32, 1};
+        Expression::ResultType rSgprUInt64{Register::Type::Scalar, DataType::UInt64, 1};
+        Expression::ResultType rSgprHalf{Register::Type::Scalar, DataType::Half, 1};
+        Expression::ResultType rSgprHalfx2{Register::Type::Scalar, DataType::Halfx2, 2};
+        Expression::ResultType rSgprBool32{Register::Type::Scalar, DataType::Bool32, 1};
+        Expression::ResultType rSgprBool64{Register::Type::Scalar, DataType::Bool64, 1};
+        Expression::ResultType rSgprBool{Register::Type::Scalar, DataType::Bool, 1};
         Expression::ResultType rSgprWavefrontSized{
             Register::Type::Scalar,
-            context.get()->kernel()->wavefront_size() == 64 ? DataType::Bool64 : DataType::Bool32};
+            context.get()->kernel()->wavefront_size() == 64 ? DataType::Bool64 : DataType::Bool32,
+            1};
 
-        Expression::ResultType rVCC{Register::Type::VCC, DataType::Bool32};
-        Expression::ResultType rSCC{Register::Type::SCC, DataType::Bool};
+        Expression::ResultType rVCC{Register::Type::VCC, DataType::Bool32, 1};
+        Expression::ResultType rSCC{Register::Type::SCC, DataType::Bool, 1};
 
-        Expression::ResultType rAgprFloat{Register::Type::Accumulator, DataType::Float};
-        Expression::ResultType rAgprDouble{Register::Type::Accumulator, DataType::Double};
+        Expression::ResultType rAgprFloat{Register::Type::Accumulator, DataType::Float, 1};
+        Expression::ResultType rAgprDouble{Register::Type::Accumulator, DataType::Double, 1};
 
         SECTION("Value expressions")
         {
@@ -1132,7 +1113,9 @@ namespace ExpressionTest
             CHECK(rVgprInt32 == resultType(op(vgprUInt32)));
             CHECK(rVgprInt32 == resultType(op(vgprUInt64)));
             CHECK(rVgprInt32 == resultType(op(vgprHalf)));
-            CHECK(rVgprInt32 == resultType(op(vgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rVgprInt32.regType, rVgprInt32.varType, rVgprInt32.valueCount * 2)
+                  == resultType(op(vgprHalfx2)));
             CHECK(rVgprInt32 == resultType(op(vgprBool32)));
 
             CHECK(rSgprInt32 == resultType(op(sgprFloat)));
@@ -1142,7 +1125,9 @@ namespace ExpressionTest
             CHECK(rSgprInt32 == resultType(op(sgprUInt32)));
             CHECK(rSgprInt32 == resultType(op(sgprUInt64)));
             CHECK(rSgprInt32 == resultType(op(sgprHalf)));
-            CHECK(rSgprInt32 == resultType(op(sgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rSgprInt32.regType, rSgprInt32.varType, rSgprInt32.valueCount * 2)
+                  == resultType(op(sgprHalfx2)));
             CHECK(rSgprInt32 == resultType(op(sgprBool32)));
         }
 
@@ -1156,7 +1141,9 @@ namespace ExpressionTest
             CHECK(rVgprUInt32 == resultType(op(vgprUInt32)));
             CHECK(rVgprUInt32 == resultType(op(vgprUInt64)));
             CHECK(rVgprUInt32 == resultType(op(vgprHalf)));
-            CHECK(rVgprUInt32 == resultType(op(vgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rVgprUInt32.regType, rVgprUInt32.varType, rVgprUInt32.valueCount * 2)
+                  == resultType(op(vgprHalfx2)));
             CHECK(rVgprUInt32 == resultType(op(vgprBool32)));
 
             CHECK(rSgprUInt32 == resultType(op(sgprFloat)));
@@ -1166,7 +1153,9 @@ namespace ExpressionTest
             CHECK(rSgprUInt32 == resultType(op(sgprUInt32)));
             CHECK(rSgprUInt32 == resultType(op(sgprUInt64)));
             CHECK(rSgprUInt32 == resultType(op(sgprHalf)));
-            CHECK(rSgprUInt32 == resultType(op(sgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rSgprUInt32.regType, rSgprUInt32.varType, rSgprUInt32.valueCount * 2)
+                  == resultType(op(sgprHalfx2)));
             CHECK(rSgprUInt32 == resultType(op(sgprBool32)));
         }
 
@@ -1187,7 +1176,10 @@ namespace ExpressionTest
             CHECK(rSgprWavefrontSized == resultType(op(vgprUInt32, vgprUInt32)));
             CHECK(rSgprWavefrontSized == resultType(op(vgprUInt64, vgprUInt64)));
             CHECK(rSgprWavefrontSized == resultType(op(vgprHalf, vgprHalf)));
-            CHECK(rSgprWavefrontSized == resultType(op(vgprHalfx2, vgprHalfx2)));
+            CHECK(Expression::ResultType(rSgprWavefrontSized.regType,
+                                         rSgprWavefrontSized.varType,
+                                         rSgprWavefrontSized.valueCount * 2)
+                  == resultType(op(vgprHalfx2, vgprHalfx2)));
             CHECK(rSgprWavefrontSized == resultType(op(vgprBool32, vgprBool32)));
             CHECK(rSgprWavefrontSized == resultType(op(vgprBool, vgprBool)));
 
@@ -1198,7 +1190,9 @@ namespace ExpressionTest
             CHECK(rSgprBool == resultType(op(sgprUInt32, sgprUInt32)));
             CHECK(rSgprBool == resultType(op(sgprUInt64, sgprUInt64)));
             CHECK(rSgprBool == resultType(op(sgprHalf, sgprHalf)));
-            CHECK(rSgprBool == resultType(op(sgprHalfx2, sgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rSgprBool.regType, rSgprBool.varType, rSgprBool.valueCount * 2)
+                  == resultType(op(sgprHalfx2, sgprHalfx2)));
             CHECK(rSgprBool == resultType(op(sgprBool32, sgprBool32)));
             CHECK(rSgprBool == resultType(op(sgprBool, sgprBool)));
         }
@@ -1473,6 +1467,7 @@ namespace ExpressionTest
 
         SECTION("Arguments")
         {
+            size_t       valueCount = 1;
             VariableType doubleVal{DataType::Double, PointerType::Value};
             auto         ca = std::make_shared<CommandArgument>(nullptr, doubleVal, 0);
             auto         cb = std::make_shared<CommandArgument>(nullptr, doubleVal, 8);
@@ -1491,7 +1486,7 @@ namespace ExpressionTest
             } args;
             RuntimeArguments runtimeArgs((uint8_t*)&args, sizeof(args));
 
-            Expression::ResultType expected{Register::Type::Literal, DataType::Double};
+            Expression::ResultType expected{Register::Type::Literal, DataType::Double, valueCount};
             CHECK(expected == resultType(expr2));
             CHECK(6.0 == std::get<double>(evaluate(expr2, runtimeArgs)));
 
@@ -1513,6 +1508,7 @@ namespace ExpressionTest
 
     TEST_CASE("Expression test evaluate mixed types", "[expression]")
     {
+        size_t valueCount = 1;
         using Expression::literal;
         auto one          = literal(1.0);
         auto two          = literal(2.0f);
@@ -1566,9 +1562,9 @@ namespace ExpressionTest
         auto eight75Half = convert(DataType::Half, eightPoint75);
         CHECK(Half(8.75) == std::get<Half>(evaluate(eight75Half)));
 
-        Expression::ResultType litDouble{Register::Type::Literal, DataType::Double};
-        Expression::ResultType litFloat{Register::Type::Literal, DataType::Float};
-        Expression::ResultType litBool{Register::Type::Literal, DataType::Bool};
+        Expression::ResultType litDouble{Register::Type::Literal, DataType::Double, valueCount};
+        Expression::ResultType litFloat{Register::Type::Literal, DataType::Float, valueCount};
+        Expression::ResultType litBool{Register::Type::Literal, DataType::Bool, valueCount};
 
         CHECK(litDouble == resultType(exprSix));
         // Result type not (yet?) defined for mixed integral/floating point types.
@@ -3233,9 +3229,9 @@ namespace ExpressionTest
             // 4294965263 = 11111111111111111111100000001111
             std::string expected = R"(
                 v_and_b32 v2, 130048, v0
-                v_and_b32 v3, 4294965263, v1
-                v_lshrrev_b32 v4, 6, v2
-                v_or_b32 v2, v4, v3
+                v_lshrrev_b32 v3, 6, v2
+                v_and_b32 v2, 4294965263, v1
+                v_or_b32 v4, v3, v2
             )";
 
             CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));

@@ -120,6 +120,12 @@ if(HIPSPARSELT_ENABLE_MARKER)
         message(FATAL_ERROR "rocTracer marker is not supported with CUDA backend.")
     else()
         find_library(ROCTX64_LIBRARY REQUIRED HINTS lib NAMES roctx64 libroctx64)
+        get_filename_component(ROCTRACER_LIB_DIR ${ROCTX64_LIBRARY} DIRECTORY)
+        get_filename_component(ROCTRACER_ROOT_DIR ${ROCTRACER_LIB_DIR} DIRECTORY)
+        find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h"
+            HINTS ${ROCTRACER_ROOT_DIR}
+            PATH_SUFFIXES include
+            REQUIRED)
     endif()
 endif()
 
@@ -170,12 +176,22 @@ if(HIPSPARSELT_ENABLE_HIP)
 
     set(ORIGAMI_ENABLE_INSTALL OFF)
     add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
+    # Hide TensileLite symbols to prevent interposition with hipblaslt's copy
+    target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)
     endblock()
 endif()
 
 add_subdirectory(library)
 
 if(HIPSPARSELT_ENABLE_CLIENT)
+    if(NOT HIPSPARSELT_ENABLE_THEROCK)
+        if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
+            set(CMAKE_Fortran_COMPILER "gfortran")
+        endif()
+        enable_language(Fortran)
+        find_package(LAPACK)
+        include(fetch_lapack)
+    endif()
     add_subdirectory(clients)
 endif()
 
