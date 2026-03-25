@@ -118,16 +118,16 @@ The hipBLASLt compute modes are listed in the following table.
 
     *
       - ``HIPBLAS_COMPUTE_32F_FAST_16F``
-      - Enables the library to utilize Tensor Cores with 16-bit half precision computation for matrices with 32-bit float precision input and output.
+      - Enables the library to utilize Tensor Cores with automatic down-conversion and 16-bit half-precision computation for 32-bit float-precision input and output matrices.
 
     *
       - ``HIPBLAS_COMPUTE_32F_FAST_16BF``
-      - Enables the library to utilize Tensor Cores with 16-bit bfloat16 precision computation for matrices with 32-bit float precision input and output.
+      - Enables the library to utilize Tensor Cores with automatic down-conversion and 16-bit bfloat16-precision computation for 32-bit float-precision input and output matrices.
 
     *
       - ``HIPBLAS_COMPUTE_32F_FAST_TF32``
-      - Enables the library to utilize Tensor Cores with TF32 computation (on the AMD Instinct™ MI300 series)
-        or emulated TF32 computation (on the AMD Instinct MI350 and AMD Instinct MI355) for matrices with 32-bit input and output.
+      - Enables the library to utilize Tensor Cores with TF32 computation (on the gfx942 and gfx950 platforms)
+        or emulated TF32 computation (on the gfx950 platform) for matrices with 32-bit input and output.
 
 .. note::
    
