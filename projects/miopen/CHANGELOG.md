@@ -8,6 +8,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ## MIOpen 3.5.1 for ROCm 7.12.0
 ### Added
+* [Conv] Enabled gfx1103 (Phoenix).
 * [Conv] Enabled CK wrw and bwd solvers with split-k disabled in deterministic mode.
 * [Conv] Added `ConvDepthwiseFwd2D` solver for optimizing specific depthwise convolutions.
 
