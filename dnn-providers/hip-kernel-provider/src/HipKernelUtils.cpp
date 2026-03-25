@@ -3,6 +3,7 @@
 
 #include "HipKernelUtils.hpp"
 
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider::hip_kernel_utils
@@ -39,6 +40,59 @@ const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
     throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                    "Failed to find tensor with UID in tensorMap: "
                                                        + std::to_string(uid));
+}
+
+bool isChannelLastLayout(const hipdnn_data_sdk::data_objects::TensorAttributes* tensor)
+{
+    const auto* strides = tensor->strides();
+    const auto* dims = tensor->dims();
+    const size_t numDims = dims->size();
+
+    // Extract stride order from strides
+    std::vector<int64_t> stridesVec(strides->begin(), strides->end());
+    std::vector<int64_t> strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(stridesVec);
+
+    // Compare against known layouts
+    if(numDims == 4)
+    {
+        const auto layoutNchw = hipdnn_data_sdk::utilities::TensorLayout::NCHW;
+        const auto layoutNhwc = hipdnn_data_sdk::utilities::TensorLayout::NHWC;
+
+        if(strideOrder == layoutNhwc.strideOrder)
+        {
+            return true;
+        }
+        if(strideOrder == layoutNchw.strideOrder)
+        {
+            return false;
+        }
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported tensor layout for 4D tensor. Only NCHW and NHWC are supported.");
+    }
+
+    if(numDims == 5)
+    {
+        const auto layoutNcdhw = hipdnn_data_sdk::utilities::TensorLayout::NCDHW;
+        const auto layoutNdhwc = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
+
+        if(strideOrder == layoutNdhwc.strideOrder)
+        {
+            return true;
+        }
+        if(strideOrder == layoutNcdhw.strideOrder)
+        {
+            return false;
+        }
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported tensor layout for 5D tensor. Only NCDHW and NDHWC are supported.");
+    }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+        "Tensor must be 4D or 5D for layout detection. Got " + std::to_string(numDims)
+            + "D tensor.");
 }
 
 } // namespace hip_kernel_provider::hip_kernel_utils
