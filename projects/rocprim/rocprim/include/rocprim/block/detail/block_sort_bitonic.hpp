@@ -52,11 +52,11 @@ struct block_sort_bitonic_impl
     static constexpr int num_wave_bits = Log2<VirtualWaveSize>::VALUE;
     static constexpr int num_id_bits   = Log2<BlockSize>::VALUE;
 
-    // Define block-level compare-and-swap.
-    // This family of functions compares keys across threads using Shared Memory.
-    // Following the forward-only bitonic sort logic:
-    // - 'is_first_step' determines if we use mirror pairing to build a bitonic sequence.
-    // - 'is_upper' denotes if the current thread keeps the min or max value.
+    /// Define block-level compare-and-swap.
+    /// This family of functions compares keys across threads using Shared Memory.
+    /// Following the forward-only bitonic sort logic:
+    /// - `is_first_step` determines if we use mirror pairing to build a bitonic sequence.
+    /// - `is_upper` denotes if the current thread keeps the min or max value.
     template<bool is_first_step = false, class Storage, class K, class V, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static void blev_cas(unsigned int   id,
@@ -223,9 +223,9 @@ struct block_sort_bitonic_impl
                 ::rocprim::detail::constexpr_for_gte<group_bit - 1, num_wave_bits, -1>(
                     [&](auto offset_bit)
                     {
-                        constexpr bool         is_first_offset_bit = offset_bit == group_bit - 1;
+                        constexpr bool         is_first_step = offset_bit == group_bit - 1;
                         constexpr unsigned int xor_mask
-                            = is_first_offset_bit ? ((1u << group_bit) - 1u) : (1u << offset_bit);
+                            = is_first_step ? ((1u << group_bit) - 1u) : (1u << offset_bit);
 
                         // Dictates the min/max role of the current thread for forward-only sorting.
                         // is_upper == 0: This thread is the lower half. It wants the minimum.
@@ -235,8 +235,7 @@ struct block_sort_bitonic_impl
                         // Assume that shared storage is ready to write on the very first
                         // 'blev_cas'-invocation. So, we skip if we're on the first group
                         // and first offset.
-                        constexpr bool skip_block_sync
-                            = is_first_block_group_bit && is_first_offset_bit;
+                        constexpr bool skip_block_sync = is_first_block_group_bit && is_first_step;
                         if constexpr(!skip_block_sync)
                         {
                             // Ensure that all threads have consumed data from shared
@@ -244,12 +243,12 @@ struct block_sort_bitonic_impl
                             ::rocprim::syncthreads();
                         }
 
-                        blev_cas<is_first_offset_bit>(flat_tid,
-                                                      storage,
-                                                      is_upper,
-                                                      compare_function,
-                                                      xor_mask,
-                                                      kv...);
+                        blev_cas<is_first_step>(flat_tid,
+                                                storage,
+                                                is_upper,
+                                                compare_function,
+                                                xor_mask,
+                                                kv...);
                     });
 
                 // 'group_bit' may be smaller than 'num_wave_bits'. We must make sure
@@ -261,7 +260,7 @@ struct block_sort_bitonic_impl
                 ::rocprim::detail::constexpr_for_gte<wave_group_bit - 1, 0, -1>(
                     [&](auto offset_bit)
                     {
-                        constexpr bool is_first_step = (offset_bit == group_bit - 1);
+                        constexpr bool is_first_step = offset_bit == group_bit - 1;
                         // If it's the first step, use a mirrored XOR mask to pair lanes from opposite
                         // ends of the sequence. This inherently folds two sorted halves into a bitonic
                         // topology. On all subsequent steps, use a standard linear XOR mask to merge

@@ -247,8 +247,7 @@ V warp_swizzle_shuffle(V& v, const int mask, const int width = arch::wavefront::
 {
     using VV = typename std::remove_cv<V>::type;
 
-    VV   result  = v;
-    bool matched = false;
+    VV result = v;
 
     // __builtin_amdgcn_ds_swizzle instruction requires the offset to be a compile-time constant, so we
     // cannot pass a runtime variable `mask` directly.
@@ -257,15 +256,13 @@ V warp_swizzle_shuffle(V& v, const int mask, const int width = arch::wavefront::
     // as `(XOR_MASK << 10) | 0x1F`. We can use this formula to get the offsets from the XOR masks during
     // complile time.
     //
-    // So we use a fold expression `(|| ...)` over an integer sequence to generate 31 inline branches at
-    // compile time to generate the corresponding `ds_swizzle_b32` instruction.
+    // We use compile-time unrolling to generate branches for the corresponding `ds_swizzle_b32` instructions.
     ::rocprim::detail::constexpr_for_lt<1, 32, 1>(
         [&](auto i)
         {
             if(mask == i)
             {
-                result  = warp_swizzle<V, (i << 10) | 0x1F>(v);
-                matched = true;
+                result = warp_swizzle<V, (i << 10) | 0x1F>(v);
             }
         });
 
@@ -276,9 +273,9 @@ V warp_swizzle_shuffle(V& v, const int mask, const int width = arch::wavefront::
     //
     // We fall back to the generic `warp_shuffle_xor`, which degrades to `ds_bpermute_b32` (LDS crossbar
     // routing), it's slower but necessary for cross-half-wave operations.
-    if(!matched)
+    if(mask >= 32)
     {
-        result = warp_shuffle_xor(v, mask, width);
+        return warp_shuffle_xor(v, mask, width);
     }
     return result;
 }
