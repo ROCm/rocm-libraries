@@ -58,12 +58,10 @@ constexpr float getToleranceInferenceWithVariance()
     }
     else if constexpr(std::is_same_v<T, half>)
     {
-        // Extra sqrt in the variance path introduces additional rounding error in reduced precision
         return 8e-4f;
     }
     else if constexpr(std::is_same_v<T, bfloat16>)
     {
-        // Extra sqrt in the variance path introduces additional rounding error in reduced precision
         return 7e-3f;
     }
     else
