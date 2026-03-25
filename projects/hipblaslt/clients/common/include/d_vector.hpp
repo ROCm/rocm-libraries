@@ -226,16 +226,19 @@ class memory_pool
 public:
     static M Get(size_t m_bytes, bool use_HMM = false)
     {
+        std::lock_guard<std::mutex> lock(Instance().m_mutex);
         return Instance().get(m_bytes, use_HMM);
     }
 
     static void Restore(M& dm)
     {
+        std::lock_guard<std::mutex> lock(Instance().m_mutex);
         Instance().restore(dm);
     }
 
 private:
     std::vector<M> m_pool, m_pool_managed;
+    std::mutex m_mutex;
 
     static memory_pool& Instance()
     {
