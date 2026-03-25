@@ -26,14 +26,20 @@ namespace hipdnn_frontend::detail
 
     // Unpack scale tensor
     std::shared_ptr<graph::TensorAttributes> scaleTensor;
-    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_RMSNORM_SCALE_EXT, tensorMap, scaleTensor, "rmsnorm SCALE_EXT tensor"));
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
+                                               HIPDNN_ATTR_OPERATION_RMSNORM_SCALE_EXT,
+                                               tensorMap,
+                                               scaleTensor,
+                                               "rmsnorm SCALE_EXT tensor"));
     attributes.set_scale(scaleTensor);
 
     // Unpack epsilon tensor
     std::shared_ptr<graph::TensorAttributes> epsilonTensor;
-    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_RMSNORM_EPSILON_EXT, tensorMap, epsilonTensor, "rmsnorm EPSILON_EXT tensor"));
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
+                                               HIPDNN_ATTR_OPERATION_RMSNORM_EPSILON_EXT,
+                                               tensorMap,
+                                               epsilonTensor,
+                                               "rmsnorm EPSILON_EXT tensor"));
     attributes.set_epsilon(epsilonTensor);
 
     // Unpack y tensor
@@ -44,8 +50,11 @@ namespace hipdnn_frontend::detail
 
     // Unpack bias tensor
     std::shared_ptr<graph::TensorAttributes> biasTensor;
-    HIPDNN_CHECK_ERROR(unpackOptionalTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT, tensorMap, biasTensor, "rmsnorm BIAS_EXT tensor"));
+    HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
+                                            HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT,
+                                            tensorMap,
+                                            biasTensor,
+                                            "rmsnorm BIAS_EXT tensor"));
     if(biasTensor)
     {
         attributes.set_bias(biasTensor);
@@ -53,8 +62,11 @@ namespace hipdnn_frontend::detail
 
     // Unpack inv_rms tensor
     std::shared_ptr<graph::TensorAttributes> invRmsTensor;
-    HIPDNN_CHECK_ERROR(unpackOptionalTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT, tensorMap, invRmsTensor, "rmsnorm INV_RMS_EXT tensor"));
+    HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
+                                            HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT,
+                                            tensorMap,
+                                            invRmsTensor,
+                                            "rmsnorm INV_RMS_EXT tensor"));
     if(invRmsTensor)
     {
         attributes.set_inv_rms(invRmsTensor);
@@ -75,8 +87,8 @@ namespace hipdnn_frontend::detail
     attributes.set_forward_phase(forwardPhaseResult);
 
     // Unpack compute data type
-    auto [dt, dtErr]
-        = unpackGraphDataType(opDesc, HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, "rmsnorm compute data type");
+    auto [dt, dtErr] = unpackGraphDataType(
+        opDesc, HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, "rmsnorm compute data type");
     if(dtErr.is_bad())
     {
         return dtErr;

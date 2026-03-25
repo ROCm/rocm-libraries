@@ -3,15 +3,15 @@
 
 #include "HipdnnOperationType.h"
 #include "TestMacros.hpp"
-#include "descriptors/RMSNormOperationDescriptor.hpp"
 #include "descriptors/NodeFactory.hpp"
+#include "descriptors/RMSNormOperationDescriptor.hpp"
 #include "descriptors/ScopedDescriptor.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/RMSNormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -128,8 +128,11 @@ protected:
         ASSERT_EQ(dimCount, static_cast<int64_t>(expectedDims.size()));
         std::vector<int64_t> dims(static_cast<size_t>(dimCount));
         int64_t actualDimCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, dimCount, &actualDimCount, dims.data());
+        tensorDesc->getAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS,
+                                 HIPDNN_TYPE_INT64,
+                                 dimCount,
+                                 &actualDimCount,
+                                 dims.data());
         EXPECT_EQ(dims, expectedDims);
 
         int64_t strideCount = 0;
@@ -138,8 +141,11 @@ protected:
         ASSERT_EQ(strideCount, static_cast<int64_t>(expectedStrides.size()));
         std::vector<int64_t> strides(static_cast<size_t>(strideCount));
         int64_t actualStrideCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, strideCount, &actualStrideCount, strides.data());
+        tensorDesc->getAttribute(HIPDNN_ATTR_TENSOR_STRIDES,
+                                 HIPDNN_TYPE_INT64,
+                                 strideCount,
+                                 &actualStrideCount,
+                                 strides.data());
         EXPECT_EQ(strides, expectedStrides);
     }
 };
@@ -281,7 +287,6 @@ TEST_F(TestRMSNormOperationFromNode, SetsTensorReferencesWithFullValues)
     EXPECT_EQ(desc->getInvRmsDesc()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->getInvRmsDesc()->getData().dims, (std::vector<int64_t>{1, 1, 32, 32}));
     EXPECT_EQ(desc->getInvRmsDesc()->getData().strides, (std::vector<int64_t>{1024, 1024, 32, 1}));
-
 }
 
 TEST_F(TestRMSNormOperationFromNode, FailsWithMissingXTensor)
@@ -413,8 +418,11 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify forward_phase
     hipdnnNormFwdPhase_t forwardPhase = {};
     int64_t forwardPhaseCount = 0;
-    desc->getAttribute(
-        HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT, HIPDNN_TYPE_NORM_FWD_PHASE, 1, &forwardPhaseCount, &forwardPhase);
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT,
+                       HIPDNN_TYPE_NORM_FWD_PHASE,
+                       1,
+                       &forwardPhaseCount,
+                       &forwardPhase);
     ASSERT_EQ(forwardPhase, HIPDNN_NORM_FWD_PHASE_TRAINING);
 
     // Verify x tensor
@@ -427,7 +435,9 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(xScoped.getPtr()));
     ASSERT_EQ(xCount, 1);
     ASSERT_NE(xScoped.get(), nullptr);
-    verifyTensorDescriptor(xScoped.get(), K_RMSNORM_TENSOR_X_UID, HIPDNN_DATA_FLOAT,
+    verifyTensorDescriptor(xScoped.get(),
+                           K_RMSNORM_TENSOR_X_UID,
+                           HIPDNN_DATA_FLOAT,
                            {1, 64, 32, 32},
                            {65536, 1024, 32, 1});
 
@@ -441,7 +451,9 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(scaleScoped.getPtr()));
     ASSERT_EQ(scaleCount, 1);
     ASSERT_NE(scaleScoped.get(), nullptr);
-    verifyTensorDescriptor(scaleScoped.get(), K_RMSNORM_TENSOR_SCALE_UID, HIPDNN_DATA_FLOAT,
+    verifyTensorDescriptor(scaleScoped.get(),
+                           K_RMSNORM_TENSOR_SCALE_UID,
+                           HIPDNN_DATA_FLOAT,
                            {1, 64, 1, 1},
                            {64, 1, 1, 1});
 
@@ -455,7 +467,9 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(epsilonScoped.getPtr()));
     ASSERT_EQ(epsilonCount, 1);
     ASSERT_NE(epsilonScoped.get(), nullptr);
-    verifyTensorDescriptor(epsilonScoped.get(), K_RMSNORM_TENSOR_EPSILON_UID, HIPDNN_DATA_FLOAT,
+    verifyTensorDescriptor(epsilonScoped.get(),
+                           K_RMSNORM_TENSOR_EPSILON_UID,
+                           HIPDNN_DATA_FLOAT,
                            {1, 1, 1, 1},
                            {1, 1, 1, 1});
 
@@ -469,7 +483,9 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(yScoped.getPtr()));
     ASSERT_EQ(yCount, 1);
     ASSERT_NE(yScoped.get(), nullptr);
-    verifyTensorDescriptor(yScoped.get(), K_RMSNORM_TENSOR_Y_UID, HIPDNN_DATA_FLOAT,
+    verifyTensorDescriptor(yScoped.get(),
+                           K_RMSNORM_TENSOR_Y_UID,
+                           HIPDNN_DATA_FLOAT,
                            {1, 64, 32, 32},
                            {65536, 1024, 32, 1});
 
@@ -483,7 +499,9 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(biasScoped.getPtr()));
     ASSERT_EQ(biasCount, 1);
     ASSERT_NE(biasScoped.get(), nullptr);
-    verifyTensorDescriptor(biasScoped.get(), K_RMSNORM_TENSOR_BIAS_UID, HIPDNN_DATA_FLOAT,
+    verifyTensorDescriptor(biasScoped.get(),
+                           K_RMSNORM_TENSOR_BIAS_UID,
+                           HIPDNN_DATA_FLOAT,
                            {1, 64, 1, 1},
                            {64, 1, 1, 1});
 
@@ -497,7 +515,9 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(invRmsScoped.getPtr()));
     ASSERT_EQ(invRmsCount, 1);
     ASSERT_NE(invRmsScoped.get(), nullptr);
-    verifyTensorDescriptor(invRmsScoped.get(), K_RMSNORM_TENSOR_INV_RMS_UID, HIPDNN_DATA_FLOAT,
+    verifyTensorDescriptor(invRmsScoped.get(),
+                           K_RMSNORM_TENSOR_INV_RMS_UID,
+                           HIPDNN_DATA_FLOAT,
                            {1, 1, 32, 32},
                            {1024, 1024, 32, 1});
 

@@ -117,8 +117,7 @@ namespace hipdnn_frontend::detail
         return {std::make_shared<graph::PointwiseNode>(graph::PointwiseAttributes{}, graphAttrs),
                 {}};
     case HIPDNN_OPERATION_TYPE_RMSNORM:
-        return {std::make_shared<graph::RMSNormNode>(graph::RMSNormAttributes{}, graphAttrs),
-                {}};
+        return {std::make_shared<graph::RMSNormNode>(graph::RMSNormAttributes{}, graphAttrs), {}};
     case HIPDNN_OPERATION_TYPE_SDPA_BACKWARD:
         return {std::make_shared<graph::SdpaBpropNode>(graph::SdpaBackwardAttributes{}, graphAttrs),
                 {}};
