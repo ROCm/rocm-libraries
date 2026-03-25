@@ -153,68 +153,13 @@ function(findAndCheckClangTidy)
         set(_not_found_log_level STATUS)
     endif()
 
-    # Compose search paths
-    set(_search_dirs ${LLVM_TOOL_PATHS})
-    if(DEFINED ROCM_PATH)
-        list(APPEND _search_dirs "${ROCM_PATH}/llvm/bin")
-    endif()
-    if(DEFINED LLVM_TOOLS_SEARCH_PREFIX)
-        list(APPEND _search_dirs "${LLVM_TOOLS_SEARCH_PREFIX}/bin")
-    endif()
-    # Add all PATH dirs
-    string(REPLACE ":" ";" _path_list "$ENV{PATH}")
-    foreach(_p IN LISTS _path_list)
-        if(NOT _p IN_LIST _search_dirs)
-            list(APPEND _search_dirs "${_p}")
-        endif()
-    endforeach()
+    findandchecktool(
+        CLANG_TIDY_EXE "clang-tidy" ${EXPECTED_CLANG_TIDY_VERSION} "version ([0-9]+)\\."
+        ${_not_found_log_level}
+    )
 
-    set(CLANG_TIDY_EXE "")
-    set(CLANG_TIDY_EXE_FALLBACK "")
-    set(CLANG_TIDY_EXE_FALLBACK_VERSION "")
-    foreach(_dir IN LISTS _search_dirs)
-        file(GLOB _candidates "${_dir}/clang-tidy*")
-        foreach(_candidate IN LISTS _candidates)
-            if(NOT IS_EXECUTABLE "${_candidate}")
-                continue()
-            endif()
-            # Only match files named exactly clang-tidy or with a numeric suffix (avoid clang-tidy-diff, etc)
-            get_filename_component(_fname "${_candidate}" NAME)
-            if(NOT _fname MATCHES "^clang-tidy(-[0-9]+)?$")
-                continue()
-            endif()
-            execute_process(
-                COMMAND "${_candidate}" --version
-                OUTPUT_VARIABLE _version_output
-                ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
-            )
-            if(_version_output MATCHES "version[ ]*${EXPECTED_CLANG_TIDY_VERSION}\\.")
-                set(CLANG_TIDY_EXE "${_candidate}")
-                break()
-            else()
-                # Keep the first found clang-tidy as a fallback if we don't find the expected version
-                if(NOT CLANG_TIDY_EXE_FALLBACK)
-                    set(CLANG_TIDY_EXE_FALLBACK "${_candidate}")
-                    set(CLANG_TIDY_EXE_FALLBACK_VERSION "${_version_output}")
-                endif()
-            endif()
-        endforeach()
-        if(CLANG_TIDY_EXE)
-            break()
-        endif()
-    endforeach()
-
-    if(CLANG_TIDY_EXE)
-        message(STATUS "Found clang-tidy version ${EXPECTED_CLANG_TIDY_VERSION} at: ${CLANG_TIDY_EXE}")
-        set(CLANG_TIDY_EXE ${CLANG_TIDY_EXE} PARENT_SCOPE)
-    else()
-        if (CLANG_TIDY_EXE_FALLBACK)
-            message(WARNING "Failed to find clang-tidy version ${EXPECTED_CLANG_TIDY_VERSION}, fell back to version ${CLANG_TIDY_EXE_FALLBACK_VERSION} at ${CLANG_TIDY_EXE_FALLBACK}")
-            set(CLANG_TIDY_EXE ${CLANG_TIDY_EXE_FALLBACK} PARENT_SCOPE)
-        else()
-            message(${_not_found_log_level} "clang-tidy not found. Please install clang-tidy version ${EXPECTED_CLANG_TIDY_VERSION} or set LLVM_TOOLS_SEARCH_PREFIX to a directory containing it.")
-        endif()
-    endif()
+    # Export to parent scope
+    set(CLANG_TIDY_EXE ${CLANG_TIDY_EXE} PARENT_SCOPE)
 
     findandchecktool(
         RUN_CLANG_TIDY_EXE "run-clang-tidy" ${EXPECTED_CLANG_TIDY_VERSION} "SKIP_VERSION_CHECK"
