@@ -213,6 +213,7 @@ struct BufferConfig {
 
   bool useIndex = false;  // idxen
   bool useOffset = false; // offen
+  bool useLds = false;    // lds (direct-to-LDS)
 
   // Factory: Parses the raw string tokens into a clean config
   static BufferConfig parse(const std::vector<std::string_view> &parts,
@@ -227,28 +228,42 @@ struct BufferConfig {
       if (token == "idxen") {
         cfg.useIndex = true;
       }
+      if (token == "lds") {
+        cfg.useLds = true;
+      }
       if (token.starts_with("offset:")) {
         cfg.instOffset = std::stoi(std::string(token.substr(7)), nullptr, 0);
       }
     }
 
-    // Map Operands
-    // parts[0]=Op, [1]=Data, [2]=VAddr, [3]=SRSRC, [4]=SOffset
-    auto vAddrBase = wave.getFirstRegister(parts[2]);
-    cfg.srsrc = wave.getFirstRegister(parts[3]);
+    // Map Operands.
+    // Standard: parts[1]=VDATA, [2]=VADDR, [3]=SRSRC, [4]=SOFFSET
+    // DTL:      parts[1]=VDATA,            [2]=SRSRC, [3]=SOFFSET
+    //   No separate VADDR — VDATA doubles as the offen offset.
+    // The LDS case has one fewer operand, so SRSRC/SOFFSET shift down by 1.
+    int srsrcIdx = cfg.useLds ? 2 : 3;
+    cfg.srsrc = wave.getFirstRegister(parts[srsrcIdx]);
 
-    // Handle VADDR Logic: [Index?, Offset?]
-    if (cfg.useIndex) {
-      cfg.vIndexReg = vAddrBase;
+    // VADDR / offen / idxen handling.
+    auto vAddrBase = wave.getFirstRegister(parts[cfg.useLds ? 1 : 2]);
+    if (cfg.useLds) {
+      // DTL: VDATA provides the offen offset for the global address.
       if (cfg.useOffset) {
-        cfg.vOffsetReg = CommonRegister::getVgpr(vAddrBase.index + 1);
+        cfg.vOffsetReg = vAddrBase;
       }
-    } else if (cfg.useOffset) {
-      cfg.vOffsetReg = vAddrBase;
+    } else {
+      if (cfg.useIndex) {
+        cfg.vIndexReg = vAddrBase;
+        if (cfg.useOffset) {
+          cfg.vOffsetReg = CommonRegister::getVgpr(vAddrBase.index + 1);
+        }
+      } else if (cfg.useOffset) {
+        cfg.vOffsetReg = vAddrBase;
+      }
     }
 
-    // Handle SOFFSET (SGPR or Imm)
-    std::string_view sOff = parts[4];
+    // SOFFSET (SGPR or immediate).
+    std::string_view sOff = parts[srsrcIdx + 1];
     if (sOff.find('s') == 0) {
       cfg.sOffsetReg = wave.getFirstRegister(sOff).index;
     } else {
@@ -332,20 +347,77 @@ public:
                                    std::string_view line) const final {
     auto parts = getPartitioned(line);
     auto config = BufferConfig::parse(parts, wave);
-    auto dstReg = wave.getFirstRegister(parts[1]);
     int n = numElements;
 
-    std::vector<uint32_t> waveWritten;
-    for (int i = 0; i < numElements; ++i) {
-      waveWritten.push_back(dstReg.index + i);
-    }
+    // ================================================================
+    // Direct-to-LDS (DTL): buffer_load ... lds
+    // ================================================================
+    //
+    // Overview
+    // --------
+    // When the `lds` modifier is present on a MUBUF buffer_load instruction,
+    // the hardware bypasses VGPRs entirely and writes the loaded data straight
+    // into LDS (Local Data Share / shared memory). This is used by high-
+    // performance GEMM kernels (e.g. TensileLite on gfx950) to overlap global
+    // memory fetches with compute — the data arrives in LDS ready for the
+    // math units without an intermediate ds_write step.
+    //
+    // ISA reference: CDNA4 ISA §9.1.9 "Memory Buffer Load to LDS".
+    // Supported instructions (CDNA4): BUFFER_LOAD_{ubyte, sbyte, ushort,
+    // sshort, dword, dwordX3, dwordX4, format_x}.
+    // Note: CDNA3 (gfx942) only supports up to dword (no dwordX3/X4).
+    //
+    // Memory (source) address
+    // -----------------------
+    // Computed exactly like a normal buffer_load via the SRD (Shader Resource
+    // Descriptor) + optional VGPR offset (offen/idxen) + SGPR/imm SOffset:
+    //
+    //   global_addr = SRD.base
+    //                 + (idxen ? vgpr_index * SRD.stride : 0)
+    //                 + (offen ? vgpr_offset : 0)
+    //                 + sgpr_soffset
+    //                 + inst_offset
+    //
+    // LDS (destination) address
+    // -------------------------
+    // The LDS write address is determined by M0 and the lane index:
+    //
+    //   lds_addr = M0[17:0] + TIDinWave * bytes_per_lane
+    //
+    // where bytes_per_lane is the number of bytes loaded per lane (e.g. 16
+    // for dwordx4). For dwordx3 the hardware still uses bytes_per_lane=16,
+    // writing 3 dwords and skipping the 4th.
+    //
+    // Operand encoding difference
+    // ---------------------------
+    // In a normal buffer_load, the VDATA field names the destination VGPR(s).
+    // With LDS=1, VDATA is reinterpreted: the hardware reads M0 implicitly
+    // for the LDS base address. In assembly syntax this changes the operand
+    // layout:
+    //
+    //   Standard: buffer_load_dwordx4 v[dst], v[addr], s[srd], soff offen
+    //             parts: [0]=op [1]=VDATA [2]=VADDR [3]=SRSRC [4]=SOFFSET
+    //
+    //   DTL:      buffer_load_dwordx4 v[addr], s[srd], soff offen lds
+    //             parts: [0]=op [1]=VDATA(=VADDR) [2]=SRSRC [3]=SOFFSET
+    //
+    // The VDATA VGPR provides the offen/idxen offset for the global memory
+    // address, NOT the LDS address. BufferConfig::parse handles this
+    // 3-operand layout when useLds is true.
+    //
+    // ================================================================
 
-    return [&wave, config, dstReg, n, waveWritten]() {
-      auto run = [&](int lane) {
-        // 1. Resolve State
+    // Shared iteration: for each active lane, compute BufferState, check
+    // bounds per element, and call onLoad/onOob. This is the common logic
+    // between standard buffer loads (→ VGPR) and DTL (→ LDS).
+    //
+    // OOB behavior (ISA reference: CDNA3 §9.1, CDNA4 §9.1):
+    // "When an address is out of range, reads return zero, and writes and
+    // atomics are dropped." For standard loads the caller zeros the VGPR;
+    // for DTL the caller skips the LDS write.
+    auto forEachElement = [&wave, config, n](auto onLoad, auto onOob) {
+      wave.runExecConditionedForLanes([&](int lane) {
         auto state = BufferState::compute(wave, lane, config);
-
-        // 2. Element Loop
         for (int i = 0; i < n; ++i) {
           int64_t elemOffset = i * sizeof(T);
           if (state.isInBounds(elemOffset, sizeof(T))) {
@@ -355,13 +427,47 @@ public:
               std::memcpy(&val, reinterpret_cast<const void *>(addr),
                           sizeof(T));
             }
-            wave.setVgpr(dstReg.index + i, lane, val);
+            onLoad(lane, i, val);
           } else {
-            wave.setVgpr(dstReg.index + i, lane, 0);
+            onOob(lane, i);
           }
         }
+      });
+    };
+
+    if (config.useLds) {
+      int bytesPerLane = n * static_cast<int>(sizeof(T));
+      return [&wave, forEachElement, bytesPerLane]() {
+        IntervalSet intervals;
+        uint32_t m0 = wave.getM0();
+        forEachElement(
+            [&](int lane, int i, T val) {
+              int ldsAddr =
+                  static_cast<int>(m0 + lane * bytesPerLane + i * sizeof(T));
+              wave.getWorkgroup().getLds().write<T>(ldsAddr, val);
+              intervals.append(ldsAddr, ldsAddr + static_cast<int>(sizeof(T)));
+            },
+            [](int, int) {});
+        intervals.finalize();
+        wave.registerGlobalToLdsEvent(wave.getPc(), intervals);
+        return wave.getPc() + 1;
       };
-      wave.runExecConditionedForLanes(run);
+    }
+
+    // Standard buffer load: data goes to VGPRs.
+    auto dstReg = wave.getFirstRegister(parts[1]);
+
+    std::vector<uint32_t> waveWritten;
+    for (int i = 0; i < numElements; ++i) {
+      waveWritten.push_back(dstReg.index + i);
+    }
+
+    return [&wave, forEachElement, dstReg, waveWritten]() {
+      forEachElement(
+          [&](int lane, int i, T val) {
+            wave.setVgpr(dstReg.index + i, lane, val);
+          },
+          [&](int lane, int i) { wave.setVgpr(dstReg.index + i, lane, 0); });
       wave.registerGlobalToVgprEvent(wave.getPc(), waveWritten);
       return wave.getPc() + 1;
     };

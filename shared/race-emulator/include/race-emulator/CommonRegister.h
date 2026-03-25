@@ -13,7 +13,18 @@ enum class MemoryEventType {
   VGPR_TO_GLOBAL,
   LDS_TO_VGPR,
   VGPR_TO_LDS,
+
+  // Direct-to-LDS (DTL): `buffer_load ... lds` bypasses VGPRs and writes
+  // global memory data directly to LDS. Unlike VGPR_TO_LDS (which has VGPR
+  // registers), GLOBAL_TO_LDS events have no VGPR registers — only LDS
+  // intervals.
+  //
+  // Wait counter: DTL is a MUBUF instruction, so it uses vmcnt (not lgkmcnt).
+  // s_waitcnt vmcnt(0) must complete before the owning wave can read the LDS
+  // bytes. Cross-wave access requires s_barrier after vmcnt, same as ds_write
+  // followed by s_barrier.
   GLOBAL_TO_LDS,
+
   N
 };
 

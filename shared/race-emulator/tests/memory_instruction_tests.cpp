@@ -1,3 +1,4 @@
+#include "race-emulator/CommonRegister.h"
 #include "race-emulator/EmulatorException.h"
 #include "race-emulator/Wave.h"
 #include "race-emulator/Workgroup.h"
@@ -12,6 +13,14 @@ using namespace raceemulator;
 
 void tryExecute(Wave &regs, const std::string &line) {
   regs.tryExecute(line, false);
+}
+
+// Helper: set up SRD (Shader Resource Descriptor) in s[srdBase:srdBase+3].
+void setupSrd(Wave &wave, int srdBase, uintptr_t baseAddr, uint32_t size) {
+  wave.setSgpr(srdBase, static_cast<uint32_t>(baseAddr & 0xFFFFFFFF));
+  wave.setSgpr(srdBase + 1, static_cast<uint32_t>((baseAddr >> 32) & 0xFFFF));
+  wave.setSgpr(srdBase + 2, size);
+  wave.setSgpr(srdBase + 3, 0);
 }
 
 } // namespace
@@ -430,6 +439,36 @@ TEST(Instructions, BufferLoad_NegativeOffsets) {
 
   // 5. Verify
   EXPECT_EQ(regs.getVgpr(1, 0), 0xCAFEBABE);
+}
+
+// OOB (out-of-bounds) buffer loads return zero.
+// ISA reference: CDNA3 §9.1: "When an address is out of range, reads return
+// zero, and writes and atomics are dropped." CDNA4 §9.1 identical.
+TEST(Instructions, BufferLoad_OutOfBounds_ReturnsZero) {
+  Workgroup wg;
+  Wave regs(/*vgprCount=*/10, /*sgprCount=*/10, /*waveSize=*/1, wg);
+
+  std::vector<uint32_t> hostMem = {0x11111111, 0x22222222};
+  uintptr_t baseAddr = reinterpret_cast<uintptr_t>(hostMem.data());
+  // SRD size = 4 bytes: only the first dword is in bounds.
+  setupSrd(regs, /*srdBase=*/4, baseAddr, /*size=*/4);
+
+  // Pre-fill destination with sentinel to verify it gets zeroed.
+  regs.setVgpr(2, 0, 0xDEADBEEF);
+  regs.setVgpr(3, 0, 0xDEADBEEF);
+
+  regs.setVgpr(0, 0, 0); // voffset = 0
+  tryExecute(regs, "buffer_load_dwordx2 v[2:3], v0, s[4:7], 0 offen");
+
+  // First dword is in bounds, second is OOB → zeroed.
+  EXPECT_EQ(regs.getVgpr(2, 0), 0x11111111u);
+  EXPECT_EQ(regs.getVgpr(3, 0), 0u);
+
+  // Fully OOB: offset beyond buffer size.
+  regs.setVgpr(4, 0, 0xDEADBEEF);
+  regs.setVgpr(0, 0, 100); // voffset = 100, well past 4-byte buffer
+  tryExecute(regs, "buffer_load_dword v4, v0, s[4:7], 0 offen");
+  EXPECT_EQ(regs.getVgpr(4, 0), 0u);
 }
 
 TEST(Instructions, DS_Write_B8_D16_HI) {
@@ -916,4 +955,85 @@ TEST(Instructions, BufferLoadD16_ByteLevelRace) {
   // Now both halves are safe.
   EXPECT_NO_THROW(regs.getVgpr(0, 0));
   EXPECT_EQ(regs.getVgpr(0, 0), 0xABCD1234u);
+}
+
+// ============================================================================
+// buffer_load ... lds (direct-to-LDS)
+// ============================================================================
+
+// buffer_load_dwordx4 ... lds: loads 4 dwords per lane from global memory
+// directly into LDS at m0 + lane * 16.
+TEST(Instructions, BufferLoad_Lds_DirectToLds) {
+  Workgroup wg;
+  wg.resizeLds(1024);
+  // waveSize=2 for manageable test size (2 lanes × 16 bytes = 32 bytes LDS).
+  Wave wave(/*vgprCount=*/4, /*sgprCount=*/10, /*waveSize=*/2, wg);
+  wave.setRaceChecks(true);
+  wave.setCompleteEmulation(true);
+
+  // Host memory: 8 dwords (4 per lane × 2 lanes).
+  std::vector<uint32_t> hostMem = {0x11111111, 0x22222222, 0x33333333,
+                                   0x44444444, 0x55555555, 0x66666666,
+                                   0x77777777, 0x88888888};
+  uintptr_t baseAddr = reinterpret_cast<uintptr_t>(hostMem.data());
+  setupSrd(wave, /*srdBase=*/4, baseAddr, hostMem.size() * sizeof(uint32_t));
+
+  // v0 = per-lane offset into global memory (offen). Lane 0 → offset 0,
+  // lane 1 → offset 16 (second group of 4 dwords).
+  wave.setVgpr(0, /*lane=*/0, 0);
+  wave.setVgpr(0, /*lane=*/1, 16);
+
+  // m0 = LDS base address for the write.
+  wave.setM0(64);
+
+  tryExecute(wave, "buffer_load_dwordx4 v0, s[4:7], 0 offen lds");
+
+  // Verify LDS contents: lane 0 at m0+0*16=64, lane 1 at m0+1*16=80.
+  auto &lds = wg.getLds();
+  EXPECT_EQ(lds.read<uint32_t>(64), 0x11111111u);
+  EXPECT_EQ(lds.read<uint32_t>(68), 0x22222222u);
+  EXPECT_EQ(lds.read<uint32_t>(72), 0x33333333u);
+  EXPECT_EQ(lds.read<uint32_t>(76), 0x44444444u);
+  EXPECT_EQ(lds.read<uint32_t>(80), 0x55555555u);
+  EXPECT_EQ(lds.read<uint32_t>(84), 0x66666666u);
+  EXPECT_EQ(lds.read<uint32_t>(88), 0x77777777u);
+  EXPECT_EQ(lds.read<uint32_t>(92), 0x88888888u);
+
+  // Verify GLOBAL_TO_LDS event was registered.
+  EXPECT_EQ(wave.getWaveMemoryEvents().size(), 1u);
+  EventId eid = wave.getWaveMemoryEvents()[0];
+  EXPECT_EQ(wg.getEventType(eid), MemoryEventType::GLOBAL_TO_LDS);
+  EXPECT_EQ(wg.getLdsWriteEvents().size(), 1u);
+
+  // Verify vmcnt retires it.
+  wave.sWaitCntVmcnt(0);
+  EXPECT_TRUE(wave.getWaveMemoryEvents().empty());
+  EXPECT_EQ(wg.getEventStatus(eid), EventStatus::WAVE_COMPLETE);
+}
+
+// Verify that LDS reads race against an outstanding DTL write (before vmcnt).
+TEST(Instructions, BufferLoad_Lds_RaceBeforeVmcnt) {
+  Workgroup wg;
+  wg.resizeLds(1024);
+  wg.setRaceChecks(true);
+  Wave wave(/*vgprCount=*/4, /*sgprCount=*/10, /*waveSize=*/1, wg);
+  wave.setRaceChecks(true);
+  wave.setCompleteEmulation(true);
+
+  std::vector<uint32_t> hostMem = {0xAAAAAAAA};
+  uintptr_t baseAddr = reinterpret_cast<uintptr_t>(hostMem.data());
+  setupSrd(wave, /*srdBase=*/4, baseAddr, sizeof(uint32_t));
+
+  wave.setVgpr(0, /*lane=*/0, 0);
+  wave.setM0(0);
+
+  tryExecute(wave, "buffer_load_dword v0, s[4:7], 0 offen lds");
+
+  // LDS read before vmcnt → race.
+  EXPECT_THROW(wg.readLds<uint32_t>(0, WaveId{0}, 0), RaceConditionException);
+
+  // After vmcnt → safe.
+  wave.sWaitCntVmcnt(0);
+  EXPECT_NO_THROW(wg.readLds<uint32_t>(0, WaveId{0}, 0));
+  EXPECT_EQ(wg.readLds<uint32_t>(0, WaveId{0}, 0), 0xAAAAAAAAu);
 }
