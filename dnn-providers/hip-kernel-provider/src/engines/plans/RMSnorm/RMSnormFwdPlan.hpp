@@ -15,8 +15,10 @@
 
 namespace hip_kernel_provider
 {
-
 class IKernelCompiler;
+
+namespace rmsnorm
+{
 
 class RMSnormFwdParams
 {
@@ -37,7 +39,7 @@ public:
     const hipdnn_data_sdk::data_objects::TensorAttributes* bias() const;
     const hipdnn_data_sdk::data_objects::TensorAttributes* y() const;
     const hipdnn_data_sdk::data_objects::TensorAttributes* invRMS() const;
-    float epsilon() const;
+    const hipdnn_data_sdk::data_objects::TensorAttributes* epsilon() const;
 
 private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _x;
@@ -45,7 +47,7 @@ private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _bias;
     const hipdnn_data_sdk::data_objects::TensorAttributes* _y;
     const hipdnn_data_sdk::data_objects::TensorAttributes* _invRMS;
-    float _epsilonValue;
+    const hipdnn_data_sdk::data_objects::TensorAttributes* _epsilon;
 };
 
 class RMSnormFwdPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
@@ -78,4 +80,5 @@ private:
     std::unique_ptr<IRunnableKernel> _runnableKernel;
 };
 
+}
 }

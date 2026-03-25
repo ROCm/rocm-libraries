@@ -90,7 +90,7 @@ void validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t num
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "RMSnorm implementation supports only NCHW  layouts for 4D tensors.");
+                "RMSnorm implementation supports only NCHW layouts for 4D tensors.");
         }
     }
     else

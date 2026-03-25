@@ -17,7 +17,10 @@ using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hip_kernel_provider::test_utilities;
-using namespace hip_kernel_provider::test_rmsnorm_common;
+
+namespace hip_kernel_provider::rmsnorm::test
+{
+using namespace common;
 
 namespace
 {
@@ -86,7 +89,7 @@ using IntegrationGpuRMSnormForwardNcdhwFp32 = RMSNormForwardTraining<float, floa
 using IntegrationGpuRMSnormForwardNcdhwFp16 = RMSNormForwardTraining<half, float>;
 using IntegrationGpuRMSnormForwardNcdhwBfp16 = RMSNormForwardTraining<bfloat16, float>;
 
-} // namespace
+}
 
 // ============================================================================
 // NCHW FP32
@@ -176,3 +179,5 @@ TEST_P(IntegrationGpuRMSnormForwardNcdhwBfp16, Correctness)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuRMSnormForwardNcdhwBfp16,
                          testing::ValuesIn(getRMSnorm3dTestCases()));
+
+} // namespace hip_kernel_provider::rmsnorm::test

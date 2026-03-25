@@ -29,8 +29,8 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
              auto engine = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID);
              engine->addPlanBuilder(
                  std::make_unique<BatchnormPlanBuilder>(kernelCompiler, devicePropertyProvider));
-             engine->addPlanBuilder(
-                 std::make_unique<RMSnormPlanBuilder>(kernelCompiler, devicePropertyProvider));
+             engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormPlanBuilder>(
+                 kernelCompiler, devicePropertyProvider));
              return engine;
          }}};
 

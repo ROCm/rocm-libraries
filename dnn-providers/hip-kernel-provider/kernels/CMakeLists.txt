@@ -80,7 +80,6 @@ set(KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/types/FloatTypes.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/VectorTypes.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/types/Bfloat16Dev.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/types/CstdInt.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/HipKernelActivation.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/HipKernelMath.hpp
 )

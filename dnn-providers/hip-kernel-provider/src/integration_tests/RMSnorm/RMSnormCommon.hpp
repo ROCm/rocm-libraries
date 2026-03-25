@@ -5,12 +5,13 @@
 
 #include <cstdint>
 #include <ostream>
+#include <stdexcept>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
-namespace hip_kernel_provider::test_rmsnorm_common
+namespace hip_kernel_provider::rmsnorm::test::common
 {
 
 struct RMSnormTestCase

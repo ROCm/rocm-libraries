@@ -8,7 +8,10 @@
 #include "RMSnormFwdPlan.hpp"
 #include "RMSnormPlanBuilder.hpp"
 
-namespace hip_kernel_provider
+#include <algorithm>
+#include <set>
+
+namespace hip_kernel_provider::rmsnorm
 {
 
 RMSnormPlanBuilder::RMSnormPlanBuilder(const IKernelCompiler& kernelCompiler,

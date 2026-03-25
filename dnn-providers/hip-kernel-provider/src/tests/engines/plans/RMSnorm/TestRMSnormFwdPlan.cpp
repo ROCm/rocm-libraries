@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdint>
 #include <cstdio>
 #include <gtest/gtest.h>
 
@@ -14,7 +15,8 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
-using namespace hip_kernel_provider;
+namespace hip_kernel_provider::rmsnorm::test
+{
 
 // ============================================================================
 // RMSnormFwdParams - construction from valid graph data
@@ -86,7 +88,7 @@ TEST(TestRMSnormFwdParams, IsNotCopyConstructible)
     EXPECT_FALSE(std::is_copy_constructible_v<RMSnormFwdParams>);
 }
 // ============================================================================
-// BatchnormFwdInferencePlan - helpers
+// RMSnormFwdPlan - helpers
 // ============================================================================
 
 namespace
@@ -121,24 +123,24 @@ hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
 } // namespace
 
 // ============================================================================
-// BatchnormFwdInferencePlan - basic behavior
+// RMSnormFwdPlan - basic behavior
 // ============================================================================
 
-TEST(TestRMSnormFwdInferencePlan, ExecuteWithoutCompileThrows)
+TEST(TestRMSnormFwdPlan, ExecuteWithoutCompileThrows)
 {
     auto plan = createPlanFromGraph();
     HipKernelHandle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestRMSnormFwdInferencePlan, GetWorkspaceSizeReturnsZero)
+TEST(TestRMSnormFwdPlan, GetWorkspaceSizeReturnsZero)
 {
     auto plan = createPlanFromGraph();
     HipKernelHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
-TEST(TestRMSnormFwdInferencePlan, IsMoveConstructible)
+TEST(TestRMSnormFwdPlan, IsMoveConstructible)
 {
     auto plan = createPlanFromGraph();
 
@@ -147,16 +149,16 @@ TEST(TestRMSnormFwdInferencePlan, IsMoveConstructible)
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 
-TEST(TestRMSnormFwdInferencePlan, IsNotCopyConstructible)
+TEST(TestRMSnormFwdPlan, IsNotCopyConstructible)
 {
     EXPECT_FALSE(std::is_copy_constructible_v<RMSnormFwdPlan>);
 }
 
 // ============================================================================
-// BatchnormFwdInferencePlan - compile
+// RMSnormFwdPlan - compile
 // ============================================================================
 
-TEST(TestRMSnormFwdInferencePlan, CompileCallsCompilerWithCorrectKernelName)
+TEST(TestRMSnormFwdPlan, CompileCallsCompilerWithCorrectKernelName)
 {
     MockKernelCompiler mockCompiler;
 
@@ -177,7 +179,7 @@ TEST(TestRMSnormFwdInferencePlan, CompileCallsCompilerWithCorrectKernelName)
     plan.compile(mockCompiler, deviceProps);
 }
 
-TEST(TestRMSnormFwdInferencePlan, CompileIncludesOffloadArchOption)
+TEST(TestRMSnormFwdPlan, CompileIncludesOffloadArchOption)
 {
     MockKernelCompiler mockCompiler;
 
@@ -199,7 +201,7 @@ TEST(TestRMSnormFwdInferencePlan, CompileIncludesOffloadArchOption)
     plan.compile(mockCompiler, deviceProps);
 }
 
-TEST(TestRMSnormFwdInferencePlan, CompileFp32SetsCorrectDefines)
+TEST(TestRMSnormFwdPlan, CompileFp32SetsCorrectDefines)
 {
     MockKernelCompiler mockCompiler;
 
@@ -232,7 +234,7 @@ TEST(TestRMSnormFwdInferencePlan, CompileFp32SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_IO_TYPE=float"));
 }
 
-TEST(TestRMSnormFwdInferencePlan, CompileFp16SetsCorrectDefines)
+TEST(TestRMSnormFwdPlan, CompileFp16SetsCorrectDefines)
 {
     MockKernelCompiler mockCompiler;
 
@@ -266,7 +268,7 @@ TEST(TestRMSnormFwdInferencePlan, CompileFp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_IO_TYPE=half"));
 }
 
-TEST(TestRMSnormFwdInferencePlan, CompileBfp16SetsCorrectDefines)
+TEST(TestRMSnormFwdPlan, CompileBfp16SetsCorrectDefines)
 {
     MockKernelCompiler mockCompiler;
 
@@ -301,7 +303,7 @@ TEST(TestRMSnormFwdInferencePlan, CompileBfp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_IO_TYPE=ushort"));
 }
 
-TEST(TestRMSnormFwdInferencePlan, CompileWithUnsupportedDimensionThrows)
+TEST(TestRMSnormFwdPlan, CompileWithUnsupportedDimensionThrows)
 {
     MockKernelCompiler mockCompiler;
 
@@ -321,3 +323,26 @@ TEST(TestRMSnormFwdInferencePlan, CompileWithUnsupportedDimensionThrows)
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+TEST(TestRMSnormFwdPlan, CompileWithUnsupportedWorkgroupsThrows)
+{
+    MockKernelCompiler mockCompiler;
+
+    // Number of workgroups exeeds UINT32_MAX
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
+        {4, 4, 2, 1}, {UINT32_MAX, 1, 2, 2}, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_RMSNormAttributes();
+
+    RMSnormFwdParams params(attr, graph.getTensorMap());
+    RMSnormFwdPlan plan(std::move(params));
+
+    auto deviceProps = createTestDeviceProps();
+
+    EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+} // namespace hip_kernel_provider::rmsnorm::test

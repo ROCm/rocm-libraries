@@ -15,7 +15,7 @@
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::rmsnorm
 {
 
 RMSnormFwdParams::RMSnormFwdParams(
@@ -31,10 +31,9 @@ RMSnormFwdParams::RMSnormFwdParams(
     , _invRMS(attributes.inv_rms_tensor_uid().has_value()
                   ? tensorMap.at(attributes.inv_rms_tensor_uid().value())
                   : nullptr)
+    , _epsilon((tensorMap.at(attributes.epsilon_tensor_uid())))
+
 {
-    auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue = static_cast<float>(
-        hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon"));
 }
 
 const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormFwdParams::x() const
@@ -47,9 +46,9 @@ const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormFwdParams::scale()
     return _scale;
 }
 
-float RMSnormFwdParams::epsilon() const
+const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormFwdParams::epsilon() const
 {
-    return _epsilonValue;
+    return _epsilon;
 }
 
 const hipdnn_data_sdk::data_objects::TensorAttributes* RMSnormFwdParams::bias() const
@@ -74,7 +73,7 @@ RMSnormFwdPlan::RMSnormFwdPlan(RMSnormFwdParams&& params)
 
 size_t RMSnormFwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& handle) const
 {
-    // No workspace needed for RMS norrm
+    // No workspace needed for RMS norm
     return 0;
 }
 
@@ -95,39 +94,43 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     case hipdnn_data_sdk::data_objects::DataType::BFLOAT16:
         ioTypeString = "ushort";
         break;
-    default:
+    case hipdnn_data_sdk::data_objects::DataType::FLOAT:
         ioTypeString = "float";
         break;
+    default:
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            std::string("Unsupported data type: ")
+                + hipdnn_data_sdk::data_objects::EnumNameDataType(ioDataType));
     }
 
     // Extract dimensions from x tensor
     const auto* xDims = _params.x()->dims();
-    const auto* xStrides = _params.x()->strides();
-    int64_t cStride = xStrides->Get(1);
-    int64_t cSize = xDims->Get(1);
-    int64_t nSize = xDims->Get(0);
-
-    if(xDims->size() < 4 || xDims->size() > 5)
+    if(const auto xRank = xDims->size(); xRank < 4 || xRank > 5)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "Unsupported tensor dimension: "
-                                                           + std::to_string(xDims->size()));
+                                                           + std::to_string(xRank));
+    }
+
+    const auto* xStrides = _params.x()->strides();
+    const int64_t cStride = xStrides->Get(1);
+    const int64_t cSize = xDims->Get(1);
+    const int64_t nSize = xDims->Get(0);
+    if(auto numWorkgroups = (nSize * cStride); numWorkgroups > UINT32_MAX)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Unsupported number of workgroups: "
+                                                           + std::to_string(numWorkgroups));
     }
 
     // Calculate block and grid dimensions
-    size_t xlocalsize = LOCAL_SIZE;
-    size_t xgridsize = static_cast<size_t>(nSize * cStride) * xlocalsize;
-    size_t ylocalsize = 1;
-    size_t ygridsize = 1;
-    size_t zlocalsize = 1;
-    size_t zgridsize = 1;
-
-    // Detect GPU architecture
-    std::string archName(deviceProperties.gcnArchName);
-    bool isGfx103x = (archName.find("gfx103") == 0);
-    bool isGfx110x = (archName.find("gfx110") == 0);
-    bool isGfx120x = (archName.find("gfx120") == 0);
-    bool isGfx115x = (archName.find("gfx115") == 0);
+    const uint64_t xlocalsize = LOCAL_SIZE;
+    const uint64_t xgridsize = static_cast<uint64_t>(nSize * cStride) * xlocalsize;
+    const uint64_t ylocalsize = 1;
+    const uint64_t ygridsize = 1;
+    const uint64_t zlocalsize = 1;
+    const uint64_t zgridsize = 1;
 
     // Prepare compilation options
     std::vector<std::string> options;
@@ -150,10 +153,6 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_IO_TYPE=") + ioTypeString);
     options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_LOCAL_SIZE=")
                          + std::to_string(LOCAL_SIZE));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX103X=") + (isGfx103x ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX110X=") + (isGfx110x ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX120X=") + (isGfx120x ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX115X=") + (isGfx115x ? "1" : "0"));
     options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
 
     // Compile kernel and configure launch dimensions
@@ -198,7 +197,10 @@ void RMSnormFwdPlan::execute(const HipKernelHandle& handle,
                                       _params.invRMS()->uid(), deviceBuffers, numDeviceBuffers)
                                       .ptr;
 
-    auto epsilonValue = _params.epsilon();
+    hipdnn_data_sdk::data_objects::TensorAttributesT epsilonTensor;
+    _params.epsilon()->UnPackTo(&epsilonTensor);
+    double epsilon
+        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor, "Epsilon");
 
     _runnableKernel->launch(handle.getStream(),
                             xBuffer.ptr,
@@ -206,7 +208,7 @@ void RMSnormFwdPlan::execute(const HipKernelHandle& handle,
                             biasBufferPtr,
                             yBuffer.ptr,
                             invRMSBufferPtr,
-                            epsilonValue);
+                            static_cast<float>(epsilon));
 }
 
 }
