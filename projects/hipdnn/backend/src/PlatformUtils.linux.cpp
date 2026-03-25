@@ -60,7 +60,9 @@ void closeLibrary(PluginLibHandle handle)
 
 void* getSymbol(PluginLibHandle handle, const char* symbolName)
 {
+    // NOLINTBEGIN(misc-const-correctness) converting this to a const void * would require changing the getSymbol signature, which would cascade down to large parts of the codebase
     void* symbol = dlsym(handle, symbolName);
+    // NOLINTEND(misc-const-correctness)
     if(symbol == nullptr)
     {
         const char* error = dlerror();

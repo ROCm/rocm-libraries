@@ -19,6 +19,7 @@ add_executable(
     IntegrationBlockScaleQuantize.cpp
     IntegrationBlockScaleQuantizeDescriptorLowering.cpp
     IntegrationConvForward.cpp
+    IntegrationConvFpropDescriptorLifting.cpp
     IntegrationConvFpropDescriptorLowering.cpp
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
@@ -27,15 +28,21 @@ add_executable(
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationCustomOpDescriptorLowering.cpp
     IntegrationGraphLifting.cpp
+    IntegrationGraphSupportCheck.cpp
+    IntegrationLayerNormDescriptorLifting.cpp
     IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp
     IntegrationMatmulDescriptorLowering.cpp
+    IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
     IntegrationSetPluginPathsExt.cpp
+    IntegrationSdpaBpropDescriptorLowering.cpp
+    IntegrationSdpaBpropLifting.cpp
     IntegrationSdpaFpropDescriptorLowering.cpp
 )
 
