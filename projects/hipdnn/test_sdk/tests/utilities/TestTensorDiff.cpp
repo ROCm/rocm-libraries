@@ -23,7 +23,7 @@ TEST(TestComputeTensorDiff, IdenticalTensorsHaveNoMismatches)
 
     Tensor<float> impl(dims);
     TensorView<float> refView(ref);
-    TensorView<float> implView(impl);
+    const TensorView<float> implView(impl);
     iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
         impl.setHostValue(refView.getHostValue(indices), indices);
     });
@@ -158,7 +158,7 @@ TEST(TestPrintTensorDiffSummary, OutputContainsExpectedFields)
 
     std::ostringstream oss;
     printTensorDiffSummary(oss, "testTensor", summary);
-    std::string output = oss.str();
+    const std::string output = oss.str();
 
     EXPECT_NE(output.find("testTensor"), std::string::npos);
     EXPECT_NE(output.find("Total elements: 100"), std::string::npos);
@@ -176,7 +176,7 @@ TEST(TestPrintTensorDiffSummary, NoMismatchesOmitsWorstSection)
 
     std::ostringstream oss;
     printTensorDiffSummary(oss, "clean", summary);
-    std::string output = oss.str();
+    const std::string output = oss.str();
 
     EXPECT_EQ(output.find("Worst mismatches:"), std::string::npos);
 }
@@ -197,10 +197,10 @@ TEST(TestValidateAndReport, PassingValidationPrintsSuccessful)
         impl.setHostValue(refView.getHostValue(indices), indices);
     });
 
-    CpuFpReferenceValidation<float> validator(1e-5f, 1e-5f);
+    const CpuFpReferenceValidation<float> validator(1e-5f, 1e-5f);
 
     std::ostringstream oss;
-    bool result = validateAndReport<float>(oss, "y", validator, ref, impl, 1e-5f, 1e-5f);
+    const bool result = validateAndReport<float>(oss, "y", validator, ref, impl, 1e-5f, 1e-5f);
 
     EXPECT_TRUE(result);
     EXPECT_NE(oss.str().find("successful"), std::string::npos);
@@ -220,13 +220,13 @@ TEST(TestValidateAndReport, FailingValidationPrintsDiff)
     ref.setHostValue(0.0f, std::vector<int64_t>{1, 1});
     impl.setHostValue(100.0f, std::vector<int64_t>{1, 1});
 
-    CpuFpReferenceValidation<float> validator(0.0f, 0.0f);
+    const CpuFpReferenceValidation<float> validator(0.0f, 0.0f);
 
     std::ostringstream oss;
-    bool result = validateAndReport<float>(oss, "output", validator, ref, impl, 0.0f, 0.0f);
+    const bool result = validateAndReport<float>(oss, "output", validator, ref, impl, 0.0f, 0.0f);
 
     EXPECT_FALSE(result);
-    std::string output = oss.str();
+    const std::string output = oss.str();
     EXPECT_NE(output.find("failed"), std::string::npos);
     EXPECT_NE(output.find("Tensor diff"), std::string::npos);
 }
@@ -236,10 +236,10 @@ TEST(TestValidateAndReport, ShapeMismatchPrintsShapeError)
     Tensor<float> ref({2, 3});
     Tensor<float> impl({3, 2});
 
-    CpuFpReferenceValidation<float> validator(0.0f, 0.0f);
+    const CpuFpReferenceValidation<float> validator(0.0f, 0.0f);
 
     std::ostringstream oss;
-    bool result = validateAndReport<float>(oss, "x", validator, ref, impl, 0.0f, 0.0f);
+    const bool result = validateAndReport<float>(oss, "x", validator, ref, impl, 0.0f, 0.0f);
 
     EXPECT_FALSE(result);
     EXPECT_NE(oss.str().find("shape mismatch"), std::string::npos);

@@ -77,7 +77,7 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
 
         if(absDiff > threshold)
         {
-            std::lock_guard<std::mutex> lock(mtx);
+            const std::lock_guard<std::mutex> lock(mtx);
             ++summary.mismatchCount;
             sumAbsDiff += static_cast<double>(absDiff);
 
@@ -194,7 +194,7 @@ bool validateAndReport(std::ostream& os,
                        float absoluteTolerance,
                        float relativeTolerance)
 {
-    bool valid = validator.allClose(reference, implementation);
+    const bool valid = validator.allClose(reference, implementation);
     os << "  " << tensorName << ": " << (valid ? "successful" : "failed") << "\n";
     if(!valid)
     {
