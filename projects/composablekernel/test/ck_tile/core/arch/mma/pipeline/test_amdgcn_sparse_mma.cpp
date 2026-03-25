@@ -174,7 +174,7 @@ template <typename AType,
           uint32_t WaveTileK>
 __global__ void test_sparse_accum_over_k(void* a, void* b, void* c, void* out)
 {
-    using Pipeline = SparseMma<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>;
+    using Pipeline = SparseMmaPipeline<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>;
 
     using AVecType = typename Pipeline::AVecType;
     using BVecType = typename Pipeline::BVecType;

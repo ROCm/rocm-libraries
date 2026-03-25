@@ -22,15 +22,15 @@ __global__ void test_wavewise_pipeline(void* a, void* b, void* c, void* out)
 {
     using CompilerTarget = decltype(get_compiler_target());
 
-    using Pipeline = WaveWiseMma<AType,
-                                 BType,
-                                 CType,
-                                 WaveTileM,
-                                 WaveTileN,
-                                 WaveTileK,
-                                 MmaOpFamily::DENSE,
-                                 MmaAccumPolicy::ROW_MAJOR,
-                                 CompilerTarget>;
+    using Pipeline = WaveWiseMmaPipeline<AType,
+                                         BType,
+                                         CType,
+                                         WaveTileM,
+                                         WaveTileN,
+                                         WaveTileK,
+                                         MmaOpFamily::DENSE,
+                                         MmaAccumPolicy::ROW_MAJOR,
+                                         CompilerTarget>;
 
     using AVecType = typename Pipeline::AVecType;
     using BVecType = typename Pipeline::BVecType;
