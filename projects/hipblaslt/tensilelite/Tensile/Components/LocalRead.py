@@ -1227,7 +1227,7 @@ class LocalReadMFMA(LocalRead):
                                                             comment="2 select K=%u,%u for vector=%u"%(4, 5, vgprOffset)
                                                         ))
                                                         packCode.add(VPermB32(
-                                                            dst=vgpr("PackTemp+1"),
+                                                            dst=vgpr("PackTemp"),
                                                             src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 7, i+vIdx*numVgpr)),
                                                             src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 6, i+vIdx*numVgpr)),
                                                             src2=sgpr("PackKFor%sV%u"%(tPackM, vgprOffset)),
@@ -1235,7 +1235,7 @@ class LocalReadMFMA(LocalRead):
                                                         ))
                                                         packCode.add(VLShiftLeftOrB32(
                                                             dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx + elementIdx * 2 + 1)),
-                                                            src0=vgpr("PackTemp+1"),
+                                                            src0=vgpr("PackTemp"),
                                                             shiftHex=16,
                                                             src1=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx + elementIdx * 2 + 1)),
                                                             comment="pack two half Vgpr to one Vgpr"
