@@ -426,9 +426,11 @@ namespace rocRoller
 
                     co_yield Instruction::Lock(Scheduling::Dependency::Branch,
                                                "Lock for Conditional EXEC");
+                    // code-gen the if-condition
                     co_yield Expression::generate(vcc, expr, m_context);
 
                     Register::ValuePtr sgpr;
+
                     // s_and_saveexec_b{32,64}: Calculate bitwise AND on the scalar input and the EXEC mask,
                     // store the calculated result into the EXEC mask,
                     // set SCC iff the calculated result is nonzero and
@@ -455,13 +457,33 @@ namespace rocRoller
                             Register::AllocationOptions::FullyContiguous());
                         co_yield_(Instruction("s_and_saveexec_b32", {sgpr}, {vcc}, {}, ""));
                     }
-
                     auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
                     co_yield generate(trueBody);
-
                     // restore the original EXEC mask from the scalar destination register.
                     auto EXEC = m_context->getExec();
                     co_yield m_context->copier()->copy(EXEC, sgpr, "restore the EXEC mask");
+
+                    // s_and_not0_saveexec_b{32,64}: Calculate bitwise AND on the EXEC mask and
+                    // the negation of the scalar input,
+                    // store the calculated result into the EXEC mask,
+                    // set SCC iff the calculated result is nonzero and
+                    // store the original value of the EXEC mask into the scalar destination register.
+                    if(wavefrontSize == 64)
+                    {
+                        co_yield_(Instruction("s_and_not0_saveexec_b64", {sgpr}, {vcc}, {}, ""));
+                    }
+                    else
+                    {
+                        co_yield_(Instruction("s_and_not0_saveexec_b32", {sgpr}, {vcc}, {}, ""));
+                    }
+                    auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
+                    if(!elseBody.empty())
+                    {
+                        co_yield generate(elseBody);
+                        // restore the original EXEC mask from the scalar destination register.
+                        auto EXEC = m_context->getExec();
+                        co_yield m_context->copier()->copy(EXEC, sgpr, "restore the EXEC mask");
+                    }
 
                     co_yield Instruction::Unlock("Unlock Conditional EXEC");
                     break;
