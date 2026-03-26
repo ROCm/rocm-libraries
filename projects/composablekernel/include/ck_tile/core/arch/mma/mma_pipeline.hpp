@@ -5,6 +5,7 @@
 #include "ck_tile/core/numeric/vector_type.hpp"
 
 #include "amdgcn_mma.hpp"
+#include "ck_tile/core/utility/type_traits.hpp"
 #include "mma_selector.hpp"
 #include "mma_traits.hpp"
 #include "mma_transforms.hpp"
@@ -98,17 +99,17 @@ struct MmaPipelineBase
     private:
     // Helper to reconstruct a tuple with formatted first element and remaining elements
     template <typename DstT, typename SrcT, std::size_t... Is>
-    CK_TILE_DEVICE static auto formatBufferTupleImpl(SrcT&& inputBuffer, std::index_sequence<Is...>)
+    CK_TILE_DEVICE static auto formatBufferTupleImpl(SrcT&& inputTuple, std::index_sequence<Is...>)
     {
-        auto&& first_elem = std::get<0>(std::forward<SrcT>(inputBuffer));
+        auto&& first_elem = std::get<0>(std::forward<SrcT>(inputTuple));
         return std::make_tuple(formatBuffer<DstT>(std::forward<decltype(first_elem)>(first_elem)),
-                               std::get<Is + 1>(std::forward<SrcT>(inputBuffer))...);
+                               std::get<Is + 1>(std::forward<SrcT>(inputTuple))...);
     }
 
     template <typename DstT, typename SrcT>
     CK_TILE_DEVICE static auto formatBuffer(SrcT&& inputBuffer)
     {
-        using DecayedSrcT = std::remove_reference_t<SrcT>;
+        using DecayedSrcT = ck_tile::remove_cvref_t<SrcT>;
 
         // If SrcT is a tuple, extract the first element (the vector) and format it
         // while preserving all remaining elements (metadata)
