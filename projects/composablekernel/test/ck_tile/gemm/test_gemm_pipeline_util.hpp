@@ -201,16 +201,30 @@ class TestCkTileGemmPipeline : public ::testing::Test
         using GemmPipeline =
             typename GemmPipelineTypeSelector<PipelineType, UniversalGemmProblem>::pipeline;
 
-        using GemmEpilogue =
-            ck_tile::CShuffleEpilogue < ck_tile::CShuffleEpilogueProblem < ADataType,
-              BDataType, DsDataType, AccDataType, CDataType, DsLayout, CLayout,
-              ck_tile::element_wise::PassThrough, TilePartitioner::MPerBlock,
-              TilePartitioner::NPerBlock, M_Warp, N_Warp, M_Warp_Tile, N_Warp_Tile, K_Warp_Tile,
-              UniversalGemmProblem::TransposeC, 1, /*kNumWaveGroups_*/
-            false,                                 /*FixedVectorSize_*/
-            1,                                     /*VectorSizeC_*/
+        using GemmEpilogue = ck_tile::CShuffleEpilogue<
+            ck_tile::CShuffleEpilogueProblem<ADataType,
+                                             BDataType,
+                                             DsDataType,
+                                             AccDataType,
+                                             CDataType,
+                                             DsLayout,
+                                             CLayout,
+                                             ck_tile::element_wise::PassThrough,
+                                             TilePartitioner::MPerBlock,
+                                             TilePartitioner::NPerBlock,
+                                             M_Warp,
+                                             N_Warp,
+                                             M_Warp_Tile,
+                                             N_Warp_Tile,
+                                             K_Warp_Tile,
+                                             UniversalGemmProblem::TransposeC,
+                                             1,     /*kNumWaveGroups_*/
+                                             false, /*FixedVectorSize_*/
+                                             1,     /*VectorSizeC_*/
+                                             1,     /*BlockedXDLN_PerWarp_*/
+                                             DoubleSmemBuffer /*DoubleSmemBuffer*/>>;
 
-            using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+        using Kernel     = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
         const auto kargs = Kernel::MakeKernelArgs(args);
 
         const dim3 blocks = Kernel::BlockSize();
