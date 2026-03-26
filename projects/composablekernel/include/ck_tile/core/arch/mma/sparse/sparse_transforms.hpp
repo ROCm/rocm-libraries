@@ -60,13 +60,15 @@ static CK_TILE_DEVICE int32_t compress_a_impl(AVec& a_vec)
 
 /**
  * @class SparseCompressTransform
- * @brief Transform to unpad data from b32 type to original type
+ * @brief Performs 2:4 structured sparsity compression to the vector v and produces an index mask.
+ * @note  Returns a tuple of two. The first element is the vector v with the same scalar type but
+ *        its size halved. The second element is the index mask.
  */
 template <index_t CompressionRatio>
 struct SparseCompressTransform
 {
     template <typename VecType>
-    CK_TILE_DEVICE static decltype(auto) exec(VecType&& v)
+    CK_TILE_DEVICE static decltype(auto) exec(VecType& v)
     {
         using VecTraits                         = vector_traits<remove_cvref_t<VecType>>;
         using ScalarT                           = typename VecTraits::scalar_type;
