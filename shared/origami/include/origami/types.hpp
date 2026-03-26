@@ -375,7 +375,7 @@ struct tensile_params_t {
   bool swizzle_b = false;
 
   /// Workgroup mapping XCC parameters
-  int workgroup_mapping_xcc = 0;
+  int workgroup_mapping_xcc = 1;
   int workgroup_mapping_xcc_group = 0;
   bool global_split_u_coalesced = false;
   bool global_split_u_wgm_round_robin = false;
