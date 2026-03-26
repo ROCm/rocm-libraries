@@ -46,6 +46,7 @@ class DescriptorGenerator:
         lift_fragments = {
             "fragments/node_factory_case.j2": "node_factory_case.txt",
             "fragments/operation_unpacker_case.j2": "operation_unpacker_case.txt",
+            "fragments/operation_unpacker_test.j2": "operation_unpacker_test.txt",
             "fragments/operation_type_enum.j2": "operation_type_enum.txt",
             "fragments/node_unpack_override.j2": "node_unpack_override.txt",
             "fragments/packer_name_addition.j2": "packer_name_addition.txt",
@@ -262,6 +263,7 @@ class DescriptorGenerator:
             "fragments/cmake_entries.j2": "cmake_entries.txt",
             "fragments/node_factory_case.j2": "node_factory_case.txt",
             "fragments/operation_unpacker_case.j2": "operation_unpacker_case.txt",
+            "fragments/operation_unpacker_test.j2": "operation_unpacker_test.txt",
             "fragments/operation_type_enum.j2": "operation_type_enum.txt",
             "fragments/node_unpack_override.j2": "node_unpack_override.txt",
         }
