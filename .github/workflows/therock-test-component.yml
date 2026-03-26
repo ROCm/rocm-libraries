@@ -70,7 +70,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 9a38f01d34a90ecabd87d6cdf197466eab4e84ab # 2026-03-20
+          ref: c903a7bdaee58ab217bb0ee005f17452ebac4433 # 2026-03-25
 
       - name: Run setup test environment workflow
         timeout-minutes: 15
