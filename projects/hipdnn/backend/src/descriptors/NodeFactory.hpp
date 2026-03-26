@@ -7,7 +7,7 @@
 // #include "BatchnormBackwardOperationDescriptor.hpp"
 // #include "BatchnormInferenceOperationDescriptor.hpp"
 // #include "BatchnormInferenceVarianceExtOperationDescriptor.hpp"
-// #include "BatchnormOperationDescriptor.hpp"
+#include "BatchnormOperationDescriptor.hpp"
 // #include "BlockScaleDequantizeOperationDescriptor.hpp"
 // #include "BlockScaleQuantizeOperationDescriptor.hpp"
 // #include "ConvolutionBwdOperationDescriptor.hpp"

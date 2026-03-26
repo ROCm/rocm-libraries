@@ -105,4 +105,14 @@ constexpr int64_t K_BATCHNORM_MINIMAL_TENSOR_Y_UID = 544;
 constexpr int64_t K_BATCHNORM_MINIMAL_TENSOR_MEAN_UID = 545;
 constexpr int64_t K_BATCHNORM_MINIMAL_TENSOR_INV_VARIANCE_UID = 546;
 
+// For PeerStats integration test
+constexpr int64_t K_BATCHNORM_INTEG_TENSOR_PEER_STAT_0_UID = 550;
+constexpr int64_t K_BATCHNORM_INTEG_TENSOR_PEER_STAT_1_UID = 551;
+
+// Distinct dims for AutoAssignedUids integration test
+constexpr std::array<int64_t, 4> K_BATCHNORM_AUTO_DATA_DIMS = {4, 32, 8, 8};
+constexpr std::array<int64_t, 4> K_BATCHNORM_AUTO_DATA_STRIDES = {2048, 64, 8, 1};
+constexpr std::array<int64_t, 4> K_BATCHNORM_AUTO_PARAM_DIMS = {1, 32, 1, 1};
+constexpr std::array<int64_t, 4> K_BATCHNORM_AUTO_PARAM_STRIDES = {32, 1, 1, 1};
+
 } // namespace hipdnn_tests::constants

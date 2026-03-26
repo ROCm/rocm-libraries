@@ -777,6 +777,33 @@ TEST_F(TestTensorDescriptor, GetAttributeValueQueryFailsWhenNotSet)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST_F(TestTensorDescriptor, IsByValueReturnsFalseWhenNoValueSet)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    bool isByValue = true;
+    int64_t count = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, &count, &isByValue));
+    EXPECT_FALSE(isByValue);
+}
+
+TEST_F(TestTensorDescriptor, IsByValueReturnsTrueWhenValueSet)
+{
+    auto desc = getDescriptor();
+    setRequiredAttributes();
+    float val = 1.5f;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(float), &val);
+    desc->finalize();
+
+    bool isByValue = false;
+    int64_t count = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, &count, &isByValue));
+    EXPECT_TRUE(isByValue);
+}
+
 // =============================================================================
 // SetAttribute Tests - VALUE (pass-by-value)
 // =============================================================================

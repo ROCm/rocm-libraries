@@ -375,6 +375,9 @@ typedef enum
     /** @brief Pass-by-value tensor data (extension) */
     HIPDNN_ATTR_TENSOR_VALUE_EXT = 1306,
 
+    /** @brief Read-only: whether a pass-by-value scalar is set on this tensor (extension) */
+    HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT = 1307,
+
     /** @} */
 
     /**

@@ -249,6 +249,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_TENSOR_IS_VIRTUAL");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_VALUE_EXT),
                  "HIPDNN_ATTR_TENSOR_VALUE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT),
+                 "HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W),
                  "HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W");

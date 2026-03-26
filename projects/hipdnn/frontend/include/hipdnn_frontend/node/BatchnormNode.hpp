@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/BatchnormPacker.hpp>
+#include <hipdnn_frontend/detail/BatchnormUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
@@ -22,6 +23,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(batchnormAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        BatchnormAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackBatchnormOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 
     Error pre_validate_node() const override

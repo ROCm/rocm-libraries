@@ -9,6 +9,7 @@ add_executable(
     hipdnn_public_frontend_tests
     main.cpp
     IntegrationBatchnormBackwardDescriptorLowering.cpp
+    IntegrationBatchnormDescriptorLifting.cpp
     IntegrationBatchnormDescriptorLowering.cpp
     IntegrationBatchnormForwardInference.cpp
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
