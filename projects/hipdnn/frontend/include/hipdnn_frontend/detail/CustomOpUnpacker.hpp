@@ -42,7 +42,7 @@ namespace hipdnn_frontend::detail
     std::string customOpId;
     HIPDNN_CHECK_ERROR(getDescriptorAttrString(
         opDesc, HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT, customOpId, "custom op id"));
-    attributes.set_custom_op_id(std::move(customOpId));
+    attributes.set_custom_op_id(customOpId);
 
     // Unpack opaque data payload
     std::vector<uint8_t> opaqueData;
