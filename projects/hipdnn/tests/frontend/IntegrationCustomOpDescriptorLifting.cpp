@@ -62,6 +62,33 @@ protected:
         }
     }
 
+    // Builds a zero-input custom op graph for round-trip testing
+    static std::shared_ptr<TestableGraph> buildZeroInputCustomOpGraph()
+    {
+        auto graph = std::make_shared<TestableGraph>();
+        graph->set_name("ZeroInputCustomOpLiftingTestGraph")
+            .set_compute_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_io_data_type(DataType::FLOAT);
+
+        CustomOpAttributes attrs;
+        attrs.set_name("zero_input_custom_op")
+            .set_custom_op_id(K_CUSTOM_OP_ID)
+            .set_data(K_CUSTOM_OP_OPAQUE_DATA);
+
+        auto outputs = graph->custom_op({}, 1, attrs);
+        EXPECT_EQ(outputs.size(), 1u);
+        outputs[0]
+            ->set_uid(K_CUSTOM_OP_OUTPUT_UID_0)
+            .set_output(true)
+            .set_name("output0")
+            .set_dim({2, 3})
+            .set_stride({3, 1})
+            .set_data_type(DataType::FLOAT);
+
+        return graph;
+    }
+
     // Builds a standard custom op graph for round-trip testing
     static std::shared_ptr<TestableGraph> buildCustomOpGraph(DataType computeType = DataType::FLOAT,
                                                              DataType intermediateType
@@ -419,6 +446,34 @@ TEST_F(IntegrationCustomOpDescriptorLifting, SingleInputTwoOutputsRoundTrip)
     EXPECT_EQ(customOpNode->attributes.get_outputs()[0]->get_uid(), K_CUSTOM_OP_OUTPUT_UID_0);
     EXPECT_EQ(customOpNode->attributes.get_outputs()[1]->get_uid(), K_CUSTOM_OP_OUTPUT_UID_1);
     EXPECT_EQ(customOpNode->attributes.get_name(), "single_input_two_outputs");
+}
+
+TEST_F(IntegrationCustomOpDescriptorLifting, ZeroInputCustomOpRoundTrip)
+{
+    auto originalGraph = buildZeroInputCustomOpGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = originalGraph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = originalGraph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* customOpNode = dynamic_cast<CustomOpNode*>(subNodes[0].get());
+    ASSERT_NE(customOpNode, nullptr);
+
+    ASSERT_EQ(customOpNode->attributes.get_inputs().size(), 0u);
+    ASSERT_EQ(customOpNode->attributes.get_outputs().size(), 1u);
+    EXPECT_EQ(customOpNode->attributes.get_outputs()[0]->get_uid(), K_CUSTOM_OP_OUTPUT_UID_0);
 }
 
 } // namespace

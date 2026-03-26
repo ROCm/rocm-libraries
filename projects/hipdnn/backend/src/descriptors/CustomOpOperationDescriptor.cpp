@@ -17,9 +17,6 @@ void CustomOpOperationDescriptor::finalize()
     THROW_IF_TRUE(_data.custom_op_id.empty(),
                   HIPDNN_STATUS_BAD_PARAM,
                   "CustomOpOperationDescriptor::finalize() failed: custom_op_id not set");
-    THROW_IF_TRUE(_inputDescs.empty(),
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "CustomOpOperationDescriptor::finalize() failed: no input tensors set");
     THROW_IF_TRUE(_outputDescs.empty(),
                   HIPDNN_STATUS_BAD_PARAM,
                   "CustomOpOperationDescriptor::finalize() failed: no output tensors set");

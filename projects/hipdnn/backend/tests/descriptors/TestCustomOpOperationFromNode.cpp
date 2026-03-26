@@ -417,6 +417,35 @@ TEST_F(TestCustomOpOperationFromNode, FromNodeWithSingleInputAndOutput)
     EXPECT_EQ(rebuiltAttrs->output_tensor_uids[0], K_CUSTOM_OP_OUTPUT_UID_0);
 }
 
+TEST_F(TestCustomOpOperationFromNode, FromNodeWithZeroInputs)
+{
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+
+    CustomOpAttributesT attrs;
+    attrs.custom_op_id = K_CUSTOM_OP_ID;
+    attrs.input_tensor_uids = {};
+    attrs.output_tensor_uids = {K_CUSTOM_OP_OUTPUT_UID_0};
+    attrs.data = {K_CUSTOM_OP_OPAQUE_DATA.begin(), K_CUSTOM_OP_OPAQUE_DATA.end()};
+    node.attributes.Set(attrs);
+
+    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+    ASSERT_NE(desc, nullptr);
+    ASSERT_TRUE(desc->isFinalized());
+
+    ASSERT_EQ(desc->getInputDescs().size(), 0);
+    ASSERT_EQ(desc->getOutputDescs().size(), 1);
+    EXPECT_EQ(desc->getOutputDescs()[0]->getData().uid, K_CUSTOM_OP_OUTPUT_UID_0);
+
+    auto rebuiltNode = desc->buildNode();
+    ASSERT_NE(rebuiltNode, nullptr);
+    const auto* rebuiltAttrs = rebuiltNode->attributes.AsCustomOpAttributes();
+    ASSERT_NE(rebuiltAttrs, nullptr);
+    EXPECT_TRUE(rebuiltAttrs->input_tensor_uids.empty());
+    ASSERT_EQ(rebuiltAttrs->output_tensor_uids.size(), 1);
+    EXPECT_EQ(rebuiltAttrs->output_tensor_uids[0], K_CUSTOM_OP_OUTPUT_UID_0);
+}
+
 TEST_F(TestCustomOpOperationFromNode, FromNodeWithTwoOutputs)
 {
     // Add second output tensor to the map
