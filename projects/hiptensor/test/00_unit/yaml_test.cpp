@@ -84,7 +84,7 @@ int main(int argc, char* argv[])
     auto yee          = hiptensor::ContractionTestParams{};
     yee.mLogLevelMask = (hiptensorLogLevel_t)(HIPTENSOR_LOG_LEVEL_OFF);
     yee.mDataTypes    = {
-           // clang-format off
+        // clang-format off
                 {HIPTENSOR_R_32F, HIPTENSOR_R_32F, hiptensor::NONE_TYPE, HIPTENSOR_R_32F, HIPTENSOR_R_32F}, // scale F32
                 {HIPTENSOR_C_32F, HIPTENSOR_C_32F, hiptensor::NONE_TYPE, HIPTENSOR_C_32F, HIPTENSOR_C_32F}, // scale F32 Complex
                 {HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F}, // bilinear F32
@@ -118,10 +118,8 @@ int main(int argc, char* argv[])
     {
         TmpFileWrapper()
         {
-            // use std C function to create tmp file since filesystem is not supported on some platforms
-            char tmpFilenameBuf[L_tmpnam];
-            std::tmpnam(tmpFilenameBuf);
-            tmpFilename.assign(tmpFilenameBuf);
+            // Use cross-platform filesystem approach for temporary file
+            tmpFilename = hiptensor::test::generateTempFilename("hiptensor_yaml_test_");
         }
         ~TmpFileWrapper()
         {

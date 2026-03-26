@@ -190,7 +190,7 @@ namespace
                 (void)hipHostFree(ptr);
                 break;
             case hipMemoryType::hipMemoryTypeUnregistered:
-#ifdef WIN32
+#ifdef _WIN32
                 _aligned_free(ptr);
 #else
                 std::free(ptr);
@@ -1057,7 +1057,7 @@ namespace
                 else
                 {
                     constexpr size_t alignment = 64;
-#ifdef WIN32
+#ifdef _WIN32
                     ret = _aligned_malloc(byte_size, alignment);
 #else
                     ret = std::aligned_alloc(alignment, byte_size);

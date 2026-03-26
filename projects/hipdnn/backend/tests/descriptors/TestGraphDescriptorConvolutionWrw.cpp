@@ -7,6 +7,7 @@
 #include "TestMacros.hpp"
 #include "descriptors/ConvolutionWrwOperationDescriptor.hpp"
 #include "descriptors/GraphDescriptor.hpp"
+#include "descriptors/NodeFactory.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
 #include "mocks/MockHandle.hpp"
@@ -26,8 +27,6 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
-using hipdnn_tests::toVec;
-
 namespace
 {
 
@@ -36,7 +35,8 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     createFinalizedConvolutionWrwOp(HipdnnBackendDescriptor* xDesc,
                                     HipdnnBackendDescriptor* dyDesc,
                                     HipdnnBackendDescriptor* dwDesc,
-                                    hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
+                                    hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
+                                    const std::string& name = "")
 {
     auto wrapper = createDescriptor<ConvolutionWrwOperationDescriptor>();
     auto desc = wrapper->asDescriptor<ConvolutionWrwOperationDescriptor>();
@@ -44,15 +44,15 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &xDesc);
+                       static_cast<const void*>(&xDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &dyDesc);
+                       static_cast<const void*>(&dyDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &dwDesc);
+                       static_cast<const void*>(&dwDesc));
 
     std::vector<int64_t> prePadding = {1, 1};
     desc->setAttribute(
@@ -73,6 +73,14 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     desc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
 
+    if(!name.empty())
+    {
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                           HIPDNN_TYPE_CHAR,
+                           static_cast<int64_t>(name.size()),
+                           name.c_str());
+    }
+
     desc->finalize();
     return wrapper;
 }
@@ -89,7 +97,10 @@ public:
     {
         auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
-        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                           HIPDNN_TYPE_HANDLE,
+                           1,
+                           static_cast<const void*>(&handle));
     }
 
 protected:
@@ -118,8 +129,10 @@ TEST_F(TestGraphDescriptorConvolutionWrw, BuildFromSingleOperation)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
@@ -130,8 +143,7 @@ TEST_F(TestGraphDescriptorConvolutionWrw, BuildFromSingleOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graph = GetGraph(serialized.ptr);
-    auto graphT = graph->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -160,15 +172,80 @@ TEST_F(TestGraphDescriptorConvolutionWrw, ComputeDataTypePreserved)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
+}
+
+TEST_F(TestGraphDescriptorConvolutionWrw, OperationNamePreservedInSerialization)
+{
+    auto xDesc = createFinalizedTensor(20, {1, 3, 32, 32}, {3072, 1024, 32, 1});
+    auto dyDesc = createFinalizedTensor(21, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+    auto dwDesc = createFinalizedTensor(22, {64, 3, 3, 3}, {27, 9, 3, 1});
+    auto opDesc = createFinalizedConvolutionWrwOp(
+        xDesc.get(), dyDesc.get(), dwDesc.get(), HIPDNN_DATA_FLOAT, "test_wrw_op");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1);
+    EXPECT_EQ(graphT->nodes[0]->name, "test_wrw_op");
+}
+
+TEST_F(TestGraphDescriptorConvolutionWrw, OperationNameRoundTripThroughLifting)
+{
+    auto xDesc = createFinalizedTensor(20, {1, 3, 32, 32}, {3072, 1024, 32, 1});
+    auto dyDesc = createFinalizedTensor(21, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+    auto dwDesc = createFinalizedTensor(22, {64, 3, 3, 3}, {27, 9, 3, 1});
+    auto opDesc = createFinalizedConvolutionWrwOp(
+        xDesc.get(), dyDesc.get(), dwDesc.get(), HIPDNN_DATA_FLOAT, "lift_wrw_name");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    // Serialize and deserialize via FlatBuffer
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized.ptr);
+
+    // Rebuild from the deserialized graph using NodeFactory
+    auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
+    ASSERT_EQ(graphT->nodes.size(), 1);
+
+    auto rebuilt = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
+    ASSERT_NE(rebuilt, nullptr);
+
+    auto* graphOp = rebuilt->asGraphOperation();
+    ASSERT_NE(graphOp, nullptr);
+
+    auto rebuiltNode = graphOp->buildNode();
+    ASSERT_NE(rebuiltNode, nullptr);
+    EXPECT_EQ(rebuiltNode->name, "lift_wrw_name");
+    ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionWrwAttributes);
 }
 
 } // namespace

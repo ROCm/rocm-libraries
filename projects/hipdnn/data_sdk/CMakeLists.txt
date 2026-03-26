@@ -150,6 +150,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/convolution_fwd_attributes.fbs
             schemas/convolution_bwd_attributes.fbs
             schemas/convolution_wrw_attributes.fbs
+            schemas/custom_op_attributes.fbs
             schemas/data_types.fbs
             schemas/engine_config.fbs
             schemas/engine_details.fbs
@@ -160,8 +161,10 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/norm_common.fbs
             schemas/pointwise_attributes.fbs
             schemas/rmsnorm_attributes.fbs
+            schemas/rmsnorm_backward_attributes.fbs
             schemas/block_scale_quantize_attributes.fbs
             schemas/sdpa_attributes.fbs
+            schemas/sdpa_backward_attributes.fbs
             schemas/tensor_attributes.fbs
         SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
         PRIMARY_VERSION ${HIPDNN_FLATBUFFERS_VERSION}

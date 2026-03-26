@@ -55,7 +55,7 @@ namespace std
 
 namespace fs = std::filesystem;
 
-#ifndef WIN32
+#ifndef _WIN32
 // get program_invocation_name
 #include <errno.h>
 #endif
@@ -280,7 +280,7 @@ TEST(rocfft_UnitTest, log_levels)
 
         // enumerate all known log levels and direct all of the logs to nowhere
         EnvironmentSetTemp layer("ROCFFT_LAYER", std::to_string(0xffffffff).c_str());
-#ifdef WIN32
+#ifdef _WIN32
         static const char* log_output = "NUL";
 #else
         static const char* log_output   = "/dev/null";
@@ -890,7 +890,7 @@ TEST(rocfft_UnitTest, rtc_helper_crash)
 
     try
     {
-#ifdef WIN32
+#ifdef _WIN32
         char filename[MAX_PATH];
         GetModuleFileNameA(NULL, filename, MAX_PATH);
         fs::path test_exe    = filename;
@@ -984,7 +984,7 @@ TEST(rocfft_UnitTest, rtc_test_harness)
         //
         // NOTE: using system() for launching subprocesses for simplicity
         // and portability
-#ifdef WIN32
+#ifdef _WIN32
         static const char* test_command = "amdclang++ --version > NUL";
 #else
         static const char* test_command = "amdclang++ --version > /dev/null";
@@ -1100,7 +1100,7 @@ TEST(rocfft_UnitTest, rtc_test_harness)
 #endif
             for(i = 0; i < files.size(); ++i)
             {
-#ifdef WIN32
+#ifdef _WIN32
                 const std::string command
                     = "amdclang++ -x hip -c -std=c++20 -o NUL " + files[i].first;
 #else

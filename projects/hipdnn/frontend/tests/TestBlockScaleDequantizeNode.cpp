@@ -26,8 +26,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNode)
     attrs.set_y(yTensor);
     attrs.set_block_size(std::vector<int32_t>{32});
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -41,8 +41,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeMissingX)
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_block_size(std::vector<int32_t>{32});
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -56,8 +56,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeMissingScale)
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_block_size(std::vector<int32_t>{32});
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -71,8 +71,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeMissingY)
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_block_size(std::vector<int32_t>{32});
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -90,8 +90,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeYNotVirtual)
     attrs.set_y(std::make_shared<TensorAttributes>()); // Not virtual
     attrs.set_block_size(std::vector<int32_t>{32});
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -108,8 +108,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeMissingBlockSize)
     attrs.set_y(yTensor);
     // block_size is not set (empty)
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -133,8 +133,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeYShapeMismatch)
 
     attrs.set_block_size(std::vector<int32_t>{32});
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -157,8 +157,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeYRankMismatch)
 
     attrs.set_block_size(std::vector<int32_t>{32});
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -181,8 +181,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeYDimsNotSetPassesValidation)
     attrs.set_y(yTensor);
     attrs.set_block_size(std::vector<int32_t>{32});
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -202,8 +202,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeBlockSizeZero)
     attrs.set_y(yTensor);
     attrs.set_block_size(std::vector<int32_t>{0});
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -223,8 +223,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeBlockSizeNegative)
     attrs.set_y(yTensor);
     attrs.set_block_size(std::vector<int32_t>{32, -1});
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -244,8 +244,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeBlockSizeExceedsRank)
     attrs.set_y(yTensor);
     attrs.set_block_size(std::vector<int32_t>{32, 16, 8}); // 3 entries > rank 2
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -265,8 +265,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeBlockSizeMatchesRank)
     attrs.set_y(yTensor);
     attrs.set_block_size(std::vector<int32_t>{2, 64, 32, 32}); // exactly matches rank
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -284,8 +284,8 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeXDimsNotSetSkipsDimChecks)
     attrs.set_y(yTensor);
     attrs.set_block_size(std::vector<int32_t>{32, 16, 8}); // Would fail if X had rank < 3
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -309,7 +309,7 @@ TEST(TestBlockScaleDequantizeNode, InferPropertiesNode)
     auto outputTensor = attrs.get_y();
     outputTensor->set_uid(2).set_name("OutputTensor");
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -324,7 +324,7 @@ TEST(TestBlockScaleDequantizeNode, InferPropertiesNodeMissingX)
     BlockScaleDequantizeAttributes attrs;
     attrs.set_y(std::make_shared<TensorAttributes>());
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -336,7 +336,7 @@ TEST(TestBlockScaleDequantizeNode, InferPropertiesNodeMissingY)
     BlockScaleDequantizeAttributes attrs;
     attrs.set_x(std::make_shared<TensorAttributes>());
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -373,8 +373,8 @@ TEST(TestBlockScaleDequantizeNode, PackNode)
         .set_stride({4, 3, 2, 1});
     attrs.set_y(yTensor);
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     flatbuffers::FlatBufferBuilder builder;
     auto offset = node.pack_node(builder);
@@ -419,8 +419,8 @@ TEST(TestBlockScaleDequantizeNode, PackNodeWithNegativeScale)
     yTensor->set_uid(3).set_dim({1, 2, 3, 4}).set_stride({4, 3, 2, 1});
     attrs.set_y(yTensor);
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     flatbuffers::FlatBufferBuilder builder;
     auto offset = node.pack_node(builder);
@@ -454,8 +454,8 @@ TEST(TestBlockScaleDequantizeNode, GatherHipdnnTensors)
     yTensor->set_uid(3).set_name("Y");
     attrs.set_y(yTensor);
 
-    GraphAttributes graphAttributes;
-    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
     node.gather_hipdnn_tensors(allTensors);
@@ -465,4 +465,11 @@ TEST(TestBlockScaleDequantizeNode, GatherHipdnnTensors)
     EXPECT_TRUE(allTensors.find(yTensor) != allTensors.end());
 
     EXPECT_EQ(allTensors.size(), 3);
+}
+
+TEST(TestBlockScaleDequantizeNode, GetNodeTypeReturnsBlockScaleDequantize)
+{
+    const GraphAttributes graphAttrs;
+    const BlockScaleDequantizeNode node(BlockScaleDequantizeAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::BLOCK_SCALE_DEQUANTIZE);
 }

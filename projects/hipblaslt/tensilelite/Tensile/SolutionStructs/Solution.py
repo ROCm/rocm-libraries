@@ -24,6 +24,7 @@
 
 import collections
 import math
+import sys
 
 from enum import Enum
 from typing import List, Dict, Literal
@@ -39,12 +40,150 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
+from Tensile.Common.ValidParameters import validParameters
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.Toolchain.Component import Assembler
 from Tensile.Components.CustomSchedule import hasCustomSchedule
 
 from .Utilities import reject, roundupRatio, pvar
+
+def _getExpectedTypes(validParams):
+  """Build a map from parameter name to the set of allowed Python types.
+
+  Uses the validParameters registry as the source of truth.  For each
+  parameter whose allowed-value list is not the sentinel ``-1``, we
+  collect the concrete ``type()`` of every allowed value.  Because
+  Python ``bool`` is a subclass of ``int``, we use ``type()`` (not
+  ``isinstance``) so that ``bool`` and ``int`` are kept distinct.
+
+  Returns:
+      dict[str, set[type]]: e.g. {"UseCustomMainLoopSchedule": {int},
+                                   "BufferLoad": {bool}, ...}
+  """
+  typeMap = {}
+  for name, allowedValues in validParams.items():
+    if allowedValues == -1:
+      continue
+    if isinstance(allowedValues, list) and len(allowedValues) > 0:
+      typeMap[name] = set(type(v) for v in allowedValues)
+  return typeMap
+
+# Pre-compute once at import time so the per-Solution cost is a dict lookup.
+_expectedParamTypes = _getExpectedTypes(validParameters)
+
+# Parameters to skip during type validation because YAML serialization
+# inherently produces a different type (e.g. [9, 0, 10] -> list) and the
+# conversion to the canonical type happens downstream in the pipeline.
+_skipTypeCheck = {"ISA"}
+
+
+# Module-level collector that accumulates type mismatches across all Solution
+# instances during a build.  Key is (param_name, actual_type_name,
+# expected_type_str); value is a dict with 'count', 'values' (set of unique
+# repr(value)), and 'files' (set of source file paths).
+_typeMismatchCollector = {}
+
+
+def resetTypeMismatchCollector():
+  """Clear the module-level type mismatch collector.
+
+  Call this before a new build pass or in test setUp to ensure a clean
+  slate.  Safe to call even when the collector is already empty.
+
+  Uses dict.clear() so that any existing references to
+  ``_typeMismatchCollector`` (e.g. in tests) see the same empty dict.
+  """
+  _typeMismatchCollector.clear()
+
+
+def validateParameterTypes(state, srcFile=""):
+  """Validate that every solution parameter has the correct Python type.
+
+  Compares each value in *state* against the types implied by
+  ``validParameters``.  A ``bool`` where ``int`` is expected (or vice
+  versa) is the most common error -- YAML ``false``/``true`` vs ``0``/``1``
+  are different Python types and produce different msgpack wire types,
+  which causes ``std::bad_cast`` at C++ deserialization time.
+
+  Instead of raising on the first mismatch, mismatches are collected into
+  the module-level ``_typeMismatchCollector`` dict.  Call
+  ``printTypeMismatchSummary()`` at the end of the build to emit a
+  consolidated warning.
+
+  Args:
+      state: The solution state dict (parameter name -> value).
+      srcFile: The YAML source file path, included in warning messages.
+  """
+  for key, value in state.items():
+    if key not in _expectedParamTypes or key in _skipTypeCheck:
+      continue
+    expectedTypes = _expectedParamTypes[key]
+    actualType = type(value)
+    # Use type() not isinstance() so that bool and int are distinguished
+    if actualType not in expectedTypes:
+      expectedStr = " or ".join(sorted(t.__name__ for t in expectedTypes))
+      collectorKey = (key, actualType.__name__, expectedStr)
+      if collectorKey not in _typeMismatchCollector:
+        _typeMismatchCollector[collectorKey] = {
+          "count": 0,
+          "values": set(),
+          "files": set(),
+        }
+      entry = _typeMismatchCollector[collectorKey]
+      entry["count"] += 1
+      entry["values"].add(repr(value))
+      if srcFile:
+        entry["files"].add(srcFile)
+
+
+def printTypeMismatchSummary():
+  """Print a summary of all collected type mismatches to stderr.
+
+  If no mismatches have been collected, this function prints nothing and
+  returns 0.  Otherwise it emits a WARNING block to stderr with one line
+  per unique (parameter, actual_type) combination showing the count,
+  observed values, and expected type.
+
+  Returns:
+      int: The total number of individual mismatches (0 if clean).
+  """
+  if not _typeMismatchCollector:
+    return 0
+
+  totalCount = sum(e["count"] for e in _typeMismatchCollector.values())
+  allFiles = set()
+  for e in _typeMismatchCollector.values():
+    allFiles |= e["files"]
+
+  lines = []
+  lines.append("")
+  lines.append("===========================================================")
+  lines.append(
+    f"WARNING: YAML parameter type mismatches detected "
+    f"({totalCount} total across {len(allFiles)} files):"
+  )
+  lines.append("===========================================================")
+
+  # Sort by parameter name for stable output
+  for (paramName, actualType, expectedStr), entry in sorted(
+    _typeMismatchCollector.items(), key=lambda kv: kv[0][0]
+  ):
+    valuesStr = ", ".join(sorted(entry["values"]))
+    lines.append(
+      f"  {paramName}: found {actualType} in {entry['count']} solutions "
+      f"(values: {valuesStr}) — expected {expectedStr}"
+    )
+
+  lines.append("-----------------------------------------------------------")
+  lines.append("  This will cause std::bad_cast at runtime because msgpack")
+  lines.append("  serializes bool and int as different wire types.")
+  lines.append("  Fix these to prevent future build failures.")
+  lines.append("===========================================================")
+
+  print("\n".join(lines), file=sys.stderr)
+  return totalCount
+
 
 class Fbs(Enum):
   Free=0     # Expect to be free dimension
@@ -187,6 +326,11 @@ class Solution(collections.abc.Mapping):
     # Assign solution state from config, filling missing from the defaultSolution
     for key in defaultSolution:
       assignParameterWithDefault(self._state, key, config, defaultSolution)
+
+    # Validate parameter types against the validParameters registry.
+    # Catches bool-vs-int mismatches (YAML false vs 0) that would cause
+    # std::bad_cast at C++ msgpack deserialization time.
+    validateParameterTypes(self._state, srcFile=srcName)
 
     if 'ISA' not in self._state:
       if 'ISA' in config:
