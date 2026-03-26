@@ -6735,7 +6735,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         (tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) or                                 \
         (kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and (kernel["MIInputPerThreadMetadata"] == 4))) \
         and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()) or \
-        (self.states.asmCaps["HasSWMMAC_gfx1250"] and kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1):
+        (self.states.asmCaps["HasSWMMAC_gfx1250"] and kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"]):
       self.states.a.startVgprValuPackTemp = vgprIdx
       self.states.b.startVgprValuPackTemp = vgprIdx
       vgprIdx += 1
