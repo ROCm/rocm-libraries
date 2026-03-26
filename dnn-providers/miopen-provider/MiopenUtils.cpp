@@ -74,16 +74,16 @@ MiopenTensor createBatchnormTensor(
 {
     const auto& tensorAttr = findTensorAttributes(tensorMap, uid);
 
-    if(tensorAttr.dims()->size() != 3)
-    {
-        return {tensorAttr};
-    }
-
     if(tensorAttr.dims() == nullptr || tensorAttr.strides() == nullptr)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "Tensor dims or strides are null for UID: "
                                                            + std::to_string(uid));
+    }
+
+    if(tensorAttr.dims()->size() != 3)
+    {
+        return {tensorAttr};
     }
 
     if(tensorAttr.dims()->size() != tensorAttr.strides()->size())
