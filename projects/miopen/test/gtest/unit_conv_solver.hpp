@@ -25,6 +25,7 @@
  *******************************************************************************/
 #pragma once
 
+#include <set>
 #include <unordered_map>
 
 #include <miopen/conv/solvers.hpp>
@@ -152,6 +153,7 @@ struct UnitTestConvSolverParams
     void CheckXnackDisabled();
     void SetConvAttrFp16Alt(uint64_t value);
     void SetTolerance(Gpu gpu, miopenDataType_t type, float value);
+    void ExcludeDevice(std::string_view name);
 
     friend std::ostream& operator<<(std::ostream& os, const UnitTestConvSolverParams& p);
 
@@ -163,6 +165,7 @@ struct UnitTestConvSolverParams
     std::size_t tuning_iterations_max;
     std::optional<uint64_t> conv_attr_fp16_alt;
     Tolerances tolerances;
+    std::set<std::string, std::less<>> excluded_devices;
 };
 
 class UnitTestConvSolverBase

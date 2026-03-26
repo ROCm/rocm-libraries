@@ -133,10 +133,10 @@ public:
      * @return Reference to this for method chaining
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
-    ConvFpropAttributes& set_padding(std::vector<int64_t> padding)
+    ConvFpropAttributes& set_padding(const std::vector<int64_t>& padding)
     {
         pre_padding = padding;
-        post_padding = std::move(padding);
+        post_padding = padding;
         return *this;
     }
 

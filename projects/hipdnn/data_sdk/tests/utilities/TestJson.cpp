@@ -162,6 +162,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid custom op graph)";
             break;
+        case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid reduction graph)";
+            break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
             break;
