@@ -735,6 +735,37 @@ TEST_F(TestSdpaFpropOperationFromNode, BuildNodeRoundTrip)
     EXPECT_EQ(rebuiltAttrs->implementation, AttentionImplementation::AUTO);
 }
 
+TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesMmaCoreMode)
+{
+    auto attrs = createStandardSdpaFpropAttrs();
+    attrs.mma_core_mode = DataType::HALF;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    ASSERT_NE(desc, nullptr);
+
+    EXPECT_EQ(desc->getData().mma_core_mode, DataType::HALF);
+
+    auto rebuiltNode = desc->buildNode();
+    const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
+    ASSERT_NE(rebuiltAttrs, nullptr);
+    EXPECT_EQ(rebuiltAttrs->mma_core_mode, DataType::HALF);
+}
+
+TEST_F(TestSdpaFpropOperationFromNode, FromNodeMmaCoreModeDefaultsToNotSet)
+{
+    // When mma_core_mode is NOT_SET, the packer omits the attribute.
+    // The unpacker should leave it at the default (NOT_SET).
+    auto node = createStandardNode();
+    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    ASSERT_NE(desc, nullptr);
+
+    EXPECT_EQ(desc->getData().mma_core_mode, DataType::UNSET);
+}
+
 TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesGenerateStats)
 {
     auto attrs = createStandardSdpaFpropAttrs();

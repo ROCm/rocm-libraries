@@ -351,7 +351,8 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropWithAllOptionalAttributes
         .set_diagonal_band_left_bound(-1)
         .set_diagonal_band_right_bound(1)
         .set_paged_attention_max_seq_len_kv(256)
-        .set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
+        .set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT)
+        .set_mma_core_mode(DataType::HALF);
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -456,6 +457,9 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropWithAllOptionalAttributes
 
     // Diagonal alignment (direct member)
     EXPECT_EQ(attrs.diagonal_alignment, DiagonalAlignment::BOTTOM_RIGHT);
+
+    // MMA core mode
+    EXPECT_EQ(attrs.mma_core_mode, DataType::HALF);
 }
 
 // Builds an SDPA fprop graph without explicit tensor UIDs, then verifies

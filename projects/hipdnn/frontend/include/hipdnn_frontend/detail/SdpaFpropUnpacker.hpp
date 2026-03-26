@@ -333,11 +333,12 @@ namespace hipdnn_frontend::detail
         attributes.set_amax_o(amaxOTensor);
     }
 
-    // Unpack mma_core_mode (optional — only set when != NOT_SET)
+    // Unpack mma_core_mode — the packer omits this attribute when NOT_SET because the
+    // backend descriptor does not accept NOT_SET as a valid data type value.
     {
         auto [mmaCoreMode, mmaCoreModeErr] = unpackGraphDataType(
             opDesc, HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, "sdpa mma_core_mode");
-        if(!mmaCoreModeErr.is_bad() && mmaCoreMode != DataType::NOT_SET)
+        if(!mmaCoreModeErr.is_bad())
         {
             attributes.set_mma_core_mode(mmaCoreMode);
         }
