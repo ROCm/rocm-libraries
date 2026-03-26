@@ -12,7 +12,7 @@
 
 namespace ck_tile::core::arch::mma {
 
-namespace detail {
+namespace sparse::detail {
 /**
  * @brief Compress A vector for 2:4 structured sparsity instruction by moving all non-zero
  * elements into lower part of a_vec to half its effective size.
@@ -40,7 +40,7 @@ static CK_TILE_DEVICE int32_t compress_a_impl(AVec& a_vec)
         ADataType nonzero_elems[2] = {a_vec[i * 4 + 2], a_vec[i * 4 + 3]};
         int32_t non_zero_pos       = 0;
 
-        static_for<0, 3, 1>{}([&](auto j) {
+        static_for<0, 4, 1>{}([&](auto j) {
             if(static_cast<float>(a_vec[i * 4 + j]) != 0.0f)
             {
                 nonzero_elems[non_zero_pos] = a_vec[i * 4 + j];
@@ -56,7 +56,7 @@ static CK_TILE_DEVICE int32_t compress_a_impl(AVec& a_vec)
 
     return idx;
 }
-} // namespace detail
+} // namespace sparse::detail
 
 /**
  * @class SparseCompressTransform
@@ -79,10 +79,11 @@ struct SparseCompressTransform
         static_assert(VecN % CompressionRatio == 0, "VecN must be divisible by CompressionRatio");
         static_assert(CompressedSize > 0, "CompressedSize must be > 0");
 
-        const auto idx = detail::compress_a_impl<ScalarT, CompressedSize>(v);
+        const auto idx = sparse::detail::compress_a_impl<ScalarT, CompressedSize>(v);
 
         // TODO c++20: Use bit_cast
-        return std::make_tuple(*std::launder(reinterpret_cast<VecCompressed*>(&v)), idx);
+        return std::tuple<VecCompressed&, int32_t>(
+            *std::launder(reinterpret_cast<VecCompressed*>(&v)), idx);
     }
 };
 
@@ -91,7 +92,7 @@ struct SparseCompressTransform
  * @brief Implements the default transforms for Sparse
  *
  * For 2:4 structured sparsity with inline register metadata:
- *  - ATransform: Pass-through (sparse operands formatted in Exec) TODO!
+ *  - ATransform: 2:4 structured sparsity compression
  *  - BTransform: Pass-through (sparse operands already formatted)
  *  - CTransform: Pass-through (input accumulator)
  *  - DTransform: Pass-through (output accumulator as-is)
