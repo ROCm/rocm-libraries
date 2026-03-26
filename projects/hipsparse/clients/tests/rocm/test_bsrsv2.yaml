@@ -24,6 +24,12 @@
 ---
 include: hipsparse_common.yaml
 
+# Known bugs - tests matching these criteria will be moved to known_bug category
+# These tests fail due to rounding errors with large matrices
+Known bugs:
+  - function: bsrsv2
+    filename: nos7
+
 Tests:
 - name: bsrsv2_bad_arg
   category: pre_checkin
