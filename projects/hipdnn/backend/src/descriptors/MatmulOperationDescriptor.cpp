@@ -205,16 +205,16 @@ std::shared_ptr<MatmulOperationDescriptor> MatmulOperationDescriptor::fromNode(
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   "MatmulOperationDescriptor::fromNode: MatmulAttributes is null");
 
-    auto desc          = std::make_shared<MatmulOperationDescriptor>();
-    desc->_data        = *attrs;
+    auto desc = std::make_shared<MatmulOperationDescriptor>();
+    desc->_data = *attrs;
     desc->_computeDataType = nodeT.compute_data_type;
-    desc->_name        = nodeT.name;
-    desc->_aDesc       = findTensorInMap(
-        tensorMap, attrs->a_tensor_uid, "MatmulOperationDescriptor::fromNode: A");
-    desc->_bDesc = findTensorInMap(
-        tensorMap, attrs->b_tensor_uid, "MatmulOperationDescriptor::fromNode: B");
-    desc->_cDesc = findTensorInMap(
-        tensorMap, attrs->c_tensor_uid, "MatmulOperationDescriptor::fromNode: C");
+    desc->_name = nodeT.name;
+    desc->_aDesc
+        = findTensorInMap(tensorMap, attrs->a_tensor_uid, "MatmulOperationDescriptor::fromNode: A");
+    desc->_bDesc
+        = findTensorInMap(tensorMap, attrs->b_tensor_uid, "MatmulOperationDescriptor::fromNode: B");
+    desc->_cDesc
+        = findTensorInMap(tensorMap, attrs->c_tensor_uid, "MatmulOperationDescriptor::fromNode: C");
     desc->finalize();
     return desc;
 }

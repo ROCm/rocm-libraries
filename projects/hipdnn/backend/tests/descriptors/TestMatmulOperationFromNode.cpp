@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "HipdnnOperationType.h"
+#include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/MatmulOperationDescriptor.hpp"
 #include "descriptors/NodeFactory.hpp"
@@ -10,8 +11,8 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
 #include <memory>
@@ -20,6 +21,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
+using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 
 // =============================================================================
@@ -71,47 +73,6 @@ protected:
         node.compute_data_type = computeType;
         node.attributes.Set(createStandardMatmulAttrs());
         return node;
-    }
-
-    // Verifies that a packed tensor descriptor (retrieved via getAttribute) has the
-    // expected UID, data_type, dimensions, and strides.
-    static void verifyTensorDescriptor(hipdnnBackendDescriptor_t tensorDesc,
-                                       int64_t expectedUid,
-                                       hipdnnDataType_t expectedDataType,
-                                       const std::vector<int64_t>& expectedDims,
-                                       const std::vector<int64_t>& expectedStrides)
-    {
-        int64_t uid = 0;
-        int64_t uidCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uidCount, &uid);
-        EXPECT_EQ(uid, expectedUid);
-
-        hipdnnDataType_t dataType = {};
-        int64_t dtCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &dataType);
-        EXPECT_EQ(dataType, expectedDataType);
-
-        int64_t dimCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, 0, &dimCount, nullptr);
-        ASSERT_EQ(dimCount, static_cast<int64_t>(expectedDims.size()));
-        std::vector<int64_t> dims(static_cast<size_t>(dimCount));
-        int64_t actualDimCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, dimCount, &actualDimCount, dims.data());
-        EXPECT_EQ(dims, expectedDims);
-
-        int64_t strideCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, 0, &strideCount, nullptr);
-        ASSERT_EQ(strideCount, static_cast<int64_t>(expectedStrides.size()));
-        std::vector<int64_t> strides(static_cast<size_t>(strideCount));
-        int64_t actualStrideCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, strideCount, &actualStrideCount, strides.data());
-        EXPECT_EQ(strides, expectedStrides);
     }
 };
 
@@ -207,7 +168,6 @@ TEST_F(TestMatmulOperationFromNode, SetsTensorReferencesWithFullValues)
     EXPECT_EQ(desc->getCDesc()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->getCDesc()->getData().dims, (std::vector<int64_t>{1, 1, 64, 256}));
     EXPECT_EQ(desc->getCDesc()->getData().strides, (std::vector<int64_t>{16384, 16384, 256, 1}));
-
 }
 
 TEST_F(TestMatmulOperationFromNode, FailsWithMissingATensor)
@@ -288,9 +248,8 @@ TEST_F(TestMatmulOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(aScoped.getPtr()));
     ASSERT_EQ(aCount, 1);
     ASSERT_NE(aScoped.get(), nullptr);
-    verifyTensorDescriptor(aScoped.get(), 30, HIPDNN_DATA_FLOAT,
-                           {1, 1, 64, 128},
-                           {8192, 8192, 128, 1});
+    verifyTensorDescriptor(
+        aScoped.get(), 30, HIPDNN_DATA_FLOAT, {1, 1, 64, 128}, {8192, 8192, 128, 1});
 
     // Verify b tensor
     hipdnn_backend::ScopedDescriptor bScoped;
@@ -302,9 +261,8 @@ TEST_F(TestMatmulOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(bScoped.getPtr()));
     ASSERT_EQ(bCount, 1);
     ASSERT_NE(bScoped.get(), nullptr);
-    verifyTensorDescriptor(bScoped.get(), 31, HIPDNN_DATA_FLOAT,
-                           {1, 1, 128, 256},
-                           {32768, 32768, 256, 1});
+    verifyTensorDescriptor(
+        bScoped.get(), 31, HIPDNN_DATA_FLOAT, {1, 1, 128, 256}, {32768, 32768, 256, 1});
 
     // Verify c tensor
     hipdnn_backend::ScopedDescriptor cScoped;
@@ -316,9 +274,8 @@ TEST_F(TestMatmulOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(cScoped.getPtr()));
     ASSERT_EQ(cCount, 1);
     ASSERT_NE(cScoped.get(), nullptr);
-    verifyTensorDescriptor(cScoped.get(), 32, HIPDNN_DATA_FLOAT,
-                           {1, 1, 64, 256},
-                           {16384, 16384, 256, 1});
+    verifyTensorDescriptor(
+        cScoped.get(), 32, HIPDNN_DATA_FLOAT, {1, 1, 64, 256}, {16384, 16384, 256, 1});
 
     // Verify operation type
     hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
