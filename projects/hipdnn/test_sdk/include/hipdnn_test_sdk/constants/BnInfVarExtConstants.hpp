@@ -40,33 +40,4 @@ constexpr int64_t K_BN_INF_VAR_EXT_EPSILON_UID = 86;
 constexpr std::array<int64_t, 4> K_BN_INF_VAR_EXT_EPSILON_DIMS = {1, 1, 1, 1};
 constexpr std::array<int64_t, 4> K_BN_INF_VAR_EXT_EPSILON_STRIDES = {1, 1, 1, 1};
 
-// Generic aliases used by generated test code
-constexpr auto K_TENSOR_X_UID = K_BN_INF_VAR_EXT_X_UID;
-constexpr auto& K_TENSOR_X_DIMS = K_BN_INF_VAR_EXT_X_DIMS;
-constexpr auto& K_TENSOR_X_STRIDES = K_BN_INF_VAR_EXT_X_STRIDES;
-
-constexpr auto K_TENSOR_MEAN_UID = K_BN_INF_VAR_EXT_MEAN_UID;
-constexpr auto& K_TENSOR_MEAN_DIMS = K_BN_INF_VAR_EXT_MEAN_DIMS;
-constexpr auto& K_TENSOR_MEAN_STRIDES = K_BN_INF_VAR_EXT_MEAN_STRIDES;
-
-constexpr auto K_TENSOR_VARIANCE_UID = K_BN_INF_VAR_EXT_VARIANCE_UID;
-constexpr auto& K_TENSOR_VARIANCE_DIMS = K_BN_INF_VAR_EXT_VARIANCE_DIMS;
-constexpr auto& K_TENSOR_VARIANCE_STRIDES = K_BN_INF_VAR_EXT_VARIANCE_STRIDES;
-
-constexpr auto K_TENSOR_SCALE_UID = K_BN_INF_VAR_EXT_SCALE_UID;
-constexpr auto& K_TENSOR_SCALE_DIMS = K_BN_INF_VAR_EXT_SCALE_DIMS;
-constexpr auto& K_TENSOR_SCALE_STRIDES = K_BN_INF_VAR_EXT_SCALE_STRIDES;
-
-constexpr auto K_TENSOR_BIAS_UID = K_BN_INF_VAR_EXT_BIAS_UID;
-constexpr auto& K_TENSOR_BIAS_DIMS = K_BN_INF_VAR_EXT_BIAS_DIMS;
-constexpr auto& K_TENSOR_BIAS_STRIDES = K_BN_INF_VAR_EXT_BIAS_STRIDES;
-
-constexpr auto K_TENSOR_Y_UID = K_BN_INF_VAR_EXT_Y_UID;
-constexpr auto& K_TENSOR_Y_DIMS = K_BN_INF_VAR_EXT_Y_DIMS;
-constexpr auto& K_TENSOR_Y_STRIDES = K_BN_INF_VAR_EXT_Y_STRIDES;
-
-constexpr auto K_TENSOR_EPSILON_UID = K_BN_INF_VAR_EXT_EPSILON_UID;
-constexpr auto& K_TENSOR_EPSILON_DIMS = K_BN_INF_VAR_EXT_EPSILON_DIMS;
-constexpr auto& K_TENSOR_EPSILON_STRIDES = K_BN_INF_VAR_EXT_EPSILON_STRIDES;
-
 } // namespace hipdnn_tests::constants

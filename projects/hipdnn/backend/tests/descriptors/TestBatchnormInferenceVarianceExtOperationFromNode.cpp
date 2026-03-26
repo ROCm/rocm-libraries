@@ -38,67 +38,67 @@ protected:
     void SetUp() override
     {
         TensorAttributesT xAttrs;
-        xAttrs.uid = K_TENSOR_X_UID;
+        xAttrs.uid = K_BN_INF_VAR_EXT_X_UID;
         xAttrs.data_type = DataType::FLOAT;
-        xAttrs.dims = toVec(K_TENSOR_X_DIMS);
-        xAttrs.strides = toVec(K_TENSOR_X_STRIDES);
+        xAttrs.dims = toVec(K_BN_INF_VAR_EXT_X_DIMS);
+        xAttrs.strides = toVec(K_BN_INF_VAR_EXT_X_STRIDES);
 
-        _tensorMap[K_TENSOR_X_UID] = TensorDescriptor::fromFlatBuffer(xAttrs);
+        _tensorMap[K_BN_INF_VAR_EXT_X_UID] = TensorDescriptor::fromFlatBuffer(xAttrs);
         TensorAttributesT meanAttrs;
-        meanAttrs.uid = K_TENSOR_MEAN_UID;
+        meanAttrs.uid = K_BN_INF_VAR_EXT_MEAN_UID;
         meanAttrs.data_type = DataType::FLOAT;
-        meanAttrs.dims = toVec(K_TENSOR_MEAN_DIMS);
-        meanAttrs.strides = toVec(K_TENSOR_MEAN_STRIDES);
+        meanAttrs.dims = toVec(K_BN_INF_VAR_EXT_MEAN_DIMS);
+        meanAttrs.strides = toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES);
 
-        _tensorMap[K_TENSOR_MEAN_UID] = TensorDescriptor::fromFlatBuffer(meanAttrs);
+        _tensorMap[K_BN_INF_VAR_EXT_MEAN_UID] = TensorDescriptor::fromFlatBuffer(meanAttrs);
         TensorAttributesT varianceAttrs;
-        varianceAttrs.uid = K_TENSOR_VARIANCE_UID;
+        varianceAttrs.uid = K_BN_INF_VAR_EXT_VARIANCE_UID;
         varianceAttrs.data_type = DataType::FLOAT;
-        varianceAttrs.dims = toVec(K_TENSOR_VARIANCE_DIMS);
-        varianceAttrs.strides = toVec(K_TENSOR_VARIANCE_STRIDES);
+        varianceAttrs.dims = toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS);
+        varianceAttrs.strides = toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES);
 
-        _tensorMap[K_TENSOR_VARIANCE_UID] = TensorDescriptor::fromFlatBuffer(varianceAttrs);
+        _tensorMap[K_BN_INF_VAR_EXT_VARIANCE_UID] = TensorDescriptor::fromFlatBuffer(varianceAttrs);
         TensorAttributesT scaleAttrs;
-        scaleAttrs.uid = K_TENSOR_SCALE_UID;
+        scaleAttrs.uid = K_BN_INF_VAR_EXT_SCALE_UID;
         scaleAttrs.data_type = DataType::FLOAT;
-        scaleAttrs.dims = toVec(K_TENSOR_SCALE_DIMS);
-        scaleAttrs.strides = toVec(K_TENSOR_SCALE_STRIDES);
+        scaleAttrs.dims = toVec(K_BN_INF_VAR_EXT_SCALE_DIMS);
+        scaleAttrs.strides = toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES);
 
-        _tensorMap[K_TENSOR_SCALE_UID] = TensorDescriptor::fromFlatBuffer(scaleAttrs);
+        _tensorMap[K_BN_INF_VAR_EXT_SCALE_UID] = TensorDescriptor::fromFlatBuffer(scaleAttrs);
         TensorAttributesT biasAttrs;
-        biasAttrs.uid = K_TENSOR_BIAS_UID;
+        biasAttrs.uid = K_BN_INF_VAR_EXT_BIAS_UID;
         biasAttrs.data_type = DataType::FLOAT;
-        biasAttrs.dims = toVec(K_TENSOR_BIAS_DIMS);
-        biasAttrs.strides = toVec(K_TENSOR_BIAS_STRIDES);
+        biasAttrs.dims = toVec(K_BN_INF_VAR_EXT_BIAS_DIMS);
+        biasAttrs.strides = toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES);
 
-        _tensorMap[K_TENSOR_BIAS_UID] = TensorDescriptor::fromFlatBuffer(biasAttrs);
+        _tensorMap[K_BN_INF_VAR_EXT_BIAS_UID] = TensorDescriptor::fromFlatBuffer(biasAttrs);
         TensorAttributesT yAttrs;
-        yAttrs.uid = K_TENSOR_Y_UID;
+        yAttrs.uid = K_BN_INF_VAR_EXT_Y_UID;
         yAttrs.data_type = DataType::FLOAT;
-        yAttrs.dims = toVec(K_TENSOR_Y_DIMS);
-        yAttrs.strides = toVec(K_TENSOR_Y_STRIDES);
+        yAttrs.dims = toVec(K_BN_INF_VAR_EXT_Y_DIMS);
+        yAttrs.strides = toVec(K_BN_INF_VAR_EXT_Y_STRIDES);
 
-        _tensorMap[K_TENSOR_Y_UID] = TensorDescriptor::fromFlatBuffer(yAttrs);
+        _tensorMap[K_BN_INF_VAR_EXT_Y_UID] = TensorDescriptor::fromFlatBuffer(yAttrs);
         TensorAttributesT epsilonAttrs;
-        epsilonAttrs.uid = K_TENSOR_EPSILON_UID;
+        epsilonAttrs.uid = K_BN_INF_VAR_EXT_EPSILON_UID;
         epsilonAttrs.data_type = DataType::FLOAT;
-        epsilonAttrs.dims = toVec(K_TENSOR_EPSILON_DIMS);
-        epsilonAttrs.strides = toVec(K_TENSOR_EPSILON_STRIDES);
+        epsilonAttrs.dims = toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS);
+        epsilonAttrs.strides = toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES);
 
-        _tensorMap[K_TENSOR_EPSILON_UID] = TensorDescriptor::fromFlatBuffer(epsilonAttrs);
+        _tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID] = TensorDescriptor::fromFlatBuffer(epsilonAttrs);
     }
 
     static hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT
         createStandardBatchnormInferenceVarianceExtAttrs()
     {
         hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT attrs;
-        attrs.x_tensor_uid = K_TENSOR_X_UID;
-        attrs.mean_tensor_uid = K_TENSOR_MEAN_UID;
-        attrs.variance_tensor_uid = K_TENSOR_VARIANCE_UID;
-        attrs.scale_tensor_uid = K_TENSOR_SCALE_UID;
-        attrs.bias_tensor_uid = K_TENSOR_BIAS_UID;
-        attrs.y_tensor_uid = K_TENSOR_Y_UID;
-        attrs.epsilon_tensor_uid = K_TENSOR_EPSILON_UID;
+        attrs.x_tensor_uid = K_BN_INF_VAR_EXT_X_UID;
+        attrs.mean_tensor_uid = K_BN_INF_VAR_EXT_MEAN_UID;
+        attrs.variance_tensor_uid = K_BN_INF_VAR_EXT_VARIANCE_UID;
+        attrs.scale_tensor_uid = K_BN_INF_VAR_EXT_SCALE_UID;
+        attrs.bias_tensor_uid = K_BN_INF_VAR_EXT_BIAS_UID;
+        attrs.y_tensor_uid = K_BN_INF_VAR_EXT_Y_UID;
+        attrs.epsilon_tensor_uid = K_BN_INF_VAR_EXT_EPSILON_UID;
         return attrs;
     }
 
@@ -167,7 +167,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, CreatesValidFinalized
     ASSERT_TRUE(desc->isFinalized());
     ASSERT_EQ(desc->getType(),
               HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT);
-    EXPECT_EQ(desc->getData().x_tensor_uid, K_TENSOR_X_UID);
+    EXPECT_EQ(desc->getData().x_tensor_uid, K_BN_INF_VAR_EXT_X_UID);
 }
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, NodeFactoryDelegatesCorrectly)
@@ -190,21 +190,21 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, NodeFactoryDelegatesC
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
-    EXPECT_EQ(desc->getData().x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(desc->getData().mean_tensor_uid, K_TENSOR_MEAN_UID);
-    EXPECT_EQ(desc->getData().variance_tensor_uid, K_TENSOR_VARIANCE_UID);
-    EXPECT_EQ(desc->getData().scale_tensor_uid, K_TENSOR_SCALE_UID);
-    EXPECT_EQ(desc->getData().bias_tensor_uid, K_TENSOR_BIAS_UID);
-    EXPECT_EQ(desc->getData().y_tensor_uid, K_TENSOR_Y_UID);
-    EXPECT_EQ(desc->getData().epsilon_tensor_uid, K_TENSOR_EPSILON_UID);
+    EXPECT_EQ(desc->getData().x_tensor_uid, K_BN_INF_VAR_EXT_X_UID);
+    EXPECT_EQ(desc->getData().mean_tensor_uid, K_BN_INF_VAR_EXT_MEAN_UID);
+    EXPECT_EQ(desc->getData().variance_tensor_uid, K_BN_INF_VAR_EXT_VARIANCE_UID);
+    EXPECT_EQ(desc->getData().scale_tensor_uid, K_BN_INF_VAR_EXT_SCALE_UID);
+    EXPECT_EQ(desc->getData().bias_tensor_uid, K_BN_INF_VAR_EXT_BIAS_UID);
+    EXPECT_EQ(desc->getData().y_tensor_uid, K_BN_INF_VAR_EXT_Y_UID);
+    EXPECT_EQ(desc->getData().epsilon_tensor_uid, K_BN_INF_VAR_EXT_EPSILON_UID);
     EXPECT_EQ(desc->getComputeDataType(), DataType::FLOAT);
-    EXPECT_EQ(desc->getXDesc()->getData().uid, K_TENSOR_X_UID);
-    EXPECT_EQ(desc->getMeanDesc()->getData().uid, K_TENSOR_MEAN_UID);
-    EXPECT_EQ(desc->getVarianceDesc()->getData().uid, K_TENSOR_VARIANCE_UID);
-    EXPECT_EQ(desc->getScaleDesc()->getData().uid, K_TENSOR_SCALE_UID);
-    EXPECT_EQ(desc->getBiasDesc()->getData().uid, K_TENSOR_BIAS_UID);
-    EXPECT_EQ(desc->getYDesc()->getData().uid, K_TENSOR_Y_UID);
-    EXPECT_EQ(desc->getEpsilonDesc()->getData().uid, K_TENSOR_EPSILON_UID);
+    EXPECT_EQ(desc->getXDesc()->getData().uid, K_BN_INF_VAR_EXT_X_UID);
+    EXPECT_EQ(desc->getMeanDesc()->getData().uid, K_BN_INF_VAR_EXT_MEAN_UID);
+    EXPECT_EQ(desc->getVarianceDesc()->getData().uid, K_BN_INF_VAR_EXT_VARIANCE_UID);
+    EXPECT_EQ(desc->getScaleDesc()->getData().uid, K_BN_INF_VAR_EXT_SCALE_UID);
+    EXPECT_EQ(desc->getBiasDesc()->getData().uid, K_BN_INF_VAR_EXT_BIAS_UID);
+    EXPECT_EQ(desc->getYDesc()->getData().uid, K_BN_INF_VAR_EXT_Y_UID);
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().uid, K_BN_INF_VAR_EXT_EPSILON_UID);
 }
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, PreservesComputeDataType)
@@ -221,19 +221,19 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, SetsTensorReferences)
     auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
-    EXPECT_EQ(desc->getXDesc()->getData().uid, K_TENSOR_X_UID);
+    EXPECT_EQ(desc->getXDesc()->getData().uid, K_BN_INF_VAR_EXT_X_UID);
     ASSERT_NE(desc->getMeanDesc(), nullptr);
-    EXPECT_EQ(desc->getMeanDesc()->getData().uid, K_TENSOR_MEAN_UID);
+    EXPECT_EQ(desc->getMeanDesc()->getData().uid, K_BN_INF_VAR_EXT_MEAN_UID);
     ASSERT_NE(desc->getVarianceDesc(), nullptr);
-    EXPECT_EQ(desc->getVarianceDesc()->getData().uid, K_TENSOR_VARIANCE_UID);
+    EXPECT_EQ(desc->getVarianceDesc()->getData().uid, K_BN_INF_VAR_EXT_VARIANCE_UID);
     ASSERT_NE(desc->getScaleDesc(), nullptr);
-    EXPECT_EQ(desc->getScaleDesc()->getData().uid, K_TENSOR_SCALE_UID);
+    EXPECT_EQ(desc->getScaleDesc()->getData().uid, K_BN_INF_VAR_EXT_SCALE_UID);
     ASSERT_NE(desc->getBiasDesc(), nullptr);
-    EXPECT_EQ(desc->getBiasDesc()->getData().uid, K_TENSOR_BIAS_UID);
+    EXPECT_EQ(desc->getBiasDesc()->getData().uid, K_BN_INF_VAR_EXT_BIAS_UID);
     ASSERT_NE(desc->getYDesc(), nullptr);
-    EXPECT_EQ(desc->getYDesc()->getData().uid, K_TENSOR_Y_UID);
+    EXPECT_EQ(desc->getYDesc()->getData().uid, K_BN_INF_VAR_EXT_Y_UID);
     ASSERT_NE(desc->getEpsilonDesc(), nullptr);
-    EXPECT_EQ(desc->getEpsilonDesc()->getData().uid, K_TENSOR_EPSILON_UID);
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().uid, K_BN_INF_VAR_EXT_EPSILON_UID);
 }
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, TensorReferencesMatchTensorMap)
@@ -241,13 +241,13 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, TensorReferencesMatch
     auto node = createStandardNode();
     auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
-    EXPECT_EQ(desc->getXDesc(), _tensorMap[K_TENSOR_X_UID]);
-    EXPECT_EQ(desc->getMeanDesc(), _tensorMap[K_TENSOR_MEAN_UID]);
-    EXPECT_EQ(desc->getVarianceDesc(), _tensorMap[K_TENSOR_VARIANCE_UID]);
-    EXPECT_EQ(desc->getScaleDesc(), _tensorMap[K_TENSOR_SCALE_UID]);
-    EXPECT_EQ(desc->getBiasDesc(), _tensorMap[K_TENSOR_BIAS_UID]);
-    EXPECT_EQ(desc->getYDesc(), _tensorMap[K_TENSOR_Y_UID]);
-    EXPECT_EQ(desc->getEpsilonDesc(), _tensorMap[K_TENSOR_EPSILON_UID]);
+    EXPECT_EQ(desc->getXDesc(), _tensorMap[K_BN_INF_VAR_EXT_X_UID]);
+    EXPECT_EQ(desc->getMeanDesc(), _tensorMap[K_BN_INF_VAR_EXT_MEAN_UID]);
+    EXPECT_EQ(desc->getVarianceDesc(), _tensorMap[K_BN_INF_VAR_EXT_VARIANCE_UID]);
+    EXPECT_EQ(desc->getScaleDesc(), _tensorMap[K_BN_INF_VAR_EXT_SCALE_UID]);
+    EXPECT_EQ(desc->getBiasDesc(), _tensorMap[K_BN_INF_VAR_EXT_BIAS_UID]);
+    EXPECT_EQ(desc->getYDesc(), _tensorMap[K_BN_INF_VAR_EXT_Y_UID]);
+    EXPECT_EQ(desc->getEpsilonDesc(), _tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]);
 }
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, SetsTensorReferencesWithFullValues)
@@ -256,43 +256,43 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, SetsTensorReferencesW
     auto desc = BatchnormInferenceVarianceExtOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getXDesc(), nullptr);
-    EXPECT_EQ(desc->getXDesc()->getData().uid, K_TENSOR_X_UID);
+    EXPECT_EQ(desc->getXDesc()->getData().uid, K_BN_INF_VAR_EXT_X_UID);
     EXPECT_EQ(desc->getXDesc()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->getXDesc()->getData().dims, (std::vector<int64_t>{1, 64, 32, 32}));
     EXPECT_EQ(desc->getXDesc()->getData().strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
 
     ASSERT_NE(desc->getMeanDesc(), nullptr);
-    EXPECT_EQ(desc->getMeanDesc()->getData().uid, K_TENSOR_MEAN_UID);
+    EXPECT_EQ(desc->getMeanDesc()->getData().uid, K_BN_INF_VAR_EXT_MEAN_UID);
     EXPECT_EQ(desc->getMeanDesc()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->getMeanDesc()->getData().dims, (std::vector<int64_t>{1, 64, 1, 1}));
     EXPECT_EQ(desc->getMeanDesc()->getData().strides, (std::vector<int64_t>{64, 1, 1, 1}));
 
     ASSERT_NE(desc->getVarianceDesc(), nullptr);
-    EXPECT_EQ(desc->getVarianceDesc()->getData().uid, K_TENSOR_VARIANCE_UID);
+    EXPECT_EQ(desc->getVarianceDesc()->getData().uid, K_BN_INF_VAR_EXT_VARIANCE_UID);
     EXPECT_EQ(desc->getVarianceDesc()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->getVarianceDesc()->getData().dims, (std::vector<int64_t>{1, 64, 1, 1}));
     EXPECT_EQ(desc->getVarianceDesc()->getData().strides, (std::vector<int64_t>{64, 1, 1, 1}));
 
     ASSERT_NE(desc->getScaleDesc(), nullptr);
-    EXPECT_EQ(desc->getScaleDesc()->getData().uid, K_TENSOR_SCALE_UID);
+    EXPECT_EQ(desc->getScaleDesc()->getData().uid, K_BN_INF_VAR_EXT_SCALE_UID);
     EXPECT_EQ(desc->getScaleDesc()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->getScaleDesc()->getData().dims, (std::vector<int64_t>{1, 64, 1, 1}));
     EXPECT_EQ(desc->getScaleDesc()->getData().strides, (std::vector<int64_t>{64, 1, 1, 1}));
 
     ASSERT_NE(desc->getBiasDesc(), nullptr);
-    EXPECT_EQ(desc->getBiasDesc()->getData().uid, K_TENSOR_BIAS_UID);
+    EXPECT_EQ(desc->getBiasDesc()->getData().uid, K_BN_INF_VAR_EXT_BIAS_UID);
     EXPECT_EQ(desc->getBiasDesc()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->getBiasDesc()->getData().dims, (std::vector<int64_t>{1, 64, 1, 1}));
     EXPECT_EQ(desc->getBiasDesc()->getData().strides, (std::vector<int64_t>{64, 1, 1, 1}));
 
     ASSERT_NE(desc->getYDesc(), nullptr);
-    EXPECT_EQ(desc->getYDesc()->getData().uid, K_TENSOR_Y_UID);
+    EXPECT_EQ(desc->getYDesc()->getData().uid, K_BN_INF_VAR_EXT_Y_UID);
     EXPECT_EQ(desc->getYDesc()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->getYDesc()->getData().dims, (std::vector<int64_t>{1, 64, 32, 32}));
     EXPECT_EQ(desc->getYDesc()->getData().strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
 
     ASSERT_NE(desc->getEpsilonDesc(), nullptr);
-    EXPECT_EQ(desc->getEpsilonDesc()->getData().uid, K_TENSOR_EPSILON_UID);
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().uid, K_BN_INF_VAR_EXT_EPSILON_UID);
     EXPECT_EQ(desc->getEpsilonDesc()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->getEpsilonDesc()->getData().dims, (std::vector<int64_t>{1, 1, 1, 1}));
     EXPECT_EQ(desc->getEpsilonDesc()->getData().strides, (std::vector<int64_t>{1, 1, 1, 1}));
@@ -300,7 +300,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, SetsTensorReferencesW
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingXTensor)
 {
-    _tensorMap.erase(K_TENSOR_X_UID);
+    _tensorMap.erase(K_BN_INF_VAR_EXT_X_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -310,7 +310,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingXTens
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingMeanTensor)
 {
-    _tensorMap.erase(K_TENSOR_MEAN_UID);
+    _tensorMap.erase(K_BN_INF_VAR_EXT_MEAN_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -320,7 +320,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingMeanT
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingVarianceTensor)
 {
-    _tensorMap.erase(K_TENSOR_VARIANCE_UID);
+    _tensorMap.erase(K_BN_INF_VAR_EXT_VARIANCE_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -330,7 +330,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingVaria
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingScaleTensor)
 {
-    _tensorMap.erase(K_TENSOR_SCALE_UID);
+    _tensorMap.erase(K_BN_INF_VAR_EXT_SCALE_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -340,7 +340,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingScale
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingBiasTensor)
 {
-    _tensorMap.erase(K_TENSOR_BIAS_UID);
+    _tensorMap.erase(K_BN_INF_VAR_EXT_BIAS_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -350,7 +350,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingBiasT
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingYTensor)
 {
-    _tensorMap.erase(K_TENSOR_Y_UID);
+    _tensorMap.erase(K_BN_INF_VAR_EXT_Y_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -360,7 +360,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingYTens
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingEpsilonTensor)
 {
-    _tensorMap.erase(K_TENSOR_EPSILON_UID);
+    _tensorMap.erase(K_BN_INF_VAR_EXT_EPSILON_UID);
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -375,13 +375,13 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetTensorDescriptorsR
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 7);
-    EXPECT_EQ(tensors[0]->getData().uid, K_TENSOR_X_UID);
-    EXPECT_EQ(tensors[1]->getData().uid, K_TENSOR_MEAN_UID);
-    EXPECT_EQ(tensors[2]->getData().uid, K_TENSOR_VARIANCE_UID);
-    EXPECT_EQ(tensors[3]->getData().uid, K_TENSOR_SCALE_UID);
-    EXPECT_EQ(tensors[4]->getData().uid, K_TENSOR_BIAS_UID);
-    EXPECT_EQ(tensors[5]->getData().uid, K_TENSOR_Y_UID);
-    EXPECT_EQ(tensors[6]->getData().uid, K_TENSOR_EPSILON_UID);
+    EXPECT_EQ(tensors[0]->getData().uid, K_BN_INF_VAR_EXT_X_UID);
+    EXPECT_EQ(tensors[1]->getData().uid, K_BN_INF_VAR_EXT_MEAN_UID);
+    EXPECT_EQ(tensors[2]->getData().uid, K_BN_INF_VAR_EXT_VARIANCE_UID);
+    EXPECT_EQ(tensors[3]->getData().uid, K_BN_INF_VAR_EXT_SCALE_UID);
+    EXPECT_EQ(tensors[4]->getData().uid, K_BN_INF_VAR_EXT_BIAS_UID);
+    EXPECT_EQ(tensors[5]->getData().uid, K_BN_INF_VAR_EXT_Y_UID);
+    EXPECT_EQ(tensors[6]->getData().uid, K_BN_INF_VAR_EXT_EPSILON_UID);
 }
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, BuildNodeRoundTrip)
@@ -397,13 +397,13 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, BuildNodeRoundTrip)
 
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsBatchnormInferenceAttributesVarianceExt();
     ASSERT_NE(rebuiltAttrs, nullptr);
-    EXPECT_EQ(rebuiltAttrs->x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(rebuiltAttrs->mean_tensor_uid, K_TENSOR_MEAN_UID);
-    EXPECT_EQ(rebuiltAttrs->variance_tensor_uid, K_TENSOR_VARIANCE_UID);
-    EXPECT_EQ(rebuiltAttrs->scale_tensor_uid, K_TENSOR_SCALE_UID);
-    EXPECT_EQ(rebuiltAttrs->bias_tensor_uid, K_TENSOR_BIAS_UID);
-    EXPECT_EQ(rebuiltAttrs->y_tensor_uid, K_TENSOR_Y_UID);
-    EXPECT_EQ(rebuiltAttrs->epsilon_tensor_uid, K_TENSOR_EPSILON_UID);
+    EXPECT_EQ(rebuiltAttrs->x_tensor_uid, K_BN_INF_VAR_EXT_X_UID);
+    EXPECT_EQ(rebuiltAttrs->mean_tensor_uid, K_BN_INF_VAR_EXT_MEAN_UID);
+    EXPECT_EQ(rebuiltAttrs->variance_tensor_uid, K_BN_INF_VAR_EXT_VARIANCE_UID);
+    EXPECT_EQ(rebuiltAttrs->scale_tensor_uid, K_BN_INF_VAR_EXT_SCALE_UID);
+    EXPECT_EQ(rebuiltAttrs->bias_tensor_uid, K_BN_INF_VAR_EXT_BIAS_UID);
+    EXPECT_EQ(rebuiltAttrs->y_tensor_uid, K_BN_INF_VAR_EXT_Y_UID);
+    EXPECT_EQ(rebuiltAttrs->epsilon_tensor_uid, K_BN_INF_VAR_EXT_EPSILON_UID);
 }
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfterFromNode)
@@ -431,8 +431,11 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
                        static_cast<void*>(xScoped.getPtr()));
     ASSERT_EQ(xCount, 1);
     ASSERT_NE(xScoped.get(), nullptr);
-    verifyTensorDescriptor(
-        xScoped.get(), K_TENSOR_X_UID, HIPDNN_DATA_FLOAT, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+    verifyTensorDescriptor(xScoped.get(),
+                           K_BN_INF_VAR_EXT_X_UID,
+                           HIPDNN_DATA_FLOAT,
+                           {1, 64, 32, 32},
+                           {65536, 1024, 32, 1});
 
     // Verify mean tensor
     hipdnn_backend::ScopedDescriptor meanScoped;
@@ -444,8 +447,11 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
                        static_cast<void*>(meanScoped.getPtr()));
     ASSERT_EQ(meanCount, 1);
     ASSERT_NE(meanScoped.get(), nullptr);
-    verifyTensorDescriptor(
-        meanScoped.get(), K_TENSOR_MEAN_UID, HIPDNN_DATA_FLOAT, {1, 64, 1, 1}, {64, 1, 1, 1});
+    verifyTensorDescriptor(meanScoped.get(),
+                           K_BN_INF_VAR_EXT_MEAN_UID,
+                           HIPDNN_DATA_FLOAT,
+                           {1, 64, 1, 1},
+                           {64, 1, 1, 1});
 
     // Verify variance tensor
     hipdnn_backend::ScopedDescriptor varianceScoped;
@@ -458,7 +464,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
     ASSERT_EQ(varianceCount, 1);
     ASSERT_NE(varianceScoped.get(), nullptr);
     verifyTensorDescriptor(varianceScoped.get(),
-                           K_TENSOR_VARIANCE_UID,
+                           K_BN_INF_VAR_EXT_VARIANCE_UID,
                            HIPDNN_DATA_FLOAT,
                            {1, 64, 1, 1},
                            {64, 1, 1, 1});
@@ -473,8 +479,11 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
                        static_cast<void*>(scaleScoped.getPtr()));
     ASSERT_EQ(scaleCount, 1);
     ASSERT_NE(scaleScoped.get(), nullptr);
-    verifyTensorDescriptor(
-        scaleScoped.get(), K_TENSOR_SCALE_UID, HIPDNN_DATA_FLOAT, {1, 64, 1, 1}, {64, 1, 1, 1});
+    verifyTensorDescriptor(scaleScoped.get(),
+                           K_BN_INF_VAR_EXT_SCALE_UID,
+                           HIPDNN_DATA_FLOAT,
+                           {1, 64, 1, 1},
+                           {64, 1, 1, 1});
 
     // Verify bias tensor
     hipdnn_backend::ScopedDescriptor biasScoped;
@@ -486,8 +495,11 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
                        static_cast<void*>(biasScoped.getPtr()));
     ASSERT_EQ(biasCount, 1);
     ASSERT_NE(biasScoped.get(), nullptr);
-    verifyTensorDescriptor(
-        biasScoped.get(), K_TENSOR_BIAS_UID, HIPDNN_DATA_FLOAT, {1, 64, 1, 1}, {64, 1, 1, 1});
+    verifyTensorDescriptor(biasScoped.get(),
+                           K_BN_INF_VAR_EXT_BIAS_UID,
+                           HIPDNN_DATA_FLOAT,
+                           {1, 64, 1, 1},
+                           {64, 1, 1, 1});
 
     // Verify y tensor
     hipdnn_backend::ScopedDescriptor yScoped;
@@ -499,8 +511,11 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
                        static_cast<void*>(yScoped.getPtr()));
     ASSERT_EQ(yCount, 1);
     ASSERT_NE(yScoped.get(), nullptr);
-    verifyTensorDescriptor(
-        yScoped.get(), K_TENSOR_Y_UID, HIPDNN_DATA_FLOAT, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+    verifyTensorDescriptor(yScoped.get(),
+                           K_BN_INF_VAR_EXT_Y_UID,
+                           HIPDNN_DATA_FLOAT,
+                           {1, 64, 32, 32},
+                           {65536, 1024, 32, 1});
 
     // Verify epsilon tensor
     hipdnn_backend::ScopedDescriptor epsilonScoped;
@@ -512,8 +527,11 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
                        static_cast<void*>(epsilonScoped.getPtr()));
     ASSERT_EQ(epsilonCount, 1);
     ASSERT_NE(epsilonScoped.get(), nullptr);
-    verifyTensorDescriptor(
-        epsilonScoped.get(), K_TENSOR_EPSILON_UID, HIPDNN_DATA_FLOAT, {1, 1, 1, 1}, {1, 1, 1, 1});
+    verifyTensorDescriptor(epsilonScoped.get(),
+                           K_BN_INF_VAR_EXT_EPSILON_UID,
+                           HIPDNN_DATA_FLOAT,
+                           {1, 1, 1, 1},
+                           {1, 1, 1, 1});
 
     // Verify operation type
     hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
