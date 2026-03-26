@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "HipdnnOperationType.h"
+#include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/CustomOpOperationDescriptor.hpp"
 #include "descriptors/NodeFactory.hpp"
@@ -15,6 +16,7 @@
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/CustomOpConstants.hpp>
 
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -37,24 +39,27 @@ protected:
         TensorAttributesT input0Attrs;
         input0Attrs.uid = K_CUSTOM_OP_INPUT_UID_0;
         input0Attrs.data_type = DataType::FLOAT;
-        input0Attrs.dims = {2, 3};
-        input0Attrs.strides = {3, 1};
+        input0Attrs.dims = {K_CUSTOM_OP_TENSOR_DIMS.begin(), K_CUSTOM_OP_TENSOR_DIMS.end()};
+        input0Attrs.strides
+            = {K_CUSTOM_OP_TENSOR_STRIDES.begin(), K_CUSTOM_OP_TENSOR_STRIDES.end()};
         _tensorMap[K_CUSTOM_OP_INPUT_UID_0] = TensorDescriptor::fromFlatBuffer(input0Attrs);
 
         // Input tensor 1
         TensorAttributesT input1Attrs;
         input1Attrs.uid = K_CUSTOM_OP_INPUT_UID_1;
         input1Attrs.data_type = DataType::FLOAT;
-        input1Attrs.dims = {2, 3};
-        input1Attrs.strides = {3, 1};
+        input1Attrs.dims = {K_CUSTOM_OP_TENSOR_DIMS.begin(), K_CUSTOM_OP_TENSOR_DIMS.end()};
+        input1Attrs.strides
+            = {K_CUSTOM_OP_TENSOR_STRIDES.begin(), K_CUSTOM_OP_TENSOR_STRIDES.end()};
         _tensorMap[K_CUSTOM_OP_INPUT_UID_1] = TensorDescriptor::fromFlatBuffer(input1Attrs);
 
         // Output tensor 0
         TensorAttributesT output0Attrs;
         output0Attrs.uid = K_CUSTOM_OP_OUTPUT_UID_0;
         output0Attrs.data_type = DataType::FLOAT;
-        output0Attrs.dims = {2, 3};
-        output0Attrs.strides = {3, 1};
+        output0Attrs.dims = {K_CUSTOM_OP_TENSOR_DIMS.begin(), K_CUSTOM_OP_TENSOR_DIMS.end()};
+        output0Attrs.strides
+            = {K_CUSTOM_OP_TENSOR_STRIDES.begin(), K_CUSTOM_OP_TENSOR_STRIDES.end()};
         _tensorMap[K_CUSTOM_OP_OUTPUT_UID_0] = TensorDescriptor::fromFlatBuffer(output0Attrs);
     }
 
@@ -130,6 +135,39 @@ TEST_F(TestCustomOpOperationFromNode, SetsTensorReferences)
     EXPECT_EQ(desc->getInputDescs()[1]->getData().uid, K_CUSTOM_OP_INPUT_UID_1);
     ASSERT_EQ(desc->getOutputDescs().size(), 1);
     EXPECT_EQ(desc->getOutputDescs()[0]->getData().uid, K_CUSTOM_OP_OUTPUT_UID_0);
+}
+
+TEST_F(TestCustomOpOperationFromNode, SetsTensorReferencesWithFullValues)
+{
+    auto node = createStandardNode();
+    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+
+    const std::vector<int64_t> expectedDims(K_CUSTOM_OP_TENSOR_DIMS.begin(),
+                                            K_CUSTOM_OP_TENSOR_DIMS.end());
+    const std::vector<int64_t> expectedStrides(K_CUSTOM_OP_TENSOR_STRIDES.begin(),
+                                               K_CUSTOM_OP_TENSOR_STRIDES.end());
+
+    // Verify inputs
+    ASSERT_EQ(desc->getInputDescs().size(), 2);
+    ASSERT_NE(desc->getInputDescs()[0], nullptr);
+    EXPECT_EQ(desc->getInputDescs()[0]->getData().uid, K_CUSTOM_OP_INPUT_UID_0);
+    EXPECT_EQ(desc->getInputDescs()[0]->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getInputDescs()[0]->getData().dims, expectedDims);
+    EXPECT_EQ(desc->getInputDescs()[0]->getData().strides, expectedStrides);
+
+    ASSERT_NE(desc->getInputDescs()[1], nullptr);
+    EXPECT_EQ(desc->getInputDescs()[1]->getData().uid, K_CUSTOM_OP_INPUT_UID_1);
+    EXPECT_EQ(desc->getInputDescs()[1]->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getInputDescs()[1]->getData().dims, expectedDims);
+    EXPECT_EQ(desc->getInputDescs()[1]->getData().strides, expectedStrides);
+
+    // Verify output
+    ASSERT_EQ(desc->getOutputDescs().size(), 1);
+    ASSERT_NE(desc->getOutputDescs()[0], nullptr);
+    EXPECT_EQ(desc->getOutputDescs()[0]->getData().uid, K_CUSTOM_OP_OUTPUT_UID_0);
+    EXPECT_EQ(desc->getOutputDescs()[0]->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getOutputDescs()[0]->getData().dims, expectedDims);
+    EXPECT_EQ(desc->getOutputDescs()[0]->getData().strides, expectedStrides);
 }
 
 TEST_F(TestCustomOpOperationFromNode, TensorReferencesMatchTensorMap)
@@ -220,7 +258,22 @@ TEST_F(TestCustomOpOperationFromNode, GetAttributeWorksAfterFromNode)
                        idBuffer.data());
     EXPECT_STREQ(idBuffer.data(), K_CUSTOM_OP_ID.c_str());
 
-    // Verify input tensors
+    // Verify operation type
+    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    int64_t opTypeCount = 0;
+    desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
+    ASSERT_EQ(opTypeCount, 1);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CUSTOM_OP);
+
+    // Verify name (empty default from fixture, count==1 for null terminator)
+    int64_t nameCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &nameCount, nullptr);
+    EXPECT_EQ(nameCount, 1);
+
+    // --- Input tensor descriptors ---
+
+    // Query count
     int64_t inputCount = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -229,7 +282,41 @@ TEST_F(TestCustomOpOperationFromNode, GetAttributeWorksAfterFromNode)
                        nullptr);
     ASSERT_EQ(inputCount, 2);
 
-    // Verify output tensors
+    // Retrieve all input descriptors
+    std::array<hipdnnBackendDescriptor_t, 2> inputDescs = {};
+    int64_t retrievedInputCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       2,
+                       &retrievedInputCount,
+                       static_cast<void*>(inputDescs.data()));
+    ASSERT_EQ(retrievedInputCount, 2);
+
+    // Wrap in ScopedDescriptor for RAII
+    hipdnn_backend::ScopedDescriptor input0Scoped(inputDescs[0]);
+    hipdnn_backend::ScopedDescriptor input1Scoped(inputDescs[1]);
+    ASSERT_NE(input0Scoped.get(), nullptr);
+    ASSERT_NE(input1Scoped.get(), nullptr);
+
+    const std::vector<int64_t> expectedDims(K_CUSTOM_OP_TENSOR_DIMS.begin(),
+                                            K_CUSTOM_OP_TENSOR_DIMS.end());
+    const std::vector<int64_t> expectedStrides(K_CUSTOM_OP_TENSOR_STRIDES.begin(),
+                                               K_CUSTOM_OP_TENSOR_STRIDES.end());
+
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(input0Scoped.get(),
+                                                           K_CUSTOM_OP_INPUT_UID_0,
+                                                           HIPDNN_DATA_FLOAT,
+                                                           expectedDims,
+                                                           expectedStrides);
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(input1Scoped.get(),
+                                                           K_CUSTOM_OP_INPUT_UID_1,
+                                                           HIPDNN_DATA_FLOAT,
+                                                           expectedDims,
+                                                           expectedStrides);
+
+    // --- Output tensor descriptors ---
+
+    // Query count
     int64_t outputCount = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -238,13 +325,25 @@ TEST_F(TestCustomOpOperationFromNode, GetAttributeWorksAfterFromNode)
                        nullptr);
     ASSERT_EQ(outputCount, 1);
 
-    // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
-    int64_t opTypeCount = 0;
-    desc->getAttribute(
-        HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
-    ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CUSTOM_OP);
+    // Retrieve output descriptor
+    std::array<hipdnnBackendDescriptor_t, 1> outputDescs = {};
+    int64_t retrievedOutputCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &retrievedOutputCount,
+                       static_cast<void*>(outputDescs.data()));
+    ASSERT_EQ(retrievedOutputCount, 1);
+
+    // Wrap in ScopedDescriptor for RAII
+    hipdnn_backend::ScopedDescriptor output0Scoped(outputDescs[0]);
+    ASSERT_NE(output0Scoped.get(), nullptr);
+
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(output0Scoped.get(),
+                                                           K_CUSTOM_OP_OUTPUT_UID_0,
+                                                           HIPDNN_DATA_FLOAT,
+                                                           expectedDims,
+                                                           expectedStrides);
 }
 
 TEST_F(TestCustomOpOperationFromNode, NamePreservedFromNode)
@@ -324,8 +423,8 @@ TEST_F(TestCustomOpOperationFromNode, FromNodeWithTwoOutputs)
     TensorAttributesT output1Attrs;
     output1Attrs.uid = K_CUSTOM_OP_OUTPUT_UID_1;
     output1Attrs.data_type = DataType::FLOAT;
-    output1Attrs.dims = {2, 3};
-    output1Attrs.strides = {3, 1};
+    output1Attrs.dims = {K_CUSTOM_OP_TENSOR_DIMS.begin(), K_CUSTOM_OP_TENSOR_DIMS.end()};
+    output1Attrs.strides = {K_CUSTOM_OP_TENSOR_STRIDES.begin(), K_CUSTOM_OP_TENSOR_STRIDES.end()};
     _tensorMap[K_CUSTOM_OP_OUTPUT_UID_1] = TensorDescriptor::fromFlatBuffer(output1Attrs);
 
     NodeT node;
