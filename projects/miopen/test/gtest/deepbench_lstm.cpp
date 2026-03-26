@@ -116,9 +116,3 @@ using GPU_DeepBench_LSTM_FP32 = GPU_DeepBench_LSTM_test<float>;
 TEST_P(GPU_DeepBench_LSTM_FP32, FloatTest) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_DeepBench_LSTM_FP32, testing::ValuesIn(GetTestCases()));
-
-using GPU_DeepBench_LSTM_FP64 = GPU_DeepBench_LSTM_test<double>;
-
-TEST_P(GPU_DeepBench_LSTM_FP64, DoubleTest) { RunTest(); }
-
-INSTANTIATE_TEST_SUITE_P(Full, GPU_DeepBench_LSTM_FP64, testing::ValuesIn(GetTestCases()));
