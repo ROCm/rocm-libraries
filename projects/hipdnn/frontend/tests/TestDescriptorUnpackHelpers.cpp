@@ -1908,3 +1908,21 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrByteArrayDataFails)
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
+
+TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrByteArrayCountMismatch)
+{
+    // Count query returns 5
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_CHAR, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{5}), Return(HIPDNN_STATUS_SUCCESS)));
+
+    // Data query succeeds but reports actualCount=3 (mismatches count=5)
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_CHAR, 5, _, Ne(nullptr)))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{3}), Return(HIPDNN_STATUS_SUCCESS)));
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    std::vector<uint8_t> value;
+    auto err = getDescriptorAttrByteArray(desc, HIPDNN_ATTR_TENSOR_VALUE_EXT, value, "test bytes");
+
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}

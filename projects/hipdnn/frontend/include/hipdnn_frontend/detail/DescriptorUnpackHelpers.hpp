@@ -603,6 +603,12 @@ template <typename T>
         hipdnnBackend()->backendGetAttribute(
             desc, attrName, HIPDNN_TYPE_CHAR, count, &actualCount, value.data()),
         "Failed to get " + errorContext);
+    if(actualCount != count)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Element count mismatch for " + errorContext + ": expected " + std::to_string(count)
+                    + " but got " + std::to_string(actualCount)};
+    }
 
     return {};
 }
