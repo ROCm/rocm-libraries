@@ -294,7 +294,7 @@ namespace rocRoller
             co_yield_(Instruction("v_readfirstlane_b32", {dest}, {src}, {}, comment));
         }
         // Scalar -> EXEC
-        else if((src->regType() == Register::Type::Scalar && dest->isExec())
+        else if((src->regType() == Register::Type::Scalar && dest->isEXEC())
                 && ((src->registerCount() == 2 && context->kernel()->wavefront_size() == 64)
                     || (src->registerCount() == 1 && context->kernel()->wavefront_size() == 32)))
         {

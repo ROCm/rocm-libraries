@@ -39,7 +39,7 @@ namespace rocRoller
             return false;
         }
 
-        bool Value::isExec() const
+        bool Value::isEXEC() const
         {
             auto context = m_context.lock();
             if(context && IsSpecial(m_regType))
