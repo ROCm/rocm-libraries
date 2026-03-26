@@ -11,6 +11,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 
 #include "../utils/Helpers.hpp"
 
@@ -115,10 +116,14 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         auto dwValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
             absoluteTolerance, relativeTolerance);
 
-        bool dwValid = dwValidator.allClose(dwRefTensor, dwTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  dw: " << (dwValid ? "successful" : "failed") << "\n";
+        bool dwValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(std::cout,
+                                                                                "dw",
+                                                                                dwValidator,
+                                                                                dwRefTensor,
+                                                                                dwTensor,
+                                                                                absoluteTolerance,
+                                                                                relativeTolerance);
 
         validationPassed = dwValid;
     }
