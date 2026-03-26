@@ -13,7 +13,7 @@ Documentation for rocSPARSE is available at
 * Added the strided batched computations for `rocsparse_sptrsv`.
 
 ### Optimized
-* Significant performance improvement for `rocsparse_Xgtsv_no_pivot` when the system size is less than 2^17
+* Significant performance improvement for `rocsparse_Xgtsv_no_pivot` when the system size is less than 2^17.
 
 ## rocSPARSE 4.5.0 for ROCm 7.12.0
 
