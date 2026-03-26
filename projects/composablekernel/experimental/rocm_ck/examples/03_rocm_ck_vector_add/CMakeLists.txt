@@ -69,7 +69,7 @@ foreach(variant IN LISTS KERNEL_VARIANTS)
                     ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
             DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
                     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_vector_add_dev.hpp
-                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_vector_add_api.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_vector_add_kernel.hpp
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/datatype_utils.hpp
             COMMENT "Compiling ${variant}.hip -> ${arch}.hsaco"
         )

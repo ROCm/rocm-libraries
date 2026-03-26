@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
+// Role: types — Layout enum, constexpr/consteval helpers. No runtime, no CK deps.
+//
 // Memory layout enum for matrix operations.
-// Host-safe — no CK Tile dependency.
 
 #pragma once
 

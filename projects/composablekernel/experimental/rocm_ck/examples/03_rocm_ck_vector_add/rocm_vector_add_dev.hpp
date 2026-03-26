@@ -4,11 +4,22 @@
 // Device-side kernel for rocm_ck vector add. Uses CK Tile tile primitives
 // directly to compute c = alpha * a + beta * b with mixed input/output types.
 //
-// Uses C++20 struct NTTPs: template <VectorAddKernel K>.
+// DEVICE ONLY: compiled via --cuda-device-only in .hip files.
+// This header must NOT be included from host-only .cpp files.
+//
+// Compilation boundary:
+//   _kernel.hpp — schema types + consteval factory (both passes)
+//   _api.hpp    — host-only helpers (host pass only, #error on device)
+//   _dev.hpp (this) — CK Tile bridge + __device__ code (device pass only, #error on host)
 
 #pragma once
 
-#include "rocm_vector_add_api.hpp"
+#ifndef __HIP_DEVICE_COMPILE__
+#error \
+    "rocm_vector_add_dev.hpp requires device compilation. Host code should include rocm_vector_add_api.hpp."
+#endif
+
+#include "rocm_vector_add_kernel.hpp"
 
 #include <rocm_ck/ck_type_map.hpp>
 
@@ -30,6 +41,11 @@ namespace rocm_ck {
 template <VectorAddKernel K>
 __device__ void runVectorAdd(Args args)
 {
+    // Device-side validation — catches invalid manual construction.
+    static_assert(K.block_tile > 0, "block_tile must be positive");
+    static_assert(K.thread_block_size > 0, "thread_block_size must be positive");
+    static_assert(K.block_warps > 0, "block_warps must be positive");
+
     using X = typename CkTypeMap<K.in_dtype>::type;
     using Y = typename CkTypeMap<K.out_dtype>::type;
 

@@ -1,7 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// HIP error checking macro for kpack examples.
+// Role: host — HIP error checking. Requires HIP runtime.
+//
+// HIP error checking macro for rocm_ck examples.
 
 #pragma once
 

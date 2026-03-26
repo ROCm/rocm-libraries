@@ -1,10 +1,15 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
+// Role: device — maps DataType to CK Tile types. Requires --cuda-device-only.
+//
 // Maps DataType enum values to CK Tile C++ numeric types.
-// Device-side only — requires CK Tile headers.
 
 #pragma once
+
+#ifndef __HIP_DEVICE_COMPILE__
+#error "ck_type_map.hpp requires CK Tile headers (device compilation only)"
+#endif
 
 #include <rocm_ck/datatype_utils.hpp>
 

@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
+// Role: meta — Signature, Tensor, Scalar. No runtime, no CK deps.
+//
 // Signature: the complete description of WHAT a kernel computes.
 //
 // A directed compute graph where tensors are nodes and operators are edges.

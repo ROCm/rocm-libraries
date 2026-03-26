@@ -1,7 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Shared type definitions for kpack API.
+// Role: types — index_t, warp_size. No runtime, no CK deps.
+//
+// Shared type definitions for rocm_ck.
 
 #pragma once
 

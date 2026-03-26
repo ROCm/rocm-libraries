@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
+// Role: meta — consteval resolve(), C++20 concepts. No runtime, no CK deps.
+//
 // Signature resolution: resolves a Signature into concrete tensor descriptors.
 //
 // resolve() walks the operator graph, collects tensor slots with operator-implied

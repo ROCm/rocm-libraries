@@ -1,7 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// GPU architecture detection utility for kpack examples.
+// Role: host — GPU architecture detection. Requires HIP runtime.
+//
+// GPU architecture detection utility for rocm_ck examples.
 
 #pragma once
 

@@ -14,6 +14,7 @@
 #include "rocm_fmha_bwd_registry.hpp"
 
 #include <rocm_ck/args.hpp>
+#include <rocm_ck/datatype_convert.hpp>
 #include <rocm_ck/datatype_utils.hpp>
 #include <rocm_ck/gpu_arch.hpp>
 #include <rocm_ck/hip_check.hpp>

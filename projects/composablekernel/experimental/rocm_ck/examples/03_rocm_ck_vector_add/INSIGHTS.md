@@ -22,23 +22,30 @@ constexpr auto kernel = make_kernel(
 
 > **Production implication**: Every rocm_ck operation will follow this pattern. The Signature defines WHAT; the Algorithm defines HOW. `consteval` is the bridge that enforces invariants.
 
-## 2. Optional Dtype Hierarchy
+## 2. Dtype Resolution via Operator-Centric Signature
 
-The `Signature` uses optional dtype fields with clear resolution chains. For elementwise, the dtype hierarchy has three levels:
+The `Signature` uses a two-level dtype cascade resolved by `consteval resolve()`:
 
 ```
-dtype                    (kernel-level default)
-+-- in_dtype             (overrides dtype for inputs)
-|   +-- a_dtype          (overrides in_dtype)
-|   +-- b_dtype          (overrides in_dtype)
-+-- out_dtype            (overrides dtype for output -- NOT from in_dtype)
+Signature::dtype         (kernel-level default for all tensors)
++-- Tensor::dtype        (per-tensor override by name)
 ```
 
-`in_dtype` does NOT cascade to `out_dtype`. They are separate branches rooted at `dtype`. This prevents ambiguity: setting `in_dtype = FP16` with `dtype = FP32` gives FP16 inputs and FP32 output, not FP16 everywhere.
+`Signature::dtype` sets the default for every tensor discovered by walking the operator graph. Explicit `Tensor` entries in `sig.tensors[]` override specific tensors by name. This is the same model for all operations — elementwise, GEMM, FMHA.
 
-The `resolve()` consteval function flattens the hierarchy. `static_assert` tests verify all resolution paths — homogeneous, widening, narrowing, and per-operand overrides.
+```cpp
+// Homogeneous: all FP32
+Signature{.dtype = DataType::FP32, .ops = {AddOp{.lhs = "A", .rhs = "B", .out = "C"}}}
 
-> **Production implication**: The dtype hierarchy depth is operation-dependent. Elementwise has a shared input default (`in_dtype`); GEMM uses a two-level hierarchy (dtype → per-operand) because its operands are asymmetric. The unified `Signature` type handles both through its operator structs and tensor overrides.
+// Widening: fp16 inputs, fp32 output
+Signature{.dtype = DataType::FP16,
+          .tensors = {Tensor{.name = "C", .dtype = DataType::FP32}},
+          .ops = {AddOp{.lhs = "A", .rhs = "B", .out = "C"}}}
+```
+
+`resolve()` flattens the cascade at compile time. `static_assert` tests verify all resolution paths — homogeneous, widening, narrowing, and per-tensor overrides.
+
+> **Production implication**: The dtype cascade is operation-independent — one model for all operations. Per-tensor overrides via `Tensor::dtype` handle any mixed-precision pattern without operation-specific fields.
 
 ## 3. consteval for Immediate Feedback
 
@@ -55,9 +62,9 @@ Invalid configs fail at compile time with readable messages like `"block_tile mu
 
 ## 4. Signature / Algorithm Separation
 
-"What" (data types) vs "How" (tile geometry) are orthogonal concerns:
+"What" (data types + operation) vs "How" (tile geometry) are orthogonal concerns:
 
-- **Signature**: `{dtype, in_dtype, a_dtype, b_dtype, out_dtype}` — specifies the types
+- **Signature**: `{dtype, tensors[], scalars[], ops[]}` — specifies the compute graph and types
 - **Algorithm**: `{block_tile, block_warps, warp_tile, pad}` — specifies the tile geometry
 
 The same signature can be paired with different algorithms to explore the tuning surface. The same algorithm can run on FP32, FP16, or BF16 (subject to `kVectorM` constraints validated by `make_kernel`).

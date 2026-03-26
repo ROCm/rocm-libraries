@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
+// Role: abi — shared between host and device. Trivially copyable, no CK deps.
+//
 // Generic kernel argument structure for all rocm_ck operations.
 //
 // One Args type replaces per-operation structs (VectorAddArgs, GemmArgs, etc.).

@@ -208,10 +208,11 @@ and asserted with `static_assert`.
 first-class in the signature, not implicit extra tensor dimensions. Keep semantic
 information in the signature — it enables better validation and clearer code.
 
-**Epilogue composition is general.** The target is a composable graph of typed epilogue
-operations, at least as flexible as CK Tile's best epilogue patterns. We start simple
-(enum + D tensors) and grow toward full generality. A more general solution is often
-simpler than accumulating special cases.
+**Epilogue composition is general.** Epilogue fusion is expressed as a composable graph
+of typed operators in the signature's `ops` array. Each fusion step is a typed operator
+(`AddOp`, `ReluOp`, etc.) with named tensor slots. `make_kernel()` pattern-matches the
+operator sequence to select the CK Tile epilogue configuration. This avoids accumulating
+special cases — adding a new epilogue combination requires no new enum values.
 
 **Split-K is algorithmic.** Parallelism strategies like split-K, workspace allocation,
 and tuning parameters belong in the algorithm, not the signature. The signature describes

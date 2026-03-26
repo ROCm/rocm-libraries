@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
+// Role: meta — operator structs, Op variant. No runtime, no CK deps.
+//
 // Operator structs for the rocm_ck signature compute graph.
 //
 // Each operator is a typed struct with named tensor slots. Operators
@@ -28,8 +30,6 @@ struct GemmOp
 };
 
 /// Element-wise addition: out = lhs + rhs.
-/// No default names — slots must be explicitly named to prevent accidental
-/// graph connections when composing with GemmOp (which defaults to A, B, C).
 struct AddOp
 {
     std::string_view lhs;

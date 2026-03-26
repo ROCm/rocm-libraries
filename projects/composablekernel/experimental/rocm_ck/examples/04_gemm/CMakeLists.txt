@@ -61,7 +61,7 @@ foreach(variant IN LISTS KERNEL_VARIANTS)
                     -o ${hsaco_output}
                     ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
             DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
-                    ${CMAKE_CURRENT_SOURCE_DIR}/gemm_api.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/gemm_kernel.hpp
                     ${CMAKE_CURRENT_SOURCE_DIR}/gemm_dev.hpp
             COMMENT "Compiling ${variant}.hip -> ${arch}.hsaco"
         )

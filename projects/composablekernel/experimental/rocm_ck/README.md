@@ -53,6 +53,42 @@ extern "C" __global__ void gemm_fp16_add_relu(rocm_ck::Args args)
 
 Every architectural concept is visible: Signature declares the compute graph, Algorithm specifies the tile strategy, `make_kernel` validates and resolves at compile time, and the bridge function takes universal `Args`.
 
+## Compilation Boundary
+
+Examples 03 and 04 use a three-file pattern that enforces clean separation
+between metaprogramming, host runtime, and device code:
+
+```text
+                  _kernel.hpp (metaprogramming)
+                 /            \
+        _api.hpp               _dev.hpp
+       (host only)            (device only)
+           |                       |
+       main.cpp               *.hip files
+```
+
+**`_kernel.hpp`** is pure metaprogramming. It contains `consteval` factories
+(`make_kernel`, `is_valid_warp_gemm`), `constexpr` structural types
+(`GemmKernel`, `VectorAddKernel`), named accessors, and `static_assert` tests.
+The compiler evaluates everything at compile time — no runtime code is generated
+on either side. Both host (g++) and device (hipcc `--cuda-device-only`) passes
+include this header.
+
+**`_api.hpp`** is host-only. It contains runtime code that uses the standard
+library freely: arg assembly (`make_args`), launch wrappers, runtime validation
+with rich error messages. Guarded with `#ifdef __HIP_DEVICE_COMPILE__` / `#error`
+to prevent accidental inclusion from `.hip` files.
+
+**`_dev.hpp`** is device-only. It contains the CK Tile bridge — `__device__`
+functions that wire structural NTTP descriptors to the CK Tile template stack.
+Guarded with `#ifndef __HIP_DEVICE_COMPILE__` / `#error` to prevent inclusion
+from host `.cpp` files.
+
+The `.hip` files are compiled with `--cuda-device-only` (device pass only), so
+`__HIP_DEVICE_COMPILE__` is always defined. `main.cpp` is compiled as plain C++
+by g++, so `__HIP_DEVICE_COMPILE__` is never defined. The guards enforce
+the correct boundaries at the preprocessor level.
+
 ## What This Changes
 
 CK Tile is a powerful template metaprogramming library. Using it directly means wiring ~7 internal type layers (`TileGemmShape`, `TileGemmTraits`, `GemmPipelineProblem`, pipeline type, partitioner, epilogue, kernel) with dozens of positional template parameters. See [`gemm_dev.hpp`](examples/04_gemm/gemm_dev.hpp) for what that looks like — it's the device-side bridge that rocm_ck hides behind 6 named fields.
@@ -155,22 +191,33 @@ host executable  (variant selection → hipModuleLoadData → hipModuleLaunchKer
 experimental/rocm_ck/
 ├── CMakeLists.txt                  # Top-level (delegates to include/ and examples)
 ├── README.md
-├── include/                        # Shared host-side headers (header-only)
+├── include/                        # Shared headers (header-only)
 │   ├── CMakeLists.txt              # INTERFACE library target "rocm_ck"
 │   └── rocm_ck/
-│       ├── hip_check.hpp           # HIP_CHECK error-checking macro
-│       ├── gpu_arch.hpp            # get_gpu_arch() — GPU architecture detection
-│       ├── datatype_utils.hpp      # DataType enum, type conversions, tolerances
-│       ├── types.hpp               # Common types: index_t, warp_size
-│       ├── typed_buffer.hpp        # TypedBuffer wrapper for host memory
-│       ├── kpack_module.hpp        # RAII wrappers for kpack and HIP module handles
-│       ├── ck_type_map.hpp         # DataType enum to CK Tile type mapping
+│       │ # Types — pure definitions, no runtime, no CK deps
+│       ├── types.hpp               # index_t, warp_size
+│       ├── datatype_utils.hpp      # DataType enum, data_type_bits(), data_type_name()
 │       ├── layout.hpp              # Layout enum (Row, Col, Contiguous, Auto)
 │       ├── tensor_desc.hpp         # TensorDesc: name, dtype, rank, layout
-│       ├── ops.hpp                 # Operator structs (GemmOp, AddOp, ReluOp, ...) + Op variant
-│       ├── args.hpp                # Generic Args, TensorArg, ScalarValue (kernarg ABI)
-│       ├── signature.hpp           # Tensor, Scalar, Signature (compute graph)
-│       └── resolve.hpp             # consteval resolve(): dtype cascade, rank/layout propagation
+│       ├── physical_tensor.hpp     # TensorName, PhysicalTensor (consteval, NTTP-safe)
+│       │
+│       │ # ABI — shared host/device interface
+│       ├── args.hpp                # Args, TensorArg, ScalarValue (kernarg ABI, 1408 bytes)
+│       │
+│       │ # Metaprogramming — compile-time logic, no runtime
+│       ├── ops.hpp                 # Operator structs (GemmOp, AddOp, ...) + Op variant
+│       ├── signature.hpp           # Tensor, Scalar, Signature (compute graph schema)
+│       ├── resolve.hpp             # consteval resolve(): dtype cascade, rank/layout propagation
+│       │
+│       │ # Host-only — requires HIP runtime or C++ runtime features
+│       ├── hip_check.hpp           # HIP_CHECK error-checking macro
+│       ├── gpu_arch.hpp            # get_gpu_arch() — GPU architecture detection
+│       ├── typed_buffer.hpp        # TypedBuffer: RAII device memory with type conversion
+│       ├── datatype_convert.hpp    # float ↔ typed conversions, verification tolerances
+│       ├── kpack_module.hpp        # KpackArchive, KpackKernel RAII wrappers
+│       │
+│       │ # Device-only — requires CK Tile headers (--cuda-device-only)
+│       └── ck_type_map.hpp         # DataType → CK Tile C++ type mapping
 ├── rocm_kpack/                     # Vendored kpack C runtime library (from TheRock)
 │   ├── CMakeLists.txt
 │   ├── include/rocm_kpack/
@@ -200,22 +247,24 @@ experimental/rocm_ck/
     │   └── main.cpp
     ├── 03_rocm_ck_vector_add/      # Full tuning surface: variants + registry
     │   ├── CMakeLists.txt
-    │   ├── rocm_vector_add_api.hpp     # Signature/Algorithm types, make_kernel validation
-    │   ├── rocm_vector_add_dev.hpp     # Device interface — maps config to CK Tile types
+    │   ├── rocm_vector_add_kernel.hpp  # Metaprogramming: types, consteval make_kernel, static_asserts
+    │   ├── rocm_vector_add_api.hpp     # Host-only: arg assembly, launch helpers (guarded)
+    │   ├── rocm_vector_add_dev.hpp     # Device-only: CK Tile bridge, runVectorAdd<K> (guarded)
     │   ├── rocm_vector_add_registry.hpp # Variant table + find_variant selection
-    │   ├── vector_add_*.hip            # 12 variant instantiations
+    │   ├── vector_add_*.hip            # 12 variant instantiations (include _dev.hpp only)
     │   ├── pack.py                     # Variant-aware packer with metadata
     │   └── main.cpp                    # Variant selection demo + verify-all mode
     └── 04_gemm/                     # GEMM: multi-type via operator-centric Signature
         ├── CMakeLists.txt
-        ├── gemm_api.hpp                # Signature-based make_kernel, GemmKernel, tile validation
-        ├── gemm_dev.hpp                # CkTypeMap, CkLayoutMap, runGemm<K> template
-        ├── gemm_fp32.hip               # fp32 variant instantiation
-        ├── gemm_fp16.hip               # fp16 variant instantiation
-        ├── gemm_fp16_w32.hip           # fp16 variant with WarpTile=32 (K=16 for fp16)
+        ├── gemm_kernel.hpp             # Metaprogramming: types, consteval make_kernel, static_asserts
+        ├── gemm_api.hpp                # Host-only: arg assembly, launch helpers (guarded)
+        ├── gemm_dev.hpp                # Device-only: CK Tile bridge, runGemm<K> (guarded)
+        ├── gemm_fp32.hip               # fp32 variant (include gemm_dev.hpp only)
+        ├── gemm_fp16.hip               # fp16 variant
+        ├── gemm_fp16_w32.hip           # fp16 variant with WarpTile=32
         ├── gemm_fp16_add.hip           # fp16 + bias addition (fused epilogue)
         ├── gemm_fp16_add_relu.hip      # fp16 + bias + ReLU (composed epilogue)
-        ├── gemm_bf16.hip               # bf16 variant instantiation
+        ├── gemm_bf16.hip               # bf16 variant
         ├── cpu_ref.hpp                 # CPU reference GEMM implementation
         ├── cpu_ref.cpp                 # CPU reference implementation
         ├── pack.py                     # Variant-aware packer with dtype metadata

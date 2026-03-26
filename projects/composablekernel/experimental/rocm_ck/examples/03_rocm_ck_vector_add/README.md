@@ -105,15 +105,40 @@ The `_w8`/`_w2` suffixes indicate multi-warp variants.
 
 ## File Roles
 
-| File | Purpose |
-|------|---------|
-| `rocm_vector_add_api.hpp` | Signature/Algorithm types, `resolve`, `make_kernel` validation |
-| `rocm_vector_add_dev.hpp` | Device kernel — uses CK Tile tile primitives for `c = alpha*a + beta*b` |
-| `rocm_vector_add_registry.hpp` | `VariantDescriptor` table and `findVariant` selection (host-only) |
-| `vector_add_*.hip` | Variant instantiations (~15 lines each) |
-| `pack.py` | Archive packer with variant metadata |
-| `main.cpp` | Host loader — variant selection demo, verify-all, scaled-add test |
-| `CMakeLists.txt` | Build system (variant × arch nested loop) |
+Each example uses a three-file compilation boundary that separates
+metaprogramming, host runtime, and device code:
+
+| File | Compiled by | Purpose |
+|------|-------------|---------|
+| `rocm_vector_add_kernel.hpp` | Both (g++ and hipcc) | **Metaprogramming** — structural types (`VectorAddKernel`, `ElementwiseAlgorithm`), `consteval` factory (`make_kernel`), compile-time `static_assert` tests. No runtime code — everything evaluates at compile time. |
+| `rocm_vector_add_api.hpp` | Host only (g++) | **Host runtime** — arg assembly, launch helpers, runtime validation. Guards with `#error` on device compilation. Includes `_kernel.hpp`. |
+| `rocm_vector_add_dev.hpp` | Device only (hipcc `--cuda-device-only`) | **Device code** — CK Tile bridge (`runVectorAdd<K>`), `__device__` functions. Guards with `#error` on host compilation. Includes `_kernel.hpp`. |
+| `rocm_vector_add_registry.hpp` | Host only | Variant table (`ALL_VARIANTS[]`) and `findVariant` selection |
+| `vector_add_*.hip` | Device only | Variant instantiations (~10 lines each) — include only `_dev.hpp` |
+| `main.cpp` | Host only | Host loader — variant selection demo, verify-all, scaled-add test |
+| `pack.py` | — | Archive packer with variant metadata |
+| `CMakeLists.txt` | — | Build system (variant × arch nested loop) |
+
+### Compilation Boundary
+
+```text
+                    _kernel.hpp (metaprogramming)
+                   /            \
+          _api.hpp               _dev.hpp
+         (host only)            (device only)
+             |                       |
+         main.cpp              *.hip files
+       registry.hpp
+```
+
+`_kernel.hpp` is pure metaprogramming: `consteval` factories, `constexpr` structural
+types, and `static_assert` tests. The compiler evaluates it all and produces constants.
+No runtime code is generated on either side.
+
+`.hip` files are compiled with `--cuda-device-only` and include only `_dev.hpp`
+(which transitively includes `_kernel.hpp`). `main.cpp` is compiled as plain C++
+and includes `_api.hpp` (via the registry). The `#error` guards enforce these
+boundaries — including the wrong header produces a clear compile error.
 
 ## Build
 

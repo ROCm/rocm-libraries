@@ -128,9 +128,10 @@ make_kernel(
 - `[GemmOp, AddOp, ReluOp]` — fused bias + activation (tensors 0-3: A, B, E, D0)
 
 All variants use the generic `Args` struct. Tensor slot count varies by
-epilogue — `runGemm` branches on `K.num_d_tensors` at compile time on the
-device side. On the host side, the resolved signature drives which slots to
-populate: `variant.resolved.find_tensor("bias")` returns the D0 slot index.
+epilogue — `runGemm` branches on `EpilogueTypes<K>::NumDTensors` (derived
+from `K.num_physical_tensors - 3`) at compile time on the device side.
+On the host side, `k.num_physical_tensors > 3` determines whether D
+tensor slots need populating.
 
 The "bias" tensor's dtype cascades from `Signature::dtype`. Explicit `Tensor`
 entries can override it for mixed-precision epilogues.
@@ -153,19 +154,39 @@ demonstrates composed epilogue (bias + activation).
 
 ## File Roles
 
-| File | Purpose |
-|------|---------|
-| `gemm_api.hpp` | `Signature`, `GemmAlgorithm`, `GemmKernel`, `make_kernel`, `is_valid_warp_gemm`, static_asserts |
-| `gemm_dev.hpp` | `CkTypeMap`, `CkLayoutMap`, `EpilogueTypes`, `runGemm<K>` — maps schema to CK Tile types |
-| `gemm_fp32.hip` | fp32 variant (16×16×16 warp tile) |
-| `gemm_fp16.hip` | fp16 variant (16×16×16 warp tile) |
-| `gemm_bf16.hip` | bf16 variant (16×16×16 warp tile) |
-| `gemm_fp16_w32.hip` | fp16 variant (32×32×16 warp tile) |
-| `gemm_fp16_add.hip` | fp16 + bias addition (fused epilogue) |
-| `gemm_fp16_add_relu.hip` | fp16 + bias + ReLU (composed epilogue) |
-| `pack.py` | Archive packer with per-variant dtype, epilogue, and tile metadata |
-| `main.cpp` | Host loader — multi-variant loop with D tensor support, CPU reference verification |
-| `CMakeLists.txt` | Build system (variant × arch nested loop) |
+Each example uses a three-file compilation boundary that separates
+metaprogramming, host runtime, and device code:
+
+| File | Compiled by | Purpose |
+|------|-------------|---------|
+| `gemm_kernel.hpp` | Both (g++ and hipcc) | **Metaprogramming** — structural types (`GemmKernel`, `GemmAlgorithm`, `Dim3`, `EpilogueOp`), `consteval` factories (`make_kernel`, `is_valid_warp_gemm`), named accessors (`tensor`, `slot`, `dtype`, `layout`), compile-time `static_assert` tests. No runtime code. |
+| `gemm_api.hpp` | Host only (g++) | **Host runtime** — arg assembly, launch helpers, runtime validation. Guards with `#error` on device compilation. Includes `_kernel.hpp`. |
+| `gemm_dev.hpp` | Device only (hipcc `--cuda-device-only`) | **Device code** — CK Tile bridge (`runGemm<K>`), `CkTypeMap`, `CkLayoutMap`, `EpilogueTypes`, `ComposedCDEOp`. Guards with `#error` on host compilation. Includes `_kernel.hpp`. |
+| `gemm_*.hip` | Device only | Variant instantiations (~20 lines each) — include only `_dev.hpp` |
+| `cpu_ref.{hpp,cpp}` | Host only | CPU reference GEMM for verification |
+| `main.cpp` | Host only | Host loader — multi-variant loop with D tensor support, CPU reference verification |
+| `pack.py` | — | Archive packer with per-variant dtype, epilogue, and tile metadata |
+| `CMakeLists.txt` | — | Build system (variant × arch nested loop) |
+
+### Compilation Boundary
+
+```text
+                    gemm_kernel.hpp (metaprogramming)
+                   /                \
+         gemm_api.hpp            gemm_dev.hpp
+         (host only)             (device only)
+             |                       |
+         main.cpp                *.hip files
+```
+
+`gemm_kernel.hpp` is pure metaprogramming: `consteval` factories, `constexpr`
+structural types, and `static_assert` tests. The compiler evaluates it all and
+produces constants. No runtime code is generated on either side.
+
+`.hip` files are compiled with `--cuda-device-only` and include only `gemm_dev.hpp`
+(which transitively includes `gemm_kernel.hpp`). `main.cpp` is compiled as plain C++
+and includes `gemm_api.hpp`. The `#error` guards enforce these boundaries —
+including the wrong header produces a clear compile error.
 
 ## Build
 

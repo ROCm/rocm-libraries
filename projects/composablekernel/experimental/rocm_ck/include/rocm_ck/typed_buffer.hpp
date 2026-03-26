@@ -1,12 +1,15 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
+// Role: host — RAII device memory wrapper. Requires HIP runtime.
+//
 // RAII device buffer with automatic float-to-typed conversion for upload
 // and typed-to-float conversion for download. Simplifies host code that
 // needs to work with multiple data types (fp32, fp16, bf16).
 
 #pragma once
 
+#include <rocm_ck/datatype_convert.hpp>
 #include <rocm_ck/datatype_utils.hpp>
 #include <rocm_ck/hip_check.hpp>
 

@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
+// Role: host — kpack archive/module RAII wrappers. Requires HIP runtime.
+//
 // RAII wrappers for kpack archive and kernel loading. Handles archive
 // open/close, GPU detection, HIP module creation, and cleanup.
 

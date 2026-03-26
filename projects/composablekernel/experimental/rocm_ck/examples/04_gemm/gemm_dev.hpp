@@ -3,19 +3,31 @@
 //
 // Device-side CK Tile GEMM type wiring for kpack.
 //
-// Maps GemmKernel (our schema) → CK Tile template stack (7 types).
+// DEVICE ONLY: compiled via --cuda-device-only in .hip files.
+// This header must NOT be included from host-only .cpp files.
+//
+// Maps GemmKernel (our schema) -> CK Tile template stack (7 types).
 // Each .hip variant file includes this header and instantiates runGemm<K>
 // with a specific constexpr GemmKernel.
 //
-// CkLayoutMap: Layout enum   → CK Tile layout tag (RowMajor, ColumnMajor)
+// CkLayoutMap: Layout enum   -> CK Tile layout tag (RowMajor, ColumnMajor)
 // runGemm<K>:  wires the full CK Tile GEMM pipeline from K's types/layouts
 //
 // Tile geometry is parameterized through GemmKernel fields, validated by
 // make_kernel() against CK Tile's WarpGemmDispatcher table.
+//
+// Compilation boundary:
+//   _kernel.hpp — schema types + consteval factory (both passes)
+//   _api.hpp    — host-only helpers (host pass only, #error on device)
+//   _dev.hpp (this) — CK Tile bridge + __device__ code (device pass only, #error on host)
 
 #pragma once
 
-#include "gemm_api.hpp"
+#ifndef __HIP_DEVICE_COMPILE__
+#error "gemm_dev.hpp requires device compilation. Host code should include gemm_api.hpp."
+#endif
+
+#include "gemm_kernel.hpp"
 
 #include <rocm_ck/args.hpp>
 
@@ -48,55 +60,53 @@ struct CkLayoutMap<Layout::Col>
 };
 
 // ============================================================================
-// ComposedCDEOp: CombineOp × Activation → single CK Tile elementwise functor
+// ComposedCDEOp: epilogue op chain → single CK Tile elementwise functor
 // ============================================================================
 
-/// Composed epilogue functor: combine D tensors in float, activate, cast to output.
+/// Composed epilogue functor: applies K's epilogue_ops chain in sequence.
 ///
-/// Replaces the old CkEpilogueOpMap 1:1 enum mapping with a two-axis composition.
-/// All arithmetic is in float to avoid precision loss between combine and activation.
-/// Delegates activation math to CK Tile's existing functor implementations.
-template <CombineOp Combine, Activation Act>
+/// Binary ops (Add, Mul) fold D tensors into the accumulator via parameter pack.
+/// Unary ops (Relu, etc.) transform the accumulator in place, delegating to
+/// CK Tile's optimized implementations.
+///
+/// All arithmetic is in float. The 4 if-constexpr lines are bounded by
+/// kMaxEpilogueOps and fully resolved at compile time — zero runtime overhead.
+template <GemmKernel K>
 struct ComposedCDEOp
 {
     template <typename E, typename C, typename... Ds>
     CK_TILE_HOST_DEVICE void operator()(E& e, const C& c, const Ds&... ds) const
     {
         float result = ck_tile::type_convert<float>(c);
-
-        // Combine D tensors with matmul result
-        if constexpr(Combine == CombineOp::Add)
-        {
-            ((result += ck_tile::type_convert<float>(ds)), ...);
-        }
-        else if constexpr(Combine == CombineOp::Multiply)
-        {
-            ((result *= ck_tile::type_convert<float>(ds)), ...);
-        }
-
-        // Apply activation (delegating to CK Tile's optimized implementations)
-        if constexpr(Act == Activation::Relu)
-        {
-            ck_tile::element_wise::Relu{}(result, result);
-        }
-        else if constexpr(Act == Activation::FastGelu)
-        {
-            ck_tile::element_wise::FastGelu{}(result, result);
-        }
-        else if constexpr(Act == Activation::Gelu)
-        {
-            ck_tile::element_wise::Gelu{}(result, result);
-        }
-        else if constexpr(Act == Activation::Silu)
-        {
-            ck_tile::element_wise::Silu{}(result, result);
-        }
-        else if constexpr(Act == Activation::Sigmoid)
-        {
-            ck_tile::element_wise::Sigmoid{}(result, result);
-        }
-
+        if constexpr(K.num_epilogue_ops > 0)
+            apply_op<K.epilogue_ops[0]>(result, ds...);
+        if constexpr(K.num_epilogue_ops > 1)
+            apply_op<K.epilogue_ops[1]>(result, ds...);
+        if constexpr(K.num_epilogue_ops > 2)
+            apply_op<K.epilogue_ops[2]>(result, ds...);
+        if constexpr(K.num_epilogue_ops > 3)
+            apply_op<K.epilogue_ops[3]>(result, ds...);
         e = ck_tile::type_convert<E>(result);
+    }
+
+    private:
+    template <EpilogueOp Op, typename... Ds>
+    CK_TILE_HOST_DEVICE static void apply_op(float& result, const Ds&... ds)
+    {
+        if constexpr(Op == EpilogueOp::Add)
+            ((result += ck_tile::type_convert<float>(ds)), ...);
+        else if constexpr(Op == EpilogueOp::Mul)
+            ((result *= ck_tile::type_convert<float>(ds)), ...);
+        else if constexpr(Op == EpilogueOp::Relu)
+            ck_tile::element_wise::Relu{}(result, result);
+        else if constexpr(Op == EpilogueOp::FastGelu)
+            ck_tile::element_wise::FastGelu{}(result, result);
+        else if constexpr(Op == EpilogueOp::Gelu)
+            ck_tile::element_wise::Gelu{}(result, result);
+        else if constexpr(Op == EpilogueOp::Silu)
+            ck_tile::element_wise::Silu{}(result, result);
+        else if constexpr(Op == EpilogueOp::Sigmoid)
+            ck_tile::element_wise::Sigmoid{}(result, result);
     }
 };
 
@@ -107,24 +117,27 @@ struct ComposedCDEOp
 template <GemmKernel K>
 struct EpilogueTypes
 {
-    using Op = ComposedCDEOp<K.combine, K.activation>;
+    using Op = ComposedCDEOp<K>;
 
-    // Always resolved (GemmKernel fields have valid defaults even when unused).
-    // std::conditional_t below selects which ones go into the tuples.
-    using D0Type   = typename CkTypeMap<K.d0_dtype>::type;
-    using D1Type   = typename CkTypeMap<K.d1_dtype>::type;
-    using D0Layout = typename CkLayoutMap<K.d0_layout>::type;
-    using D1Layout = typename CkLayoutMap<K.d1_layout>::type;
+    // D tensor count: physical tensors beyond lhs(0), rhs(1), output(2)
+    static constexpr int NumDTensors = K.num_physical_tensors - 3;
 
-    using DsDataType = std::conditional_t<K.num_d_tensors == 0,
+    // D0/D1 types from physical tensor table (indices 3 and 4).
+    // Always resolved — std::conditional_t below selects which go into tuples.
+    using D0Type   = typename CkTypeMap<K.physical_tensors[3].dtype>::type;
+    using D1Type   = typename CkTypeMap<K.physical_tensors[4].dtype>::type;
+    using D0Layout = typename CkLayoutMap<K.physical_tensors[3].layout>::type;
+    using D1Layout = typename CkLayoutMap<K.physical_tensors[4].layout>::type;
+
+    using DsDataType = std::conditional_t<NumDTensors == 0,
                                           ck_tile::tuple<>,
-                                          std::conditional_t<K.num_d_tensors == 1,
+                                          std::conditional_t<NumDTensors == 1,
                                                              ck_tile::tuple<D0Type>,
                                                              ck_tile::tuple<D0Type, D1Type>>>;
 
-    using DsLayout = std::conditional_t<K.num_d_tensors == 0,
+    using DsLayout = std::conditional_t<NumDTensors == 0,
                                         ck_tile::tuple<>,
-                                        std::conditional_t<K.num_d_tensors == 1,
+                                        std::conditional_t<NumDTensors == 1,
                                                            ck_tile::tuple<D0Layout>,
                                                            ck_tile::tuple<D0Layout, D1Layout>>>;
 };
@@ -135,9 +148,8 @@ struct EpilogueTypes
 
 /// Device-side GEMM bridge: Args → CK Tile template stack → ck_tile::GemmKernel.
 ///
-/// Tensor layout:
-///   tensors[0] = A,  tensors[1] = B,  tensors[2] = C/E (output)
-///   tensors[3] = D0 (optional, for fused epilogue)
+/// Tensor slot mapping comes from K's role-based accessors:
+///   lhs() = left operand,  rhs() = right operand,  output() = final output,  [3] = D0 (optional)
 ///   lengths[0] = first dim, lengths[1] = second dim
 ///   strides follow dimension order (RowMajor: strides[0]=ld, ColMajor: strides[1]=ld)
 ///
@@ -147,20 +159,32 @@ struct EpilogueTypes
 template <GemmKernel K>
 __device__ void runGemm(Args args)
 {
-    // --- Map schema types to CK Tile types ---
-    using AType   = typename CkTypeMap<K.a_dtype>::type;
-    using BType   = typename CkTypeMap<K.b_dtype>::type;
-    using AccType = typename CkTypeMap<K.acc_dtype>::type;
-    using OType   = typename CkTypeMap<K.c_dtype>::type;
+    // Device-side validation — catches invalid manual construction.
+    static_assert(K.num_physical_tensors >= 3,
+                  "kernel must have at least lhs, rhs, and output tensors");
+    static_assert(K.thread_block_size > 0, "thread_block_size must be positive");
+    static_assert(EpilogueTypes<K>::NumDTensors <= 1,
+                  "at most 1 D tensor supported in this example");
 
-    using ALayout = typename CkLayoutMap<K.a_layout>::type;
-    using BLayout = typename CkLayoutMap<K.b_layout>::type;
-    using CLayout = typename CkLayoutMap<K.c_layout>::type;
+    // Physical tensor table: role-based access (compile-time constants)
+    static constexpr auto PT_LHS = K.lhs();    // GEMM left operand
+    static constexpr auto PT_RHS = K.rhs();    // GEMM right operand
+    static constexpr auto PT_OUT = K.output(); // final output
+
+    // --- Map schema types to CK Tile types ---
+    using AType   = typename CkTypeMap<PT_LHS.dtype>::type;
+    using BType   = typename CkTypeMap<PT_RHS.dtype>::type;
+    using AccType = typename CkTypeMap<K.acc_dtype>::type;
+    using OType   = typename CkTypeMap<PT_OUT.dtype>::type;
+
+    using ALayout = typename CkLayoutMap<PT_LHS.layout>::type;
+    using BLayout = typename CkLayoutMap<PT_RHS.layout>::type;
+    using CLayout = typename CkLayoutMap<PT_OUT.layout>::type;
 
     // --- Unpack generic Args — compiler generates s_load at fixed offsets ---
-    const TensorArg& t_a = args.tensors[0];
-    const TensorArg& t_b = args.tensors[1];
-    const TensorArg& t_c = args.tensors[2];
+    const TensorArg& t_a = args.tensors[PT_LHS.args_slot];
+    const TensorArg& t_b = args.tensors[PT_RHS.args_slot];
+    const TensorArg& t_c = args.tensors[PT_OUT.args_slot];
 
     index_t M     = t_a.lengths[0];
     index_t N     = t_b.lengths[1];
@@ -169,11 +193,11 @@ __device__ void runGemm(Args args)
     // Leading dimension stride depends on layout:
     //   RowMajor → strides[0],  ColMajor → strides[1]
     index_t stride_A =
-        static_cast<index_t>(K.a_layout == Layout::Row ? t_a.strides[0] : t_a.strides[1]);
+        static_cast<index_t>(PT_LHS.layout == Layout::Row ? t_a.strides[0] : t_a.strides[1]);
     index_t stride_B =
-        static_cast<index_t>(K.b_layout == Layout::Row ? t_b.strides[0] : t_b.strides[1]);
+        static_cast<index_t>(PT_RHS.layout == Layout::Row ? t_b.strides[0] : t_b.strides[1]);
     index_t stride_C =
-        static_cast<index_t>(K.c_layout == Layout::Row ? t_c.strides[0] : t_c.strides[1]);
+        static_cast<index_t>(PT_OUT.layout == Layout::Row ? t_c.strides[0] : t_c.strides[1]);
 
     // --- Step 1: Tile geometry (from GemmKernel, validated by make_kernel) ---
     using GemmShape =
@@ -224,7 +248,9 @@ __device__ void runGemm(Args args)
 
     // Convert generic Args to CK Tile's internal args.
     // Branch on D tensor count to construct the right KernelArgs initializer.
-    if constexpr(K.num_d_tensors == 0)
+    static constexpr int NumDTensors = EpilogueTypes<K>::NumDTensors;
+
+    if constexpr(NumDTensors == 0)
     {
         const KernelArgs kargs{{t_a.ptr},                  // as_ptr
                                {t_b.ptr},                  // bs_ptr
@@ -240,11 +266,12 @@ __device__ void runGemm(Args args)
                                1};                         // k_batch (no split-K)
         CkKernel{}(kargs);
     }
-    else if constexpr(K.num_d_tensors == 1)
+    else if constexpr(NumDTensors == 1)
     {
-        const TensorArg& t_d0 = args.tensors[3];
+        static constexpr auto PT_D0 = K.physical_tensors[3];
+        const TensorArg& t_d0       = args.tensors[PT_D0.args_slot];
         index_t stride_D0 =
-            static_cast<index_t>(K.d0_layout == Layout::Row ? t_d0.strides[0] : t_d0.strides[1]);
+            static_cast<index_t>(PT_D0.layout == Layout::Row ? t_d0.strides[0] : t_d0.strides[1]);
 
         const KernelArgs kargs{{t_a.ptr},                  // as_ptr
                                {t_b.ptr},                  // bs_ptr
