@@ -255,38 +255,38 @@ TEST_F(TestRMSNormOperationFromNode, SetsTensorReferencesWithFullValues)
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_RMSNORM_TENSOR_X_UID);
     EXPECT_EQ(desc->getXDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getXDesc()->getData().dims, (std::vector<int64_t>{1, 64, 32, 32}));
-    EXPECT_EQ(desc->getXDesc()->getData().strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
+    EXPECT_EQ(desc->getXDesc()->getData().dims, toVec(K_RMSNORM_TENSOR_X_DIMS));
+    EXPECT_EQ(desc->getXDesc()->getData().strides, toVec(K_RMSNORM_TENSOR_X_STRIDES));
 
     ASSERT_NE(desc->getScaleDesc(), nullptr);
     EXPECT_EQ(desc->getScaleDesc()->getData().uid, K_RMSNORM_TENSOR_SCALE_UID);
     EXPECT_EQ(desc->getScaleDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getScaleDesc()->getData().dims, (std::vector<int64_t>{1, 64, 1, 1}));
-    EXPECT_EQ(desc->getScaleDesc()->getData().strides, (std::vector<int64_t>{64, 1, 1, 1}));
+    EXPECT_EQ(desc->getScaleDesc()->getData().dims, toVec(K_RMSNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(desc->getScaleDesc()->getData().strides, toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
 
     ASSERT_NE(desc->getEpsilonDesc(), nullptr);
     EXPECT_EQ(desc->getEpsilonDesc()->getData().uid, K_RMSNORM_TENSOR_EPSILON_UID);
     EXPECT_EQ(desc->getEpsilonDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getEpsilonDesc()->getData().dims, (std::vector<int64_t>{1, 1, 1, 1}));
-    EXPECT_EQ(desc->getEpsilonDesc()->getData().strides, (std::vector<int64_t>{1, 1, 1, 1}));
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().dims, toVec(K_RMSNORM_TENSOR_EPSILON_DIMS));
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().strides, toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES));
 
     ASSERT_NE(desc->getYDesc(), nullptr);
     EXPECT_EQ(desc->getYDesc()->getData().uid, K_RMSNORM_TENSOR_Y_UID);
     EXPECT_EQ(desc->getYDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getYDesc()->getData().dims, (std::vector<int64_t>{1, 64, 32, 32}));
-    EXPECT_EQ(desc->getYDesc()->getData().strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
+    EXPECT_EQ(desc->getYDesc()->getData().dims, toVec(K_RMSNORM_TENSOR_Y_DIMS));
+    EXPECT_EQ(desc->getYDesc()->getData().strides, toVec(K_RMSNORM_TENSOR_Y_STRIDES));
 
     ASSERT_NE(desc->getBiasDesc(), nullptr);
     EXPECT_EQ(desc->getBiasDesc()->getData().uid, K_RMSNORM_TENSOR_BIAS_UID);
     EXPECT_EQ(desc->getBiasDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getBiasDesc()->getData().dims, (std::vector<int64_t>{1, 64, 1, 1}));
-    EXPECT_EQ(desc->getBiasDesc()->getData().strides, (std::vector<int64_t>{64, 1, 1, 1}));
+    EXPECT_EQ(desc->getBiasDesc()->getData().dims, toVec(K_RMSNORM_TENSOR_BIAS_DIMS));
+    EXPECT_EQ(desc->getBiasDesc()->getData().strides, toVec(K_RMSNORM_TENSOR_BIAS_STRIDES));
 
     ASSERT_NE(desc->getInvRmsDesc(), nullptr);
     EXPECT_EQ(desc->getInvRmsDesc()->getData().uid, K_RMSNORM_TENSOR_INV_RMS_UID);
     EXPECT_EQ(desc->getInvRmsDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getInvRmsDesc()->getData().dims, (std::vector<int64_t>{1, 1, 32, 32}));
-    EXPECT_EQ(desc->getInvRmsDesc()->getData().strides, (std::vector<int64_t>{1024, 1024, 32, 1}));
+    EXPECT_EQ(desc->getInvRmsDesc()->getData().dims, toVec(K_RMSNORM_TENSOR_INV_RMS_DIMS));
+    EXPECT_EQ(desc->getInvRmsDesc()->getData().strides, toVec(K_RMSNORM_TENSOR_INV_RMS_STRIDES));
 }
 
 TEST_F(TestRMSNormOperationFromNode, FailsWithMissingXTensor)
@@ -438,8 +438,8 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
     verifyTensorDescriptor(xScoped.get(),
                            K_RMSNORM_TENSOR_X_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 64, 32, 32},
-                           {65536, 1024, 32, 1});
+                           toVec(K_RMSNORM_TENSOR_X_DIMS),
+                           toVec(K_RMSNORM_TENSOR_X_STRIDES));
 
     // Verify scale tensor
     hipdnn_backend::ScopedDescriptor scaleScoped;
@@ -454,8 +454,8 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
     verifyTensorDescriptor(scaleScoped.get(),
                            K_RMSNORM_TENSOR_SCALE_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 64, 1, 1},
-                           {64, 1, 1, 1});
+                           toVec(K_RMSNORM_TENSOR_SCALE_DIMS),
+                           toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
 
     // Verify epsilon tensor
     hipdnn_backend::ScopedDescriptor epsilonScoped;
@@ -470,8 +470,8 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
     verifyTensorDescriptor(epsilonScoped.get(),
                            K_RMSNORM_TENSOR_EPSILON_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 1, 1, 1},
-                           {1, 1, 1, 1});
+                           toVec(K_RMSNORM_TENSOR_EPSILON_DIMS),
+                           toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES));
 
     // Verify y tensor
     hipdnn_backend::ScopedDescriptor yScoped;
@@ -486,8 +486,8 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
     verifyTensorDescriptor(yScoped.get(),
                            K_RMSNORM_TENSOR_Y_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 64, 32, 32},
-                           {65536, 1024, 32, 1});
+                           toVec(K_RMSNORM_TENSOR_Y_DIMS),
+                           toVec(K_RMSNORM_TENSOR_Y_STRIDES));
 
     // Verify bias tensor (optional)
     hipdnn_backend::ScopedDescriptor biasScoped;
@@ -502,8 +502,8 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
     verifyTensorDescriptor(biasScoped.get(),
                            K_RMSNORM_TENSOR_BIAS_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 64, 1, 1},
-                           {64, 1, 1, 1});
+                           toVec(K_RMSNORM_TENSOR_BIAS_DIMS),
+                           toVec(K_RMSNORM_TENSOR_BIAS_STRIDES));
 
     // Verify inv_rms tensor (optional)
     hipdnn_backend::ScopedDescriptor invRmsScoped;
@@ -518,8 +518,8 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
     verifyTensorDescriptor(invRmsScoped.get(),
                            K_RMSNORM_TENSOR_INV_RMS_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 1, 32, 32},
-                           {1024, 1024, 32, 1});
+                           toVec(K_RMSNORM_TENSOR_INV_RMS_DIMS),
+                           toVec(K_RMSNORM_TENSOR_INV_RMS_STRIDES));
 
     // Verify operation type
     hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;

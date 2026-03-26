@@ -392,7 +392,12 @@ template <typename T>
         // set_value() overwrites _dataType via getDataTypeEnumFromType<T>(),
         // which is wrong for types that share a C++ type (e.g. INT8, FP8_E4M3,
         // FP8_E5M2 all use uint8_t → UINT8). Restore the original data type.
+        // set_value() also resets _dim and _stride to {1}. Restore the
+        // dimensions and strides that were read from the backend descriptor
+        // so the round-trip is symmetric with lowering.
         tensor->set_data_type(dt);
+        tensor->set_dim(dims);
+        tensor->set_stride(strides);
     }
 
     return {};
