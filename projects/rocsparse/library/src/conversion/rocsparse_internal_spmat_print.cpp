@@ -91,7 +91,7 @@ namespace rocsparse
             break;
         }
         }
-        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hind, {}));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hind, 0));
         return rocsparse_status_success;
     }
 
@@ -127,7 +127,7 @@ namespace rocsparse
             break;
         }
         }
-        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hind, {}));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hind, 0));
         return rocsparse_status_success;
     }
 
@@ -200,7 +200,7 @@ namespace rocsparse
             break;
         }
         }
-        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hind, {}));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hind, 0));
         return rocsparse_status_success;
     }
 
@@ -271,7 +271,7 @@ namespace rocsparse
             break;
         }
         }
-        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hind, {}));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hind, 0));
         return rocsparse_status_success;
     }
 }
