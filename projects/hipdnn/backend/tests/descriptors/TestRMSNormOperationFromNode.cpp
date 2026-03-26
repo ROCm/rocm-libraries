@@ -267,8 +267,8 @@ TEST_F(TestRMSNormOperationFromNode, SetsTensorReferencesWithFullValues)
     ASSERT_NE(desc->getEpsilonDesc(), nullptr);
     EXPECT_EQ(desc->getEpsilonDesc()->getData().uid, K_RMSNORM_TENSOR_EPSILON_UID);
     EXPECT_EQ(desc->getEpsilonDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getEpsilonDesc()->getData().dims, (std::vector<int64_t>{1, 1, 1, 1}));
-    EXPECT_EQ(desc->getEpsilonDesc()->getData().strides, (std::vector<int64_t>{1, 1, 1, 1}));
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().dims, (std::vector<int64_t>{1}));
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().strides, (std::vector<int64_t>{1}));
 
     ASSERT_NE(desc->getYDesc(), nullptr);
     EXPECT_EQ(desc->getYDesc()->getData().uid, K_RMSNORM_TENSOR_Y_UID);
@@ -470,8 +470,8 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
     verifyTensorDescriptor(epsilonScoped.get(),
                            K_RMSNORM_TENSOR_EPSILON_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 1, 1, 1},
-                           {1, 1, 1, 1});
+                           {1},
+                           {1});
 
     // Verify y tensor
     hipdnn_backend::ScopedDescriptor yScoped;
