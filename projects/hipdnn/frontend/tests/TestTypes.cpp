@@ -656,10 +656,9 @@ TEST(TestTypes, FromHipdnnAttentionImplementationRoundTrip)
 {
     using namespace hipdnn_frontend;
 
-    for(auto impl :
-        {AttentionImplementation::AUTO,
-         AttentionImplementation::COMPOSITE,
-         AttentionImplementation::UNIFIED})
+    for(auto impl : {AttentionImplementation::AUTO,
+                     AttentionImplementation::COMPOSITE,
+                     AttentionImplementation::UNIFIED})
     {
         auto backend = toBackendAttentionImplementation(impl);
         auto [roundTripped, err] = fromHipdnnAttentionImplementation(backend);

@@ -9,7 +9,7 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/detail/SdpaFpropPacker.hpp>
-#include "hipdnn_frontend/detail/SdpaFpropUnpacker.hpp"
+#include <hipdnn_frontend/detail/SdpaFpropUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph

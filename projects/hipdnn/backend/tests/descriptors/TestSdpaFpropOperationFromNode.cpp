@@ -4,15 +4,15 @@
 #include "HipdnnOperationType.h"
 #include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
-#include "descriptors/SdpaFpropOperationDescriptor.hpp"
 #include "descriptors/NodeFactory.hpp"
 #include "descriptors/ScopedDescriptor.hpp"
+#include "descriptors/SdpaFpropOperationDescriptor.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/SdpaFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -56,30 +56,66 @@ protected:
         addTensor(K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
 
         // Optional tensors
-        addTensor(K_SDPA_TENSOR_ATTN_MASK_UID, toVec(K_SDPA_TENSOR_ATTN_MASK_DIMS), toVec(K_SDPA_TENSOR_ATTN_MASK_STRIDES));
-        addTensor(K_SDPA_TENSOR_SCALE_UID, toVec(K_SDPA_TENSOR_SCALAR_DIMS), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_ATTN_MASK_UID,
+                  toVec(K_SDPA_TENSOR_ATTN_MASK_DIMS),
+                  toVec(K_SDPA_TENSOR_ATTN_MASK_STRIDES));
+        addTensor(K_SDPA_TENSOR_SCALE_UID,
+                  toVec(K_SDPA_TENSOR_SCALAR_DIMS),
+                  toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
         addTensor(K_SDPA_TENSOR_SEQ_LEN_Q_UID, {1}, {1});
         addTensor(K_SDPA_TENSOR_SEQ_LEN_KV_UID, {1}, {1});
-        addTensor(K_SDPA_TENSOR_SEED_UID, toVec(K_SDPA_TENSOR_SCALAR_DIMS), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
-        addTensor(K_SDPA_TENSOR_OFFSET_UID, toVec(K_SDPA_TENSOR_SCALAR_DIMS), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
-        addTensor(K_SDPA_TENSOR_DROPOUT_MASK_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
-        addTensor(K_SDPA_TENSOR_DROPOUT_SCALE_UID, toVec(K_SDPA_TENSOR_SCALAR_DIMS), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_SEED_UID,
+                  toVec(K_SDPA_TENSOR_SCALAR_DIMS),
+                  toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_OFFSET_UID,
+                  toVec(K_SDPA_TENSOR_SCALAR_DIMS),
+                  toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_DROPOUT_MASK_UID,
+                  toVec(K_SDPA_TENSOR_Q_DIMS),
+                  toVec(K_SDPA_TENSOR_Q_STRIDES));
+        addTensor(K_SDPA_TENSOR_DROPOUT_SCALE_UID,
+                  toVec(K_SDPA_TENSOR_SCALAR_DIMS),
+                  toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
         addTensor(K_SDPA_TENSOR_PAGE_TABLE_K_UID, {1}, {1});
         addTensor(K_SDPA_TENSOR_PAGE_TABLE_V_UID, {1}, {1});
         addTensor(K_SDPA_TENSOR_BLOCK_MASK_UID, {1}, {1});
         addTensor(K_SDPA_TENSOR_SINK_TOKEN_UID, {1}, {1});
-        addTensor(K_SDPA_TENSOR_DESCALE_Q_UID, toVec(K_SDPA_TENSOR_SCALAR_DIMS), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
-        addTensor(K_SDPA_TENSOR_DESCALE_K_UID, toVec(K_SDPA_TENSOR_SCALAR_DIMS), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
-        addTensor(K_SDPA_TENSOR_DESCALE_V_UID, toVec(K_SDPA_TENSOR_SCALAR_DIMS), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
-        addTensor(K_SDPA_TENSOR_DESCALE_S_UID, toVec(K_SDPA_TENSOR_SCALAR_DIMS), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
-        addTensor(K_SDPA_TENSOR_SCALE_S_UID, toVec(K_SDPA_TENSOR_SCALAR_DIMS), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
-        addTensor(K_SDPA_TENSOR_SCALE_O_UID, toVec(K_SDPA_TENSOR_SCALAR_DIMS), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
-        addTensor(K_SDPA_TENSOR_STATS_UID, toVec(K_SDPA_TENSOR_STATS_DIMS), toVec(K_SDPA_TENSOR_STATS_STRIDES));
-        addTensor(K_SDPA_TENSOR_MAX_UID, toVec(K_SDPA_TENSOR_STATS_DIMS), toVec(K_SDPA_TENSOR_STATS_STRIDES));
-        addTensor(K_SDPA_TENSOR_SUM_EXP_UID, toVec(K_SDPA_TENSOR_STATS_DIMS), toVec(K_SDPA_TENSOR_STATS_STRIDES));
-        addTensor(K_SDPA_TENSOR_RNG_DUMP_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
-        addTensor(K_SDPA_TENSOR_AMAX_S_UID, toVec(K_SDPA_TENSOR_SCALAR_DIMS), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
-        addTensor(K_SDPA_TENSOR_AMAX_O_UID, toVec(K_SDPA_TENSOR_SCALAR_DIMS), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_DESCALE_Q_UID,
+                  toVec(K_SDPA_TENSOR_SCALAR_DIMS),
+                  toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_DESCALE_K_UID,
+                  toVec(K_SDPA_TENSOR_SCALAR_DIMS),
+                  toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_DESCALE_V_UID,
+                  toVec(K_SDPA_TENSOR_SCALAR_DIMS),
+                  toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_DESCALE_S_UID,
+                  toVec(K_SDPA_TENSOR_SCALAR_DIMS),
+                  toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_SCALE_S_UID,
+                  toVec(K_SDPA_TENSOR_SCALAR_DIMS),
+                  toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_SCALE_O_UID,
+                  toVec(K_SDPA_TENSOR_SCALAR_DIMS),
+                  toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_STATS_UID,
+                  toVec(K_SDPA_TENSOR_STATS_DIMS),
+                  toVec(K_SDPA_TENSOR_STATS_STRIDES));
+        addTensor(K_SDPA_TENSOR_MAX_UID,
+                  toVec(K_SDPA_TENSOR_STATS_DIMS),
+                  toVec(K_SDPA_TENSOR_STATS_STRIDES));
+        addTensor(K_SDPA_TENSOR_SUM_EXP_UID,
+                  toVec(K_SDPA_TENSOR_STATS_DIMS),
+                  toVec(K_SDPA_TENSOR_STATS_STRIDES));
+        addTensor(K_SDPA_TENSOR_RNG_DUMP_UID,
+                  toVec(K_SDPA_TENSOR_Q_DIMS),
+                  toVec(K_SDPA_TENSOR_Q_STRIDES));
+        addTensor(K_SDPA_TENSOR_AMAX_S_UID,
+                  toVec(K_SDPA_TENSOR_SCALAR_DIMS),
+                  toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_AMAX_O_UID,
+                  toVec(K_SDPA_TENSOR_SCALAR_DIMS),
+                  toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
     }
 
     static hipdnn_data_sdk::data_objects::SdpaAttributesT createStandardSdpaFpropAttrs()
@@ -220,9 +256,8 @@ TEST_F(TestSdpaFpropOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 // -- 3c: Parameterized compute data type tests --
 
-class TestSdpaFpropComputeDataType
-    : public TestSdpaFpropOperationFromNode
-    , public ::testing::WithParamInterface<DataType>
+class TestSdpaFpropComputeDataType : public TestSdpaFpropOperationFromNode,
+                                     public ::testing::WithParamInterface<DataType>
 {
 };
 
@@ -236,13 +271,16 @@ TEST_P(TestSdpaFpropComputeDataType, PreservesComputeDataType)
 
 INSTANTIATE_TEST_SUITE_P(ComputeDataTypes,
                          TestSdpaFpropComputeDataType,
-                         ::testing::Values(DataType::HALF, DataType::BFLOAT16, DataType::FLOAT));
+                         ::testing::Values(DataType::HALF,
+                                           DataType::BFLOAT16,
+                                           DataType::FLOAT,
+                                           DataType::FP8_E4M3,
+                                           DataType::FP8_E5M2));
 
 // -- 3c: Parameterized diagonal alignment tests --
 
-class TestSdpaFpropDiagonalAlignment
-    : public TestSdpaFpropOperationFromNode
-    , public ::testing::WithParamInterface<DiagonalAlignment>
+class TestSdpaFpropDiagonalAlignment : public TestSdpaFpropOperationFromNode,
+                                       public ::testing::WithParamInterface<DiagonalAlignment>
 {
 };
 
@@ -265,8 +303,8 @@ INSTANTIATE_TEST_SUITE_P(DiagonalAlignments,
 // -- 3c: Parameterized attention implementation tests --
 
 class TestSdpaFpropAttentionImplementation
-    : public TestSdpaFpropOperationFromNode
-    , public ::testing::WithParamInterface<AttentionImplementation>
+    : public TestSdpaFpropOperationFromNode,
+      public ::testing::WithParamInterface<AttentionImplementation>
 {
 };
 
@@ -575,9 +613,8 @@ TEST_F(TestSdpaFpropOperationFromNode, SucceedsWithOnlyRequiredTensors)
 
 // -- 3d: Parameterized optional tensor missing tests --
 
-class TestSdpaFpropOptionalTensorMissing
-    : public TestSdpaFpropOperationFromNode
-    , public ::testing::WithParamInterface<int64_t>
+class TestSdpaFpropOptionalTensorMissing : public TestSdpaFpropOperationFromNode,
+                                           public ::testing::WithParamInterface<int64_t>
 {
 };
 
@@ -587,6 +624,7 @@ TEST_P(TestSdpaFpropOptionalTensorMissing, SucceedsWhenOptionalTensorMissing)
     auto node = createStandardNode();
     auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
+    ASSERT_TRUE(desc->isFinalized());
 }
 
 INSTANTIATE_TEST_SUITE_P(OptionalTensors,
@@ -945,15 +983,21 @@ TEST_F(TestSdpaFpropOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify diagonal_alignment
     hipdnnDiagonalAlignment_t diagonalAlignment = {};
     int64_t diagonalAlignmentCount = 0;
-    desc->getAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1, &diagonalAlignmentCount, &diagonalAlignment);
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                       1,
+                       &diagonalAlignmentCount,
+                       &diagonalAlignment);
     ASSERT_EQ(diagonalAlignment, HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT);
 
     // Verify implementation
     hipdnnAttentionImplementation_t implementation = {};
     int64_t implementationCount = 0;
-    desc->getAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, 1, &implementationCount, &implementation);
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
+                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                       1,
+                       &implementationCount,
+                       &implementation);
     ASSERT_EQ(implementation, HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT);
 
     // Verify q tensor
@@ -966,9 +1010,11 @@ TEST_F(TestSdpaFpropOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(qScoped.getPtr()));
     ASSERT_EQ(qCount, 1);
     ASSERT_NE(qScoped.get(), nullptr);
-    hipdnn_backend::test_utilities::verifyTensorDescriptor(qScoped.get(), K_SDPA_TENSOR_Q_UID, HIPDNN_DATA_FLOAT,
-                           toVec(K_SDPA_TENSOR_Q_DIMS),
-                           toVec(K_SDPA_TENSOR_Q_STRIDES));
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(qScoped.get(),
+                                                           K_SDPA_TENSOR_Q_UID,
+                                                           HIPDNN_DATA_FLOAT,
+                                                           toVec(K_SDPA_TENSOR_Q_DIMS),
+                                                           toVec(K_SDPA_TENSOR_Q_STRIDES));
 
     // Verify k tensor
     hipdnn_backend::ScopedDescriptor kScoped;
@@ -980,9 +1026,11 @@ TEST_F(TestSdpaFpropOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(kScoped.getPtr()));
     ASSERT_EQ(kCount, 1);
     ASSERT_NE(kScoped.get(), nullptr);
-    hipdnn_backend::test_utilities::verifyTensorDescriptor(kScoped.get(), K_SDPA_TENSOR_K_UID, HIPDNN_DATA_FLOAT,
-                           toVec(K_SDPA_TENSOR_K_DIMS),
-                           toVec(K_SDPA_TENSOR_K_STRIDES));
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(kScoped.get(),
+                                                           K_SDPA_TENSOR_K_UID,
+                                                           HIPDNN_DATA_FLOAT,
+                                                           toVec(K_SDPA_TENSOR_K_DIMS),
+                                                           toVec(K_SDPA_TENSOR_K_STRIDES));
 
     // Verify v tensor
     hipdnn_backend::ScopedDescriptor vScoped;
@@ -994,9 +1042,11 @@ TEST_F(TestSdpaFpropOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(vScoped.getPtr()));
     ASSERT_EQ(vCount, 1);
     ASSERT_NE(vScoped.get(), nullptr);
-    hipdnn_backend::test_utilities::verifyTensorDescriptor(vScoped.get(), K_SDPA_TENSOR_V_UID, HIPDNN_DATA_FLOAT,
-                           toVec(K_SDPA_TENSOR_V_DIMS),
-                           toVec(K_SDPA_TENSOR_V_STRIDES));
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(vScoped.get(),
+                                                           K_SDPA_TENSOR_V_UID,
+                                                           HIPDNN_DATA_FLOAT,
+                                                           toVec(K_SDPA_TENSOR_V_DIMS),
+                                                           toVec(K_SDPA_TENSOR_V_STRIDES));
 
     // Verify o tensor
     hipdnn_backend::ScopedDescriptor oScoped;
@@ -1008,9 +1058,24 @@ TEST_F(TestSdpaFpropOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(oScoped.getPtr()));
     ASSERT_EQ(oCount, 1);
     ASSERT_NE(oScoped.get(), nullptr);
-    hipdnn_backend::test_utilities::verifyTensorDescriptor(oScoped.get(), K_SDPA_TENSOR_O_UID, HIPDNN_DATA_FLOAT,
-                           toVec(K_SDPA_TENSOR_O_DIMS),
-                           toVec(K_SDPA_TENSOR_O_STRIDES));
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(oScoped.get(),
+                                                           K_SDPA_TENSOR_O_UID,
+                                                           HIPDNN_DATA_FLOAT,
+                                                           toVec(K_SDPA_TENSOR_O_DIMS),
+                                                           toVec(K_SDPA_TENSOR_O_STRIDES));
+}
+
+TEST_F(TestSdpaFpropOperationFromNode, OperationTypeIsCorrectAfterFromNode)
+{
+    auto node = createStandardNode();
+    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+
+    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    int64_t opTypeCount = 0;
+    desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
+    ASSERT_EQ(opTypeCount, 1);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_SDPA_FORWARD);
 }
 
 TEST_F(TestSdpaFpropOperationFromNode, NamePreservedFromNode)
@@ -1051,4 +1116,16 @@ TEST_F(TestSdpaFpropOperationFromNode, BuildNodePreservesName)
 
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_build_name");
+}
+
+TEST_F(TestSdpaFpropOperationFromNode, FromNodeFailsWithWrongAttributeType)
+{
+    // A node with ConvolutionFwdAttributes should fail SDPA fromNode — wrong union type.
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    hipdnn_data_sdk::data_objects::ConvolutionFwdAttributesT convAttrs;
+    node.attributes.Set(convAttrs);
+
+    ASSERT_THROW_HIPDNN_STATUS(SdpaFpropOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_INTERNAL_ERROR);
 }

@@ -80,35 +80,23 @@ protected:
             .set_io_data_type(DataType::FLOAT);
 
         auto q = std::make_shared<TensorAttributes>();
-        q->set_uid(K_SDPA_TENSOR_Q_UID)
-            .set_name("q")
-            .set_data_type(DataType::FLOAT);
+        q->set_uid(K_SDPA_TENSOR_Q_UID).set_name("q").set_data_type(DataType::FLOAT);
         q->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
 
         auto k = std::make_shared<TensorAttributes>();
-        k->set_uid(K_SDPA_TENSOR_K_UID)
-            .set_name("k")
-            .set_data_type(DataType::FLOAT);
+        k->set_uid(K_SDPA_TENSOR_K_UID).set_name("k").set_data_type(DataType::FLOAT);
         k->set_dim(toVec(K_SDPA_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_TENSOR_K_STRIDES));
 
         auto v = std::make_shared<TensorAttributes>();
-        v->set_uid(K_SDPA_TENSOR_V_UID)
-            .set_name("v")
-            .set_data_type(DataType::FLOAT);
+        v->set_uid(K_SDPA_TENSOR_V_UID).set_name("v").set_data_type(DataType::FLOAT);
         v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
 
         SdpaAttributes attrs;
         attrs.set_name("test_op");
         attrs.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
 
-        auto results = graph->sdpa(
-            q,
-            k,
-            v,
-            attrs);
-        results[0]->set_uid(K_SDPA_TENSOR_O_UID)
-            .set_output(true)
-            .set_name("o");
+        auto results = graph->sdpa(q, k, v, attrs);
+        results[0]->set_uid(K_SDPA_TENSOR_O_UID).set_output(true).set_name("o");
 
         return graph;
     }
@@ -220,20 +208,16 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropTensorSharingPreserved)
 
     // Verify q tensor sharing
     EXPECT_EQ(opNode->attributes.get_q()->get_uid(), K_SDPA_TENSOR_Q_UID);
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID].get(),
-              opNode->attributes.get_q().get());
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID].get(), opNode->attributes.get_q().get());
     // Verify k tensor sharing
     EXPECT_EQ(opNode->attributes.get_k()->get_uid(), K_SDPA_TENSOR_K_UID);
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_K_UID].get(),
-              opNode->attributes.get_k().get());
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_K_UID].get(), opNode->attributes.get_k().get());
     // Verify v tensor sharing
     EXPECT_EQ(opNode->attributes.get_v()->get_uid(), K_SDPA_TENSOR_V_UID);
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_V_UID].get(),
-              opNode->attributes.get_v().get());
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_V_UID].get(), opNode->attributes.get_v().get());
     // Verify o tensor sharing
     EXPECT_EQ(opNode->attributes.get_o()->get_uid(), K_SDPA_TENSOR_O_UID);
-    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_O_UID].get(),
-              opNode->attributes.get_o().get());
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_O_UID].get(), opNode->attributes.get_o().get());
 }
 
 // Builds a SdpaFprop graph, serializes to binary, creates a backend descriptor
@@ -345,8 +329,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropWithAllOptionalAttributes
     dropoutMask->set_uid(K_SDPA_TENSOR_DROPOUT_MASK_UID)
         .set_name("DROPOUT_MASK")
         .set_data_type(DataType::UINT8);
-    dropoutMask->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS))
-        .set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
+    dropoutMask->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
 
     auto dropoutScale = std::make_shared<TensorAttributes>();
     dropoutScale->set_uid(K_SDPA_TENSOR_DROPOUT_SCALE_UID).set_name("DROPOUT_SCALE");

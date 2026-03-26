@@ -16,11 +16,11 @@
 // #include "CustomOpOperationDescriptor.hpp"
 #include "LayernormOperationDescriptor.hpp"
 // #include "MatmulOperationDescriptor.hpp"
+#include "IGraphOperation.hpp"
 #include "PointwiseOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
 #include "SdpaBpropOperationDescriptor.hpp"
 #include "SdpaFpropOperationDescriptor.hpp"
-#include "IGraphOperation.hpp"
 #include "TensorDescriptor.hpp"
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <memory>
