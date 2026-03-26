@@ -149,7 +149,7 @@ int main() {
 | gfx1151 | Radeon RX 8000 series | ✔️ | |
 | gfx1152 | AMD Radeon 840M iGPU | ✔️ | |
 | gfx1153 | AMD Radeon 820M iGPU | ✔️ | |
-| gfx1201 | Radeon RX 8900 XTX, Radeon RX 8900 XT, Radeon RX 8800 XT, Radeon RX 8800, Radeon RX 8700 XT, Radeon RX 8700, Radeon RX 8600 XT, Radeon RX 8600 | ✔️ | |
+| gfx1201 | Radeon RX 9070 XT, Radeon RX 9070 GRE, Radeon RX 9070 | ✔️ | |
 
 For more information on GPU hardware specifications, check out [ROCm documentation](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html).
 
