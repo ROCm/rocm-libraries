@@ -350,7 +350,7 @@ public:
             // Free device arrays if allocated
             if(device_arrays_allocated && gamma_device_array)
             {
-                RETURN_IF_HIP_ERROR(rocsparse_hipFree(gamma_device_array));
+                (void)rocsparse_hipFree(gamma_device_array);
                 gamma_device_array      = nullptr;
                 z_array                 = nullptr;
                 device_arrays_allocated = false;
