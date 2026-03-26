@@ -24,11 +24,11 @@ namespace miopen_plugin
 // 2. Detect hash collisions with other formally-registered engines
 //
 // Example for new engines:
-// HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE, "MY_CUSTOM_ENGINE")
-// HIPDNN_REGISTER_ENGINE(MY_OTHER_ENGINE, "MY_OTHER_ENGINE")
+// HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE)
+// HIPDNN_REGISTER_ENGINE(MY_OTHER_ENGINE)
 //
 // Note: MIOPEN_ENGINE is already registered in EngineNames.hpp via
-// HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE, "MIOPEN_ENGINE"), so we can use
+// HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE), so we can use
 // the MIOPEN_ENGINE_NAME and MIOPEN_ENGINE_ID constants directly from there.
 // ============================================================================
 

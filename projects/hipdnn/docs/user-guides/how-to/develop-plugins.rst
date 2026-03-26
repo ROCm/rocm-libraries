@@ -83,7 +83,7 @@ hipDNN uses a deterministic hash-based system for managing engine IDs. This syst
 The engine ID system ensures globally unique identifiers across all plugins.
 
 When creating a new engine, select a unique descriptive name.
-During development, add the ``HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE, "MY_CUSTOME_ENGINE")`` macro to a source file in your project.
+During development, add the ``HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE)`` macro to a source file in your project.
 This verifies that the new plugin name doesn't conflict with plugin names from the official distribution and creates variables that can be used to retrieve the unique ID for this engine.
 
 Benefits
@@ -103,9 +103,7 @@ Use engine IDs
 
   // This macro registers the engine name and creates helper variables
   // such as MY_CUSTOM_ENGINE_ID for this engine.
-  using hipdnn_data_sdk::utilities::engineNameToId;
-  using hipdnn_data_sdk::utilities::EngineRegistrar;
-  HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE, "MY_CUSTOM_ENGINE")
+  HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE)
 
   class MyCustomEngine : public hipdnn_plugin_sdk::IEngine< ... >
   {
@@ -125,7 +123,7 @@ To add your engine name to the official registry, submit a GitHub pull request t
 
 .. code:: cpp
 
-  HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE, "MY_CUSTOM_ENGINE")
+  HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE)
 
 Test it locally. You can use unregistered names during development, but you'll need to remove the ``HIPDNN_REGISTER_ENGINE()`` macro from your plugin before it's added to the official registry.
 

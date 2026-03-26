@@ -126,7 +126,7 @@ To add your engine name to the official registry:
 
 2. **Add to Registry**: Submit a PR to add your engine name to [`data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp`](../data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp):
    ```cpp
-   HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE, "MY_NEW_ENGINE")
+   HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE)
    ```
 
 3. **Test Locally First**: You can use unregistered names during development - they'll generate a warning but work correctly
