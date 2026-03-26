@@ -100,6 +100,28 @@ public:
     {
     }
 
+    std::vector<int64_t> getOutputTensorIds() const override
+    {
+        std::vector<int64_t> ids = {_params.yTensor.uid};
+        if(_params.meanTensor.has_value())
+        {
+            ids.push_back(_params.meanTensor.value().uid);
+        }
+        if(_params.invVarianceTensor.has_value())
+        {
+            ids.push_back(_params.invVarianceTensor.value().uid);
+        }
+        if(_params.nextRunningMeanTensor.has_value())
+        {
+            ids.push_back(_params.nextRunningMeanTensor.value().uid);
+        }
+        if(_params.nextRunningVarianceTensor.has_value())
+        {
+            ids.push_back(_params.nextRunningVarianceTensor.value().uid);
+        }
+        return ids;
+    }
+
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
         auto shallowXTensor
@@ -112,7 +134,7 @@ public:
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         // Extract epsilon from pass-by-value tensor (cast to double)
-        double epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+        const double epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
             _params.epsilonTensor, "Epsilon");
 
         // Optional batch statistics tensors
@@ -348,12 +370,14 @@ public:
            && nodeAttributes->next_running_mean_tensor_uid()
            && nodeAttributes->next_running_variance_tensor_uid())
         {
+            // NOLINTBEGIN(bugprone-unchecked-optional-access)
             prevRunningMean = tensorMap.at(nodeAttributes->prev_running_mean_tensor_uid().value());
             prevRunningVariance
                 = tensorMap.at(nodeAttributes->prev_running_variance_tensor_uid().value());
             nextRunningMean = tensorMap.at(nodeAttributes->next_running_mean_tensor_uid().value());
             nextRunningVariance
                 = tensorMap.at(nodeAttributes->next_running_variance_tensor_uid().value());
+            // NOLINTEND(bugprone-unchecked-optional-access)
         }
 
         BatchnormTrainParams<MeanVarianceDataType> params(

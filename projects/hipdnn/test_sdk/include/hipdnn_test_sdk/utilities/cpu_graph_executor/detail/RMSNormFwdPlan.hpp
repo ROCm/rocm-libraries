@@ -63,6 +63,16 @@ public:
     {
     }
 
+    std::vector<int64_t> getOutputTensorIds() const override
+    {
+        std::vector<int64_t> ids = {_params.yTensor.uid};
+        if(_params.invRmsTensor.has_value())
+        {
+            ids.push_back(_params.invRmsTensor.value().uid);
+        }
+        return ids;
+    }
+
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
         auto shallowXTensor
@@ -74,7 +84,7 @@ public:
         auto shallowScaleTensor = createShallowTensor<ScaleDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
-        double epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+        const double epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
             _params.epsilonTensor, "Epsilon");
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>> shallowBiasTensor;

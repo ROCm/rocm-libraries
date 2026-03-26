@@ -33,15 +33,15 @@ void sortEngineIds(std::vector<int64_t>& engineIds)
     };
 
     std::sort(indices.begin(), indices.end(), [&](size_t i, size_t j) {
-        int priA = getPriority(engineIds[i]);
-        int priB = getPriority(engineIds[j]);
+        const int priA = getPriority(engineIds[i]);
+        const int priB = getPriority(engineIds[j]);
         return (priA != priB) ? (priA < priB) : (i < j);
     });
 
     // Reorder engineIds based on sorted indices
     std::vector<int64_t> sorted;
     sorted.reserve(engineIds.size());
-    for(size_t idx : indices)
+    for(const size_t idx : indices)
     {
         sorted.push_back(engineIds[idx]);
     }

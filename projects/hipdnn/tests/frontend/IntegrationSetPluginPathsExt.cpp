@@ -43,10 +43,10 @@ static bool containsPluginByFolder(const std::vector<fs::path>& loadedPaths,
 TEST(IntegrationFrontendSetPluginPathsExt, EmptyPathsAdditive)
 {
     // Reset plugin paths from any prior test to ensure clean state
-    std::vector<fs::path> emptyPaths = {};
+    const std::vector<fs::path> emptyPaths = {};
     setEnginePluginPaths(emptyPaths, PluginLoadingMode::MODE_ABSOLUTE);
 
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     auto error = setEnginePluginPaths(emptyPaths, PluginLoadingMode::MODE_ADDITIVE);
@@ -59,7 +59,7 @@ TEST(IntegrationFrontendSetPluginPathsExt, EmptyPathsAdditive)
     error = getLoadedEnginePluginPaths(*handle, loadedPaths);
     ASSERT_TRUE(error.is_good());
 
-    std::string expectedPluginPath = testDefaultGoodPluginPath();
+    const std::string expectedPluginPath = testDefaultGoodPluginPath();
 
     EXPECT_EQ(loadedPaths.size(), 1);
     EXPECT_TRUE(containsPluginByFilename(loadedPaths, expectedPluginPath));
@@ -67,11 +67,11 @@ TEST(IntegrationFrontendSetPluginPathsExt, EmptyPathsAdditive)
 
 TEST(IntegrationFrontendSetPluginPathsExt, AbsoluteLoadsOnlyCustom)
 {
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     const auto& pluginFilePath = testGoodPluginPath();
-    std::array<const char*, 1> paths = {pluginFilePath.c_str()};
+    const std::array<const char*, 1> paths = {pluginFilePath.c_str()};
 
     auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ABSOLUTE);
     ASSERT_TRUE(error.is_good());
@@ -100,7 +100,7 @@ TEST(IntegrationFrontendSetPluginPathsExt, AdditiveLoadsBothDefaultAndCustom)
     // Reset plugin paths from any prior test to ensure clean state
     setEnginePluginPaths(std::vector<fs::path>{}, PluginLoadingMode::MODE_ABSOLUTE);
 
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     const std::array<const char*, 1> paths = {getTestPluginCustomDir().c_str()};
