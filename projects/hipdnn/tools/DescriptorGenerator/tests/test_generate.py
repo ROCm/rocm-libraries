@@ -75,9 +75,9 @@ class TestPreviewFilesBackend:
 
     def test_backend_file_count(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_BACKEND)
-        # 9 file templates + 9 fragment templates + 4 per generatable mode field
+        # 9 file templates + 10 fragment templates + 4 per generatable mode field
         n_mode_files = 4 * len(convolution_fwd_config.generatable_mode_fields)
-        expected = 9 + 9 + n_mode_files
+        expected = 9 + 10 + n_mode_files
         assert len(files) == expected
 
     def test_backend_contains_descriptor_header(self, convolution_fwd_config):
@@ -130,6 +130,7 @@ class TestPreviewFilesBackend:
             "fragments/cmake_entries.txt",
             "fragments/node_factory_case.txt",
             "fragments/operation_unpacker_case.txt",
+            "fragments/operation_unpacker_test.txt",
             "fragments/operation_type_enum.txt",
             "fragments/node_unpack_override.txt",
         ]
@@ -208,8 +209,8 @@ class TestPreviewFilesLiftOnly:
 
     def test_lift_only_file_count(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_LIFT_ONLY)
-        # 3 files + 6 fragments = 9
-        assert len(files) == 9
+        # 3 files + 7 fragments = 10
+        assert len(files) == 10
 
     def test_lift_only_contains_unpacker(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_LIFT_ONLY)
@@ -228,6 +229,7 @@ class TestPreviewFilesLiftOnly:
         expected_fragments = [
             "fragments/node_factory_case.txt",
             "fragments/operation_unpacker_case.txt",
+            "fragments/operation_unpacker_test.txt",
             "fragments/operation_type_enum.txt",
             "fragments/node_unpack_override.txt",
             "fragments/descriptor_lifting_additions.txt",
@@ -328,9 +330,9 @@ class TestPreviewFilesWithRealConfigs:
         assert not any("mode_frontend_plumbing" in f for f in files)
 
     def test_matmul_backend_exact_count(self, matmul_config):
-        """Matmul backend: 9 files + 9 fragments = 18, no mode enums."""
+        """Matmul backend: 9 files + 10 fragments = 19, no mode enums."""
         files = _preview_files(matmul_config, MODE_BACKEND)
-        assert len(files) == 18
+        assert len(files) == 19
 
 
 # ---------------------------------------------------------------------------
