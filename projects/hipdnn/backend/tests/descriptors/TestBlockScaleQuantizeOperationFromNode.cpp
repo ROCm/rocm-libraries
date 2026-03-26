@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "HipdnnOperationType.h"
+#include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/BlockScaleQuantizeOperationDescriptor.hpp"
 #include "descriptors/NodeFactory.hpp"
@@ -14,13 +15,16 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/BlockScaleQuantizeConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <memory>
 #include <vector>
 
 using namespace hipdnn_backend;
+using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 
 // =============================================================================
 // BlockScaleQuantizeOperationDescriptor::fromNode() Tests
@@ -33,29 +37,22 @@ protected:
 
     void SetUp() override
     {
-        // X tensor
-        TensorAttributesT xAttrs;
-        xAttrs.uid = K_BSQ_TENSOR_X_UID;
-        xAttrs.data_type = DataType::FLOAT;
-        xAttrs.dims = {K_BSQ_TENSOR_X_DIMS.begin(), K_BSQ_TENSOR_X_DIMS.end()};
-        xAttrs.strides = {K_BSQ_TENSOR_X_STRIDES.begin(), K_BSQ_TENSOR_X_STRIDES.end()};
-        _tensorMap[K_BSQ_TENSOR_X_UID] = TensorDescriptor::fromFlatBuffer(xAttrs);
+        auto makeTensor = [this](int64_t uid,
+                                 const std::vector<int64_t>& dims,
+                                 const std::vector<int64_t>& strides) {
+            TensorAttributesT attrs;
+            attrs.uid = uid;
+            attrs.data_type = DataType::FLOAT;
+            attrs.dims = dims;
+            attrs.strides = strides;
+            _tensorMap[uid] = TensorDescriptor::fromFlatBuffer(attrs);
+        };
 
-        // Y tensor
-        TensorAttributesT yAttrs;
-        yAttrs.uid = K_BSQ_TENSOR_Y_UID;
-        yAttrs.data_type = DataType::FLOAT;
-        yAttrs.dims = {K_BSQ_TENSOR_Y_DIMS.begin(), K_BSQ_TENSOR_Y_DIMS.end()};
-        yAttrs.strides = {K_BSQ_TENSOR_Y_STRIDES.begin(), K_BSQ_TENSOR_Y_STRIDES.end()};
-        _tensorMap[K_BSQ_TENSOR_Y_UID] = TensorDescriptor::fromFlatBuffer(yAttrs);
-
-        // Scale tensor
-        TensorAttributesT scaleAttrs;
-        scaleAttrs.uid = K_BSQ_TENSOR_SCALE_UID;
-        scaleAttrs.data_type = DataType::FLOAT;
-        scaleAttrs.dims = {K_BSQ_TENSOR_SCALE_DIMS.begin(), K_BSQ_TENSOR_SCALE_DIMS.end()};
-        scaleAttrs.strides = {K_BSQ_TENSOR_SCALE_STRIDES.begin(), K_BSQ_TENSOR_SCALE_STRIDES.end()};
-        _tensorMap[K_BSQ_TENSOR_SCALE_UID] = TensorDescriptor::fromFlatBuffer(scaleAttrs);
+        makeTensor(K_BSQ_TENSOR_X_UID, toVec(K_BSQ_TENSOR_X_DIMS), toVec(K_BSQ_TENSOR_X_STRIDES));
+        makeTensor(K_BSQ_TENSOR_Y_UID, toVec(K_BSQ_TENSOR_Y_DIMS), toVec(K_BSQ_TENSOR_Y_STRIDES));
+        makeTensor(K_BSQ_TENSOR_SCALE_UID,
+                   toVec(K_BSQ_TENSOR_SCALE_DIMS),
+                   toVec(K_BSQ_TENSOR_SCALE_STRIDES));
     }
 
     static BlockScaleQuantizeAttributesT createStandardBsqAttrs()
@@ -78,6 +75,33 @@ protected:
         return node;
     }
 };
+
+// =============================================================================
+// Parameterized: missing required tensor
+// =============================================================================
+
+class TestBsqMissingRequiredTensor : public TestBlockScaleQuantizeOperationFromNode,
+                                     public ::testing::WithParamInterface<int64_t>
+{
+};
+
+TEST_P(TestBsqMissingRequiredTensor, FailsWithMissingRequiredTensor)
+{
+    _tensorMap.erase(GetParam());
+    auto node = createStandardNode();
+    ASSERT_THROW_HIPDNN_STATUS(BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_INTERNAL_ERROR);
+}
+
+INSTANTIATE_TEST_SUITE_P(AllRequiredTensors,
+                         TestBsqMissingRequiredTensor,
+                         ::testing::Values(K_BSQ_TENSOR_X_UID,
+                                           K_BSQ_TENSOR_Y_UID,
+                                           K_BSQ_TENSOR_SCALE_UID));
+
+// =============================================================================
+// Non-parameterized tests
+// =============================================================================
 
 TEST_F(TestBlockScaleQuantizeOperationFromNode, CreatesValidFinalizedDescriptor)
 {
@@ -110,6 +134,7 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, NodeFactoryDelegatesCorrectly)
     EXPECT_EQ(desc->getData().block_size, K_BSQ_BLOCK_SIZE);
     EXPECT_FALSE(desc->getData().axis.has_value());
     EXPECT_FALSE(desc->getData().transpose);
+    EXPECT_EQ(desc->getComputeDataType(), DataType::FLOAT);
 }
 
 TEST_F(TestBlockScaleQuantizeOperationFromNode, PreservesComputeDataType)
@@ -122,10 +147,12 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, PreservesComputeDataType)
 
 TEST_F(TestBlockScaleQuantizeOperationFromNode, PreservesBlockSize)
 {
-    auto node = createStandardNode();
     auto attrs = createStandardBsqAttrs();
     attrs.block_size = 64;
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
+
     auto desc = BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().block_size, 64);
@@ -133,10 +160,12 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, PreservesBlockSize)
 
 TEST_F(TestBlockScaleQuantizeOperationFromNode, PreservesAxis)
 {
-    auto node = createStandardNode();
     auto attrs = createStandardBsqAttrs();
     attrs.axis = 1;
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
+
     auto desc = BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_TRUE(desc->getData().axis.has_value());
@@ -145,10 +174,12 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, PreservesAxis)
 
 TEST_F(TestBlockScaleQuantizeOperationFromNode, PreservesTranspose)
 {
-    auto node = createStandardNode();
     auto attrs = createStandardBsqAttrs();
     attrs.transpose = true;
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
+
     auto desc = BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_TRUE(desc->getData().transpose);
@@ -177,33 +208,6 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, TensorReferencesMatchTensorMap)
     EXPECT_EQ(desc->getScaleDesc(), _tensorMap[K_BSQ_TENSOR_SCALE_UID]);
 }
 
-TEST_F(TestBlockScaleQuantizeOperationFromNode, FailsWithMissingXTensor)
-{
-    _tensorMap.erase(K_BSQ_TENSOR_X_UID);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_INTERNAL_ERROR);
-}
-
-TEST_F(TestBlockScaleQuantizeOperationFromNode, FailsWithMissingYTensor)
-{
-    _tensorMap.erase(K_BSQ_TENSOR_Y_UID);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_INTERNAL_ERROR);
-}
-
-TEST_F(TestBlockScaleQuantizeOperationFromNode, FailsWithMissingScaleTensor)
-{
-    _tensorMap.erase(K_BSQ_TENSOR_SCALE_UID);
-    auto node = createStandardNode();
-
-    ASSERT_THROW_HIPDNN_STATUS(BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap),
-                               HIPDNN_STATUS_INTERNAL_ERROR);
-}
-
 TEST_F(TestBlockScaleQuantizeOperationFromNode, SucceedsWithoutOptionalAxis)
 {
     auto attrs = createStandardBsqAttrs();
@@ -226,7 +230,7 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, GetTensorDescriptorsReturnsAllTe
     auto desc = BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
-    ASSERT_EQ(tensors.size(), 3);
+    ASSERT_EQ(tensors.size(), 3u);
     EXPECT_EQ(tensors[0]->getData().uid, K_BSQ_TENSOR_X_UID);
     EXPECT_EQ(tensors[1]->getData().uid, K_BSQ_TENSOR_Y_UID);
     EXPECT_EQ(tensors[2]->getData().uid, K_BSQ_TENSOR_SCALE_UID);
@@ -234,7 +238,13 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, GetTensorDescriptorsReturnsAllTe
 
 TEST_F(TestBlockScaleQuantizeOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
+    auto attrs = createStandardBsqAttrs();
+    attrs.axis = 1;
+    attrs.transpose = true;
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
     auto desc = BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
@@ -248,6 +258,21 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, BuildNodeRoundTrip)
     EXPECT_EQ(rebuiltAttrs->y_tensor_uid, K_BSQ_TENSOR_Y_UID);
     EXPECT_EQ(rebuiltAttrs->scale_tensor_uid, K_BSQ_TENSOR_SCALE_UID);
     EXPECT_EQ(rebuiltAttrs->block_size, K_BSQ_BLOCK_SIZE);
+    ASSERT_TRUE(rebuiltAttrs->axis.has_value());
+    EXPECT_EQ(rebuiltAttrs->axis.value(), 1);
+    EXPECT_TRUE(rebuiltAttrs->transpose);
+}
+
+TEST_F(TestBlockScaleQuantizeOperationFromNode, BuildNodeOmitsUnsetOptionalFields)
+{
+    auto node = createStandardNode();
+    auto desc = BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap);
+
+    auto rebuiltNode = desc->buildNode();
+    ASSERT_NE(rebuiltNode, nullptr);
+    const auto* rebuiltAttrs = rebuiltNode->attributes.AsBlockScaleQuantizeAttributes();
+    ASSERT_NE(rebuiltAttrs, nullptr);
+
     EXPECT_FALSE(rebuiltAttrs->axis.has_value());
     EXPECT_FALSE(rebuiltAttrs->transpose);
 }
@@ -265,7 +290,8 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &dtCount,
                        &computeType);
-    ASSERT_EQ(computeType, HIPDNN_DATA_FLOAT);
+    ASSERT_EQ(dtCount, 1);
+    EXPECT_EQ(computeType, HIPDNN_DATA_FLOAT);
 
     // Verify block_size
     int32_t blockSize = 0;
@@ -275,7 +301,8 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &bsCount,
                        &blockSize);
-    ASSERT_EQ(blockSize, K_BSQ_BLOCK_SIZE);
+    ASSERT_EQ(bsCount, 1);
+    EXPECT_EQ(blockSize, K_BSQ_BLOCK_SIZE);
 
     // Verify transpose
     bool transpose = true;
@@ -285,39 +312,8 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &tCount,
                        &transpose);
-    ASSERT_FALSE(transpose);
-
-    // Verify X tensor
-    hipdnn_backend::ScopedDescriptor xScoped;
-    int64_t xCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &xCount,
-                       static_cast<void*>(xScoped.getPtr()));
-    ASSERT_EQ(xCount, 1);
-    ASSERT_NE(xScoped.get(), nullptr);
-    int64_t xUid = 0;
-    int64_t xUidCount = 0;
-    xScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &xUidCount, &xUid);
-    EXPECT_EQ(xUid, K_BSQ_TENSOR_X_UID);
-
-    // Verify Y tensor
-    hipdnn_backend::ScopedDescriptor yScoped;
-    int64_t yCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &yCount,
-                       static_cast<void*>(yScoped.getPtr()));
-    ASSERT_EQ(yCount, 1);
-    ASSERT_NE(yScoped.get(), nullptr);
-    int64_t yUid = 0;
-    int64_t yUidCount = 0;
-    yScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &yUidCount, &yUid);
-    EXPECT_EQ(yUid, K_BSQ_TENSOR_Y_UID);
+    ASSERT_EQ(tCount, 1);
+    EXPECT_FALSE(transpose);
 
     // Verify operation type
     hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
@@ -326,6 +322,54 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, GetAttributeWorksAfterFromNode)
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
     EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE);
+
+    // Verify X tensor — deep check: UID, data type, dims, strides
+    ScopedDescriptor xScoped;
+    int64_t xCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &xCount,
+                       static_cast<void*>(xScoped.getPtr()));
+    ASSERT_EQ(xCount, 1);
+    ASSERT_NE(xScoped.get(), nullptr);
+    verifyTensorDescriptor(xScoped.get(),
+                           K_BSQ_TENSOR_X_UID,
+                           HIPDNN_DATA_FLOAT,
+                           toVec(K_BSQ_TENSOR_X_DIMS),
+                           toVec(K_BSQ_TENSOR_X_STRIDES));
+
+    // Verify Y tensor — deep check: UID, data type, dims, strides
+    ScopedDescriptor yScoped;
+    int64_t yCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &yCount,
+                       static_cast<void*>(yScoped.getPtr()));
+    ASSERT_EQ(yCount, 1);
+    ASSERT_NE(yScoped.get(), nullptr);
+    verifyTensorDescriptor(yScoped.get(),
+                           K_BSQ_TENSOR_Y_UID,
+                           HIPDNN_DATA_FLOAT,
+                           toVec(K_BSQ_TENSOR_Y_DIMS),
+                           toVec(K_BSQ_TENSOR_Y_STRIDES));
+
+    // Verify Scale tensor — deep check: UID, data type, dims, strides
+    ScopedDescriptor scaleScoped;
+    int64_t scaleCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &scaleCount,
+                       static_cast<void*>(scaleScoped.getPtr()));
+    ASSERT_EQ(scaleCount, 1);
+    ASSERT_NE(scaleScoped.get(), nullptr);
+    verifyTensorDescriptor(scaleScoped.get(),
+                           K_BSQ_TENSOR_SCALE_UID,
+                           HIPDNN_DATA_FLOAT,
+                           toVec(K_BSQ_TENSOR_SCALE_DIMS),
+                           toVec(K_BSQ_TENSOR_SCALE_STRIDES));
 }
 
 TEST_F(TestBlockScaleQuantizeOperationFromNode, NamePreservedFromNode)
