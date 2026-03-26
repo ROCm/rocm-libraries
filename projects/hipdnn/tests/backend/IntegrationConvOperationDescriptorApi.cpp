@@ -12,8 +12,6 @@
 
 using namespace backend_test;
 using namespace hipdnn_tests::constants;
-using hipdnn_data_sdk::data_objects::ConvMode;
-
 class IntegrationConvOperationDescriptorApi : public ::testing::Test
 {
 protected:
@@ -67,19 +65,19 @@ TEST_F(IntegrationConvOperationDescriptorApi, CreateAndFinalizeConvOperation)
                                         HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &xDesc),
+                                        static_cast<const void*>(&xDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
                                         HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &wDesc),
+                                        static_cast<const void*>(&wDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
                                         HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &yDesc),
+                                        static_cast<const void*>(&yDesc)),
               HIPDNN_STATUS_SUCCESS);
 
     // Set convolution parameters
@@ -112,10 +110,11 @@ TEST_F(IntegrationConvOperationDescriptorApi, CreateAndFinalizeConvOperation)
                                         dilation.data()),
               HIPDNN_STATUS_SUCCESS);
 
-    auto convMode = static_cast<int64_t>(ConvMode::CROSS_CORRELATION);
-    EXPECT_EQ(hipdnnBackendSetAttribute(
-                  opDesc, HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convMode),
-              HIPDNN_STATUS_SUCCESS);
+    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    EXPECT_EQ(
+        hipdnnBackendSetAttribute(
+            opDesc, HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode),
+        HIPDNN_STATUS_SUCCESS);
 
     auto computeType = HIPDNN_DATA_FLOAT;
     EXPECT_EQ(
@@ -146,19 +145,19 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
                                         HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &xDesc),
+                                        static_cast<const void*>(&xDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
                                         HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &wDesc),
+                                        static_cast<const void*>(&wDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
                                         HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &yDesc),
+                                        static_cast<const void*>(&yDesc)),
               HIPDNN_STATUS_SUCCESS);
 
     // Set convolution parameters
@@ -191,10 +190,11 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
                                         dilation.data()),
               HIPDNN_STATUS_SUCCESS);
 
-    auto convMode = static_cast<int64_t>(ConvMode::CROSS_CORRELATION);
-    EXPECT_EQ(hipdnnBackendSetAttribute(
-                  opDesc, HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convMode),
-              HIPDNN_STATUS_SUCCESS);
+    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    EXPECT_EQ(
+        hipdnnBackendSetAttribute(
+            opDesc, HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode),
+        HIPDNN_STATUS_SUCCESS);
 
     auto computeType = HIPDNN_DATA_FLOAT;
     EXPECT_EQ(
@@ -213,7 +213,7 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         &elementCount,
-                                        &retrievedDesc),
+                                        static_cast<void*>(&retrievedDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(elementCount, 1);
     EXPECT_NE(retrievedDesc, nullptr);
@@ -226,7 +226,7 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         &elementCount,
-                                        &retrievedDesc),
+                                        static_cast<void*>(&retrievedDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(elementCount, 1);
     EXPECT_NE(retrievedDesc, nullptr);
@@ -239,7 +239,7 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         &elementCount,
-                                        &retrievedDesc),
+                                        static_cast<void*>(&retrievedDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(elementCount, 1);
     EXPECT_NE(retrievedDesc, nullptr);
@@ -295,17 +295,17 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
     EXPECT_EQ(retrievedDilation, dilation);
 
     // Verify conv mode
-    int64_t retrievedConvMode = 0;
+    hipdnnConvolutionMode_t retrievedConvMode = {};
     elementCount = 0;
     EXPECT_EQ(hipdnnBackendGetAttribute(opDesc,
                                         HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
-                                        HIPDNN_TYPE_INT64,
+                                        HIPDNN_TYPE_CONVOLUTION_MODE,
                                         1,
                                         &elementCount,
                                         &retrievedConvMode),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(elementCount, 1);
-    EXPECT_EQ(retrievedConvMode, static_cast<int64_t>(ConvMode::CROSS_CORRELATION));
+    EXPECT_EQ(retrievedConvMode, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
 
     // Verify compute type
     hipdnnDataType_t retrievedCompType = {};
@@ -355,9 +355,9 @@ TEST_F(IntegrationConvOperationDescriptorApi, ConvOperationFailsWithoutTensorRef
                               static_cast<int64_t>(dilation.size()),
                               dilation.data());
 
-    auto convMode = static_cast<int64_t>(ConvMode::CROSS_CORRELATION);
+    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
     hipdnnBackendSetAttribute(
-        opDesc, HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convMode);
+        opDesc, HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
 
     auto computeType = HIPDNN_DATA_FLOAT;
     hipdnnBackendSetAttribute(

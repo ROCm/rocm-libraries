@@ -223,9 +223,9 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
     if(m == 0 || n == 0)
     {
         rocblas_int rowsB = std::max(m, n);
-        rocblas_int blocksx = (rowsB - 1) / 32 + 1;
-        rocblas_int blocksy = (nrhs - 1) / 32 + 1;
-        ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(blocksx, blocksy, batch_count), dim3(32, 32), 0,
+        rocblas_int blocksx = (rowsB - 1) / BS2 + 1;
+        rocblas_int blocksy = (nrhs - 1) / BS2 + 1;
+        ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0,
                                 stream, rowsB, nrhs, B, shiftB, ldb, strideB);
 
         return rocblas_status_success;
@@ -239,9 +239,9 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
     // constants in host memory
     const rocblas_stride strideP = std::min(m, n);
     const rocblas_int check_threads = std::min(((std::min(m, n) - 1) / 64 + 1) * 64, BS1);
-    const rocblas_int copyblocksmin = (std::min(m, n) - 1) / 32 + 1;
-    const rocblas_int copyblocksmax = (std::max(m, n) - 1) / 32 + 1;
-    const rocblas_int copyblocksy = (nrhs - 1) / 32 + 1;
+    const rocblas_int copyblocksmin = (std::min(m, n) - 1) / BS2 + 1;
+    const rocblas_int copyblocksmax = (std::max(m, n) - 1) / BS2 + 1;
+    const rocblas_int copyblocksy = (nrhs - 1) / BS2 + 1;
 
     // TODO: apply scaling to improve accuracy over a larger range of values
 
@@ -267,8 +267,8 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
 
             // save elements of B that will be overwritten in cases where info is nonzero
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmin, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, copymat_to_buffer, n, nrhs, B, shiftB,
-                                    ldb, strideB, ipiv_savedB, info_mask(info));
+                                    dim3(BS2, BS2), 0, stream, copymat_to_buffer, n, nrhs, B,
+                                    shiftB, ldb, strideB, ipiv_savedB, info_mask(info));
 
             // solve RX = Q'B, overwriting B with X
             rocsolver_trsm_upper<BATCHED, STRIDED, T>(
@@ -278,7 +278,7 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
 
             // restore elements of B that were overwritten in cases where info is nonzero
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmin, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, copymat_from_buffer, n, nrhs, B,
+                                    dim3(BS2, BS2), 0, stream, copymat_from_buffer, n, nrhs, B,
                                     shiftB, ldb, strideB, ipiv_savedB, info_mask(info));
         }
         else
@@ -290,8 +290,8 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
 
             // save elements of B that will be overwritten in cases where info is nonzero
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmax, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, copymat_to_buffer, m, nrhs, B, shiftB,
-                                    ldb, strideB, ipiv_savedB, info_mask(info));
+                                    dim3(BS2, BS2), 0, stream, copymat_to_buffer, m, nrhs, B,
+                                    shiftB, ldb, strideB, ipiv_savedB, info_mask(info));
 
             // solve R'Y = B overwriting B with Y (here Y = Q'X)
             rocsolver_trsm_upper<BATCHED, STRIDED, T>(
@@ -301,9 +301,9 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
                 trfact_workTrmm_invA_arr);
 
             // zero row n to m-1 of B in cases where info is zero
-            const rocblas_int zeroblocksx = (m - n - 1) / 32 + 1;
+            const rocblas_int zeroblocksx = (m - n - 1) / BS2 + 1;
             ROCSOLVER_LAUNCH_KERNEL((gels_set_zero<T, U>),
-                                    dim3(zeroblocksx, copyblocksy, batch_count), dim3(32, 32), 0,
+                                    dim3(zeroblocksx, copyblocksy, batch_count), dim3(BS2, BS2), 0,
                                     stream, n, m, nrhs, B, shiftB, ldb, strideB, info);
 
             rocsolver_ormqr_unmqr_template<BATCHED, STRIDED>(
@@ -314,7 +314,7 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
 
             // restore elements of B that were overwritten in cases where info is nonzero
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmax, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, copymat_from_buffer, m, nrhs, B,
+                                    dim3(BS2, BS2), 0, stream, copymat_from_buffer, m, nrhs, B,
                                     shiftB, ldb, strideB, ipiv_savedB, info_mask(info));
         }
     }
@@ -334,8 +334,8 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
 
             // save elements of B that will be overwritten in cases where info is nonzero
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmax, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, copymat_to_buffer, n, nrhs, B, shiftB,
-                                    ldb, strideB, ipiv_savedB, info_mask(info));
+                                    dim3(BS2, BS2), 0, stream, copymat_to_buffer, n, nrhs, B,
+                                    shiftB, ldb, strideB, ipiv_savedB, info_mask(info));
 
             // solve LY = B overwriting B with Y (here Y = QX)
             rocsolver_trsm_lower<BATCHED, STRIDED, T>(
@@ -344,9 +344,9 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
                 work_x_temp, workArr_temp_arr, diag_trfac_invA, trfact_workTrmm_invA_arr);
 
             // zero row m to n-1 of B in cases where info is zero
-            const rocblas_int zeroblocksx = (n - m - 1) / 32 + 1;
+            const rocblas_int zeroblocksx = (n - m - 1) / BS2 + 1;
             ROCSOLVER_LAUNCH_KERNEL((gels_set_zero<T, U>),
-                                    dim3(zeroblocksx, copyblocksy, batch_count), dim3(32, 32), 0,
+                                    dim3(zeroblocksx, copyblocksy, batch_count), dim3(BS2, BS2), 0,
                                     stream, m, n, nrhs, B, shiftB, ldb, strideB, info);
 
             rocsolver_ormlq_unmlq_template<BATCHED, STRIDED>(
@@ -357,7 +357,7 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
 
             // restore elements of B that were overwritten in cases where info is nonzero
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmax, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, copymat_from_buffer, n, nrhs, B,
+                                    dim3(BS2, BS2), 0, stream, copymat_from_buffer, n, nrhs, B,
                                     shiftB, ldb, strideB, ipiv_savedB, info_mask(info));
         }
         else
@@ -375,8 +375,8 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
 
             // save elements of B that will be overwritten in cases where info is nonzero
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmin, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, copymat_to_buffer, m, nrhs, B, shiftB,
-                                    ldb, strideB, ipiv_savedB, info_mask(info));
+                                    dim3(BS2, BS2), 0, stream, copymat_to_buffer, m, nrhs, B,
+                                    shiftB, ldb, strideB, ipiv_savedB, info_mask(info));
 
             // solve L'X = QB, overwriting B with X
             rocsolver_trsm_lower<BATCHED, STRIDED, T>(
@@ -387,7 +387,7 @@ rocblas_status rocsolver_gels_template(rocblas_handle handle,
 
             // restore elements of B that were overwritten in cases where info is nonzero
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmin, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, copymat_from_buffer, m, nrhs, B,
+                                    dim3(BS2, BS2), 0, stream, copymat_from_buffer, m, nrhs, B,
                                     shiftB, ldb, strideB, ipiv_savedB, info_mask(info));
         }
     }

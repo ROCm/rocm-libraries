@@ -30,6 +30,11 @@ namespace hipdnn_frontend::graph
  * operation: y = conv(x, w). The operation computes the convolution of input tensor
  * x with filter tensor w.
  *
+ * **Tensor Shapes:**
+ * - **x** (input): `(N, C, H, W)` or `(N, C, D, H, W)` — batch, channels, spatial dims
+ * - **w** (weights): `(K, C/groups, R, S)` or `(K, C/groups, T, R, S)` — output channels, input channels per group, kernel spatial dims
+ * - **y** (output): `(N, K, H_out, W_out)` or `(N, K, D_out, H_out, W_out)` — batch, output channels, output spatial dims
+ *
  * @code{.cpp}
  * // Create a 2D convolution with 3x3 kernel, padding=1, stride=1
  * auto y = graph.conv_fprop(x, w, ConvFpropAttributes()
@@ -43,6 +48,8 @@ namespace hipdnn_frontend::graph
 class ConvFpropAttributes : public Attributes<ConvFpropAttributes>
 {
 public:
+    ConvFpropAttributes() = default;
+
     /// Input tensor identifiers
     enum class InputNames
     {
@@ -66,7 +73,7 @@ public:
     std::vector<int64_t> post_padding; ///< Padding after convolution (per spatial dim)
     std::vector<int64_t> stride; ///< Stride (per spatial dim)
     std::vector<int64_t> dilation; ///< Dilation (per spatial dim)
-    /// Convolution mode (CROSS_CORRELATION or CONVOLUTION)
+    /// Convolution mode (default: CROSS_CORRELATION)
     ConvolutionMode math_mode = ConvolutionMode::CROSS_CORRELATION;
     // NOLINTEND(readability-identifier-naming)
 
@@ -126,10 +133,10 @@ public:
      * @return Reference to this for method chaining
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
-    ConvFpropAttributes& set_padding(std::vector<int64_t> padding)
+    ConvFpropAttributes& set_padding(const std::vector<int64_t>& padding)
     {
         pre_padding = padding;
-        post_padding = std::move(padding);
+        post_padding = padding;
         return *this;
     }
 

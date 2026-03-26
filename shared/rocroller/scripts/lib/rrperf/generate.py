@@ -8,7 +8,6 @@ import os
 import subprocess
 from itertools import chain
 from pathlib import Path
-from typing import Dict
 
 import rrperf
 from rrperf.utils import sjoin
@@ -19,7 +18,7 @@ def generate_kernels(
     architecture: str,
     build_dir: Path,
     work_dir: Path,
-    env: Dict[str, str],
+    env: dict[str, str],
     id_filter: list[str],
 ) -> bool:
 

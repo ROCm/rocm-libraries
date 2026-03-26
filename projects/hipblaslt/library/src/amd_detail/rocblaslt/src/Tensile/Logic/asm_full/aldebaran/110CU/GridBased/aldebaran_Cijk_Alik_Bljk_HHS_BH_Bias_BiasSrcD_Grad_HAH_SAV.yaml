@@ -64,7 +64,7 @@
   UseScaleAlphaVec: 1
 - - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: 1
+    ActivationFuncCall: true
     ActivationFused: true
     AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
@@ -78,15 +78,15 @@
     CustomKernelName: ''
     DepthU: 32
     DepthULdsDivisor: 1
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprA: false
     DirectToVgprB: false
     EdgeType: ShiftPtr
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: false
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 1
@@ -181,11 +181,11 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 0
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_BiasSrcD_Grad_HAH_MT128x256x32_MI32x32x8x1_SN_AFC1_AF0EM1_GSU1_MIWT2_4
-    SourceSwap: 1
+    SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
     StaggerUStride: 256
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSyncOpt: 0
     StoreVectorWidth: 2
@@ -202,7 +202,7 @@
     TransposeLDS: 1
     UnrollMajorLDSA: true
     UnrollMajorLDSB: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -226,7 +226,7 @@
     allowLRVWforTLUandMI: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: 1
+    ActivationFuncCall: true
     ActivationFused: true
     AssertFree0ElementMultiple: 8
     AssertFree1ElementMultiple: 1
@@ -240,15 +240,15 @@
     CustomKernelName: ''
     DepthU: 32
     DepthULdsDivisor: 1
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprA: false
     DirectToVgprB: false
     EdgeType: ShiftPtr
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: false
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 1
@@ -343,11 +343,11 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 1
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_BiasSrcD_Grad_HAH_MT128x256x32_MI32x32x8x1_SN_AFC1_AF0EM8_GSU1_MIWT2_4
-    SourceSwap: 1
+    SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
     StaggerUStride: 256
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSyncOpt: 0
     StoreVectorWidth: 2
@@ -364,7 +364,7 @@
     TransposeLDS: 1
     UnrollMajorLDSA: true
     UnrollMajorLDSB: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true

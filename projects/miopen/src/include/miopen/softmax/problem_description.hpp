@@ -1,33 +1,15 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include <miopen/config.h>
+#if MIOPEN_ENABLE_SQLITE
+#include <miopen/sqlite_db.hpp>
+#endif
 #include <miopen/problem_description_base.hpp>
 #include <miopen/tensor.hpp>
+#include <miopen/mlo_internal.hpp>
 
 namespace miopen {
 
@@ -35,7 +17,16 @@ struct NetworkConfig;
 
 namespace softmax {
 
-struct ProblemDescription : ProblemDescriptionBase
+struct ProblemDescriptionTag
+{
+};
+
+struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
+                                                    ProblemDescriptionTag
+#if MIOPEN_ENABLE_SQLITE
+    ,
+                                                    SQLiteSerializable<ProblemDescription>
+#endif
 {
     // softmax forward constructor
     ProblemDescription(const void* alpha_,
@@ -110,7 +101,43 @@ struct ProblemDescription : ProblemDescriptionBase
     const TensorDescriptor& GetdYDesc() const { return dyDesc; }
     const TensorDescriptor& GetdXDesc() const { return xdxDesc; }
 
+    void Serialize(std::ostream& stream) const { stream << MakeNetworkConfig().ToString(); }
+
     NetworkConfig MakeNetworkConfig() const override;
+
+    template <class Self>
+    static void Visit(Self&& self, std::function<void(int64_t, std::string)> f)
+    {
+        // The column names match the driver command line argument names
+        f(static_cast<uint64_t>(self.isForward), "forw");
+        f(self.GetBatchSize(), "batchsize");
+        f(self.GetChannels(), "in_channels");
+        f(self.GetHeight(), "in_h");
+        f(self.GetWidth(), "in_w");
+        f(static_cast<uint64_t>(self.algorithm), "algorithm");
+        f(static_cast<uint64_t>(self.mode), "mode");
+    }
+
+    template <class Self>
+    static void Visit(Self&& self, std::function<void(std::string, std::string)> f)
+    {
+        f(GetDataTypeName(self.yDesc.GetType()), "data_type");
+        f(self.GetLayout(), "layout");
+    }
+
+    template <class Self, class Visitor>
+    static void VisitAll(Self&& self, const Visitor& f)
+    {
+        Visit(std::forward<Self>(self), [&](int64_t value, std::string name) { f(value, name); });
+        Visit(std::forward<Self>(self),
+              [&](std::string value, std::string name) { f(value, name); });
+    }
+
+    // This declaration marks softmax as a primitive with tuning enabled.
+    // Any tunable solver would be able pick it and fetch a db instance in ExecutePrimitive.
+    // It has to be discoverable via ADL from problem description.
+    friend auto GetDb(const ExecutionContext& context,
+                      const ProblemDescriptionTag&) -> PerformanceDb;
 
 private:
     void CheckAndAssignAlphaBeta(const void* alpha_, const void* beta_)
@@ -141,6 +168,12 @@ private:
 
     const miopenSoftmaxAlgorithm_t algorithm;
     const miopenSoftmaxMode_t mode;
+
+    std::size_t GetBatchSize() const { return yDesc.GetLengths()[0]; }
+    std::size_t GetChannels() const { return yDesc.GetLengths()[1]; }
+    std::size_t GetHeight() const { return yDesc.GetLengths()[2]; }
+    std::size_t GetWidth() const { return yDesc.GetLengths()[3]; }
+    std::string GetLayout() const { return yDesc.GetLayout_str(); }
 };
 
 } // namespace softmax

@@ -32,11 +32,23 @@ extern int                    mp_ranks;
 static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {256},
     {256, 256},
+    {256, 1},
+    {1, 256},
     {256, 256, 256},
+    {256, 256, 1},
+    {256, 1, 256},
+    {1, 256, 256},
+    {256, 1, 1},
+    {1, 1, 256},
+    {1, 256, 1},
 };
 static const std::vector<size_t>        multi_gpu_batch_range = {4, 1};
 static std::vector<std::vector<size_t>> ioffset_range_zero    = {{0, 0}};
 static std::vector<std::vector<size_t>> ooffset_range_zero    = {{0, 0}};
+
+// Limit local device testing to 16 GPUs, as we have some bottlenecks with
+// larger device counts that unreasonably slow down plan creation
+static constexpr int max_num_gpus_per_rank = 16;
 
 enum SplitType
 {
@@ -69,11 +81,7 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
         {
             throw std::runtime_error("hipGetDeviceCount failed");
         }
-
-        // Limit local device testing to 16 GPUs, as we have some
-        // bottlenecks with larger device counts that unreasonably slow
-        // down plan creation
-        gpusperrank = std::min<int>(16, gpusperrank);
+        gpusperrank = std::min<int>(max_num_gpus_per_rank, gpusperrank);
     }
     else
     {
@@ -116,6 +124,7 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
     std::vector<fft_params> all_params;
 
     auto distribute_params = [=, &all_params](const std::vector<fft_params>& params) {
+        static std::ranlux24_base gen(random_seed);
         for(auto& p : params)
         {
             // start with all-ones in grids
@@ -123,7 +132,6 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
             std::vector<unsigned int>          output_grid(p.length.size() + 1, 1);
             int                                start_global_dev_id_input  = 0;
             int                                start_global_dev_id_output = 0;
-            static std::ranlux24_base          gen(random_seed);
             std::uniform_int_distribution<int> dev_rng(0, total_num_devices);
 
             auto p_dist = p;
@@ -218,6 +226,15 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
             default:
                 throw std::invalid_argument("param_generator_multi_gpu: unkonwn split type");
             }
+
+            bool too_short_lengths = false;
+            for(size_t dim = 0; !too_short_lengths && dim < p.length.size(); dim++)
+                too_short_lengths
+                    |= p.length[dim] < input_grid[dim + 1] || p.length[dim] < output_grid[dim + 1];
+            if(too_short_lengths)
+                continue;
+            if(mp_lib == fft_params::fft_mp_lib_mpi && p_dist.is_real() && p.length.back() == 1)
+                continue; // known issues to fix in mpi_worker.h
 
             p_dist.mp_lib = mp_lib;
             p_dist.distribute_field<fft_io::fft_io_in>(
@@ -404,8 +421,10 @@ static const auto multi_gpu_tokens = {
     // 3D multi-process out-of-place transform using 2 MPI ranks each with 2 GPUs
     "complex_forward_len_256_256_256_double_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_64_256_256_stride_4194304_65536_256_1_dev_0_brick_lower_0_64_0_0_upper_1_128_256_256_stride_4194304_65536_256_1_rank_0_dev_1_brick_lower_0_128_0_0_upper_1_192_256_256_stride_4194304_65536_256_1_rank_1_dev_2_brick_lower_0_192_0_0_upper_1_256_256_256_stride_4194304_65536_256_1_rank_1_dev_3_ofield_brick_lower_0_0_0_0_upper_1_256_256_64_stride_4194304_16384_64_1_dev_0_brick_lower_0_0_0_64_upper_1_256_256_128_stride_4194304_16384_64_1_rank_0_dev_1_brick_lower_0_0_0_128_upper_1_256_256_192_stride_4194304_16384_64_1_rank_1_dev_2_brick_lower_0_0_0_192_upper_1_256_256_256_stride_4194304_16384_64_1_rank_1_dev_3",
     // 3D multi-process batched in-place transform using 2 MPI ranks each with 2 GPUs
-    "complex_forward_len_128_300_256_single_op_batch_4_ifield_brick_lower_0_0_0_0_upper_4_32_300_256_stride_2457600_76800_256_1_dev_0_brick_lower_0_32_0_0_upper_4_64_300_256_stride_2457600_76800_256_1_rank_1_dev_1_brick_lower_0_64_0_0_upper_4_96_300_256_stride_2457600_76800_256_1_rank_0_dev_2_brick_lower_0_96_0_0_upper_4_128_300_256_stride_2457600_76800_256_1_rank_1_dev_3_ofield_brick_lower_0_0_0_0_upper_4_128_300_64_stride_2457600_19200_64_1_dev_0_brick_lower_0_0_0_64_upper_4_128_300_128_stride_2457600_19200_64_1_rank_1_dev_1_brick_lower_0_0_0_128_upper_4_128_300_192_stride_2457600_19200_64_1_rank_0_dev_2_brick_lower_0_0_0_192_upper_4_128_300_256_stride_2457600_19200_64_1_rank_1_dev_3 ",
+    "complex_forward_len_128_300_256_single_op_batch_4_ifield_brick_lower_0_0_0_0_upper_4_32_300_256_stride_2457600_76800_256_1_dev_0_brick_lower_0_32_0_0_upper_4_64_300_256_stride_2457600_76800_256_1_rank_1_dev_1_brick_lower_0_64_0_0_upper_4_96_300_256_stride_2457600_76800_256_1_rank_0_dev_2_brick_lower_0_96_0_0_upper_4_128_300_256_stride_2457600_76800_256_1_rank_1_dev_3_ofield_brick_lower_0_0_0_0_upper_4_128_300_64_stride_2457600_19200_64_1_dev_0_brick_lower_0_0_0_64_upper_4_128_300_128_stride_2457600_19200_64_1_rank_1_dev_1_brick_lower_0_0_0_128_upper_4_128_300_192_stride_2457600_19200_64_1_rank_0_dev_2_brick_lower_0_0_0_192_upper_4_128_300_256_stride_2457600_19200_64_1_rank_1_dev_3",
 
+    // 2D, 2-device out-of-place transform where both devices require work memory
+    "complex_forward_len_8_65536_8_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_8_32768_8_stride_2097152_262144_8_1_dev_0_brick_lower_0_0_32768_0_upper_1_8_65536_8_stride_2097152_262144_8_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_8_65536_4_stride_2097152_262144_4_1_dev_0_brick_lower_0_0_0_4_upper_1_8_65536_8_stride_2097152_262144_4_1_dev_1",
     // clang-format on
 };
 
@@ -420,10 +439,7 @@ std::vector<fft_params> param_generator_multi_gpu_adhoc()
             throw std::runtime_error("hipGetDeviceCount failed");
         }
 
-        // Limit local device testing to 16 GPUs, as we have some
-        // bottlenecks with larger device counts that unreasonably slow
-        // down plan creation
-        localDeviceCount = std::min<int>(16, localDeviceCount);
+        localDeviceCount = std::min<int>(max_num_gpus_per_rank, localDeviceCount);
     }
     else
     {
@@ -488,4 +504,188 @@ std::vector<fft_params> param_generator_multi_gpu_adhoc()
 INSTANTIATE_TEST_SUITE_P(multi_gpu_adhoc_token,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_multi_gpu_adhoc()),
+                         accuracy_test::TestName);
+
+std::vector<fft_params> param_generator_some_continuous_brick()
+{
+    int gpusperrank = 0;
+    if(ngpus <= 0)
+    {
+        // Use the command-line option as a priority
+        if(hipGetDeviceCount(&gpusperrank) != hipSuccess)
+        {
+            throw std::runtime_error("hipGetDeviceCount failed");
+        }
+        gpusperrank = std::min<int>(max_num_gpus_per_rank, gpusperrank);
+    }
+    else
+    {
+        gpusperrank = ngpus;
+    }
+
+    if(mp_lib == fft_params::fft_mp_lib_none && mp_ranks != 1)
+        throw std::runtime_error("Unexpected value of mp_ranks (" + std::to_string(mp_ranks)
+                                 + ") without a multi-process library.");
+    if(mp_ranks < 0 || gpusperrank < 0)
+        return {}; // underflow protection
+
+    const size_t     total_num_devices  = mp_ranks * gpusperrank;
+    constexpr size_t min_slow_axis_ncut = 2;
+    // need at least min_slow_axis_ncut + 1 devices
+    if(total_num_devices < min_slow_axis_ncut + 1)
+        return {};
+
+    std::vector<fft_params> params = param_generator_base(test_prob,
+                                                          trans_type_range_full,
+                                                          multi_gpu_sizes,
+                                                          precision_range_sp_dp,
+                                                          multi_gpu_batch_range,
+                                                          generate_types,
+                                                          stride_generator({{1}}),
+                                                          stride_generator({{1}}),
+                                                          ioffset_range_zero,
+                                                          ooffset_range_zero,
+                                                          place_range,
+                                                          false /* : planar */);
+
+    auto get_full_range = [](const fft_params& p, fft_io io) {
+        auto ret = io == fft_io::fft_io_in ? p.ilength() : p.olength();
+        ret.insert(ret.begin(), p.nbatch);
+        return ret;
+    };
+    auto get_full_strides = [](const fft_params& p, fft_io io) {
+        auto ret  = default_strides(p.transform_type, p.placement, io, p.length);
+        auto dist = default_distance(p.transform_type, p.placement, io, p.length, p.nbatch);
+        ret.insert(ret.begin(), dist);
+        return ret;
+    };
+    static std::ranlux24_base gen(random_seed);
+
+    const size_t slowest_axis_ncut = std::max(min_slow_axis_ncut, total_num_devices / 2);
+    for(auto p = params.begin(); p != params.end();)
+    {
+        if((p->nbatch != 1 && p->nbatch < slowest_axis_ncut)
+           || (p->nbatch == 1 && p->length[0] < slowest_axis_ncut)
+           || p->length.back() < (total_num_devices - slowest_axis_ncut))
+        {
+            // no can do with this one
+            p = params.erase(p);
+            continue;
+        }
+        const size_t slowest_brick_axis = p->nbatch == 1 ? 1 : 0;
+        if(slowest_brick_axis == p->dim())
+        {
+            // too few dimensions
+            p = params.erase(p);
+            continue;
+        }
+        // initialize field size and bricks
+        for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
+        {
+            auto& fields = io == fft_io::fft_io_in ? p->ifields : p->ofields;
+            fields.resize(1);
+            fields[0].bricks.clear();
+        }
+        // make slowest_axis_ncut bricks cutting the slowest axis in the layout
+        for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
+        {
+            auto& bricks = io == fft_io::fft_io_in ? p->ifields[0].bricks : p->ofields[0].bricks;
+            const auto full_range   = get_full_range(*p, io);
+            const auto full_strides = get_full_strides(*p, io);
+            for(size_t b_idx = 0; b_idx < slowest_axis_ncut; b_idx++)
+            {
+                fft_params::fft_brick brick;
+                brick.lower.resize(p->dim() + 1);
+                brick.upper.resize(p->dim() + 1);
+                brick.stride.resize(p->dim() + 1);
+                for(size_t axis = p->dim() + 1; axis-- > 0;)
+                {
+                    if(axis == slowest_brick_axis)
+                    {
+                        brick.lower[axis] = b_idx * (full_range[axis] / slowest_axis_ncut);
+                        brick.upper[axis]
+                            = b_idx < slowest_axis_ncut - 1
+                                  ? (b_idx + 1) * (full_range[axis] / slowest_axis_ncut)
+                                  : full_range[axis];
+                    }
+                    else
+                    {
+                        brick.lower[axis] = 0;
+                        brick.upper[axis] = full_range[axis];
+                    }
+                    if(axis > slowest_brick_axis)
+                        brick.stride[axis] = full_strides[axis];
+                    else
+                        brick.stride[axis] = brick.stride[axis + 1]
+                                             * (brick.upper[axis + 1] - brick.lower[axis + 1]);
+                }
+                bricks.emplace_back(brick);
+            }
+            // randomly pick one of the bricks created so far as one that we won't divide anymore
+            std::uniform_int_distribution<size_t> dev_rng(0, slowest_axis_ncut - 1);
+            const auto                            const_brick_idx = dev_rng(gen);
+            while(bricks.size() < total_num_devices)
+            {
+                std::uniform_int_distribution<size_t> rnd(0, bricks.size() - 1);
+
+                size_t split_brick_idx = rnd(gen);
+                while(split_brick_idx == const_brick_idx)
+                    split_brick_idx = rnd(gen);
+                auto& split_brick = bricks[split_brick_idx];
+                if(split_brick.upper.back() - split_brick.lower.back() <= 1)
+                {
+                    if(verbose)
+                        std::cout << "Unexpected small last-axis length encountered in "
+                                     "param_generator_some_continuous_brick"
+                                  << std::endl;
+                    break;
+                }
+                // split bricks along the last axis, start with a simple copy
+                auto other_half = split_brick;
+                split_brick.upper.back()
+                    = split_brick.lower.back()
+                      + (split_brick.upper.back() - split_brick.lower.back()) / 2;
+                other_half.lower.back() = split_brick.upper.back();
+                // reset each split brick's strides to be contiguous
+                split_brick.stride.back() = 1;
+                other_half.stride.back()  = 1;
+                for(size_t axis = p->dim(); axis-- > 0;)
+                {
+                    split_brick.stride[axis]
+                        = split_brick.stride[axis + 1]
+                          * (split_brick.upper[axis + 1] - split_brick.lower[axis + 1]);
+                    other_half.stride[axis]
+                        = other_half.stride[axis + 1]
+                          * (other_half.upper[axis + 1] - other_half.lower[axis + 1]);
+                }
+                bricks.emplace_back(other_half);
+            }
+        }
+        if(p->ifields.size() != 1 || p->ifields[0].bricks.size() != total_num_devices
+           || p->ofields.size() != 1 || p->ofields[0].bricks.size() != total_num_devices)
+        {
+            // unexpected issue encountered while splitting
+            p = params.erase(p);
+            continue;
+        }
+        // assign ranks and devices, cycle through ranks first to make sure
+        // all processes have something to do
+        for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
+        {
+            auto& bricks = io == fft_io::fft_io_in ? p->ifields[0].bricks : p->ofields[0].bricks;
+            for(size_t b_idx = 0; b_idx < bricks.size(); b_idx++)
+            {
+                bricks[b_idx].rank   = b_idx % mp_ranks;
+                bricks[b_idx].device = (b_idx / mp_ranks) % gpusperrank;
+            }
+        }
+        p->mp_lib = mp_lib;
+        p++;
+    }
+    return params;
+}
+
+INSTANTIATE_TEST_SUITE_P(multi_gpu_some_continuous_brick,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_some_continuous_brick()),
                          accuracy_test::TestName);
