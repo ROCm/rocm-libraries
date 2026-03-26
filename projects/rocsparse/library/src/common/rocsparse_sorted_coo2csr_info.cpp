@@ -40,6 +40,7 @@ rocsparse::sorted_coo2csr_info_t::sorted_coo2csr_info_t(int64_t             num_
     const size_t num_bytes
         = rocsparse::indextype_sizeof(this->m_row_ptr_indextype) * (this->m_num_rows + 1);
     THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&this->m_row_ptr, num_bytes, stream));
+    THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
 }
 
 hipError_t rocsparse::sorted_coo2csr_info_t::free_memory(hipStream_t stream)
