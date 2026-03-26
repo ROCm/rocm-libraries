@@ -14,7 +14,7 @@ Documentation for rocSPARSE is available at
 
 ### Removed
 
-* The deprecated C++14 support, which is no longer supported by rocPRIM.
+* The deprecated C++14 support, which is no longer supported by the rocPRIM dependency.
 
 ## rocSPARSE 4.5.0 for ROCm 7.12.0
 
