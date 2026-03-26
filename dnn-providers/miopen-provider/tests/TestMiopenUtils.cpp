@@ -111,6 +111,50 @@ TEST(TestMiopenUtils, GetSpatialDimCountThrowsOnInvalidDims)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+TEST(TestMiopenUtils, CreateBatchnormTensor4dPassthrough)
+{
+    // 4D NCHW tensor should pass through unchanged
+    std::vector<int64_t> dims = {2, 3, 14, 14};
+    std::vector<int64_t> strides = {588, 196, 14, 1};
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 42, "", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims);
+    builder.Finish(attrOffset);
+
+    auto attrPtr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
+        builder.GetBufferPointer());
+
+    auto tensorMap
+        = std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>{
+            {42, attrPtr}};
+
+    auto result = miopen_utils::createBatchnormTensor(tensorMap, 42);
+
+    EXPECT_EQ(result.uid(), 42);
+
+    // Verify tensor is unchanged (4D with exact dims/strides)
+    int numDims = 0;
+    miopenGetTensorDescriptorSize(result.tensorDescriptor(), &numDims);
+    ASSERT_EQ(numDims, 4);
+
+    std::vector<int> resultDims(4);
+    std::vector<int> resultStrides(4);
+    miopenDataType_t dataType;
+    miopenGetTensorDescriptor(
+        result.tensorDescriptor(), &dataType, resultDims.data(), resultStrides.data());
+
+    EXPECT_EQ(resultDims[0], 2);
+    EXPECT_EQ(resultDims[1], 3);
+    EXPECT_EQ(resultDims[2], 14);
+    EXPECT_EQ(resultDims[3], 14);
+
+    EXPECT_EQ(resultStrides[0], 588);
+    EXPECT_EQ(resultStrides[1], 196);
+    EXPECT_EQ(resultStrides[2], 14);
+    EXPECT_EQ(resultStrides[3], 1);
+}
+
 TEST(TestMiopenUtils, CreateBatchnormTensor5dPassthrough)
 {
     // 5D NCDHW tensor should pass through unchanged
