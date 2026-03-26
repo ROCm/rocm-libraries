@@ -3,6 +3,7 @@
 
 #include "Helpers.hpp"
 
+#include <cmath>
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/types.hpp>
@@ -32,6 +33,20 @@ void makeTensorsEqual(T& tensor1, T& tensor2)
 TEST(TestCpuFpReferenceValidation, NegativeToleranceThrows)
 {
     EXPECT_THROW(const CpuFpReferenceValidation<float> refValidation(-1e-5f),
+                 std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceValidation, NaNToleranceThrows)
+{
+    EXPECT_THROW(const CpuFpReferenceValidation<float> refValidation(
+                     std::numeric_limits<float>::quiet_NaN()),
+                 std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceValidation, InfToleranceThrows)
+{
+    EXPECT_THROW(const CpuFpReferenceValidation<float> refValidation(
+                     0.0f, std::numeric_limits<float>::infinity()),
                  std::invalid_argument);
 }
 
@@ -574,6 +589,188 @@ TEST(TestCpuIntReferenceValidation, TensorSameElementCountDifferentDims)
     // Should return false because dimensions don't match
     // even though element counts are the same
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+/* ================================================= */
+
+/* ======== NaN/Inf detection tests (TYPED_TEST across fp types) ======== */
+
+template <typename T>
+class CpuFpReferenceValidationNanInf : public ::testing::Test
+{
+};
+
+using FpValidationTypes = ::testing::Types<float, double, half, bfloat16>;
+TYPED_TEST_SUITE(CpuFpReferenceValidationNanInf, FpValidationTypes, );
+
+TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenReferenceHasNaN)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenImplementationHasNaN)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor2.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenBothHaveNaN)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillWithSentinelValue();
+    tensor2.fillWithSentinelValue();
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenReferenceHasInf)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenImplementationHasNegativeInf)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor2.setHostValue(-std::numeric_limits<TypeParam>::infinity(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceValidationNanInf, FailsWhenBothHaveInf)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0);
+    tensor2.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceValidationNanInf, PassesForFiniteValues)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}
+
+/* ================================================= */
+
+/* ======== Integer sentinel detection tests (TYPED_TEST across int types) ======== */
+
+template <typename T>
+class CpuIntReferenceValidationSentinel : public ::testing::Test
+{
+};
+
+using IntValidationTypes = ::testing::Types<int32_t, int8_t, uint8_t>;
+TYPED_TEST_SUITE(CpuIntReferenceValidationSentinel, IntValidationTypes, );
+
+TYPED_TEST(CpuIntReferenceValidationSentinel, FailsWhenReferenceHasSentinel)
+{
+    const CpuIntReferenceValidation<TypeParam> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1);
+    tensor2.fillTensorWithValue(1);
+
+    tensor1.setHostValue(std::numeric_limits<TypeParam>::max(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuIntReferenceValidationSentinel, FailsWhenImplementationHasSentinel)
+{
+    const CpuIntReferenceValidation<TypeParam> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1);
+    tensor2.fillTensorWithValue(1);
+
+    tensor2.setHostValue(std::numeric_limits<TypeParam>::max(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuIntReferenceValidationSentinel, FailsWhenBothHaveSentinel)
+{
+    const CpuIntReferenceValidation<TypeParam> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillWithSentinelValue();
+    tensor2.fillWithSentinelValue();
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuIntReferenceValidationSentinel, PassesForNonSentinelValues)
+{
+    const CpuIntReferenceValidation<TypeParam> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1);
+    tensor2.fillTensorWithValue(1);
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
 
 /* ================================================= */

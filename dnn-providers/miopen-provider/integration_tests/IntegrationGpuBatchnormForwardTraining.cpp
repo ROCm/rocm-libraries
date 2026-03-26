@@ -201,6 +201,9 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
+        // Fill output tensors with sentinel values
+        bundle.sentinelFillOutputTensors();
+
         // Note: Epsilon and momentum are pass-by-value (set via set_value()), not buffers
 
         // X input: default range
@@ -213,31 +216,20 @@ protected:
         bundle.tensors.at(BatchnormFwdTrainingTensorIds::BIAS_UID)
             ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 2);
 
-        // Running mean: prev and next must start with SAME values
-        // because MIOpen's API uses IN/OUT parameter semantics
+        // Running mean: only initialize PREV (input), leave NEXT (output) with sentinel
         if(bundle.tensors.find(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID)
-               != bundle.tensors.end()
-           && bundle.tensors.find(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_MEAN_UID)
-                  != bundle.tensors.end())
+           != bundle.tensors.end())
         {
-            unsigned runningMeanSeed = seed + 1000;
             bundle.tensors.at(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID)
-                ->fillTensorWithRandomValues(-2.0f, 2.0f, runningMeanSeed);
-            bundle.tensors.at(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_MEAN_UID)
-                ->fillTensorWithRandomValues(-2.0f, 2.0f, runningMeanSeed);
+                ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 1000);
         }
 
-        // Running variance: prev and next must start with SAME values
+        // Running variance: only initialize PREV (input), leave NEXT (output) with sentinel
         if(bundle.tensors.find(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID)
-               != bundle.tensors.end()
-           && bundle.tensors.find(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_VARIANCE_UID)
-                  != bundle.tensors.end())
+           != bundle.tensors.end())
         {
-            unsigned runningVarianceSeed = seed + 2000;
             bundle.tensors.at(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID)
-                ->fillTensorWithRandomValues(-2.0f, 2.0f, runningVarianceSeed);
-            bundle.tensors.at(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_VARIANCE_UID)
-                ->fillTensorWithRandomValues(-2.0f, 2.0f, runningVarianceSeed);
+                ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 2000);
         }
     }
 };

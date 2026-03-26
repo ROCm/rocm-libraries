@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
@@ -69,6 +70,7 @@ private:
             if(attr->virtual_() && updatedVariantPack.find(id) == updatedVariantPack.end())
             {
                 auto tensor = detail::createTensorFromAttribute(*attr);
+                tensor->fillWithSentinelValue();
                 virtualTensors.push_back(std::move(tensor));
                 updatedVariantPack[id] = virtualTensors.back()->rawHostData();
             }

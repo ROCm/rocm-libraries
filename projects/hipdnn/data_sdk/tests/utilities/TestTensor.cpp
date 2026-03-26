@@ -1,12 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cmath>
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_data_sdk::types;
 
 TEST(TestTensor, Swap)
 {
@@ -605,4 +608,66 @@ TEST(TestTensor, SparseTensorCreationAndUsage)
     EXPECT_EQ(tensor.getIndex(0, 0, 1, 0), 8);
     EXPECT_EQ(tensor.getIndex(0, 0, 0, 1), 16);
     EXPECT_EQ(tensor.getIndex(1, 1, 1, 1), 30);
+}
+
+/* ======== fillWithSentinelValue tests ======== */
+
+template <typename T>
+class TensorSentinel : public ::testing::Test
+{
+};
+
+using SentinelTypes = ::testing::Types<float,
+                                       double,
+                                       half,
+                                       bfloat16,
+                                       hipdnn_data_sdk::types::fp8_e4m3,
+                                       hipdnn_data_sdk::types::fp8_e5m2,
+                                       int8_t,
+                                       uint8_t,
+                                       int32_t>;
+
+TYPED_TEST_SUITE(TensorSentinel, SentinelTypes, );
+
+TYPED_TEST(TensorSentinel, PackedTensorFilled)
+{
+    using hipdnn_data_sdk::types::isnan;
+    Tensor<TypeParam> tensor({2, 3});
+    tensor.fillWithSentinelValue();
+
+    for(auto valuePtr : tensor)
+    {
+        auto value = *static_cast<TypeParam*>(valuePtr);
+        if constexpr(std::numeric_limits<TypeParam>::has_quiet_NaN)
+        {
+            EXPECT_TRUE(isnan(value));
+        }
+        else
+        {
+            EXPECT_EQ(value, std::numeric_limits<TypeParam>::max());
+        }
+    }
+}
+
+TYPED_TEST(TensorSentinel, StridedTensorFilled)
+{
+    using hipdnn_data_sdk::types::isnan;
+    const std::vector<int64_t> dims = {2, 2, 2};
+    const std::vector<int64_t> strides = {2, 4, 8};
+
+    Tensor<TypeParam> tensor(dims, strides);
+    tensor.fillWithSentinelValue();
+
+    for(auto valuePtr : tensor)
+    {
+        auto value = *static_cast<TypeParam*>(valuePtr);
+        if constexpr(std::numeric_limits<TypeParam>::has_quiet_NaN)
+        {
+            EXPECT_TRUE(isnan(value));
+        }
+        else
+        {
+            EXPECT_EQ(value, std::numeric_limits<TypeParam>::max());
+        }
+    }
 }
