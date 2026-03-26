@@ -467,11 +467,8 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(epsilonScoped.getPtr()));
     ASSERT_EQ(epsilonCount, 1);
     ASSERT_NE(epsilonScoped.get(), nullptr);
-    verifyTensorDescriptor(epsilonScoped.get(),
-                           K_RMSNORM_TENSOR_EPSILON_UID,
-                           HIPDNN_DATA_FLOAT,
-                           {1},
-                           {1});
+    verifyTensorDescriptor(
+        epsilonScoped.get(), K_RMSNORM_TENSOR_EPSILON_UID, HIPDNN_DATA_FLOAT, {1}, {1});
 
     // Verify y tensor
     hipdnn_backend::ScopedDescriptor yScoped;
