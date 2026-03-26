@@ -593,4 +593,8 @@ TEST_F(TestBatchnormBackwardOperationFromNode, GetTensorDescriptorsReturnsAllTen
     EXPECT_EQ(tensors[3]->getData().uid, K_BN_BWD_TENSOR_DX_UID);
     EXPECT_EQ(tensors[4]->getData().uid, K_BN_BWD_TENSOR_DSCALE_UID);
     EXPECT_EQ(tensors[5]->getData().uid, K_BN_BWD_TENSOR_DBIAS_UID);
+    EXPECT_EQ(tensors[6]->getData().uid, K_BN_BWD_TENSOR_MEAN_UID);
+    EXPECT_EQ(tensors[7]->getData().uid, K_BN_BWD_TENSOR_INV_VARIANCE_UID);
+    EXPECT_EQ(tensors[8]->getData().uid, K_BN_BWD_TENSOR_PEER_STAT_0_UID);
+    EXPECT_EQ(tensors[9]->getData().uid, K_BN_BWD_TENSOR_PEER_STAT_1_UID);
 }

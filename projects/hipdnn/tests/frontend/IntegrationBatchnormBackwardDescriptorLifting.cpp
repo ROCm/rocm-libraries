@@ -114,6 +114,71 @@ protected:
         return graph;
     }
 
+    // Builds a batchnorm backward graph with peer_stats tensors for distributed testing
+    static std::shared_ptr<TestableGraph> buildBatchnormBackwardGraphWithPeerStats()
+    {
+        auto graph = std::make_shared<TestableGraph>();
+        graph->set_name("BnBwdPeerStatsLiftingTestGraph")
+            .set_compute_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_io_data_type(DataType::FLOAT);
+
+        auto dy = std::make_shared<TensorAttributes>();
+        dy->set_uid(K_BN_BWD_INTEG_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
+        dy->set_dim(toVec(K_BN_BWD_INTEG_DATA_DIMS)).set_stride(toVec(K_BN_BWD_INTEG_DATA_STRIDES));
+
+        auto x = std::make_shared<TensorAttributes>();
+        x->set_uid(K_BN_BWD_INTEG_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+        x->set_dim(toVec(K_BN_BWD_INTEG_DATA_DIMS)).set_stride(toVec(K_BN_BWD_INTEG_DATA_STRIDES));
+
+        auto scale = std::make_shared<TensorAttributes>();
+        scale->set_uid(K_BN_BWD_INTEG_TENSOR_SCALE_UID)
+            .set_name("Scale")
+            .set_data_type(DataType::FLOAT);
+        scale->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
+            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+
+        auto mean = std::make_shared<TensorAttributes>();
+        mean->set_uid(K_BN_BWD_INTEG_TENSOR_MEAN_UID)
+            .set_name("Mean")
+            .set_data_type(DataType::FLOAT);
+        mean->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
+            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+
+        auto invVar = std::make_shared<TensorAttributes>();
+        invVar->set_uid(K_BN_BWD_INTEG_TENSOR_INV_VARIANCE_UID)
+            .set_name("InvVariance")
+            .set_data_type(DataType::FLOAT);
+        invVar->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
+            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+
+        auto peerStat0 = std::make_shared<TensorAttributes>();
+        peerStat0->set_uid(K_BN_BWD_INTEG_TENSOR_PEER_STAT_0_UID)
+            .set_name("PeerStat0")
+            .set_data_type(DataType::FLOAT);
+        peerStat0->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
+            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+
+        auto peerStat1 = std::make_shared<TensorAttributes>();
+        peerStat1->set_uid(K_BN_BWD_INTEG_TENSOR_PEER_STAT_1_UID)
+            .set_name("PeerStat1")
+            .set_data_type(DataType::FLOAT);
+        peerStat1->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
+            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+
+        BatchnormBackwardAttributes bnBwdAttrs;
+        bnBwdAttrs.set_name("bn_bwd_peer_stats_op");
+        bnBwdAttrs.set_saved_mean_and_inv_variance(mean, invVar);
+        bnBwdAttrs.set_peer_stats({peerStat0, peerStat1});
+
+        auto [dxOut, dscaleOut, dbiasOut] = graph->batchnorm_backward(dy, x, scale, bnBwdAttrs);
+        dxOut->set_uid(K_BN_BWD_INTEG_TENSOR_DX_UID).set_output(true).set_name("DX");
+        dscaleOut->set_uid(K_BN_BWD_INTEG_TENSOR_DSCALE_UID).set_output(true).set_name("DScale");
+        dbiasOut->set_uid(K_BN_BWD_INTEG_TENSOR_DBIAS_UID).set_output(true).set_name("DBias");
+
+        return graph;
+    }
+
     // Builds a minimal batchnorm backward graph (no optional mean/invVariance)
     static std::shared_ptr<TestableGraph> buildMinimalBatchnormBackwardGraph()
     {
@@ -414,6 +479,66 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting,
     EXPECT_NE(bnBwdNode->attributes.get_dbias(), nullptr);
     EXPECT_EQ(bnBwdNode->attributes.get_mean(), nullptr);
     EXPECT_EQ(bnBwdNode->attributes.get_inv_variance(), nullptr);
+}
+
+// Builds a batchnorm backward graph with peer_stats tensors, performs a full round-trip,
+// and verifies peer_stats appear in the lifted tensor map and node attributes.
+TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardPeerStatsPreserved)
+{
+    auto originalGraph = buildBatchnormBackwardGraphWithPeerStats();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = originalGraph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = originalGraph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify tensor map includes the 2 peer_stats tensors (8 base + 2 peer = 10)
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 10u) << "Expected 10 tensors (8 base + 2 peer_stats)";
+
+    // Verify peer_stats tensors appear in the tensor map with correct UIDs, names, dims, strides
+    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_PEER_STAT_0_UID), 0u);
+    auto liftedPeerStat0 = tensorMap[K_BN_BWD_INTEG_TENSOR_PEER_STAT_0_UID];
+    EXPECT_EQ(liftedPeerStat0->get_uid(), K_BN_BWD_INTEG_TENSOR_PEER_STAT_0_UID);
+    EXPECT_EQ(liftedPeerStat0->get_name(), "PeerStat0");
+    EXPECT_EQ(liftedPeerStat0->get_dim(), toVec(K_BN_BWD_INTEG_PARAM_DIMS));
+    EXPECT_EQ(liftedPeerStat0->get_stride(), toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(liftedPeerStat0->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_PEER_STAT_1_UID), 0u);
+    auto liftedPeerStat1 = tensorMap[K_BN_BWD_INTEG_TENSOR_PEER_STAT_1_UID];
+    EXPECT_EQ(liftedPeerStat1->get_uid(), K_BN_BWD_INTEG_TENSOR_PEER_STAT_1_UID);
+    EXPECT_EQ(liftedPeerStat1->get_name(), "PeerStat1");
+    EXPECT_EQ(liftedPeerStat1->get_dim(), toVec(K_BN_BWD_INTEG_PARAM_DIMS));
+    EXPECT_EQ(liftedPeerStat1->get_stride(), toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(liftedPeerStat1->get_data_type(), DataType::FLOAT);
+
+    // Verify the lifted node's attributes reference peer_stats correctly
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* bnBwdNode = dynamic_cast<BatchnormBackwardNode*>(subNodes[0].get());
+    ASSERT_NE(bnBwdNode, nullptr);
+
+    const auto& liftedPeerStats = bnBwdNode->attributes.get_peer_stats();
+    ASSERT_EQ(liftedPeerStats.size(), 2u) << "Expected 2 peer_stats tensors in lifted node";
+
+    EXPECT_EQ(liftedPeerStats[0]->get_uid(), K_BN_BWD_INTEG_TENSOR_PEER_STAT_0_UID);
+    EXPECT_EQ(liftedPeerStats[0]->get_name(), "PeerStat0");
+    EXPECT_EQ(liftedPeerStats[1]->get_uid(), K_BN_BWD_INTEG_TENSOR_PEER_STAT_1_UID);
+    EXPECT_EQ(liftedPeerStats[1]->get_name(), "PeerStat1");
+
+    // Verify pointer equality: peer_stats in node attributes share objects with tensor map
+    EXPECT_EQ(liftedPeerStats[0].get(), liftedPeerStat0.get());
+    EXPECT_EQ(liftedPeerStats[1].get(), liftedPeerStat1.get());
 }
 
 } // namespace
