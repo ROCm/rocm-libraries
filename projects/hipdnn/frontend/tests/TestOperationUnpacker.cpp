@@ -439,7 +439,6 @@ TEST(TestCreateNodeForType, CreatesSdpaBpropNode)
 //     EXPECT_NE(typedNode, nullptr);
 // }
 
-
 TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
 {
     const GraphAttributes graphAttrs;
