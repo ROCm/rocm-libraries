@@ -60,6 +60,9 @@ add_executable(
     descriptors/TestLayernormOperationFromNode.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestPointwiseOperationFromNode.cpp
+    descriptors/TestPoolingFwdOperationDescriptor.cpp
+    descriptors/TestPoolingFwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorPoolingFwd.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestRMSNormOperationFromNode.cpp
     descriptors/TestSdpaBpropOperationDescriptor.cpp

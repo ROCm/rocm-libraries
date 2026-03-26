@@ -105,6 +105,9 @@ typedef enum
     /** @brief Attention implementation mode enumeration (hipdnnAttentionImplementation_t) */
     HIPDNN_TYPE_ATTENTION_IMPLEMENTATION = 27,
 
+    /** @brief Pooling mode enumeration (hipdnnPoolingMode_t) */
+    HIPDNN_TYPE_POOLING_MODE = 28,
+
     /**
      * @name Extension Types
      * hipDNN-specific extension types

@@ -449,4 +449,38 @@ hipdnnNormFwdPhase_t fromSdkNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdP
     }
 }
 
+hipdnn_data_sdk::data_objects::PoolingMode toSdkPoolingMode(hipdnnPoolingMode_t mode)
+{
+    using hipdnn_data_sdk::data_objects::PoolingMode;
+
+    switch(mode)
+    {
+    case HIPDNN_POOLING_MODE_MAX:
+        return PoolingMode::MAX;
+    case HIPDNN_POOLING_MODE_AVERAGE:
+        return PoolingMode::AVERAGE;
+    case HIPDNN_POOLING_MODE_AVERAGE_INCLUSIVE:
+        return PoolingMode::AVERAGE_INCLUSIVE;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnPoolingMode_t value");
+    }
+}
+
+hipdnnPoolingMode_t fromSdkPoolingMode(hipdnn_data_sdk::data_objects::PoolingMode mode)
+{
+    using hipdnn_data_sdk::data_objects::PoolingMode;
+
+    switch(mode)
+    {
+    case PoolingMode::MAX:
+        return HIPDNN_POOLING_MODE_MAX;
+    case PoolingMode::AVERAGE:
+        return HIPDNN_POOLING_MODE_AVERAGE;
+    case PoolingMode::AVERAGE_INCLUSIVE:
+        return HIPDNN_POOLING_MODE_AVERAGE_INCLUSIVE;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK PoolingMode value");
+    }
+}
+
 } // namespace hipdnn_backend

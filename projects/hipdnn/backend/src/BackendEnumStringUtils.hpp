@@ -10,6 +10,7 @@
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
+#include "HipdnnPoolingMode.h"
 #include "HipdnnDataType.h"
 #include "HipdnnDiagonalAlignment.h"
 #include "HipdnnNormFwdPhase.h"
@@ -158,6 +159,8 @@ inline const char* hipdnnGetAttributeTypeString(hipdnnBackendAttributeType_t typ
         return "HIPDNN_TYPE_DIAGONAL_ALIGNMENT";
     case HIPDNN_TYPE_ATTENTION_IMPLEMENTATION:
         return "HIPDNN_TYPE_ATTENTION_IMPLEMENTATION";
+    case HIPDNN_TYPE_POOLING_MODE:
+        return "HIPDNN_TYPE_POOLING_MODE";
 
     default:
         return "HIPDNN_ATTRIBUTE_UNKNOWN";
@@ -228,6 +231,8 @@ inline const char* hipdnnGetBackendDescriptorTypeName(hipdnnBackendDescriptorTyp
         return "HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT";
     case HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT:
         return "HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT";
+    case HIPDNN_BACKEND_OPERATION_POOLING_FORWARD_DESCRIPTOR:
+        return "HIPDNN_BACKEND_OPERATION_POOLING_FORWARD_DESCRIPTOR";
     default:
         return "UNKNOWN_TYPE";
     }
@@ -781,6 +786,27 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
     case HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT:
         return "HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT";
 
+    // Pooling forward operation attributes
+    case HIPDNN_ATTR_OPERATION_POOLING_FORWARD_X:
+        return "HIPDNN_ATTR_OPERATION_POOLING_FORWARD_X";
+    case HIPDNN_ATTR_OPERATION_POOLING_FORWARD_Y:
+        return "HIPDNN_ATTR_OPERATION_POOLING_FORWARD_Y";
+
+    // Shared pooling descriptor attributes
+    case HIPDNN_ATTR_POOLING_COMP_TYPE:
+        return "HIPDNN_ATTR_POOLING_COMP_TYPE";
+    case HIPDNN_ATTR_POOLING_MODE:
+        return "HIPDNN_ATTR_POOLING_MODE";
+    case HIPDNN_ATTR_POOLING_PRE_PADDINGS:
+        return "HIPDNN_ATTR_POOLING_PRE_PADDINGS";
+    case HIPDNN_ATTR_POOLING_POST_PADDINGS:
+        return "HIPDNN_ATTR_POOLING_POST_PADDINGS";
+    case HIPDNN_ATTR_POOLING_STRIDES:
+        return "HIPDNN_ATTR_POOLING_STRIDES";
+    case HIPDNN_ATTR_POOLING_WINDOW_SIZE:
+        return "HIPDNN_ATTR_POOLING_WINDOW_SIZE";
+
+
     // Operation extension attributes
     case HIPDNN_ATTR_OPERATION_NAME_EXT:
         return "HIPDNN_ATTR_OPERATION_NAME_EXT";
@@ -838,6 +864,8 @@ inline const char* hipdnnGetOperationTypeString(hipdnnOperationType_t type)
         return "HIPDNN_OPERATION_TYPE_SDPA_BACKWARD";
     case HIPDNN_OPERATION_TYPE_SDPA_FORWARD:
         return "HIPDNN_OPERATION_TYPE_SDPA_FORWARD";
+    case HIPDNN_OPERATION_TYPE_POOLING_FORWARD:
+        return "HIPDNN_OPERATION_TYPE_POOLING_FORWARD";
     default:
         return "HIPDNN_OPERATION_TYPE_UNKNOWN";
     }
