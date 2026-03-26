@@ -230,20 +230,20 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_MEAN_EXT:
-        getTensorDescriptor(_meanDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "BatchnormBackwardOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_meanDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_INV_VARIANCE_EXT:
-        getTensorDescriptor(_invVarianceDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "BatchnormBackwardOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_invVarianceDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT:
         getDataType(_computeDataType,
