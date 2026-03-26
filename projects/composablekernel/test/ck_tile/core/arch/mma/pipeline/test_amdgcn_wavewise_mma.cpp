@@ -42,7 +42,12 @@ __global__ void test_wavewise_pipeline(void* a, void* b, void* c, void* out)
                                  *reinterpret_cast<BVecType*>(b),
                                  *reinterpret_cast<CVecType*>(c));
 
-    __builtin_memcpy(out, std::addressof(result), sizeof(CVecType));
+    if constexpr(MmaOpTraits<typename Pipeline::MmaOp>::IsSupported)
+    {
+        // When the MmaOp is Unsupported (default) it returns the CVecType by value
+        // so this cast is impossible...
+        __builtin_memcpy(out, static_cast<const void*>(result), sizeof(CVecType));
+    }
 }
 
 namespace {
