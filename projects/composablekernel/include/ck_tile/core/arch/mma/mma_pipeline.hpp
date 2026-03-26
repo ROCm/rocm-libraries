@@ -101,12 +101,16 @@ struct MmaPipelineBase
     CK_TILE_DEVICE static auto formatBufferTupleImpl(SrcT&& inputTuple, std::index_sequence<Is...>)
     {
         auto&& first_elem = std::get<0>(std::forward<SrcT>(inputTuple));
-        return std::make_tuple(formatBuffer<DstT>(std::forward<decltype(first_elem)>(first_elem)),
-                               std::get<Is + 1>(std::forward<SrcT>(inputTuple))...);
+        using FirstElemResultType =
+            decltype(formatBuffer<DstT>(std::forward<decltype(first_elem)>(first_elem)));
+        using InputTupleType = ck_tile::remove_cvref_t<SrcT>;
+        return std::tuple<FirstElemResultType, std::tuple_element_t<Is + 1, InputTupleType>...>(
+            formatBuffer<DstT>(std::forward<decltype(first_elem)>(first_elem)),
+            std::get<Is + 1>(std::forward<SrcT>(inputTuple))...);
     }
 
     template <typename DstT, typename SrcT>
-    CK_TILE_DEVICE static auto formatBuffer(SrcT&& inputBuffer)
+    CK_TILE_DEVICE static decltype(auto) formatBuffer(SrcT&& inputBuffer)
     {
         using DecayedSrcT = ck_tile::remove_cvref_t<SrcT>;
 
@@ -172,7 +176,7 @@ struct MmaPipelineBase
     }
 
     template <typename ATransformResult, typename BTransformResult, typename CTransformResult>
-    CK_TILE_DEVICE static decltype(auto)
+    CK_TILE_DEVICE static auto
     applyTransformToOutput(std::tuple<ATransformResult, BTransformResult, CTransformResult>&& vecs)
     {
         auto&& [a_result, b_result, c_result] = vecs;
