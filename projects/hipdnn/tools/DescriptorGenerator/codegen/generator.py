@@ -50,6 +50,7 @@ class DescriptorGenerator:
             "fragments/operation_type_enum.j2": "operation_type_enum.txt",
             "fragments/node_unpack_override.j2": "node_unpack_override.txt",
             "fragments/packer_name_addition.j2": "packer_name_addition.txt",
+            "fragments/packer_name_test.j2": "packer_name_test.txt",
         }
 
         fragments_dir = output_dir / "fragments"
@@ -180,21 +181,19 @@ class DescriptorGenerator:
         )
         lines.append("")
         lines.append("=" * 72)
-        lines.append("# IMPORTANT: Graph Descriptor Test Update Required")
+        lines.append("# NOTE: Graph Descriptor Name Tests (Auto-Generated)")
         lines.append("=" * 72)
         lines.append("")
-        lines.append("# The existing graph descriptor test must be updated to verify")
         lines.append(
-            "# operation name round-trips through graph serialization and lifting."
+            "# The graph descriptor test template now auto-generates name tests:"
         )
+        lines.append("#   - OperationNamePreservedInSerialization")
+        lines.append("#   - OperationNameRoundTripThroughLifting")
+        lines.append("# These are generated unconditionally — no manual work needed.")
         lines.append(
-            "# Add a name parameter to the createFinalized*Op helper, and add:"
+            "# If the graph test file was generated fresh (backend or full mode),"
         )
-        lines.append("#   - OperationNamePreservedInSerialization test")
-        lines.append("#   - OperationNameRoundTripThroughLifting test")
-        lines.append(
-            f"# See the pointwise or batchnorm graph tests as reference patterns."
-        )
+        lines.append("# the name tests are already included.")
 
         return "\n".join(lines) + "\n"
 

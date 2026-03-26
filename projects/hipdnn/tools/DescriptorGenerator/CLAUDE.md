@@ -182,8 +182,10 @@ Insert the content from each fragment into the corresponding shared file:
 |----------|-------------|-------------|
 | `node_factory_case.txt` | `backend/src/descriptors/NodeFactory.cpp` | Case in `createFromNode()` switch |
 | `operation_unpacker_case.txt` | `frontend/src/OperationUnpacker.cpp` | Case in the unpacker dispatch |
+| `operation_unpacker_test.txt` | `frontend/tests/TestOperationUnpacker.cpp` | Uncomment existing test or insert generated test in the `createNodeForType` tests section. Also uncomment the corresponding `#include` for the node header. |
 | `operation_type_enum.txt` | `backend/include/HipdnnOperationType.h` | Enum entry for this operation |
 | `node_unpack_override.txt` | Frontend node header (e.g., `ConvolutionFpropNode.hpp`) | `unpack_from_descriptor` override |
+| `packer_name_test.txt` | `frontend/tests/Test<NodeClass>.cpp` | Add after existing PackNode tests |
 
 ### 7d. Wire `unpack_from_descriptor` in the Frontend Node
 
@@ -209,16 +211,15 @@ The lift-only path adds `_name` and `HIPDNN_ATTR_OPERATION_NAME_EXT` handling to
 
 Without this change, frontend→backend→frontend round-trips will silently lose the operation name.
 
-### 7g. Update Graph Descriptor Tests for Name
+### 7g. Graph Descriptor Name Tests (Auto-Generated)
 
-The existing graph descriptor test (`TestGraphDescriptor<Op>.cpp`) must be updated to verify operation names survive the full serialization and lifting round-trip:
+The graph descriptor test template (`test_graph_ops.cpp.j2`) now auto-generates operation name tests:
 
-1. Add a `const std::string& name = ""` parameter to the `createFinalized<Op>Op` helper
-2. Set the name via `setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, ...)` before finalize
-3. Add `OperationNamePreservedInSerialization` test — verify name appears in deserialized FlatBuffer
-4. Add `OperationNameRoundTripThroughLifting` test — verify name survives full serialize → deserializeGraph → fromNode → re-serialize cycle
+- The `createFinalized<Op>Op` helper includes a `const std::string& name = ""` parameter
+- `OperationNamePreservedInSerialization` test — verifies name appears in deserialized FlatBuffer
+- `OperationNameRoundTripThroughLifting` test — verifies name survives full serialize, deserializeGraph, re-serialize cycle
 
-See `TestGraphDescriptorBatchnorm.cpp` on the `batchnorm-lifting` branch as the reference for these tests.
+These tests are generated unconditionally (not gated on `data_fields`), so operations with no data fields still get name test coverage. No manual work is needed for this step.
 
 ### 7h. Deepen fromNode Test Coverage
 
