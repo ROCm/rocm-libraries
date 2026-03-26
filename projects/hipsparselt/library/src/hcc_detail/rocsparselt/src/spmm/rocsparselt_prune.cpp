@@ -132,7 +132,7 @@ __host__ __device__ inline void prune_if(bool prune, T* a, T b)
 {
     if constexpr(InPlace)
     {
-        if(prune) 
+        if(prune)
             *a = static_cast<T>(0.0f);
     }
     else
@@ -346,12 +346,15 @@ __global__
 #pragma unroll 5 //log2(THREADS_PER_SG)
             for(int tidxs = THREADS_PER_SG >> 1; tidxs > 0; tidxs >>= 1)
             {
-                Tc   a                      = norm_res[c_norm_res_offset];
-                Tc   b                      = norm_res[c_norm_res_offset + tidxs];
-                int  b_idx                  = norm_idx[c_norm_res_offset + tidxs];
-                bool update                 = serial_gt < tidxs && a < b;
-                norm_res[c_norm_res_offset] = update ? b : norm_res[c_norm_res_offset];
-                norm_idx[c_norm_res_offset] = update ? b_idx : norm_idx[c_norm_res_offset];
+                if(serial_gt < tidxs)
+                {
+                    Tc   a                      = norm_res[c_norm_res_offset];
+                    Tc   b                      = norm_res[c_norm_res_offset + tidxs];
+                    int  b_idx                  = norm_idx[c_norm_res_offset + tidxs];
+                    bool update                 = a < b;
+                    norm_res[c_norm_res_offset] = update ? b : norm_res[c_norm_res_offset];
+                    norm_idx[c_norm_res_offset] = update ? b_idx : norm_idx[c_norm_res_offset];
+                }
                 __syncthreads(); //wait until norm_res[], norm_idx[] ready
             };
 
