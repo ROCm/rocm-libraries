@@ -72,6 +72,15 @@ jobs:
           repository: "ROCm/TheRock"
           ref: c903a7bdaee58ab217bb0ee005f17452ebac4433 # 2026-03-25
 
+      - name: Configure git for long paths on Windows
+        if: ${{ runner.os == 'Windows' }}
+        run: git config --global core.longpaths true
+
+      - name: Checkout rocm-libraries repository for scripts
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-libraries
+
       - name: Run setup test environment workflow
         timeout-minutes: 15
         uses: './.github/actions/setup_test_environment'
@@ -105,10 +114,9 @@ jobs:
         # Channel name "MIOpen CI Reporting"
         if: ${{ contains(fromJSON(inputs.component).job_name, 'miopen') && failure() && !github.event.pull_request.head.repo.fork }}
         run: |
-          python3 .github/scripts/notify_teams.py \
+          python3 rocm-libraries/.github/scripts/notify_teams.py \
             --project miopen \
-            --failure_stage test \
-            --platform "${{ inputs.platform }}" \
+            --failure-stage test \
             --log-path ./test_logs/test_output.log \
             --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
             --pr-number "${{ github.event.pull_request.number }}" \
