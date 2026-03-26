@@ -228,8 +228,7 @@ std::shared_ptr<CustomOpOperationDescriptor> CustomOpOperationDescriptor::fromNo
             tensorMap, uid, "CustomOpOperationDescriptor::fromNode: output tensor"));
     }
 
-    // Use base class finalize() to skip derived validation
-    desc->HipdnnBackendDescriptorImpl<CustomOpOperationDescriptor>::finalize();
+    desc->finalize();
     return desc;
 }
 
