@@ -1,0 +1,140 @@
+operation:
+  name: "PoolingBwd"
+  class_name: "PoolingBwdOperationDescriptor"
+  fbs_table: "PoolingBwdAttributes"
+  fbs_generated_header: "pooling_bwd_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_POOLING_BACKWARD_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_POOLING_BACKWARD"
+
+  error_label: "pooling"
+  packer_operation_label: "pooling backward"
+  packer_finalize_label: "pooling"
+  test_params_method_name: "setPoolingParams"
+  data_fields_section_label: "Pooling Parameters"
+  build_node_attrs_var: "poolAttrs"
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_POOLING_BACKWARD"
+
+  frontend:
+    packer_function: "createPoolingBwdOperation"
+    unpacker_function: "unpackPoolingBwdOperation"
+    node_class: "PoolingBwdNode"
+    attributes_class: "PoolingBwdAttributes"
+    attributes_include: "PoolingBwdAttributes"
+
+    inputs:
+      - name: "dy"
+        enum_name: "DY"
+        required: true
+        getter_name: "get_dy"
+        setter_name: "set_dy"
+    outputs:
+      - name: "dx"
+        enum_name: "DX"
+        required: true
+        getter_name: "get_dx"
+        setter_name: "set_dx"
+    graph_method_name: "pooling_bwd"
+    graph_method_params:
+      - name: "dy"
+        tensor_name: "dy"
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "dx"
+    node_type_enum: "NodeType::POOLING_BWD"
+    node_attributes_union_type: "PoolingBwdAttributes"
+    compatibility_typedef: "Pooling_bwd_attributes"
+
+  tensor_fields:
+    - name: "dy"
+      fbs_field: "dy_tensor_uid"
+      attr_suffix: "DY"
+      required: true
+      frontend_getter: "get_dy()"
+
+    - name: "dx"
+      fbs_field: "dx_tensor_uid"
+      attr_suffix: "DX"
+      required: true
+      frontend_getter: "get_dx()"
+
+  data_fields:
+    - name: "pre_padding"
+      fbs_field: "pre_padding"
+      attr_name: "HIPDNN_ATTR_POOLING_PRE_PADDINGS"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_pre_padding()"
+      shared: true
+
+    - name: "post_padding"
+      fbs_field: "post_padding"
+      attr_name: "HIPDNN_ATTR_POOLING_POST_PADDINGS"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_post_padding()"
+      shared: true
+
+    - name: "stride"
+      fbs_field: "stride"
+      attr_name: "HIPDNN_ATTR_POOLING_STRIDES"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_stride()"
+      shared: true
+
+    - name: "window_size"
+      fbs_field: "window_size"
+      attr_name: "HIPDNN_ATTR_POOLING_WINDOW_SIZE"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_window_size()"
+      shared: true
+
+    - name: "pooling_mode"
+      fbs_field: "pooling_mode"
+      attr_name: "HIPDNN_ATTR_POOLING_MODE"
+      type: "mode"
+      cpp_enum: "hipdnn_data_sdk::data_objects::PoolingMode"
+      frontend_type: "PoolingMode"
+      required: false
+      frontend_getter: "get_pooling_mode()"
+      backend_setter: "setPoolingMode"
+      backend_getter: "getPoolingMode"
+      backend_converter: "toBackendPoolingMode"
+      frontend_inverse_converter: "fromHipdnnPoolingMode"
+      backend_type_name: "HIPDNN_TYPE_POOLING_MODE"
+      shared: true
+      test_enum_value: "MAX"
+      test_alt_enum_value: "AVERAGE"
+      test_backend_value: "HIPDNN_POOLING_MODE_MAX"
+      test_c_type: "hipdnnPoolingMode_t"
+      test_default_value: "HIPDNN_POOLING_MODE_AVERAGE"
+      enum_def:
+        backend_header: "HipdnnPoolingMode.h"
+        backend_prefix: "HIPDNN_POOLING_MODE_"
+        values:
+          - { name: "UNSET", value: 0, sentinel: true }
+          - { name: "MAX", value: 1, description: "Maximum pooling" }
+          - { name: "AVERAGE", value: 2, description: "Average pooling (excludes padding)" }
+          - { name: "AVERAGE_INCLUSIVE", value: 3, description: "Average pooling (includes padding)" }
+
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_POOLING_COMP_TYPE"
+  compute_data_type_shared: true
+
+  test_data:
+    tensor_uids: { dy: 42, dx: 43 }
+    tensor_configs:
+      dy: { dims: [1, 3, 16, 16], strides: [768, 256, 16, 1] }
+      dx: { dims: [1, 3, 32, 32], strides: [3072, 1024, 32, 1] }
+    field_values:
+      pre_padding: [1, 1]
+      post_padding: [1, 1]
+      stride: [2, 2]
+      window_size: [3, 3]

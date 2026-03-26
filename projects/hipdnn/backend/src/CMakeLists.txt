@@ -41,6 +41,7 @@ add_library(
     descriptors/LayernormOperationDescriptor.cpp
     descriptors/MatmulOperationDescriptor.cpp
     descriptors/PointwiseOperationDescriptor.cpp
+    descriptors/PoolingBwdOperationDescriptor.cpp
     descriptors/PoolingFwdOperationDescriptor.cpp
     descriptors/RMSNormOperationDescriptor.cpp
     descriptors/SdpaBpropOperationDescriptor.cpp

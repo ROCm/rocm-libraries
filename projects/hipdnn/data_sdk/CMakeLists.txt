@@ -162,6 +162,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/pointwise_attributes.fbs
             schemas/pooling_common.fbs
             schemas/pooling_fwd_attributes.fbs
+            schemas/pooling_bwd_attributes.fbs
             schemas/rmsnorm_attributes.fbs
             schemas/rmsnorm_backward_attributes.fbs
             schemas/block_scale_quantize_attributes.fbs

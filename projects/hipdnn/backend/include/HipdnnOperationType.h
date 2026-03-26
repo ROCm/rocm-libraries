@@ -40,4 +40,5 @@ typedef enum
     HIPDNN_OPERATION_TYPE_CUSTOM_OP = 16, ///< Custom operation
     HIPDNN_OPERATION_TYPE_REDUCTION = 17, ///< Reduction operation
     HIPDNN_OPERATION_TYPE_POOLING_FORWARD = 18, ///< Pooling forward
+    HIPDNN_OPERATION_TYPE_POOLING_BACKWARD = 19, ///< Pooling backward
 } hipdnnOperationType_t;

@@ -233,6 +233,8 @@ inline const char* hipdnnGetBackendDescriptorTypeName(hipdnnBackendDescriptorTyp
         return "HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT";
     case HIPDNN_BACKEND_OPERATION_POOLING_FORWARD_DESCRIPTOR:
         return "HIPDNN_BACKEND_OPERATION_POOLING_FORWARD_DESCRIPTOR";
+    case HIPDNN_BACKEND_OPERATION_POOLING_BACKWARD_DESCRIPTOR:
+        return "HIPDNN_BACKEND_OPERATION_POOLING_BACKWARD_DESCRIPTOR";
     default:
         return "UNKNOWN_TYPE";
     }
@@ -806,6 +808,11 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
     case HIPDNN_ATTR_POOLING_WINDOW_SIZE:
         return "HIPDNN_ATTR_POOLING_WINDOW_SIZE";
 
+    // Pooling backward operation attributes
+    case HIPDNN_ATTR_OPERATION_POOLING_BACKWARD_DY:
+        return "HIPDNN_ATTR_OPERATION_POOLING_BACKWARD_DY";
+    case HIPDNN_ATTR_OPERATION_POOLING_BACKWARD_DX:
+        return "HIPDNN_ATTR_OPERATION_POOLING_BACKWARD_DX";
 
     // Operation extension attributes
     case HIPDNN_ATTR_OPERATION_NAME_EXT:
@@ -866,6 +873,8 @@ inline const char* hipdnnGetOperationTypeString(hipdnnOperationType_t type)
         return "HIPDNN_OPERATION_TYPE_SDPA_FORWARD";
     case HIPDNN_OPERATION_TYPE_POOLING_FORWARD:
         return "HIPDNN_OPERATION_TYPE_POOLING_FORWARD";
+    case HIPDNN_OPERATION_TYPE_POOLING_BACKWARD:
+        return "HIPDNN_OPERATION_TYPE_POOLING_BACKWARD";
     default:
         return "HIPDNN_OPERATION_TYPE_UNKNOWN";
     }

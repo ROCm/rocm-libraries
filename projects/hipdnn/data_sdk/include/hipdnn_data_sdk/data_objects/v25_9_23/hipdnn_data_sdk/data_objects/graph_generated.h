@@ -27,6 +27,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "layernorm_attributes_generated.h"
 #include "matmul_attributes_generated.h"
 #include "pointwise_attributes_generated.h"
+#include "pooling_bwd_attributes_generated.h"
 #include "pooling_fwd_attributes_generated.h"
 #include "reduction_attributes_generated.h"
 #include "rmsnorm_attributes_generated.h"
@@ -72,11 +73,12 @@ enum class NodeAttributes : uint8_t {
   RMSNormBackwardAttributes = 17,
   ReductionAttributes = 18,
   PoolingFwdAttributes = 19,
+  PoolingBwdAttributes = 20,
   MIN = NONE,
-  MAX = PoolingFwdAttributes
+  MAX = PoolingBwdAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[20] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[21] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -97,13 +99,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[20] {
     NodeAttributes::CustomOpAttributes,
     NodeAttributes::RMSNormBackwardAttributes,
     NodeAttributes::ReductionAttributes,
-    NodeAttributes::PoolingFwdAttributes
+    NodeAttributes::PoolingFwdAttributes,
+    NodeAttributes::PoolingBwdAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[21] = {
+  static const char * const names[22] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -124,13 +127,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "RMSNormBackwardAttributes",
     "ReductionAttributes",
     "PoolingFwdAttributes",
+    "PoolingBwdAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::PoolingFwdAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::PoolingBwdAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -215,6 +219,10 @@ template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::PoolingFwd
   static const NodeAttributes enum_value = NodeAttributes::PoolingFwdAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::PoolingBwdAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::PoolingBwdAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -293,6 +301,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::Reduc
 
 template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::PoolingFwdAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::PoolingFwdAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::PoolingBwdAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::PoolingBwdAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -477,6 +489,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::PoolingFwdAttributes ?
       reinterpret_cast<const hipdnn_data_sdk::data_objects::PoolingFwdAttributesT *>(value) : nullptr;
   }
+  hipdnn_data_sdk::data_objects::PoolingBwdAttributesT *AsPoolingBwdAttributes() {
+    return type == NodeAttributes::PoolingBwdAttributes ?
+      reinterpret_cast<hipdnn_data_sdk::data_objects::PoolingBwdAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_data_sdk::data_objects::PoolingBwdAttributesT *AsPoolingBwdAttributes() const {
+    return type == NodeAttributes::PoolingBwdAttributes ?
+      reinterpret_cast<const hipdnn_data_sdk::data_objects::PoolingBwdAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -562,6 +582,9 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
       return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::PoolingFwdAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_data_sdk::data_objects::PoolingFwdAttributesT *>(rhs.value));
     }
+    case NodeAttributes::PoolingBwdAttributes: {
+      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::PoolingBwdAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::PoolingBwdAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -668,6 +691,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_data_sdk::data_objects::PoolingFwdAttributes *attributes_as_PoolingFwdAttributes() const {
     return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::PoolingFwdAttributes ? static_cast<const hipdnn_data_sdk::data_objects::PoolingFwdAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_data_sdk::data_objects::PoolingBwdAttributes *attributes_as_PoolingBwdAttributes() const {
+    return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::PoolingBwdAttributes ? static_cast<const hipdnn_data_sdk::data_objects::PoolingBwdAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -760,6 +786,10 @@ template<> inline const hipdnn_data_sdk::data_objects::ReductionAttributes *Node
 
 template<> inline const hipdnn_data_sdk::data_objects::PoolingFwdAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::PoolingFwdAttributes>() const {
   return attributes_as_PoolingFwdAttributes();
+}
+
+template<> inline const hipdnn_data_sdk::data_objects::PoolingBwdAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::PoolingBwdAttributes>() const {
+  return attributes_as_PoolingBwdAttributes();
 }
 
 struct NodeBuilder {
@@ -1204,6 +1234,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::PoolingFwdAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::PoolingBwdAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::PoolingBwdAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -1299,6 +1333,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::PoolingFwdAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::PoolingBwdAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::PoolingBwdAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -1382,6 +1420,9 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::PoolingFwdAttributesT *>(value);
       return CreatePoolingFwdAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::PoolingBwdAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::PoolingBwdAttributesT *>(value);
+      return CreatePoolingBwdAttributes(_fbb, ptr, _rehasher).Union();
     }
     default: return 0;
   }
@@ -1465,6 +1506,9 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
       value = new hipdnn_data_sdk::data_objects::PoolingFwdAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::PoolingFwdAttributesT *>(u.value));
       break;
     }
+    case NodeAttributes::PoolingBwdAttributes: {
+      value = new hipdnn_data_sdk::data_objects::PoolingBwdAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::PoolingBwdAttributesT *>(u.value));
+      break;
     }
     default:
       break;
@@ -1568,6 +1612,9 @@ inline void NodeAttributesUnion::Reset() {
       delete ptr;
       break;
     }
+    case NodeAttributes::PoolingBwdAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::PoolingBwdAttributesT *>(value);
+      delete ptr;
       break;
     }
     default: break;

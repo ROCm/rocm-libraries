@@ -286,4 +286,12 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_POOLING_FORWARD_DESCRIPTOR = 31,
 
+    /**
+     * @brief Pooling backward operation descriptor
+     *
+     * Represents a backward pooling operation with output gradient (DY) and
+     * input gradient (DX) tensors plus pooling parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_POOLING_BACKWARD_DESCRIPTOR = 32,
+
 } hipdnnBackendDescriptorType_t;

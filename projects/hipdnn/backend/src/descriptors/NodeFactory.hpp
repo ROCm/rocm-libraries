@@ -17,6 +17,7 @@
 #include "LayernormOperationDescriptor.hpp"
 // #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
+#include "PoolingBwdOperationDescriptor.hpp"
 #include "PoolingFwdOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
 #include "SdpaBpropOperationDescriptor.hpp"

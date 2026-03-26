@@ -56,6 +56,7 @@
  * - 3100-3199: SDPA backward propagation operation attributes
  * - 3200-3299: Pooling forward operation attributes
  * - 3300-3399: Shared pooling descriptor attributes
+ * - 3400-3499: Pooling backward operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -1105,6 +1106,20 @@ typedef enum
 
     /** @brief Pooling window size for each spatial dimension */
     HIPDNN_ATTR_POOLING_WINDOW_SIZE = 3305,
+
+    /** @} */
+
+    /**
+     * @name Pooling Backward Operation Attributes (3400-3499)
+     * Attributes for HIPDNN_BACKEND_OPERATION_POOLING_BACKWARD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Output gradient tensor for backward pooling */
+    HIPDNN_ATTR_OPERATION_POOLING_BACKWARD_DY = 3400,
+
+    /** @brief Input gradient tensor for backward pooling */
+    HIPDNN_ATTR_OPERATION_POOLING_BACKWARD_DX = 3401,
 
     /** @} */
 

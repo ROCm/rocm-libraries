@@ -50,6 +50,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return SdpaBpropOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::PoolingFwdAttributes:
         return PoolingFwdOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::PoolingBwdAttributes:
+        return PoolingBwdOperationDescriptor::fromNode(nodeT, tensorMap);
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
