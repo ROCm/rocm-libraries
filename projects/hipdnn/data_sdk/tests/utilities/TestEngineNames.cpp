@@ -10,6 +10,20 @@
 
 using namespace hipdnn_data_sdk::utilities;
 
+// Test engines defined with the macro to verify expansion
+// These use unique names to avoid collision with production engines
+namespace test_macro_expansion
+{
+// Single-argument form: identifier and display name are the same
+HIPDNN_REGISTER_ENGINE(TEST_MACRO_SINGLE_ARG_ENGINE)
+
+// Two-argument form: identifier differs from display name
+HIPDNN_REGISTER_ENGINE(TEST_MACRO_DUAL_ARG_ENGINE, "CustomDisplayName")
+
+// Two-argument form where identifier and display name happen to match (like MIOPEN_ENGINE)
+HIPDNN_REGISTER_ENGINE(TEST_MACRO_MATCHING_ARGS_ENGINE, "TEST_MACRO_MATCHING_ARGS_ENGINE")
+} // namespace test_macro_expansion
+
 class TestEngineNames : public ::testing::Test
 {
 };
@@ -150,4 +164,61 @@ TEST_F(TestEngineNames, EnsureAllEngineNameToIdsBehaveTheSame)
         EXPECT_EQ(engineIdCString, engineIdString);
         EXPECT_EQ(engineIdCString, engineIdStringView);
     }
+}
+
+TEST_F(TestEngineNames, MacroSingleArgGeneratesCorrectName)
+{
+    // Single-argument form: _NAME should be the stringified identifier
+    EXPECT_STREQ(test_macro_expansion::TEST_MACRO_SINGLE_ARG_ENGINE_NAME,
+                 "TEST_MACRO_SINGLE_ARG_ENGINE");
+}
+
+TEST_F(TestEngineNames, MacroSingleArgGeneratesCorrectId)
+{
+    // Single-argument form: _ID should be computed from the stringified identifier
+    EXPECT_EQ(test_macro_expansion::TEST_MACRO_SINGLE_ARG_ENGINE_ID,
+              engineNameToId("TEST_MACRO_SINGLE_ARG_ENGINE"));
+}
+
+TEST_F(TestEngineNames, MacroSingleArgRegistersEngine)
+{
+    // Single-argument form: engine should be registered with the stringified identifier
+    EXPECT_TRUE(isEngineNameRegistered("TEST_MACRO_SINGLE_ARG_ENGINE"));
+    EXPECT_EQ(getEngineNameFromId(test_macro_expansion::TEST_MACRO_SINGLE_ARG_ENGINE_ID),
+              "TEST_MACRO_SINGLE_ARG_ENGINE");
+}
+
+TEST_F(TestEngineNames, MacroDualArgGeneratesCorrectName)
+{
+    // Two-argument form: _NAME should be the custom display name, not the identifier
+    EXPECT_STREQ(test_macro_expansion::TEST_MACRO_DUAL_ARG_ENGINE_NAME, "CustomDisplayName");
+}
+
+TEST_F(TestEngineNames, MacroDualArgGeneratesCorrectId)
+{
+    // Two-argument form: _ID should be computed from the custom display name
+    EXPECT_EQ(test_macro_expansion::TEST_MACRO_DUAL_ARG_ENGINE_ID,
+              engineNameToId("CustomDisplayName"));
+    // Verify it's NOT computed from the identifier
+    EXPECT_NE(test_macro_expansion::TEST_MACRO_DUAL_ARG_ENGINE_ID,
+              engineNameToId("TEST_MACRO_DUAL_ARG_ENGINE"));
+}
+
+TEST_F(TestEngineNames, MacroDualArgRegistersWithDisplayName)
+{
+    // Two-argument form: engine should be registered with the display name, not the identifier
+    EXPECT_TRUE(isEngineNameRegistered("CustomDisplayName"));
+    EXPECT_FALSE(isEngineNameRegistered("TEST_MACRO_DUAL_ARG_ENGINE"));
+    EXPECT_EQ(getEngineNameFromId(test_macro_expansion::TEST_MACRO_DUAL_ARG_ENGINE_ID),
+              "CustomDisplayName");
+}
+
+TEST_F(TestEngineNames, MacroMatchingArgsEquivalentToSingleArg)
+{
+    // Two-argument form with matching args should behave the same as single-argument form
+    EXPECT_STREQ(test_macro_expansion::TEST_MACRO_MATCHING_ARGS_ENGINE_NAME,
+                 "TEST_MACRO_MATCHING_ARGS_ENGINE");
+    EXPECT_EQ(test_macro_expansion::TEST_MACRO_MATCHING_ARGS_ENGINE_ID,
+              engineNameToId("TEST_MACRO_MATCHING_ARGS_ENGINE"));
+    EXPECT_TRUE(isEngineNameRegistered("TEST_MACRO_MATCHING_ARGS_ENGINE"));
 }
