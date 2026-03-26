@@ -14,14 +14,6 @@
 
 namespace ck_tile {
 
-/**
- * @brief Problem definition for the PermuteN epilogue.
- *
- * @details The PermuteN epilogue writes the accumulator tile directly to DRAM
- *          with a permuted N-dimension layout. Unlike CShuffleEpilogue it does
- *          NOT use LDS (shared memory), so parameters related to LDS shuffling
- *          (DoubleSmemBuffer, BlockedXDLN_PerWarp, kNumWaveGroups) are not needed.
- */
 template <typename AsDataType_,
           typename BsDataType_,
           typename DsDataType_,
@@ -67,18 +59,6 @@ struct PermuteNEpilogueProblem
                   "The size of DsDataType and DsLayout should be the same");
 };
 
-/**
- * @brief PermuteN epilogue — writes accumulator tile to DRAM with permuted N layout.
- *
- * @details This epilogue performs an in-register permutation of the N-dimension
- *          data produced by tiled MMA and writes the result directly to DRAM.
- *          It does NOT use LDS/shared memory, making it suitable for kernels
- *          where the MMA output already has a permuted N layout (e.g. flatmm,
- *          block-scale GEMM with pre-shuffled B).
- *
- * @tparam Problem_ A PermuteNEpilogueProblem (or compatible) type.
- * @tparam Policy_  Optional policy (reserved for future use).
- */
 template <typename Problem_, typename Policy_ = void>
 struct PermuteNEpilogue
 {
@@ -213,7 +193,6 @@ struct PermuteNEpilogue
         return max_vector_size / sizeof(DiDataType);
     }
 
-    /// @brief The PermuteN epilogue does not use LDS.
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return 0; }
 
     using WG = WarpGemmDispatcher<ATypeToUse,
@@ -245,19 +224,6 @@ struct PermuteNEpilogue
         using DataType = typename T::DataType;
     };
 
-    /**
-     * @brief PermuteN epilogue operator.
-     *
-     * @details Permutes the N-dimension data in registers and writes directly
-     *          to DRAM. No LDS / shared memory is used. The @p p_smem parameter
-     *          is accepted for API compatibility but is unused.
-     *
-     * @param out_dram_window   Output DRAM tile window.
-     * @param o_acc_tile        Accumulator tile from the MMA pipeline.
-     * @param ds_dram_windows   D-tensor DRAM windows (for element-wise fusion).
-     * @param scale_m           Optional row scale (EmptyScale by default).
-     * @param scale_n           Optional column scale (EmptyScale by default).
-     */
     template <typename ODramWindow,
               typename OAccTile,
               typename DsDramWindows,
