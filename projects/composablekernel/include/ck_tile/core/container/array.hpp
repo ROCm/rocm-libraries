@@ -109,7 +109,7 @@ struct array
 
     CK_TILE_HOST_DEVICE constexpr auto& at(index_t i)                                   { return get(i); }
     CK_TILE_HOST_DEVICE constexpr const auto& at(index_t i) const  [[clang::lifetimebound]]                     { return get(i); }
-    template <index_t I> CK_TILE_HOST_DEVICE constexpr auto& at()                       { return get(I); }
+    template <index_t I> CK_TILE_HOST_DEVICE constexpr auto& at() [[clang::lifetimebound]]                      { return get(I); }
     template <index_t I> CK_TILE_HOST_DEVICE constexpr const auto& at() const [[clang::lifetimebound]]          { return get(I); }
     template <index_t I> CK_TILE_HOST_DEVICE constexpr auto& at(number<I>) [[clang::lifetimebound]]              { return get(I); }
     template <index_t I> CK_TILE_HOST_DEVICE constexpr const auto& at(number<I>) const [[clang::lifetimebound]] { return get(I); }
