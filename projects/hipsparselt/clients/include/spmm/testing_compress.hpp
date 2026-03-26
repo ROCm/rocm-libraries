@@ -108,7 +108,8 @@ void self_validate(T*             A,
                                           || std::is_same<hipsparselt_fp8_e4m3, T>::value
                                           || std::is_same<hipsparselt_fp8_e5m2, T>::value
 #endif
-                                      ,float,
+                                      ,
+                                      float,
                                       T>;
     for(int i3 = 0; i3 < m_n3; i3++)
     {
@@ -143,6 +144,8 @@ void self_validate(T*             A,
 
                         b = C[c_pos];
                         m_idx++;
+                        if(m_idx >= 4)
+                            break;
                     }
                     CHECK_SUCCESS(static_cast<c_type>(a) == static_cast<c_type>(b));
                 }
@@ -183,7 +186,8 @@ void compress(const Ti*      in,
                                           || std::is_same<hipsparselt_fp8_e4m3, Ti>::value
                                           || std::is_same<hipsparselt_fp8_e5m2, Ti>::value
 #endif
-                                      ,float,
+                                      ,
+                                      float,
                                       Ti>;
 
     for(int b = 0; b < num_batches; b++)
@@ -259,10 +263,10 @@ void testing_compress_bad_arg(const Arguments& arg)
     // allocate memory on device
     device_vector<Ti> dA(safe_size);
     CHECK_DEVICE_ALLOCATION(dA.memcheck());
-    hipsparseOrder_t            order = HIPSPARSE_ORDER_COL;
-    hipsparseLtHandle_t      handle_;
+    hipsparseOrder_t           order = HIPSPARSE_ORDER_COL;
+    hipsparseLtHandle_t        handle_;
     hipsparseLtMatDescriptor_t matA_;
-    hipsparseLtMatmulPlan_t plan_;
+    hipsparseLtMatmulPlan_t    plan_;
 
     hipsparselt_local_handle    handle{arg};
     hipsparselt_local_mat_descr matA(
@@ -295,9 +299,9 @@ void testing_compress_bad_arg(const Arguments& arg)
             hipsparseLtSpMMACompressedSize(&handle_, plan, &compressed_size, &compress_buffer_size),
             HIPSPARSE_STATUS_INVALID_VALUE);
 
-        EXPECT_HIPSPARSE_STATUS(
-            hipsparseLtSpMMACompressedSize(handle, nullptr, &compressed_size, &compress_buffer_size),
-            HIPSPARSE_STATUS_INVALID_VALUE);
+        EXPECT_HIPSPARSE_STATUS(hipsparseLtSpMMACompressedSize(
+                                    handle, nullptr, &compressed_size, &compress_buffer_size),
+                                HIPSPARSE_STATUS_INVALID_VALUE);
 
         EXPECT_HIPSPARSE_STATUS(
             hipsparseLtSpMMACompressedSize(handle, &plan_, &compressed_size, &compress_buffer_size),
@@ -309,7 +313,7 @@ void testing_compress_bad_arg(const Arguments& arg)
 
         EXPECT_HIPSPARSE_STATUS(
             hipsparseLtSpMMACompressedSize(handle, plan, &compressed_size, nullptr),
-                                HIPSPARSE_STATUS_INVALID_VALUE);
+            HIPSPARSE_STATUS_INVALID_VALUE);
 
         EXPECT_HIPSPARSE_STATUS(
             hipsparseLtSpMMACompressedSize(handle, plan, &compressed_size, &compress_buffer_size),
@@ -320,21 +324,17 @@ void testing_compress_bad_arg(const Arguments& arg)
         CHECK_DEVICE_ALLOCATION(dA_1.memcheck());
         CHECK_DEVICE_ALLOCATION(dA_ws.memcheck());
 
-        EXPECT_HIPSPARSE_STATUS(
-            hipsparseLtSpMMACompress(nullptr, plan, dA, dA_1, dA_ws, stream),
-            HIPSPARSE_STATUS_INVALID_VALUE);
+        EXPECT_HIPSPARSE_STATUS(hipsparseLtSpMMACompress(nullptr, plan, dA, dA_1, dA_ws, stream),
+                                HIPSPARSE_STATUS_INVALID_VALUE);
 
-        EXPECT_HIPSPARSE_STATUS(
-            hipsparseLtSpMMACompress(&handle_, plan, dA, dA_1, dA_ws, stream),
-            HIPSPARSE_STATUS_INVALID_VALUE);
+        EXPECT_HIPSPARSE_STATUS(hipsparseLtSpMMACompress(&handle_, plan, dA, dA_1, dA_ws, stream),
+                                HIPSPARSE_STATUS_INVALID_VALUE);
 
-        EXPECT_HIPSPARSE_STATUS(
-            hipsparseLtSpMMACompress(handle, nullptr, dA, dA_1, dA_ws, stream),
-            HIPSPARSE_STATUS_INVALID_VALUE);
+        EXPECT_HIPSPARSE_STATUS(hipsparseLtSpMMACompress(handle, nullptr, dA, dA_1, dA_ws, stream),
+                                HIPSPARSE_STATUS_INVALID_VALUE);
 
-        EXPECT_HIPSPARSE_STATUS(
-            hipsparseLtSpMMACompress(handle, &plan_, dA, dA_1, dA_ws, stream),
-            HIPSPARSE_STATUS_INVALID_VALUE);
+        EXPECT_HIPSPARSE_STATUS(hipsparseLtSpMMACompress(handle, &plan_, dA, dA_1, dA_ws, stream),
+                                HIPSPARSE_STATUS_INVALID_VALUE);
 
         EXPECT_HIPSPARSE_STATUS(
             hipsparseLtSpMMACompress(handle, plan, nullptr, dA_1, dA_ws, stream),
@@ -344,24 +344,24 @@ void testing_compress_bad_arg(const Arguments& arg)
             hipsparseLtSpMMACompress(handle, plan, dA_1, nullptr, dA_ws, stream),
             HIPSPARSE_STATUS_INVALID_VALUE);
     }
-    else if (arg.func_version == 2)
+    else if(arg.func_version == 2)
     {
         // test version 2
         EXPECT_HIPSPARSE_STATUS(
             hipsparseLtSpMMACompressedSize2(nullptr, matA, &compressed_size, &compress_buffer_size),
             HIPSPARSE_STATUS_INVALID_VALUE);
 
-        EXPECT_HIPSPARSE_STATUS(
-            hipsparseLtSpMMACompressedSize2(&handle_, matA, &compressed_size, &compress_buffer_size),
-            HIPSPARSE_STATUS_INVALID_VALUE);
+        EXPECT_HIPSPARSE_STATUS(hipsparseLtSpMMACompressedSize2(
+                                    &handle_, matA, &compressed_size, &compress_buffer_size),
+                                HIPSPARSE_STATUS_INVALID_VALUE);
 
-        EXPECT_HIPSPARSE_STATUS(
-            hipsparseLtSpMMACompressedSize2(handle, nullptr, &compressed_size, &compress_buffer_size),
-            HIPSPARSE_STATUS_INVALID_VALUE);
+        EXPECT_HIPSPARSE_STATUS(hipsparseLtSpMMACompressedSize2(
+                                    handle, nullptr, &compressed_size, &compress_buffer_size),
+                                HIPSPARSE_STATUS_INVALID_VALUE);
 
-        EXPECT_HIPSPARSE_STATUS(
-            hipsparseLtSpMMACompressedSize2(handle, &matA_, &compressed_size, &compress_buffer_size),
-            HIPSPARSE_STATUS_INVALID_VALUE);
+        EXPECT_HIPSPARSE_STATUS(hipsparseLtSpMMACompressedSize2(
+                                    handle, &matA_, &compressed_size, &compress_buffer_size),
+                                HIPSPARSE_STATUS_INVALID_VALUE);
 
         EXPECT_HIPSPARSE_STATUS(
             hipsparseLtSpMMACompressedSize2(handle, matB, &compressed_size, &compress_buffer_size),
