@@ -1,7 +1,12 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#pragma once
+
 #include <cstdint>
+#include <functional>
+#include <vector>
+
 #include <gtest/gtest.h>
 
 #include "ck_tile/core/arch/arch.hpp"
