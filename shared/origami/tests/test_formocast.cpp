@@ -168,7 +168,7 @@ TEST_CASE("Formocast: Performance prediction", "[formocast]") {
         
         // Check specific expected values for 2048x512x1024 on gfx942
         REQUIRE(perf.microSeconds == Approx(68.640434).epsilon(0.01));
-        REQUIRE(perf.hitRate == Approx(70.0).epsilon(0.01));
+        REQUIRE(perf.hitRate == Approx(17.5).epsilon(0.01));
     }
     
     SECTION("Performance prediction with batched problem") {
@@ -183,7 +183,7 @@ TEST_CASE("Formocast: Performance prediction", "[formocast]") {
         
         // Check specific expected values for batched 512x512x512 (4 batches)
         REQUIRE(perf.microSeconds == Approx(23.165081).epsilon(0.01));
-        REQUIRE(perf.hitRate == Approx(62.5).epsilon(0.01));
+        REQUIRE(perf.hitRate == Approx(25.0).epsilon(0.01));
     }
     
     SECTION("Performance prediction with GlobalSplitU") {
@@ -231,8 +231,8 @@ TEST_CASE("Formocast: Cache hit rate computation", "[formocast]") {
         );
         
         REQUIRE(l2_hit.totalHitRate == Approx(0.4375).epsilon(0.01));
-        REQUIRE(l2_hit.tile0HitRate == Approx(0.875).epsilon(0.01));
-        REQUIRE(l2_hit.tile1HitRate == Approx(0.0).epsilon(0.01));
+        REQUIRE(l2_hit.tile0HitRate == Approx(0.0).margin(0.01));
+        REQUIRE(l2_hit.tile1HitRate == Approx(0.875).epsilon(0.01));
     }
     
     SECTION("L3 cache hit rate computation") {
@@ -812,7 +812,7 @@ TEST_CASE("Formocast: Edge cases and error handling", "[formocast]") {
         auto perf = simulator.predictedPerformance();
         
         // Check specific expected value for large problem (8192x8192x8192)
-        REQUIRE(perf.microSeconds == Approx(847.421).epsilon(0.01));
+        REQUIRE(perf.microSeconds == Approx(1123.903).epsilon(0.01));
     }
     
     SECTION("Problem with GlobalSplitU=2") {

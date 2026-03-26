@@ -416,13 +416,8 @@ namespace origami
             std::vector<uint32_t> arrA_2(gsuMulBatch * wg0, 0);
             std::vector<uint32_t> arrB_2(gsuMulBatch * wg1, 0);
 
-            int WGMXCC  = XCC;
+            int WGMXCC  = (XCC > 0) ? XCC : 1;
             int WGMXCCG = (XCCG > 0)? XCCG : NumCUs;
-            // NB:
-            //  tensilelite has the limitations for XCC and XCCG,
-            //  so there shouldn't be solutions failing the assertions.
-            //  (Besides: WGMXCC can only > 0 for non-streamK )
-            assert(WGMXCC != 0);
             if(WGMXCC > 0)
                 assert((WGMXCCG % WGMXCC) == 0);
 
