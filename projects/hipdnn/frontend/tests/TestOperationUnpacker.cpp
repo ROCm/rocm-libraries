@@ -13,7 +13,7 @@
 // #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 // #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
 // #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
-// #include <hipdnn_frontend/node/BatchnormNode.hpp>
+#include <hipdnn_frontend/node/BatchnormNode.hpp>
 // #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
 // #include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
 // #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
@@ -24,7 +24,7 @@
 // #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
-// #include <hipdnn_frontend/node/RMSNormNode.hpp>
+#include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
 // #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 
@@ -263,15 +263,15 @@ TEST_F(TestUnpackOperation, FailsImmediatelyOnUnpackError)
 // ---------------------------------------------------------------------------
 
 // Uncomment when unpack_from_descriptor() is implemented in the lifting PR:
-// TEST(TestCreateNodeForType, CreatesBatchnormNode)
-// {
-//     const GraphAttributes graphAttrs;
-//     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM, graphAttrs);
-//     EXPECT_EQ(err.code, ErrorCode::OK);
-//     ASSERT_NE(node, nullptr);
-//     auto typedNode = std::dynamic_pointer_cast<BatchnormNode>(node);
-//     EXPECT_NE(typedNode, nullptr);
-// }
+TEST(TestCreateNodeForType, CreatesBatchnormNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<BatchnormNode>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
 
 // TEST(TestCreateNodeForType, CreatesBatchnormBackwardNode)
 // {
@@ -399,15 +399,15 @@ TEST(TestCreateNodeForType, CreatesPointwiseNode)
     EXPECT_NE(typedNode, nullptr);
 }
 
-// TEST(TestCreateNodeForType, CreatesRMSNormNode)
-// {
-//     const GraphAttributes graphAttrs;
-//     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_RMSNORM, graphAttrs);
-//     EXPECT_EQ(err.code, ErrorCode::OK);
-//     ASSERT_NE(node, nullptr);
-//     auto typedNode = std::dynamic_pointer_cast<RMSNormNode>(node);
-//     EXPECT_NE(typedNode, nullptr);
-// }
+TEST(TestCreateNodeForType, CreatesRMSNormNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_RMSNORM, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<RMSNormNode>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
 
 TEST(TestCreateNodeForType, CreatesSdpaBpropNode)
 {
