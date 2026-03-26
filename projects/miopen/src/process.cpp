@@ -48,25 +48,32 @@ struct ProcessImpl
                 const ProcessEnvironmentMap& additionalEnvironmentVariables)
     {
         outStream = out;
-        std::string cmd{path.string()};
-        if(!additionalEnvironmentVariables.empty())
-        {
-            // Windows cmd.exe syntax: "set VAR=value && command"
-            std::stringstream environmentVariables;
-            for(const auto& envVariable : additionalEnvironmentVariables)
-            {
-                environmentVariables << "set " << envVariable.first << "=" << envVariable.second
-                                     << " && ";
-            }
-            cmd.insert(0, environmentVariables.str());
-        }
-        if(!args.empty())
-            cmd += " " + std::string{args};
-        // When capturing output, redirect stderr to stdout so we capture both
-        if(out != nullptr)
-            cmd += " 2>&1";
+
+        // Build command left-to-right using stringstream
+        std::stringstream cmdStream;
+
+        // 1. Change directory (if specified)
         if(!cwd.empty())
-            cmd.insert(0, "cd /d " + std::string{cwd} + " && ");
+            cmdStream << "cd /d " << cwd << " && ";
+
+        // 2. Set environment variables (if any)
+        for(const auto& envVariable : additionalEnvironmentVariables)
+        {
+            cmdStream << "set " << envVariable.first << "=" << envVariable.second << " && ";
+        }
+
+        // 3. Command path
+        cmdStream << path.string();
+
+        // 4. Arguments (if any)
+        if(!args.empty())
+            cmdStream << " " << args;
+
+        // 5. Redirect stderr to stdout (if capturing output)
+        if(out != nullptr)
+            cmdStream << " 2>&1";
+
+        std::string cmd = cmdStream.str();
 
         const auto fileMode = outStream != nullptr ? "r" : "w";
         pipe                = popen(cmd.c_str(), fileMode);
@@ -78,13 +85,18 @@ struct ProcessImpl
     {
         if(outStream != nullptr)
         {
+            // Buffer all output locally first to avoid unknown flush behavior of outStream
+            std::ostringstream localBuffer;
             std::array<char, 1024> buffer{};
 
             while(feof(pipe) == 0)
             {
                 if(fgets(buffer.data(), buffer.size(), pipe) != nullptr)
-                    *outStream << buffer.data();
+                    localBuffer << buffer.data();
             }
+
+            // Single write to outStream for consistent behavior and performance
+            *outStream << localBuffer.str();
         }
 
         auto status = pclose(pipe);

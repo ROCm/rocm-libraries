@@ -79,10 +79,17 @@ static inline miopen::fs::path MIOpenDriverExePath()
     return path /= MIOpenDriverExeName;
 #else
     static const std::string MIOpenDriverExeName = "MIOpenDriver.exe";
-    wchar_t modulePath[MAX_PATH];
-    if(GetModuleFileNameW(nullptr, modulePath, MAX_PATH) == 0)
+
+    // Use dynamic buffer to support long paths (up to 32767 characters)
+    std::wstring modulePath(32767, L'\0');
+    DWORD len =
+        GetModuleFileNameW(nullptr, modulePath.data(), static_cast<DWORD>(modulePath.size()));
+    if(len == 0)
         return {};
 
+    modulePath.resize(len);
+
+    // miopen::fs::path is std::filesystem::path which supports long paths
     miopen::fs::path path(modulePath);
     path = path.parent_path();
     return path / MIOpenDriverExeName;
