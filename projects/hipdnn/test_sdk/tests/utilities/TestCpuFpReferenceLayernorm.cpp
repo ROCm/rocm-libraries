@@ -578,6 +578,134 @@ TEST(TestCpuFpReferenceLayernormFp32, FpropTypicalTransformerShape)
 }
 
 // ============================================================================
+// Transformer padding: PAD (zero) positions don't affect real token outputs
+// ============================================================================
+
+TEST(TestCpuFpReferenceLayernormFp64, FpropPadPositionsDoNotAffectRealTokens)
+{
+    // Simulates a typical NLP scenario with variable-length sequences zero-padded
+    // to a fixed length. With normalizedDimCount=1, LayerNorm normalizes each
+    // position independently over the hidden dimension (d_model). PAD positions
+    // cannot corrupt real token outputs because each position computes its own
+    // mean and variance.
+    //
+    // Shape: [N=2, seq=6, d_model=4]
+    //
+    // batch 0: "The cat sat [PAD] [PAD] [PAD]"
+    //   pos 0 "The": [0.8, 0.2, 0.5, 0.1]   <- real
+    //   pos 1 "cat": [0.1, 0.9, 0.3, 0.7]   <- real
+    //   pos 2 "sat": [0.3, 0.1, 0.8, 0.4]   <- real
+    //   pos 3  PAD : [0.0, 0.0, 0.0, 0.0]   <- padding
+    //   pos 4  PAD : [0.0, 0.0, 0.0, 0.0]   <- padding
+    //   pos 5  PAD : [0.0, 0.0, 0.0, 0.0]   <- padding
+    //
+    // batch 1: "The quick brown fox [PAD] [PAD]"
+    //   pos 0 "The"  : [0.8, 0.2, 0.5, 0.1]   <- real
+    //   pos 1 "quick": [0.6, 0.7, 0.2, 0.9]   <- real
+    //   pos 2 "brown": [0.4, 0.3, 0.6, 0.5]   <- real
+    //   pos 3 "fox"  : [0.9, 0.8, 0.1, 0.3]   <- real
+    //   pos 4  PAD   : [0.0, 0.0, 0.0, 0.0]   <- padding
+    //   pos 5  PAD   : [0.0, 0.0, 0.0, 0.0]   <- padding
+
+    Tensor<double> x({2, 6, 4});
+    Tensor<double> y({2, 6, 4});
+    // scale shape {4} matches the last 1 dimension (d_model) of x, which is the
+    // normalized dimension selected by normalizedDimCount=1 below. This means
+    // LayerNorm computes mean/variance independently for each (batch, seq_pos)
+    // pair over the 4 d_model features — exactly why PAD positions at different
+    // sequence positions cannot affect real token outputs.
+    Tensor<double> scale({4});
+    Tensor<double> bias({4});
+    Tensor<double> mean({2, 6});
+    Tensor<double> rstd({2, 6});
+
+    x.fillWithValue(0.0); // Initialize all to zero (PAD positions stay zero)
+
+    // Batch 0: real tokens at positions 0-2
+    x.setHostValue(0.8, 0, 0, 0);
+    x.setHostValue(0.2, 0, 0, 1);
+    x.setHostValue(0.5, 0, 0, 2);
+    x.setHostValue(0.1, 0, 0, 3);
+
+    x.setHostValue(0.1, 0, 1, 0);
+    x.setHostValue(0.9, 0, 1, 1);
+    x.setHostValue(0.3, 0, 1, 2);
+    x.setHostValue(0.7, 0, 1, 3);
+
+    x.setHostValue(0.3, 0, 2, 0);
+    x.setHostValue(0.1, 0, 2, 1);
+    x.setHostValue(0.8, 0, 2, 2);
+    x.setHostValue(0.4, 0, 2, 3);
+
+    // Batch 1: real tokens at positions 0-3
+    x.setHostValue(0.8, 1, 0, 0);
+    x.setHostValue(0.2, 1, 0, 1);
+    x.setHostValue(0.5, 1, 0, 2);
+    x.setHostValue(0.1, 1, 0, 3);
+
+    x.setHostValue(0.6, 1, 1, 0);
+    x.setHostValue(0.7, 1, 1, 1);
+    x.setHostValue(0.2, 1, 1, 2);
+    x.setHostValue(0.9, 1, 1, 3);
+
+    x.setHostValue(0.4, 1, 2, 0);
+    x.setHostValue(0.3, 1, 2, 1);
+    x.setHostValue(0.6, 1, 2, 2);
+    x.setHostValue(0.5, 1, 2, 3);
+
+    x.setHostValue(0.9, 1, 3, 0);
+    x.setHostValue(0.8, 1, 3, 1);
+    x.setHostValue(0.1, 1, 3, 2);
+    x.setHostValue(0.3, 1, 3, 3);
+
+    scale.fillWithValue(1.0);
+    bias.fillWithValue(0.0);
+
+    const double epsilon = 1e-5;
+    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
+
+    const auto tolerance = 1e-6;
+
+    // Key assertion: "The" appears at (0,0) and (1,0) with identical input
+    // [0.8, 0.2, 0.5, 0.1]. Despite different padding patterns in their batches
+    // (3 PADs vs 2 PADs), the outputs must be identical — each position normalizes
+    // independently over d_model, so neighboring PAD positions have no effect.
+    //
+    // "The": mean = (0.8+0.2+0.5+0.1)/4 = 0.4
+    //        var  = (0.16+0.04+0.01+0.09)/4 = 0.075
+    const double theMean = 0.4;
+    const double theRstd = 1.0 / std::sqrt(0.075 + epsilon);
+
+    EXPECT_NEAR(mean.getHostValue(0, 0), theMean, tolerance);
+    EXPECT_NEAR(rstd.getHostValue(0, 0), theRstd, tolerance);
+    EXPECT_NEAR(mean.getHostValue(1, 0), theMean, tolerance);
+    EXPECT_NEAR(rstd.getHostValue(1, 0), theRstd, tolerance);
+
+    for(int d = 0; d < 4; d++)
+    {
+        EXPECT_NEAR(y.getHostValue(0, 0, d), y.getHostValue(1, 0, d), tolerance);
+    }
+
+    // PAD positions: all-zero input -> mean=0, var=0, output=0 (identity affine)
+    for(int pad = 3; pad < 6; pad++)
+    {
+        EXPECT_NEAR(mean.getHostValue(0, pad), 0.0, tolerance);
+        for(int d = 0; d < 4; d++)
+        {
+            EXPECT_NEAR(y.getHostValue(0, pad, d), 0.0, tolerance);
+        }
+    }
+    for(int pad = 4; pad < 6; pad++)
+    {
+        EXPECT_NEAR(mean.getHostValue(1, pad), 0.0, tolerance);
+        for(int d = 0; d < 4; d++)
+        {
+            EXPECT_NEAR(y.getHostValue(1, pad, d), 0.0, tolerance);
+        }
+    }
+}
+
+// ============================================================================
 // Type compatibility: various type combinations
 // ============================================================================
 

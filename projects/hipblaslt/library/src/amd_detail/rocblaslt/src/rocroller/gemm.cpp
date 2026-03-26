@@ -10,6 +10,10 @@
 
 using namespace rocRoller;
 
+const int SHUFFLE_M = 16;
+const int SHUFFLE_N = 16;
+const int SHUFFLE_K = 32;
+
 /**
  * @brief Set the required conditions in order to run a provided kernel
  *
@@ -178,13 +182,37 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     std::vector<size_t> oneStridesN = std::vector<size_t>({(size_t)1});
     std::vector<size_t> oneStridesT = std::vector<size_t>({(size_t)0, (size_t)1});
 
+    auto stridesA = gemm->kernelType.swizzleA ? std::vector<size_t>{}
+                                             : gemm->kernelType.transA ? oneStridesT : oneStridesN;
+    
     auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
-        2, dataTypeA, {}, gemm->kernelType.transA ? oneStridesT : oneStridesN)); // A
-    auto tagLoadA   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
+        2, dataTypeA, {}, stridesA)); // A
+
+    auto loadInputA = tagTensorA;
+
+    if(gemm->kernelType.swizzleA)
+    {
+        loadInputA = command->addOperation(Operations::SubTileTranspose(
+            loadInputA, {SHUFFLE_M, SHUFFLE_K}, gemm->kernelType.transA));
+    }
+    
+    auto tagLoadA   = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadInputA));
+
+    auto stridesB = gemm->kernelType.swizzleB ? std::vector<size_t>{}
+                                             : gemm->kernelType.transB ? oneStridesT : oneStridesN;
 
     auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-        2, dataTypeB, {}, gemm->kernelType.transB ? oneStridesT : oneStridesN)); // B
-    auto tagLoadB   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
+        2, dataTypeB, {}, stridesB)); // B
+    
+    auto loadInputB = tagTensorB;
+
+    if(gemm->kernelType.swizzleB)
+    {
+        loadInputB = command->addOperation(Operations::SubTileTranspose(
+            loadInputB, {SHUFFLE_K, SHUFFLE_N}, gemm->kernelType.transB));
+    }
+
+    auto tagLoadB   = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadInputB));
 
     auto mulInputA = tagLoadA;
     auto mulInputB = tagLoadB;
@@ -699,6 +727,22 @@ CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
         gemm->params->kernelType.typeA, {M, K}, gemm->params->kernelType.transA ? "T" : "N");
     TensorDescriptor descB(
         gemm->params->kernelType.typeB, {K, N}, gemm->params->kernelType.transB ? "T" : "N");
+
+    if(gemm->params->kernelType.swizzleA)
+    {
+        descA = TensorDescriptor(gemm->params->kernelType.typeA,
+                                 {M, K},
+                                 {static_cast<size_t>((K / SHUFFLE_K) * SHUFFLE_M * SHUFFLE_K),
+                                  static_cast<size_t>(SHUFFLE_M * SHUFFLE_K)});
+    }
+
+    if(gemm->params->kernelType.swizzleB)
+    {
+        descB = TensorDescriptor(gemm->params->kernelType.typeB,
+                                {K, N},
+                                {static_cast<size_t>(SHUFFLE_K * SHUFFLE_N),
+                                static_cast<size_t>((K / SHUFFLE_K) * SHUFFLE_K * SHUFFLE_N)});
+    }
 
     // TODO: Have to typecast void* pointer to something that CommandArgumentValue accepts
     setCommandTensorArg(commandArgs, gemm->tagTensorA, descA, (float*)nullptr);
