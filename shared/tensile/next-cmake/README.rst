@@ -159,7 +159,7 @@ Options
 
 *Client options*:
 
-* ``TENSILE_ENABLE_ROCM_SMI``: Enable rocm_smi support (default: ``ON`` on Linux, ``OFF`` on Windows)
+* ``TENSILE_ENABLE_AMD_SMI``: Enable amd_smi support (default: ``ON`` on Linux, ``OFF`` on Windows)
 
 CMake Targets
 -------------

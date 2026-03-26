@@ -711,11 +711,10 @@ struct UniversalGemmBasePolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeADramTileDistribution()
     {
-        constexpr index_t BlockSize = Problem::kBlockSize;
-        constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
-        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-        constexpr index_t VecLoadSize =
-            Problem::FixedVectorSize ? Problem::VectorSizeA : GetVectorSizeA<Problem>();
+        constexpr index_t BlockSize     = Problem::kBlockSize;
+        constexpr index_t MPerBlock     = Problem::BlockGemmShape::kM;
+        constexpr index_t KPerBlock     = Problem::BlockGemmShape::kK;
+        constexpr index_t VecLoadSize   = GetVectorSizeA<Problem>();
         constexpr index_t NumWaveGroups = Problem::NumWaveGroups;
 
         using ALayout = remove_cvref_t<
@@ -756,9 +755,7 @@ struct UniversalGemmBasePolicy
         // since the assumption is that A type is going to be the B LDS type
         constexpr bool IsBCastPolicyBeforeLDSWrite = IsBCastPolicyBeforeLDSWrite_v<Problem>;
         constexpr index_t VecLoadSize =
-            IsBCastPolicyBeforeLDSWrite
-                ? (Problem::FixedVectorSize ? Problem::VectorSizeA : GetVectorSizeA<Problem>())
-                : (Problem::FixedVectorSize ? Problem::VectorSizeB : GetVectorSizeB<Problem>());
+            IsBCastPolicyBeforeLDSWrite ? GetVectorSizeA<Problem>() : GetVectorSizeB<Problem>();
         constexpr index_t NumWaveGroups = Problem::NumWaveGroups;
         using BLayout                   = remove_cvref_t<
                               std::tuple_element_t<number<0>{}, remove_cvref_t<typename Problem::BsLayoutTuple>>>;
@@ -837,9 +834,10 @@ struct UniversalGemmBasePolicy
         using BlockGemm = remove_cvref_t<decltype(Derived::template GetBlockGemm<Problem>())>;
 
         constexpr index_t KPack    = static_cast<index_t>(BlockGemm::Traits::KPack);
-        constexpr index_t VecElems = static_cast<index_t>(Problem::VectorLoadSize / sizeof(A));
+        constexpr index_t VecElems = static_cast<index_t>(Problem::VectorLoadSize / sizeof(A)) *
+                                     numeric_traits<A>::PackedSize;
 
-        return (KPack < VecElems) ? KPack : VecElems;
+        return ck_tile::min(KPack, VecElems);
     }
 
     template <typename Problem>
@@ -849,9 +847,10 @@ struct UniversalGemmBasePolicy
         using BlockGemm = remove_cvref_t<decltype(Derived::template GetBlockGemm<Problem>())>;
 
         constexpr index_t KPack    = static_cast<index_t>(BlockGemm::Traits::KPack);
-        constexpr index_t VecElems = static_cast<index_t>(Problem::VectorLoadSize / sizeof(B));
+        constexpr index_t VecElems = static_cast<index_t>(Problem::VectorLoadSize / sizeof(B)) *
+                                     numeric_traits<B>::PackedSize;
 
-        return (KPack < VecElems) ? KPack : VecElems;
+        return ck_tile::min(KPack, VecElems);
     }
 
     template <typename Problem>
@@ -860,8 +859,10 @@ struct UniversalGemmBasePolicy
         using ADataType                 = remove_cvref_t<typename Problem::ADataType>;
         constexpr auto APackedSize      = numeric_traits<ADataType>::PackedSize;
         constexpr auto a_lds_block_desc = Derived::template MakeALdsBlockDescriptor<Problem>();
-        constexpr index_t smem_size_a   = integer_least_multiple(
-            a_lds_block_desc.get_element_space_size() * sizeof(ADataType) / APackedSize, 16);
+        constexpr index_t smem_size_a =
+            integer_least_multiple(a_lds_block_desc.get_element_space_size() *
+                                       lds_padded_sizeof<ADataType>() / APackedSize,
+                                   16);
         return smem_size_a;
     }
 
@@ -874,8 +875,10 @@ struct UniversalGemmBasePolicy
                                                                         typename Problem::BDataType>;
         constexpr auto BPackedSize                 = numeric_traits<BDataType>::PackedSize;
         constexpr auto b_lds_block_desc = Derived::template MakeBLdsBlockDescriptor<Problem>();
-        constexpr index_t smem_size_b   = integer_least_multiple(
-            b_lds_block_desc.get_element_space_size() * sizeof(BDataType) / BPackedSize, 16);
+        constexpr index_t smem_size_b =
+            integer_least_multiple(b_lds_block_desc.get_element_space_size() *
+                                       lds_padded_sizeof<BDataType>() / BPackedSize,
+                                   16);
         return smem_size_b;
     }
 

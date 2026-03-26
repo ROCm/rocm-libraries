@@ -150,7 +150,7 @@ public:
                 PointwiseMode::RELU_FWD, output, input0);
         }
 
-        CpuFpReferenceValidation<InputType> const validator;
+        const CpuFpReferenceValidation<InputType> validator;
         return validator.allClose(output, outTensor);
     }
 
@@ -183,7 +183,7 @@ public:
                 PointwiseMode::RELU_BWD, output, input0, input1);
         }
 
-        CpuFpReferenceValidation<InputType> const validator;
+        const CpuFpReferenceValidation<InputType> validator;
         return validator.allClose(output, outTensor);
     }
 };

@@ -52,6 +52,8 @@
  * - 2800-2899: Block scale quantize operation attributes
  * - 2807-2899: Block scale dequantize operation attributes
  * - 2900-2913: Batchnorm training forward operation attributes
+ * - 3000-3099: Custom op operation attributes
+ * - 3100-3199: SDPA backward propagation operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -76,6 +78,9 @@ typedef enum
 
     /** @brief Device properties for heuristic evaluation */
     HIPDNN_ATTR_ENGINEHEUR_DEVICEPROP = 104,
+
+    /** @brief Find first mode: stop after finding any applicable engine (bool, extension) */
+    HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT = 105,
 
     /** @} */
 
@@ -158,10 +163,10 @@ typedef enum
      */
 
     /** @brief Type of the knob */
-    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE = 500,
+    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT = 500,
 
     /** @brief Selected value for the knob */
-    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE = 501,
+    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT = 501,
 
     /** @} */
 
@@ -241,16 +246,45 @@ typedef enum
      */
 
     /** @brief Type identifier of the knob */
-    HIPDNN_ATTR_KNOB_INFO_TYPE = 900,
+    HIPDNN_ATTR_KNOB_INFO_TYPE_EXT = 900,
 
     /** @brief Maximum allowed value for the knob */
-    HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE = 901,
+    HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT = 901,
 
     /** @brief Minimum allowed value for the knob */
-    HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE = 902,
+    HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT = 902,
 
     /** @brief Step size for valid knob values */
-    HIPDNN_ATTR_KNOB_INFO_STRIDE = 903,
+    HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT = 903,
+
+    /** @brief Human-readable description of the knob */
+    HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT = 904,
+
+    /** @brief Default value for the knob (INT64, DOUBLE, or CHAR) */
+    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT = 905,
+
+    /** @brief Whether this knob is deprecated */
+    HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT = 906,
+
+    /** @brief Explicit list of valid integer values (INT64 array) */
+    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT = 907,
+
+    /** @brief Explicit list of valid string values (CHAR, flat null-separated buffer) */
+    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT = 908,
+
+    /** @brief Maximum string length for string knobs (INT32) */
+    HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT = 909,
+
+    /**
+     * @brief Type discriminator for the default value attribute (read-only, INT64)
+     *
+     * Returns the hipdnnBackendAttributeType_t value that should be used when
+     * calling getAttribute() for HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT.
+     * Possible values: HIPDNN_TYPE_INT64, HIPDNN_TYPE_DOUBLE, HIPDNN_TYPE_CHAR.
+     * This eliminates the need to probe multiple types to discover the default
+     * value type after reading a KnobDescriptor.
+     */
+    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT = 910,
 
     /** @} */
 
@@ -803,6 +837,9 @@ typedef enum
 
     /** @brief Math precision (compute data type) for layernorm */
     HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT = 2708,
+
+    /** @brief Number of normalized dimensions for layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT = 2709,
     /** @} */
 
     /**
@@ -907,6 +944,124 @@ typedef enum
 
     /** @brief Peer statistics tensor array for multi-GPU batchnorm training forward */
     HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT = 2913,
+
+    /** @} */
+
+    /**
+     * @name Custom Op Operation Attributes (3000-3099)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor array for custom op */
+    HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT = 3000,
+
+    /** @brief Output tensor array for custom op */
+    HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT = 3001,
+
+    /** @brief Plugin identifier string for custom op (e.g. "example.rope") */
+    HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT = 3002,
+
+    /** @brief Opaque byte payload for custom op */
+    HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT = 3003,
+
+    /** @brief Compute data type for custom op */
+    HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT = 3004,
+
+    /** @} */
+
+    /**
+     * @name SDPA Backward Propagation Operation Attributes (3100-3199)
+     * Attributes for HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Q (query) tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_Q_EXT = 3100,
+
+    /** @brief K (key) tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_K_EXT = 3101,
+
+    /** @brief V (value) tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_V_EXT = 3102,
+
+    /** @brief O (output) tensor from forward pass for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_O_EXT = 3103,
+
+    /** @brief dO (output gradient) tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DO_EXT = 3104,
+
+    /** @brief Stats tensor from forward pass for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_STATS_EXT = 3105,
+
+    /** @brief dQ (query gradient) output tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DQ_EXT = 3106,
+
+    /** @brief dK (key gradient) output tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DK_EXT = 3107,
+
+    /** @brief dV (value gradient) output tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DV_EXT = 3108,
+
+    /** @brief Scale tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SCALE_EXT = 3109,
+
+    /** @brief Attention mask tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_ATTN_MASK_EXT = 3110,
+
+    /** @brief Sequence length Q tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_Q_EXT = 3111,
+
+    /** @brief Sequence length KV tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_KV_EXT = 3112,
+
+    /** @brief Seed tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEED_EXT = 3113,
+
+    /** @brief Offset tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_OFFSET_EXT = 3114,
+
+    /** @brief Dropout mask tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_MASK_EXT = 3115,
+
+    /** @brief Dropout scale tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_EXT = 3116,
+
+    /** @brief Dropout scale inverse tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_INV_EXT = 3117,
+
+    /** @brief dBias (gradient of attention bias) output tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DBIAS_EXT = 3118,
+
+    /** @brief Whether to use ALiBi mask (bool) */
+    HIPDNN_ATTR_SDPA_BPROP_ALIBI_MASK_EXT = 3119,
+
+    /** @brief Whether to use padding mask (bool) */
+    HIPDNN_ATTR_SDPA_BPROP_PADDING_MASK_EXT = 3120,
+
+    /** @brief Whether to use causal mask (bool, deprecated) */
+    HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_EXT = 3121,
+
+    /** @brief Whether to use causal mask bottom-right (bool, deprecated) */
+    HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT = 3122,
+
+    /** @brief Dropout probability (float) */
+    HIPDNN_ATTR_SDPA_BPROP_DROPOUT_PROBABILITY_EXT = 3123,
+
+    /** @brief Attention scale value (float) */
+    HIPDNN_ATTR_SDPA_BPROP_ATTN_SCALE_VALUE_EXT = 3124,
+
+    /** @brief Left bound for sliding window (int64) */
+    HIPDNN_ATTR_SDPA_BPROP_LEFT_BOUND_EXT = 3125,
+
+    /** @brief Right bound for sliding window (int64) */
+    HIPDNN_ATTR_SDPA_BPROP_RIGHT_BOUND_EXT = 3126,
+
+    /** @brief Diagonal alignment mode (hipdnnDiagonalAlignment_t) */
+    HIPDNN_ATTR_SDPA_BPROP_DIAGONAL_ALIGNMENT_EXT = 3127,
+
+    /** @brief Compute data type for SDPA backward */
+    HIPDNN_ATTR_SDPA_BPROP_MATH_PREC_EXT = 3128,
 
     /** @} */
 
