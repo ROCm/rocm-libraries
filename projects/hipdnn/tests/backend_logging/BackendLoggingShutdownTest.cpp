@@ -145,6 +145,24 @@ void createAndDestroyHandle(const char* context)
     }
 }
 
+// Run a worker loop that continuously creates/destroys handles until the stop
+// flag is set. Signals readiness after the first API call completes.
+void runWorkerLoop(std::atomic<bool>& stopFlag, const char* context)
+{
+    bool signaled = false;
+    while(!stopFlag.load(std::memory_order_acquire))
+    {
+        createAndDestroyHandle(context);
+        if(!signaled)
+        {
+            gWorkersReady.fetch_add(1, std::memory_order_release);
+            gReadyCV.notify_one();
+            signaled = true;
+        }
+        std::this_thread::yield();
+    }
+}
+
 // Spawn a new thread that makes a hipDNN API call, then join it.
 // The new thread has never called getBackendLogState(), so it has no
 // thread_local s_tlRef. The atexit handler (log level OFF) prevents it
@@ -171,18 +189,7 @@ void plainWorker(std::atomic<bool>& stopFlag, int threadId)
     // may call it concurrently, all setting the same value.
     hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO);
 
-    bool signaled = false;
-    while(!stopFlag.load(std::memory_order_acquire))
-    {
-        createAndDestroyHandle("plain worker (loop)");
-        if(!signaled)
-        {
-            gWorkersReady.fetch_add(1, std::memory_order_release);
-            gReadyCV.notify_one();
-            signaled = true;
-        }
-        std::this_thread::yield();
-    }
+    runWorkerLoop(stopFlag, "plain worker (loop)");
 
     // After receiving the stop signal, delay and make one more API call.
     // By this point the atexit handler has set log level to OFF, so the
@@ -210,18 +217,7 @@ void callbackWorker(std::atomic<bool>& stopFlag,
                                  HIPDNN_LOG_CALLBACK_ASYNC,
                                  static_cast<hipdnnUserLogCallbackHandle_t>(cbData));
 
-    bool signaled = false;
-    while(!stopFlag.load(std::memory_order_acquire))
-    {
-        createAndDestroyHandle("callback worker (loop)");
-        if(!signaled)
-        {
-            gWorkersReady.fetch_add(1, std::memory_order_release);
-            gReadyCV.notify_one();
-            signaled = true;
-        }
-        std::this_thread::yield();
-    }
+    runWorkerLoop(stopFlag, "callback worker (loop)");
 
     // Intentionally do NOT deregister the user callback before exiting.
     // This tests that BackendLogState::~BackendLogState (via loggerShutdownLocked)
