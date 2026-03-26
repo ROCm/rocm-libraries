@@ -174,7 +174,7 @@ using IntegrationGpuBatchnormForwardInferenceWithVarianceNdhwcFp16
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceNclFp32, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NCL);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<float>(), TensorLayout::NCL);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -187,7 +187,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceNclBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<bfloat16>(), TensorLayout::NCL);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NCL);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -200,7 +200,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceNclFp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NCL);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<half>(), TensorLayout::NCL);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -213,7 +213,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceNlcFp32, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NLC);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<float>(), TensorLayout::NLC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -226,7 +226,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceNlcBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<bfloat16>(), TensorLayout::NLC);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NLC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -239,7 +239,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceNlcFp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NLC);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<half>(), TensorLayout::NLC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,

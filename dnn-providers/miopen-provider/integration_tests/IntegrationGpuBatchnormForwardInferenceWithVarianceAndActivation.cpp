@@ -259,7 +259,7 @@ using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcFp16
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclFp32, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NCL);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<float>(), TensorLayout::NCL);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -276,7 +276,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<bfloat16>(), TensorLayout::NCL);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NCL);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -293,7 +293,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNclFp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NCL);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<half>(), TensorLayout::NCL);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -310,7 +310,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcFp32, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NLC);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<float>(), TensorLayout::NLC);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -327,7 +327,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcBfp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<bfloat16>(), TensorLayout::NLC);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NLC);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -344,7 +344,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNlcFp16, Correctness)
 {
-    runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NLC);
+    runGraphTest(batchnorm::getToleranceInferenceWithVariance<half>(), TensorLayout::NLC);
 }
 
 INSTANTIATE_TEST_SUITE_P(
