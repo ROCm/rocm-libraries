@@ -776,7 +776,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDescriptor)
                                        1,
                                        &elementCount,
                                        static_cast<void*>(&rawQ)));
-    std::unique_ptr<HipdnnBackendDescriptor> const retrievedQ(rawQ);
+    const std::unique_ptr<HipdnnBackendDescriptor> retrievedQ(rawQ);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedQ, nullptr);
@@ -1093,7 +1093,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, ToStringContainsExpectedInfo)
     setAllAttributesExcept();
     auto desc = getDescriptor();
 
-    std::string const str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("SdpaFpropOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("q_uid=" + std::to_string(K_SDPA_TENSOR_Q_UID)), std::string::npos);
     ASSERT_NE(str.find("k_uid=" + std::to_string(K_SDPA_TENSOR_K_UID)), std::string::npos);

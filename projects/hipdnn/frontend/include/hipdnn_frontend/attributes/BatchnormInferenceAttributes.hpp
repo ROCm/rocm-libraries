@@ -39,6 +39,8 @@ namespace hipdnn_frontend::graph
 class BatchnormInferenceAttributes : public Attributes<BatchnormInferenceAttributes>
 {
 public:
+    BatchnormInferenceAttributes() = default;
+
     /// Input tensor identifiers
     enum class InputNames
     {

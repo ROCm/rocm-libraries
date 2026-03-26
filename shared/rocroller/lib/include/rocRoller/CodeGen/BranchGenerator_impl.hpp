@@ -120,7 +120,8 @@ namespace rocRoller
         // Resolve DataFlowTags and evaluate exprs with translate time source operands.
         expr = dataFlowTagPropagation(expr, context);
 
-        auto [conditionRegisterType, conditionVariableType] = Expression::resultType(expr);
+        auto [conditionRegisterType, conditionVariableType, conditionValueCount]
+            = Expression::resultType(expr);
         return conditionVariableType == DataType::Bool ? context->getSCC() : context->getVCC();
     }
 }

@@ -166,6 +166,7 @@ TEST_F(IntegrationGraphLifting, ConvFpropRoundTripViaCApi)
     EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
     EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
     EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
+    EXPECT_EQ(convNode->attributes.get_name(), "conv_fprop_op");
 }
 
 // Verifies that tensors are accessible by UID on the reconstructed graph,
@@ -284,7 +285,7 @@ TEST_F(IntegrationGraphLifting, ConvFpropLiftWithoutFinalization)
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
-    detail::ScopedHipdnnBackendDescriptor const graphDesc(data.data(), data.size());
+    const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
     ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
 
     // Lift into a new graph via fromBackendDescriptor
@@ -430,7 +431,7 @@ TEST_F(IntegrationGraphLifting, EmptyGraphDescriptorReturnsError)
 // given corrupt (garbage) bytes.
 TEST_F(IntegrationGraphLifting, DeserializeViaBackendCorruptDataReturnsError)
 {
-    std::vector<uint8_t> const garbage = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03};
+    const std::vector<uint8_t> garbage = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03};
 
     auto graph = std::make_shared<TestableGraph>();
     auto result = graph->deserialize_via_backend(_handle, garbage);
@@ -441,7 +442,7 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendCorruptDataReturnsError)
 // given an empty data vector.
 TEST_F(IntegrationGraphLifting, DeserializeViaBackendEmptyDataReturnsError)
 {
-    std::vector<uint8_t> const empty;
+    const std::vector<uint8_t> empty;
 
     auto graph = std::make_shared<TestableGraph>();
     auto result = graph->deserialize_via_backend(_handle, empty);

@@ -11,7 +11,7 @@ using namespace hipdnn_frontend::graph;
 
 TEST(TestCustomOpAttributes, DefaultValues)
 {
-    CustomOpAttributes const attr;
+    const CustomOpAttributes attr;
 
     EXPECT_TRUE(attr.get_name().empty());
     EXPECT_TRUE(attr.get_custom_op_id().empty());
@@ -56,7 +56,7 @@ TEST(TestCustomOpAttributes, InputsAndOutputs)
 
 TEST(TestCustomOpAttributes, Data)
 {
-    std::vector<uint8_t> const payload = {0x01, 0x02, 0x03, 0xFF};
+    const std::vector<uint8_t> payload = {0x01, 0x02, 0x03, 0xFF};
 
     CustomOpAttributes attr;
     attr.set_data(payload);
@@ -115,7 +115,7 @@ TEST(TestCustomOpAttributes, PackAndFromFlatBuffer)
     output->set_name("output").set_uid(30).set_dim({2, 3}).set_stride({3, 1}).set_data_type(
         DataType::FLOAT);
 
-    std::vector<uint8_t> const payload = {0xDE, 0xAD, 0xBE, 0xEF};
+    const std::vector<uint8_t> payload = {0xDE, 0xAD, 0xBE, 0xEF};
 
     CustomOpAttributes attr;
     attr.set_name("test_op")

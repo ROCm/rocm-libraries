@@ -266,7 +266,7 @@ TEST_F(IntegrationConvFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
         << "Y tensor UID " << convFwd->y_tensor_uid << " not found in graph tensors";
 
     // All three tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> const nodeUids
+    const std::unordered_set<int64_t> nodeUids
         = {convFwd->x_tensor_uid, convFwd->w_tensor_uid, convFwd->y_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 3u) << "Conv node tensor UIDs are not distinct";
 }
