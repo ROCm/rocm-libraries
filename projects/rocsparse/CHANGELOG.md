@@ -12,6 +12,10 @@ Documentation for rocSPARSE is available at
 * Added the `rocsparse_sptrsv_output_singularity` and the `rocsparse_sptrsv_output_singularity_position` in `rocsparse_sptrsv_output`.
 * Added the strided batched computations for `rocsparse_sptrsv`.
 
+### Removed
+
+* The deprecated C++14 support, which is no longer supported by rocPRIM.
+
 ## rocSPARSE 4.5.0 for ROCm 7.12.0
 
 ### Added
