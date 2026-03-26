@@ -40,7 +40,7 @@ int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                   uint32_t indexCount,
                                   miopenTensorDescriptor_t* indexDescs,
                                   miopenTensorDescriptor_t dxDesc,
-                                  miopenTensorDescriptor_t errorDesc
+                                  miopenTensorDescriptor_t errorDesc,
                                   Tgpu* dy,
                                   int32_t** indexs,
                                   Tcheck* dxhost,
