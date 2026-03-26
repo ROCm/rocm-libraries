@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "HipdnnOperationType.h"
+#include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/BlockScaleDequantizeOperationDescriptor.hpp"
 #include "descriptors/NodeFactory.hpp"
@@ -75,53 +76,6 @@ protected:
         node.compute_data_type = computeType;
         node.attributes.Set(createStandardBlockScaleDequantizeAttrs());
         return node;
-    }
-
-    // Verifies that a packed tensor descriptor (retrieved via getAttribute) has the
-    // expected UID, data_type, dimensions, and strides.
-    static void verifyTensorDescriptor(hipdnnBackendDescriptor_t tensorDesc,
-                                       int64_t expectedUid,
-                                       hipdnnDataType_t expectedDataType,
-                                       const std::vector<int64_t>& expectedDims,
-                                       const std::vector<int64_t>& expectedStrides)
-    {
-        int64_t uid = 0;
-        int64_t uidCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uidCount, &uid);
-        EXPECT_EQ(uid, expectedUid);
-
-        hipdnnDataType_t dataType = {};
-        int64_t dtCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &dataType);
-        EXPECT_EQ(dataType, expectedDataType);
-
-        int64_t dimCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, 0, &dimCount, nullptr);
-        ASSERT_EQ(dimCount, static_cast<int64_t>(expectedDims.size()));
-        std::vector<int64_t> dims(static_cast<size_t>(dimCount));
-        int64_t actualDimCount = 0;
-        tensorDesc->getAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS,
-                                 HIPDNN_TYPE_INT64,
-                                 dimCount,
-                                 &actualDimCount,
-                                 dims.data());
-        EXPECT_EQ(dims, expectedDims);
-
-        int64_t strideCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, 0, &strideCount, nullptr);
-        ASSERT_EQ(strideCount, static_cast<int64_t>(expectedStrides.size()));
-        std::vector<int64_t> strides(static_cast<size_t>(strideCount));
-        int64_t actualStrideCount = 0;
-        tensorDesc->getAttribute(HIPDNN_ATTR_TENSOR_STRIDES,
-                                 HIPDNN_TYPE_INT64,
-                                 strideCount,
-                                 &actualStrideCount,
-                                 strides.data());
-        EXPECT_EQ(strides, expectedStrides);
     }
 };
 
@@ -321,11 +275,11 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, GetAttributeWorksAfterFromNode
                        static_cast<void*>(xScoped.getPtr()));
     ASSERT_EQ(xCount, 1);
     ASSERT_NE(xScoped.get(), nullptr);
-    verifyTensorDescriptor(xScoped.get(),
-                           K_BSD_TENSOR_X_UID,
-                           HIPDNN_DATA_FLOAT,
-                           toVec(K_BSD_TENSOR_X_DIMS),
-                           toVec(K_BSD_TENSOR_X_STRIDES));
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(xScoped.get(),
+                                                           K_BSD_TENSOR_X_UID,
+                                                           HIPDNN_DATA_FLOAT,
+                                                           toVec(K_BSD_TENSOR_X_DIMS),
+                                                           toVec(K_BSD_TENSOR_X_STRIDES));
 
     // Verify scale tensor
     hipdnn_backend::ScopedDescriptor scaleScoped;
@@ -337,11 +291,11 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, GetAttributeWorksAfterFromNode
                        static_cast<void*>(scaleScoped.getPtr()));
     ASSERT_EQ(scaleCount, 1);
     ASSERT_NE(scaleScoped.get(), nullptr);
-    verifyTensorDescriptor(scaleScoped.get(),
-                           K_BSD_TENSOR_SCALE_UID,
-                           HIPDNN_DATA_FLOAT,
-                           toVec(K_BSD_TENSOR_SCALE_DIMS),
-                           toVec(K_BSD_TENSOR_SCALE_STRIDES));
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(scaleScoped.get(),
+                                                           K_BSD_TENSOR_SCALE_UID,
+                                                           HIPDNN_DATA_FLOAT,
+                                                           toVec(K_BSD_TENSOR_SCALE_DIMS),
+                                                           toVec(K_BSD_TENSOR_SCALE_STRIDES));
 
     // Verify y tensor
     hipdnn_backend::ScopedDescriptor yScoped;
@@ -353,11 +307,11 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, GetAttributeWorksAfterFromNode
                        static_cast<void*>(yScoped.getPtr()));
     ASSERT_EQ(yCount, 1);
     ASSERT_NE(yScoped.get(), nullptr);
-    verifyTensorDescriptor(yScoped.get(),
-                           K_BSD_TENSOR_Y_UID,
-                           HIPDNN_DATA_FLOAT,
-                           toVec(K_BSD_TENSOR_Y_DIMS),
-                           toVec(K_BSD_TENSOR_Y_STRIDES));
+    hipdnn_backend::test_utilities::verifyTensorDescriptor(yScoped.get(),
+                                                           K_BSD_TENSOR_Y_UID,
+                                                           HIPDNN_DATA_FLOAT,
+                                                           toVec(K_BSD_TENSOR_Y_DIMS),
+                                                           toVec(K_BSD_TENSOR_Y_STRIDES));
 
     // Verify operation type
     hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;

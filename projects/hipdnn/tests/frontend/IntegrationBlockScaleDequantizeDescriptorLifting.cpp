@@ -126,7 +126,7 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, BasicBlockScaleDequanti
 
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_GE(tensorMap.size(), 3u);
+    ASSERT_EQ(tensorMap.size(), 3u);
 
     // Verify X tensor
     ASSERT_NE(tensorMap.count(K_BSD_TENSOR_X_UID), 0u);
@@ -134,6 +134,7 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, BasicBlockScaleDequanti
     EXPECT_EQ(tensorMap[K_BSD_TENSOR_X_UID]->get_dim(), toVec(K_BSD_TENSOR_X_DIMS));
     EXPECT_EQ(tensorMap[K_BSD_TENSOR_X_UID]->get_stride(), toVec(K_BSD_TENSOR_X_STRIDES));
     EXPECT_EQ(tensorMap[K_BSD_TENSOR_X_UID]->get_data_type(), DataType::FP8_E4M3);
+    EXPECT_EQ(tensorMap[K_BSD_TENSOR_X_UID]->get_name(), "X");
 
     // Verify Scale tensor
     ASSERT_NE(tensorMap.count(K_BSD_TENSOR_SCALE_UID), 0u);
@@ -141,12 +142,14 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, BasicBlockScaleDequanti
     EXPECT_EQ(tensorMap[K_BSD_TENSOR_SCALE_UID]->get_dim(), toVec(K_BSD_TENSOR_SCALE_DIMS));
     EXPECT_EQ(tensorMap[K_BSD_TENSOR_SCALE_UID]->get_stride(), toVec(K_BSD_TENSOR_SCALE_STRIDES));
     EXPECT_EQ(tensorMap[K_BSD_TENSOR_SCALE_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_BSD_TENSOR_SCALE_UID]->get_name(), "Scale");
 
     // Verify Y tensor
     ASSERT_NE(tensorMap.count(K_BSD_TENSOR_Y_UID), 0u);
     EXPECT_EQ(tensorMap[K_BSD_TENSOR_Y_UID]->get_uid(), K_BSD_TENSOR_Y_UID);
     EXPECT_EQ(tensorMap[K_BSD_TENSOR_Y_UID]->get_dim(), toVec(K_BSD_TENSOR_Y_DIMS));
     EXPECT_EQ(tensorMap[K_BSD_TENSOR_Y_UID]->get_stride(), toVec(K_BSD_TENSOR_Y_STRIDES));
+    EXPECT_EQ(tensorMap[K_BSD_TENSOR_Y_UID]->get_name(), "Y");
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
@@ -254,7 +257,7 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting,
 
     // Verify tensor dims and strides
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_GE(tensorMap.size(), 3u);
+    ASSERT_EQ(tensorMap.size(), 3u);
 
     ASSERT_NE(tensorMap.count(K_BSD_TENSOR_X_UID), 0u);
     EXPECT_EQ(tensorMap[K_BSD_TENSOR_X_UID]->get_dim(), toVec(K_BSD_TENSOR_X_DIMS));
@@ -354,14 +357,14 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, AutoAssignedUidsPreserv
 
     // Verify all tensors have unique UIDs
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_GE(tensorMap.size(), 3u);
+    ASSERT_EQ(tensorMap.size(), 3u);
 
     std::unordered_set<int64_t> uids;
     for(const auto& [uid, tensor] : tensorMap)
     {
         uids.insert(uid);
     }
-    EXPECT_GE(uids.size(), 3u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 3u) << "Tensor UIDs are not unique";
 
     // Verify the node references tensors from the map
     auto& subNodes = liftedGraph->getSubNodes();

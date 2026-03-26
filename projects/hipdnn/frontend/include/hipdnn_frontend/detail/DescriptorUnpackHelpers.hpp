@@ -72,6 +72,15 @@ template <typename T>
     return {};
 }
 
+/// Gets a vector-valued int64 attribute (queries count first, then allocates and queries values).
+[[nodiscard]] inline Error getDescriptorAttrVec(hipdnnBackendDescriptor_t desc,
+                                                hipdnnBackendAttributeName_t attrName,
+                                                std::vector<int64_t>& values,
+                                                const std::string& errorContext)
+{
+    return getDescriptorAttrVec<int64_t>(desc, attrName, HIPDNN_TYPE_INT64, values, errorContext);
+}
+
 /// Gets a scalar attribute of a given type.
 template <typename T>
 [[nodiscard]] inline Error getDescriptorAttrScalar(hipdnnBackendDescriptor_t desc,
@@ -285,13 +294,13 @@ template <typename T>
 
     // Read dimensions
     std::vector<int64_t> dims;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrVec(
-        tensorDesc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, dims, "tensor dimensions"));
+    HIPDNN_CHECK_ERROR(
+        getDescriptorAttrVec(tensorDesc, HIPDNN_ATTR_TENSOR_DIMENSIONS, dims, "tensor dimensions"));
 
     // Read strides
     std::vector<int64_t> strides;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrVec(
-        tensorDesc, HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, strides, "tensor strides"));
+    HIPDNN_CHECK_ERROR(
+        getDescriptorAttrVec(tensorDesc, HIPDNN_ATTR_TENSOR_STRIDES, strides, "tensor strides"));
 
     // Read is_virtual
     bool isVirtual = false;

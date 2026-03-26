@@ -12,6 +12,8 @@
 namespace hipdnn_frontend::detail
 {
 
+/// Unpacks a BLOCK_SCALE_DEQUANTIZE operation descriptor into BlockScaleDequantizeAttributes.
+/// Reads X, Scale, and Y tensors; block_size; is_negative_scale; compute data type; and name.
 [[nodiscard]] inline Error unpackBlockScaleDequantizeOperation(
     hipdnnBackendDescriptor_t opDesc,
     std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,

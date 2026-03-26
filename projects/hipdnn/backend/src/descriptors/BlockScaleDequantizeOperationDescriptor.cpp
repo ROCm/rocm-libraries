@@ -271,7 +271,7 @@ std::shared_ptr<BlockScaleDequantizeOperationDescriptor>
                                        "BlockScaleDequantizeOperationDescriptor::fromNode: Scale");
     desc->_yDesc = findTensorInMap(
         tensorMap, attrs->y_tensor_uid, "BlockScaleDequantizeOperationDescriptor::fromNode: Y");
-    desc->HipdnnBackendDescriptorImpl<BlockScaleDequantizeOperationDescriptor>::finalize();
+    desc->finalize();
     return desc;
 }
 
