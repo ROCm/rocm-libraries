@@ -28,7 +28,6 @@
 
 rocsparse_status _rocsparse_adaptive_info::destroy(hipStream_t stream)
 {
-    std::cout << "adaptive_info free  " << this->row_blocks << std::endl;
     RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->row_blocks, stream));
     RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->wg_flags, stream));
     RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->wg_ids, stream));
@@ -44,6 +43,5 @@ rocsparse_status _rocsparse_adaptive_info::destroy(hipStream_t stream)
 
 void _rocsparse_adaptive_info::clear(hipStream_t stream)
 {
-    std::cout << "clear " << std::endl;
     WARNING_IF_ROCSPARSE_ERROR(this->destroy(stream));
 }

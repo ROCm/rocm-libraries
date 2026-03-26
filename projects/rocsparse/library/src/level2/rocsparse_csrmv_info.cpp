@@ -29,7 +29,6 @@
 rocsparse_status _rocsparse_csrmv_info::destroy(hipStream_t stream)
 {
     ROCSPARSE_ROUTINE_TRACE;
-    std::cout << "destroy csrmv_info " << this << std::endl;
     this->clear(stream);
     return rocsparse_status_success;
 }
