@@ -76,11 +76,20 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     using CTransform = typename MmaTransforms::CTransform;
     using DTransform = typename MmaTransforms::DTransform;
 
+    // Type check helper - not a device function, so std::declval is available
+    template <typename ATransformResult>
+    static constexpr void checkATransformResult()
+    {
+        using ExternalAvecRef = std::add_lvalue_reference_t<AVecType>;
+        static_assert(std::is_same_v<ATransformResult,
+                                     decltype(ATransform::exec(std::declval<ExternalAvecRef>()))>);
+    }
+
     template <typename ATransformResult, typename BTransformResult, typename CTransformResult>
     CK_TILE_DEVICE static void
     execImpl(std::tuple<ATransformResult, BTransformResult, CTransformResult>& vecs)
     {
-        static_assert(std::is_same_v<ATransformResult, decltype(ATransform::exec(AVecType{}))>);
+        checkATransformResult<ATransformResult>();
         auto& [a_result, b_vec, c_vec] = vecs;
         auto& [a_vec, idx]             = a_result;
         c_vec                          = MmaOp::exec(a_vec, b_vec, c_vec, idx);
