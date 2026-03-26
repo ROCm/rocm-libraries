@@ -1113,7 +1113,10 @@ rocsparse_status rocsparse_memstat_report(const char* filename)
 }
 }
 #else
-hipError_t rocsparse_hipMallocAsync(void** mem, size_t nbytes, hipStream_t stream)
+
+#include "rocsparse-types.h"
+
+hipError_t rocsparse_internal_hipMallocAsync(void** mem, size_t nbytes, hipStream_t stream)
 {
     if(nbytes > 0)
     {
@@ -1126,7 +1129,7 @@ hipError_t rocsparse_hipMallocAsync(void** mem, size_t nbytes, hipStream_t strea
     }
 }
 
-hipError_t rocsparse_hipFreeAsync(void* mem, hipStream_t stream)
+hipError_t rocsparse_internal_hipFreeAsync(void* mem, hipStream_t stream)
 {
     if(mem)
     {

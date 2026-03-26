@@ -38,8 +38,12 @@
 // if hip version is atleast 5.3.0 hipMallocAsync and hipFreeAsync are defined
 #if HIP_VERSION >= 50300000
 
-hipError_t rocsparse_hipMallocAsync(void** mem, size_t nbytes, hipStream_t stream);
-hipError_t rocsparse_hipFreeAsync(void* mem, hipStream_t stream);
+hipError_t rocsparse_internal_hipFreeAsync(void* mem, hipStream_t stream);
+hipError_t rocsparse_internal_hipMallocAsync(void** mem, size_t nbytes, hipStream_t stream);
+
+#define rocsparse_hipMallocAsync(p_, nbytes_, stream_) \
+    rocsparse_internal_hipMallocAsync(reinterpret_cast<void**>((p_)), (nbytes_), stream_)
+#define rocsparse_hipFreeAsync(p_, stream_) rocsparse_internal_hipFreeAsync((p_), stream_)
 
 #else
 #define rocsparse_hipMallocAsync(p_, nbytes_, stream_) hipMalloc((p_), (nbytes_))
