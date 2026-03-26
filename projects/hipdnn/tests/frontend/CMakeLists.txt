@@ -24,6 +24,7 @@ add_executable(
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
     IntegrationConvolutionDgradDescriptorLowering.cpp
+    IntegrationConvolutionWgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
@@ -38,6 +39,7 @@ add_executable(
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationRMSNormDescriptorLifting.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
     IntegrationSetPluginPathsExt.cpp
