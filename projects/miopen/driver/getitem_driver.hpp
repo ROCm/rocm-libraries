@@ -40,7 +40,7 @@ int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                   uint32_t indexCount,
                                   miopenTensorDescriptor_t* indexDescs,
                                   miopenTensorDescriptor_t dxDesc,
-                                  miopenTensorDescriptor_t errorDesc,
+                                  miopenTensorDescriptor_t /*errorDesc*/,
                                   Tgpu* dy,
                                   int32_t** indexs,
                                   Tcheck* dxhost,
@@ -49,7 +49,7 @@ int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                   int32_t* dims,
                                   uint32_t sliceCount,
                                   int32_t* slices,
-                                  uint32_t offset)
+                                  uint32_t /*offset*/)
 {
     auto dy_dims  = miopen::deref(dyDesc).GetLengths();
     auto dy_numel = std::accumulate(dy_dims.begin(), dy_dims.end(), 1L, std::multiplies<int64_t>());
@@ -462,6 +462,7 @@ int GetitemDriver<Tgpu, Tref>::RunBackwardCPU()
                                           indexDescs.size(),
                                           indexDescs.data(),
                                           dxDesc,
+                                          errorDesc,
                                           dy.data(),
                                           indexs_ptr.data(),
                                           dxhost.data(),
@@ -469,7 +470,8 @@ int GetitemDriver<Tgpu, Tref>::RunBackwardCPU()
                                           dims.size(),
                                           dims.data(),
                                           slices.size(),
-                                          slices_flat.data());
+                                          slices_flat.data(),
+                                          offset);
 
     return miopenStatusSuccess;
 }
