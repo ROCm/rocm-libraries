@@ -1062,17 +1062,17 @@ class LocalReadMFMA(LocalRead):
                                                                                 comment="select K=%u%u for vector=%u"%(0, 1, vgprOffset)))
                                                         vgprOffset += 1
                                                 elif kernel["MIInputPerThread%s"%tc] == 1:
-                                                    vgprIdx_ = vgprIdx+vIdx*(numSplitMetadata+1)
-                                                    packCodeT.add(VMovB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx_)), src=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 0, i+vIdx*numVgpr))))
-                                                    for elementIdx in range(1, numSplitMetadata+1):
+                                                    destVgpr_ = vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, grIdx%(kernel["MIInputPerThread%s"%tc]), vIdx*numVgpr + i))
+                                                    bitShift = 0
+                                                    for elementIdx in range(0, numSplitMetadata+1):
+                                                        # go to next vgpr
                                                         if elementIdx >= writer.states.bpr:
                                                             break
-                                                        packCodeT.add(VMovB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx_ + elementIdx)), src=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 0, i+vIdx*numVgpr)), \
-                                                                            comment="another VGPR storing lshr 8-bit value %d %d" %(vgprIdx, elementIdx)))
-                                                        packCodeT.add(VLShiftRightB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx_+elementIdx)), \
-                                                                                    shiftHex=hex(8*elementIdx), \
-                                                                                    src=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx_+elementIdx)), \
-                                                                                    comment="ValuMetadata Vpgr >> 8"))
+                                                        comment_ = "another VGPR storing lshr %d-bit value %d %d" %(bitShift, vgprIdx, elementIdx) if bitShift != 0 else ""
+                                                        packCodeT.add(VMovB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+elementIdx)), src=destVgpr_, comment=comment_))
+                                                        if bitShift != 0:
+                                                            packCodeT.add(VLShiftRightB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+elementIdx)), shiftHex=hex(bitShift), src=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+elementIdx)), comment="ValuMetadata Vpgr >> %d" % bitShift))
+                                                        bitShift += 8
                                                 else:
                                                     assert False
                                             elif tP["isM"]:
