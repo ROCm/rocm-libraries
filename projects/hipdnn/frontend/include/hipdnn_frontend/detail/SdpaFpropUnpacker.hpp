@@ -338,7 +338,7 @@ namespace hipdnn_frontend::detail
                                                            "sdpa dropout_probability"));
         if(dropoutProbability.has_value())
         {
-            attributes.dropout_probability = dropoutProbability;
+            attributes.set_dropout_probability(*dropoutProbability);
         }
     }
 
