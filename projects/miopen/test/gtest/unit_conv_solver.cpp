@@ -901,8 +901,8 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
     const auto all_known_devs = GetAllKnownDevices();
     for(const auto& [dev, dev_descr] : all_known_devs)
     {
-        const auto supported = IsDeviceSupported(params.supported_devs, dev)
-                               && params.excluded_devices.count(dev_descr.name) == 0;
+        const auto supported = IsDeviceSupported(params.supported_devs, dev) &&
+                               params.excluded_devices.count(dev_descr.name) == 0;
         // std::cout << "Test " << dev_descr << " (supported: " << supported << ")" << std::endl;
 
         auto handle    = MockHandle{dev_descr, params.check_xnack_disabled};
