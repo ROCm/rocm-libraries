@@ -144,6 +144,32 @@ namespace rocsparse
         }
 
         // Write Interface Rows to the Global spike System
+        // Consider an 8x8 system with tile size 4. This results in a 4x4 spike system.
+        // If we wrote out the spike coefficients in order this would result in a system:
+        //
+        // |b0 0 c0 0| |x0| |d0|
+        // |0 b3 c3 0| |x3|=|d3|
+        // |0 a4 b4 0| |x4| |d4|
+        // |0 a7 0 b7| |x7| |d7|
+        //
+        // This however is not tridiagonal. Instead if we swap column 1 and 2 (assuming
+        // zero indexing) we get:
+        //
+        // |b0 c0 0 0| |x0| |d0|
+        // |0 c3 b3 0| |x4|=|d3|
+        // |0 b4 a4 0| |x3| |d4|
+        // |0 0 a7 b7| |x7| |d7|
+        //
+        // Having the spike system also be tridiagonal allows us to solve it using tridiagonal
+        // solvers. In general the solution vector ordering goes from (assuiming tile size is 4):
+        //
+        // x = [x0, x3, x4, x7, x8, x11, x12, x15, x16....]
+        //
+        // to:
+        //
+        // x = [x0, x4, x3, x8, x7, x12, x11, x16, x15....]
+        //
+        // Similarly the interior neighbouring columns of the spike system should be swapped.
         if(tid == 0 || tid == BLOCKSIZE - 1)
         {
             const int first = 0;
