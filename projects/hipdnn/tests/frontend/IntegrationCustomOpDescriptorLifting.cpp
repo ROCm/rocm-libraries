@@ -350,4 +350,75 @@ TEST_F(IntegrationCustomOpDescriptorLifting, CustomOpLiftWithoutFinalization)
     EXPECT_EQ(tensorMap[K_CUSTOM_OP_OUTPUT_UID_0]->get_name(), "output0");
 }
 
+// Builds a custom op graph with 1 input and 2 outputs, verifies the round-trip
+// preserves tensor counts and UIDs correctly.
+TEST_F(IntegrationCustomOpDescriptorLifting, SingleInputTwoOutputsRoundTrip)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("SingleInputTwoOutputsTest")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto input0 = std::make_shared<TensorAttributes>();
+    input0->set_uid(K_CUSTOM_OP_INPUT_UID_0).set_name("input0").set_data_type(DataType::FLOAT);
+    input0->set_dim({2, 3}).set_stride({3, 1});
+
+    CustomOpAttributes attrs;
+    attrs.set_name("single_input_two_outputs")
+        .set_custom_op_id(K_CUSTOM_OP_ID)
+        .set_data(K_CUSTOM_OP_OPAQUE_DATA);
+
+    auto outputs = graph->custom_op({input0}, 2, attrs);
+    ASSERT_EQ(outputs.size(), 2u);
+    outputs[0]
+        ->set_uid(K_CUSTOM_OP_OUTPUT_UID_0)
+        .set_output(true)
+        .set_name("output0")
+        .set_dim({2, 3})
+        .set_stride({3, 1})
+        .set_data_type(DataType::FLOAT);
+    outputs[1]
+        ->set_uid(K_CUSTOM_OP_OUTPUT_UID_1)
+        .set_output(true)
+        .set_name("output1")
+        .set_dim({2, 3})
+        .set_stride({3, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify 3 tensors: 1 input + 2 outputs
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u);
+
+    ASSERT_NE(tensorMap.count(K_CUSTOM_OP_INPUT_UID_0), 0u);
+    ASSERT_NE(tensorMap.count(K_CUSTOM_OP_OUTPUT_UID_0), 0u);
+    ASSERT_NE(tensorMap.count(K_CUSTOM_OP_OUTPUT_UID_1), 0u);
+
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* customOpNode = dynamic_cast<CustomOpNode*>(subNodes[0].get());
+    ASSERT_NE(customOpNode, nullptr);
+
+    ASSERT_EQ(customOpNode->attributes.get_inputs().size(), 1u);
+    EXPECT_EQ(customOpNode->attributes.get_inputs()[0]->get_uid(), K_CUSTOM_OP_INPUT_UID_0);
+    ASSERT_EQ(customOpNode->attributes.get_outputs().size(), 2u);
+    EXPECT_EQ(customOpNode->attributes.get_outputs()[0]->get_uid(), K_CUSTOM_OP_OUTPUT_UID_0);
+    EXPECT_EQ(customOpNode->attributes.get_outputs()[1]->get_uid(), K_CUSTOM_OP_OUTPUT_UID_1);
+    EXPECT_EQ(customOpNode->attributes.get_name(), "single_input_two_outputs");
+}
+
 } // namespace
