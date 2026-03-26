@@ -37,6 +37,7 @@ add_executable(
     descriptors/TestGraphDescriptorConvolutionWrw.cpp
     descriptors/TestBatchnormInferenceOperationDescriptor.cpp
     descriptors/TestBatchnormOperationDescriptor.cpp
+    descriptors/TestBatchnormOperationFromNode.cpp
     descriptors/TestGraphDescriptorBatchnorm.cpp
     descriptors/TestGraphDescriptorBatchnormInference.cpp
     descriptors/TestGraphDescriptorBlockScaleDequantize.cpp
