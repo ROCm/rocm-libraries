@@ -44,6 +44,7 @@ Definitions:
   - &M_N_range_extra
     - { M: 10, N: 10 }
     - { M: 235, N: 235 }
+    - { M: 600, N: 600 }
     - { M: 1200, N: 1200 }
 
 Tests:

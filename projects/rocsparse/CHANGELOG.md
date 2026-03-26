@@ -12,6 +12,9 @@ Documentation for rocSPARSE is available at
 * Added the `rocsparse_sptrsv_output_singularity` and the `rocsparse_sptrsv_output_singularity_position` in `rocsparse_sptrsv_output`.
 * Added the strided batched computations for `rocsparse_sptrsv`.
 
+### Resolved issues
+* Fix `rocsparse_[s|d|c|z]csric0` where `rocsparse_status_invalid_value` was being returned when the maximum number of non-zeros in any row is between 513 and 1024.
+
 ## rocSPARSE 4.5.0 for ROCm 7.12.0
 
 ### Added
