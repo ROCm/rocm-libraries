@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "NodeFactory.hpp"
+#include "BatchnormOperationDescriptor.hpp"
 #include "HipdnnException.hpp"
 
 namespace hipdnn_backend
@@ -16,8 +17,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
     switch(nodeT.attributes.type)
     {
     // Uncomment when fromNode() is implemented in the lifting PR:
-    // case NodeAttributes::BatchnormAttributes:
-    //     return BatchnormOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::BatchnormAttributes:
+        return BatchnormOperationDescriptor::fromNode(nodeT, tensorMap);
     // case NodeAttributes::BatchnormBackwardAttributes:
     //     return BatchnormBackwardOperationDescriptor::fromNode(nodeT, tensorMap);
     // case NodeAttributes::BatchnormInferenceAttributes:
@@ -42,8 +43,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
     //     return MatmulOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::PointwiseAttributes:
         return PointwiseOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::RMSNormAttributes:
-    //     return RMSNormOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::RMSNormAttributes:
+        return RMSNormOperationDescriptor::fromNode(nodeT, tensorMap);
     // case NodeAttributes::SdpaAttributes:
     //     return SdpaFpropOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::SdpaBackwardAttributes:
