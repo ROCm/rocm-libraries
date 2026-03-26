@@ -22,6 +22,9 @@ add_library(
     engines/plans/RMSnorm/RMSnormApplicabilityChecks.cpp
     engines/plans/RMSNormBwdPlan.cpp
     engines/plans/RMSNormBwdPlanBuilder.cpp
+    engines/plans/rmsnorm/RMSNormApplicabilityChecks.cpp
+    engines/plans/rmsnorm/RMSNormBwdPlan.cpp
+    engines/plans/rmsnorm/RMSNormBwdPlanBuilder.cpp
 )
 target_compile_definitions(
     hip_kernel_provider_impl PRIVATE COMPONENT_NAME="hip_kernel_provider"

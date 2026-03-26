@@ -6,6 +6,7 @@
 #include "engines/HipKernelEngine.hpp"
 #include "engines/plans/BatchnormPlanBuilder.hpp"
 #include "engines/plans/RMSnorm/RMSnormPlanBuilder.hpp"
+#include "engines/plans/rmsnorm/RMSNormBwdPlanBuilder.hpp"
 #include "hip/HipKernelCompiler.hpp"
 
 #ifdef HIPDNN_ENGINE_ASM_SDPA
@@ -36,6 +37,8 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
                  std::make_unique<BatchnormPlanBuilder>(kernelCompiler, devicePropertyProvider));
              engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormPlanBuilder>(
                  kernelCompiler, devicePropertyProvider));
+             engine->addPlanBuilder(
+                 std::make_unique<RMSNormBwdPlanBuilder>(kernelCompiler, devicePropertyProvider));
              return engine;
          }},
 #ifdef HIPDNN_ENGINE_ASM_SDPA

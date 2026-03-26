@@ -5,41 +5,79 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <string>
 
-#include "RMSNormPlanBuilder.hpp"
-#include "engines/plans/RMSNormApplicabilityChecks.hpp"
-#include "engines/plans/RMSNormBwdPlan.hpp"
+#include "RMSNormBwdPlanBuilder.hpp"
+#include "engines/plans/rmsnorm/RMSNormApplicabilityChecks.hpp"
+#include "engines/plans/rmsnorm/RMSNormBwdPlan.hpp"
 
 namespace hip_kernel_provider
 {
 
-RMSNormPlanBuilder::RMSNormPlanBuilder(const IKernelCompiler& kernelCompiler,
-                                       const IDevicePropertyProvider& devicePropertyProvider)
+RMSNormBwdPlanBuilder::RMSNormBwdPlanBuilder(const IKernelCompiler& kernelCompiler,
+                                             const IDevicePropertyProvider& devicePropertyProvider)
     : _kernelCompiler(kernelCompiler)
     , _devicePropertyProvider(devicePropertyProvider)
 {
 }
 
-bool RMSNormPlanBuilder::isApplicable(
+bool RMSNormBwdPlanBuilder::isApplicable(
     [[maybe_unused]] const HipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    auto anyNodeIsNotF32Compute = [&]() {
+        return !std::all_of(
+            opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
+                return node->computeDataType() == hipdnn_data_sdk::data_objects::DataType::FLOAT;
+            });
+    };
 
     switch(opGraph.nodeCount())
     {
     case 1:
     {
+        if(anyNodeIsNotF32Compute())
+        {
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "RMSNorm backward plan builder only supports nodes with an fp32 "
+                "compute_data_type");
+            return false;
+        }
+
+        if(!opGraph.hasOnlySupportedAttributes(
+               std::set<hipdnn_data_sdk::data_objects::NodeAttributes>{
+                   hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes}))
+        {
+            HIPDNN_PLUGIN_LOG_INFO(
+                "RMSNorm backward plan builder is not applicable for this graph");
+            return false;
+        }
+
+        const auto& node = opGraph.getNode(0);
+
+        try
+        {
+            checkRMSnormBwdTensorConfigSupported(*node.attributes_as_RMSNormBackwardAttributes(),
+                                                 opGraph.getTensorMap());
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(e.what());
+            return false;
+        }
+
+        return true;
     }
     default:
     {
-        HIPDNN_PLUGIN_LOG_INFO("Batchnorm plan builder is applicable only for single node graphs. "
-                               "Graph has "
-                               << opGraph.nodeCount() << " nodes");
+        HIPDNN_PLUGIN_LOG_INFO(
+            "RMSNorm backward plan builder is applicable only for single node graphs. "
+            "Graph has "
+            << opGraph.nodeCount() << " nodes");
         return false;
     }
     }
 }
 
-size_t RMSNormPlanBuilder::getMaxWorkspaceSize(
+size_t RMSNormBwdPlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const HipKernelHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const HipKernelSettings& executionSettings) const
@@ -48,7 +86,7 @@ size_t RMSNormPlanBuilder::getMaxWorkspaceSize(
     return 0u;
 }
 
-void RMSNormPlanBuilder::initializeExecutionSettings(
+void RMSNormBwdPlanBuilder::initializeExecutionSettings(
     [[maybe_unused]] const HipKernelHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
@@ -67,10 +105,10 @@ void buildPlanSingleNode([[maybe_unused]] const HipKernelHandle& handle,
                          HipKernelContext& executionContext)
 {
     const auto& attr
-        = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::RMSNormBwdAttributes>();
+        = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes>();
 
-    RMSNormBwdParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<RMSNormBwdPlan>(std::move(params));
+    RMSnormBwdParams params(attr, opGraph.getTensorMap());
+    auto plan = std::make_unique<RMSnormBwdPlan>(std::move(params));
     plan->compile(kernelCompiler, devicePropertyProvider.getDeviceProperties());
     executionContext.setPlan(std::move(plan));
 }
@@ -86,7 +124,7 @@ void RMSNormBwdPlanBuilder::buildPlan(
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
 
-    HIPDNN_PLUGIN_LOG_INFO("Building RMSNorm bwd inference plan for node: " << nodeName);
+    HIPDNN_PLUGIN_LOG_INFO("Building RMSNorm backward plan for node: " << nodeName);
     buildPlanSingleNode(
         handle, opGraph, nodeWrapper, _kernelCompiler, _devicePropertyProvider, executionContext);
 }
