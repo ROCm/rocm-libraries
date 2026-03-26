@@ -15,7 +15,7 @@
 #include "ConvolutionWrwOperationDescriptor.hpp"
 // #include "CustomOpOperationDescriptor.hpp"
 #include "LayernormOperationDescriptor.hpp"
-// #include "MatmulOperationDescriptor.hpp"
+#include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
 #include "SdpaBpropOperationDescriptor.hpp"
