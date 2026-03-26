@@ -29,7 +29,7 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
-using namespace hipdnn_tests::constants::bn_inf_var_ext;
+using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
 namespace
@@ -85,7 +85,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     {
         desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                            HIPDNN_TYPE_CHAR,
-                           static_cast<int64_t>(name.size() + 1),
+                           static_cast<int64_t>(name.size()),
                            name.c_str());
     }
 

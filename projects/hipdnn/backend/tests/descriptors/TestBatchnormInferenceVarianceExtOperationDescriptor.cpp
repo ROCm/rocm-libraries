@@ -24,7 +24,7 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
-using namespace hipdnn_tests::constants::bn_inf_var_ext;
+using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
 class TestBatchnormInferenceVarianceExtOperationDescriptor : public ::testing::Test
