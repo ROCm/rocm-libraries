@@ -11,7 +11,7 @@
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
-// #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
 #include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
@@ -79,10 +79,10 @@ namespace hipdnn_frontend::detail
         return {std::make_shared<graph::BatchnormInferenceNode>(
                     graph::BatchnormInferenceAttributes{}, graphAttrs),
                 {}};
-    // case HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE:
-    //     return {std::make_shared<graph::BatchnormInferenceNodeVarianceExt>(
-    //                 graph::BatchnormInferenceAttributesVarianceExt{}, graphAttrs),
-    //             {}};
+    case HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE:
+        return {std::make_shared<graph::BatchnormInferenceNodeVarianceExt>(
+                    graph::BatchnormInferenceAttributesVarianceExt{}, graphAttrs),
+                {}};
     case HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE:
         return {std::make_shared<graph::BlockScaleDequantizeNode>(
                     graph::BlockScaleDequantizeAttributes{}, graphAttrs),

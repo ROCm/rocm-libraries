@@ -22,8 +22,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return BatchnormBackwardOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::BatchnormInferenceAttributes:
         return BatchnormInferenceOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
-    //     return BatchnormInferenceVarianceExtOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+        return BatchnormInferenceVarianceExtOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::BlockScaleDequantizeAttributes:
         return BlockScaleDequantizeOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::BlockScaleQuantizeAttributes:
