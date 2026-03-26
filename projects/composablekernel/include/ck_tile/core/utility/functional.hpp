@@ -197,11 +197,42 @@ struct index_decomposer<sequence<Ls...>, sequence<Is...>>
                                           lengths[inverse_perm<New2Old>::value[Is]])...>;
 };
 
+// Calls f(decompose<I>{}) for each linear index I in the pack, using a single
+// fold expression. Bypasses the static_for lambda entirely, eliminating M*N
+// intermediate lambda closure instantiations that the lambda-based approach creates.
+template <class Decomposer, class LinearIdxSeq>
+struct ford_applier;
+
+template <class Decomposer, index_t... LinearIds>
+struct ford_applier<Decomposer, sequence<LinearIds...>>
+{
+    template <class F>
+    CK_TILE_HOST_DEVICE constexpr void operator()(F f) const
+    {
+        (f(typename Decomposer::template decompose<LinearIds>{}), ...);
+    }
+};
+
+// Same as ford_applier but applies reordering during decomposition.
+template <class Decomposer, class New2Old, class LinearIdxSeq>
+struct ford_applier_reordered;
+
+template <class Decomposer, class New2Old, index_t... LinearIds>
+struct ford_applier_reordered<Decomposer, New2Old, sequence<LinearIds...>>
+{
+    template <class F>
+    CK_TILE_HOST_DEVICE constexpr void operator()(F f) const
+    {
+        (f(typename Decomposer::template decompose_reordered<LinearIds, New2Old>{}), ...);
+    }
+};
+
 } // namespace detail
 
 // Compile-time N-dimensional loop with static multi-indices.
-// Uses a single flat static_for<0, TotalSize, 1> with index decomposition,
-// eliminating intermediate lambda closures that nested static_for creates.
+// Uses direct fold expansion with index decomposition, producing zero
+// intermediate lambda closures. Each iteration calls f with a compile-time
+// sequence<i0, i1, ...> containing the multi-dimensional index.
 template <class Lengths,
           class Orders = typename arithmetic_sequence_gen<0, Lengths::size(), 1>::type>
 struct static_ford
@@ -210,9 +241,16 @@ struct static_ford
     static constexpr index_t total_size =
         reduce_on_sequence(Lengths{}, multiplies<>{}, number<1>{});
 
-    static constexpr auto ordered_lengths = Lengths::reorder_new_to_old(Orders{});
-    using OrderedLengthsType              = remove_cvref_t<decltype(ordered_lengths)>;
-    using Decomposer = detail::index_decomposer<OrderedLengthsType, make_index_sequence<n_dim>>;
+    static constexpr bool is_identity_order = std::is_same_v<Orders, make_index_sequence<n_dim>>;
+
+    // For identity order, OrderedLengths == Lengths (no reorder needed).
+    // For non-identity, reorder lengths according to iteration order.
+    // Both branches must be valid types, but only the active one is used.
+    using OrderedLengths =
+        std::conditional_t<is_identity_order,
+                           Lengths,
+                           remove_cvref_t<decltype(Lengths::reorder_new_to_old(Orders{}))>>;
+    using Decomposer = detail::index_decomposer<OrderedLengths, make_index_sequence<n_dim>>;
 
     CK_TILE_HOST_DEVICE constexpr static_ford()
     {
@@ -223,34 +261,15 @@ struct static_ford
     template <class F>
     CK_TILE_HOST_DEVICE constexpr void operator()(F f) const
     {
-        static_for<0, total_size, 1>{}([&](auto linear_idx) {
-            f(typename Decomposer::template decompose_reordered<linear_idx.value, Orders>{});
-        });
-    }
-};
-
-// Specialization for default (identity) iteration order.
-// Skips reordering entirely since OrderedLengths == Lengths.
-template <class Lengths>
-struct static_ford<Lengths, make_index_sequence<Lengths::size()>>
-{
-    static constexpr index_t n_dim = Lengths::size();
-    static constexpr index_t total_size =
-        reduce_on_sequence(Lengths{}, multiplies<>{}, number<1>{});
-
-    using Decomposer = detail::index_decomposer<Lengths, make_index_sequence<n_dim>>;
-
-    CK_TILE_HOST_DEVICE constexpr static_ford()
-    {
-        static_assert(n_dim > 0, "wrong! Lengths is empty");
-    }
-
-    template <class F>
-    CK_TILE_HOST_DEVICE constexpr void operator()(F f) const
-    {
-        static_for<0, total_size, 1>{}([&](auto linear_idx) {
-            f(typename Decomposer::template decompose<linear_idx.value>{});
-        });
+        if constexpr(is_identity_order)
+        {
+            detail::ford_applier<Decomposer, make_index_sequence<total_size>>{}(f);
+        }
+        else
+        {
+            detail::ford_applier_reordered<Decomposer, Orders, make_index_sequence<total_size>>{}(
+                f);
+        }
     }
 };
 
