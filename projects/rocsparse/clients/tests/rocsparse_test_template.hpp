@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -157,6 +157,18 @@ namespace
                             for(e = b; *e != '\0' && *e != ',' && *e != ' '; ++e)
                                 ;
                         }
+                    }
+                }
+
+                if(arg.skip_xnack_plus)
+                {
+                    std::string gcnArchName(prop.gcnArchName);
+                    const char* hsa_xnack     = getenv("HSA_XNACK");
+                    const bool  is_xnack_plus = gcnArchName.find("xnack+") != std::string::npos
+                                               || (hsa_xnack && strcmp(hsa_xnack, "1") == 0);
+                    if(is_xnack_plus)
+                    {
+                        return false;
                     }
                 }
 

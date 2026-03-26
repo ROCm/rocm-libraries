@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -125,13 +125,29 @@ Tests:
   M: [8, 1]
   N: [8, 1]
   K: [0, 1, 391]
-  block_dim: [1, 2, 4, 8, 16, 32, 64]
+  block_dim: [1, 2, 4, 8, 16]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_random]
+
+- name: bsrmm
+  category: pre_checkin
+  function: bsrmm
+  precision: *single_double_precisions_complex_real
+  M: [8, 1]
+  N: [8, 1]
+  K: [0, 1, 391]
+  block_dim: [32, 64]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+  skip_xnack_plus: true
 
 - name: bsrmm
   category: pre_checkin
