@@ -23,8 +23,8 @@ constexpr std::array<int64_t, 4> K_RMSNORM_TENSOR_SCALE_DIMS = {1, 64, 1, 1};
 constexpr std::array<int64_t, 4> K_RMSNORM_TENSOR_SCALE_STRIDES = {64, 1, 1, 1};
 
 constexpr int64_t K_RMSNORM_TENSOR_EPSILON_UID = 42;
-constexpr std::array<int64_t, 1> K_RMSNORM_TENSOR_EPSILON_DIMS = {1};
-constexpr std::array<int64_t, 1> K_RMSNORM_TENSOR_EPSILON_STRIDES = {1};
+constexpr std::array<int64_t, 4> K_RMSNORM_TENSOR_EPSILON_DIMS = {1, 1, 1, 1};
+constexpr std::array<int64_t, 4> K_RMSNORM_TENSOR_EPSILON_STRIDES = {1, 1, 1, 1};
 
 constexpr int64_t K_RMSNORM_TENSOR_Y_UID = 43;
 constexpr std::array<int64_t, 4> K_RMSNORM_TENSOR_Y_DIMS = {1, 64, 32, 32};
