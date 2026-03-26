@@ -38,6 +38,9 @@
 
 #define WORKAROUND_SWDEV_453577 1
 
+// Workaround for an HSA_STATUS_ERROR_INVALID_ISA error encountered on gfx1103
+#define WORKAROUND_ISSUE_3044 1
+
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F2X3)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2)
 
@@ -389,6 +392,21 @@ bool ConvWinoFuryRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
     // All gfx11/gfx12 ASICs are supported
     if(!(StartsWith(dev_name, "gfx11") || StartsWith(dev_name, "gfx12")))
         return false;
+#if WORKAROUND_ISSUE_3044
+    if(dev_name == "gfx1103")
+    {
+        if constexpr(IS2X3)
+        {
+            if(!env::enabled(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F2X3))
+                return false;
+        }
+        if constexpr(IS3X2)
+        {
+            if(!env::enabled(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2))
+                return false;
+        }
+    }
+#endif
 
     if(!(problem.GetKernelStrideH() == 1 && problem.GetKernelStrideW() == 1))
         return false;
@@ -623,7 +641,6 @@ ConvWinoFuryRxS<Winodata, Winofilter>::GetSolution(const ExecutionContext& ctx,
 
 template struct MIOPEN_INTERNALS_EXPORT ConvWinoFuryRxS<2, 3>;
 // template struct MIOPEN_INTERNALS_EXPORT ConvWinoFuryRxS<3, 2>;
-template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinoFuryRxS<2, 3>;
 
 } // namespace conv
 
