@@ -49,11 +49,6 @@ class BatchnormForwardTraining
     : public IntegrationGraphVerificationHarness<InputType, BatchnormTestCase>
 {
 protected:
-    void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
-    {
-        runGraphTestWithScenario(tolerance, BatchnormTrainingScenario::FULL_TRAINING, layout);
-    }
-
     void runGraphTestWithScenario(float tolerance,
                                   BatchnormTrainingScenario scenario,
                                   const TensorLayout& layout = TensorLayout::NCHW)
@@ -178,16 +173,17 @@ protected:
         }
 
         // Register validators for all output tensors
+        auto intermediateDataTolerance = batchnorm::getToleranceTraining<IntermediateType>();
         this->registerValidator(yTensorAttr, tolerance);
-        this->registerValidator(meanTensorAttr, tolerance);
-        this->registerValidator(invVarianceTensorAttr, tolerance);
+        this->registerValidator(meanTensorAttr, intermediateDataTolerance);
+        this->registerValidator(invVarianceTensorAttr, intermediateDataTolerance);
         if(nextRunningMeanTensorAttr)
         {
-            this->registerValidator(nextRunningMeanTensorAttr, tolerance);
+            this->registerValidator(nextRunningMeanTensorAttr, intermediateDataTolerance);
         }
         if(nextRunningVarianceTensorAttr)
         {
-            this->registerValidator(nextRunningVarianceTensorAttr, tolerance);
+            this->registerValidator(nextRunningVarianceTensorAttr, intermediateDataTolerance);
         }
 
         this->verifyGraph(graphObj, testCase.seed);

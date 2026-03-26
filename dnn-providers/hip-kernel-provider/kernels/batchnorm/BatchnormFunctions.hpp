@@ -7,7 +7,7 @@
 #include "HipKernelMath.hpp"
 #include "VectorTypes.hpp"
 
-namespace hip_kernel_plugin
+namespace hip_kernel_provider
 {
 
 namespace batchnorm
@@ -144,7 +144,7 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
     if constexpr(HIP_PLUGIN_USE_FPMIX)
     {
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
-        if constexpr(hip_kernel_plugin::config::layout_nhwc)
+        if constexpr(hip_kernel_provider::config::layout_nhwc)
         {
             if constexpr(config::c % 2 == 0)
             {
@@ -175,7 +175,7 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
     else if constexpr(HIP_PLUGIN_USE_BFPMIX)
     {
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
-        if constexpr(hip_kernel_plugin::config::layout_nhwc)
+        if constexpr(hip_kernel_provider::config::layout_nhwc)
         {
             if constexpr(config::c % 2 == 0)
             {
@@ -352,7 +352,7 @@ __forceinline__ __device__ void running_stash(const FpPrecType_C* __restrict pre
 {
     // Variant 4 is not used any more. There used to be a special updater for that case deleted when
     // porting kernels to HIP.
-    static_assert(hip_kernel_plugin::batchnorm::config::variant != 4,
+    static_assert(hip_kernel_provider::batchnorm::config::variant != 4,
                   "running_stash is only compiled when HIP_PLUGIN_BN_VARIANT != 4.");
 
     auto pvt_runMean = cast<FpAccumType_C>(prevRunningMean[channel]);
@@ -365,4 +365,4 @@ __forceinline__ __device__ void running_stash(const FpPrecType_C* __restrict pre
 
 } // namespace batchnorm
 
-} // namespace hip_kernel_plugin
+} // namespace hip_kernel_provider

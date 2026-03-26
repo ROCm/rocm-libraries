@@ -9,8 +9,8 @@
 #include "VectorTypes.hpp"
 #include <type_traits>
 
-// hip_kernel_plugin root configs
-namespace hip_kernel_plugin
+// hip_kernel_provider root configs
+namespace hip_kernel_provider
 {
 
 enum class type_strategy : int
@@ -81,10 +81,10 @@ using config = detail::proto_config<HIP_PLUGIN_LAYOUT_NHWC,
                                     HIP_PLUGIN_USE_AMDGCN,
                                     HIP_PLUGIN_NRN_OP_ID>;
 
-} // namespace hip_kernel_plugin
+} // namespace hip_kernel_provider
 
-// hip_kernel_plugin batchnorm configs
-namespace hip_kernel_plugin
+// hip_kernel_provider batchnorm configs
+namespace hip_kernel_provider
 {
 
 namespace batchnorm
@@ -258,16 +258,16 @@ struct proto_config
 
 } // namespace detail
 
-using config = hip_kernel_plugin::batchnorm::detail::proto_config<
-    hip_kernel_plugin::config,
-    hip_kernel_plugin::batchnorm::detail::half_max,
-    hip_kernel_plugin::batchnorm::detail::flt_max,
-    hip_kernel_plugin::batchnorm::detail::
+using config = hip_kernel_provider::batchnorm::detail::proto_config<
+    hip_kernel_provider::config,
+    hip_kernel_provider::batchnorm::detail::half_max,
+    hip_kernel_provider::batchnorm::detail::flt_max,
+    hip_kernel_provider::batchnorm::detail::
         launch_dimension<HIP_PLUGIN_BN_GRP0, HIP_PLUGIN_BN_GRP1, HIP_PLUGIN_BN_GRP2>,
-    hip_kernel_plugin::batchnorm::detail::architecture_switch<HIP_PLUGIN_BN_GFX103X,
-                                                              HIP_PLUGIN_BN_GFX110X,
-                                                              HIP_PLUGIN_BN_GFX120X,
-                                                              HIP_PLUGIN_BN_GFX115X>,
+    hip_kernel_provider::batchnorm::detail::architecture_switch<HIP_PLUGIN_BN_GFX103X,
+                                                                HIP_PLUGIN_BN_GFX110X,
+                                                                HIP_PLUGIN_BN_GFX120X,
+                                                                HIP_PLUGIN_BN_GFX115X>,
     HIP_PLUGIN_BN_VARIANT,
     HIP_PLUGIN_BN_NCHW,
     HIP_PLUGIN_BN_MAXN,
@@ -288,4 +288,4 @@ using config = hip_kernel_plugin::batchnorm::detail::proto_config<
 
 } // namespace batchnorm
 
-} // namespace hip_kernel_plugin
+} // namespace hip_kernel_provider

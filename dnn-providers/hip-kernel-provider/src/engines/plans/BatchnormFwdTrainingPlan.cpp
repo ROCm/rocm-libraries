@@ -93,18 +93,18 @@ double BatchnormFwdTrainingParams::epsilonValue() const
 
 bool BatchnormFwdTrainingParams::hasSaveMeanVariance() const
 {
-    return _mean.has_value() && _invVariance.has_value();
+    return (_mean != nullptr) && (_invVariance != nullptr);
 }
 
 const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::mean() const
 {
-    return _mean.value();
+    return _mean;
 }
 
 const hipdnn_data_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::invVariance() const
 {
-    return _invVariance.value();
+    return _invVariance;
 }
 
 bool BatchnormFwdTrainingParams::hasRunningStats() const
@@ -115,13 +115,13 @@ bool BatchnormFwdTrainingParams::hasRunningStats() const
 const hipdnn_data_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::prevRunningMean() const
 {
-    return _prevRunningMean.value();
+    return _prevRunningMean;
 }
 
 const hipdnn_data_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::prevRunningVariance() const
 {
-    return _prevRunningVariance.value();
+    return _prevRunningVariance;
 }
 
 double BatchnormFwdTrainingParams::momentumValue() const
@@ -132,13 +132,13 @@ double BatchnormFwdTrainingParams::momentumValue() const
 const hipdnn_data_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::nextRunningMean() const
 {
-    return _nextRunningMean.value();
+    return _nextRunningMean;
 }
 
 const hipdnn_data_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::nextRunningVariance() const
 {
-    return _nextRunningVariance.value();
+    return _nextRunningVariance;
 }
 
 BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams)
@@ -172,7 +172,6 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Extract dimensions from x tensor
     const auto* xDims = _trainingParams.x()->dims();
-    const auto* xStrides = _trainingParams.x()->strides();
 
     size_t n = 0;
     size_t c = 0;
@@ -207,11 +206,8 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     auto inNhw = static_cast<unsigned int>(n * h * w);
     auto invInNhw = static_cast<float>(1.0 / inNhw);
 
-    // // Detect layout
-    // bool isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(_trainingParams.x());
-
-    // Detect layout: NHWC has C dimension (index 1) with stride 1, NCHW has stride H*W
-    bool isLayoutNHWC = (xStrides->Get(1) == 1);
+    // Detect layout
+    bool isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(_trainingParams.x());
 
     // Kernel launch parameters
     // NOTE: These are generally selected based on heuristics and tuning,

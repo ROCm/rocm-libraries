@@ -5,7 +5,7 @@
 
 #include <hip/hip_fp16.h>
 
-namespace hip_kernel_plugin
+namespace hip_kernel_provider::batchnorm
 {
 
 template <typename IndexType>
@@ -171,4 +171,4 @@ struct static_unroll_count
     }
 };
 
-} // namespace hip_kernel_plugin
+} // namespace hip_kernel_provider::batchnorm

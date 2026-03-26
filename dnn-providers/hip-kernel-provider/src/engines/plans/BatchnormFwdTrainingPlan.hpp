@@ -56,16 +56,16 @@ private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _bias;
     double _epsilonValue;
 
-    // Optional save mean/variance
-    std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> _mean;
-    std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> _invVariance;
+    // Save mean/variance
+    const hipdnn_data_sdk::data_objects::TensorAttributes* _mean = nullptr;
+    const hipdnn_data_sdk::data_objects::TensorAttributes* _invVariance = nullptr;
 
-    // Optional running statistics
-    std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> _prevRunningMean;
-    std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> _prevRunningVariance;
+    // Running statistics
+    const hipdnn_data_sdk::data_objects::TensorAttributes* _prevRunningMean = nullptr;
+    const hipdnn_data_sdk::data_objects::TensorAttributes* _prevRunningVariance = nullptr;
+    const hipdnn_data_sdk::data_objects::TensorAttributes* _nextRunningMean = nullptr;
+    const hipdnn_data_sdk::data_objects::TensorAttributes* _nextRunningVariance = nullptr;
     std::optional<double> _momentumValue;
-    std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> _nextRunningMean;
-    std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> _nextRunningVariance;
     bool _hasRunningStats{false};
 };
 

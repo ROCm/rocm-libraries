@@ -6,7 +6,7 @@
 #include "Configuration.hpp"
 #include "StaticUnroll.hpp"
 
-namespace hip_kernel_plugin
+namespace hip_kernel_provider::batchnorm
 {
 
 namespace reduction
@@ -156,4 +156,4 @@ __forceinline__ __device__ void gcn_reduce2(FloatAccum& x,
 
 } // namespace reduction
 
-} // namespace hip_kernel_plugin
+} // namespace hip_kernel_provider::batchnorm
