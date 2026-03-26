@@ -13,6 +13,9 @@
 namespace hipdnn_frontend::detail
 {
 
+// Unpacks a finalized HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT into
+// frontend SdpaAttributes. Required tensors are registered in tensorMap; optional
+// tensors and scalars are set only when present in the descriptor.
 [[nodiscard]] inline Error unpackSdpaFpropOperation(
     hipdnnBackendDescriptor_t opDesc,
     std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,

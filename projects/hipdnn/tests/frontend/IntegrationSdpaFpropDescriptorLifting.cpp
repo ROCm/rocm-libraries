@@ -392,9 +392,13 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropWithAllOptionalAttributes
     const auto& attrs = liftedNode->attributes;
 
     // Optional tensor UIDs and field verification on the node
+    // Value tensors (created via set_value()) are stored as rank-1 scalars: dim={1}, stride={1}.
     ASSERT_NE(attrs.get_attn_scale(), nullptr);
     EXPECT_EQ(attrs.get_attn_scale()->get_uid(), K_SDPA_TENSOR_SCALE_UID);
     EXPECT_EQ(attrs.get_attn_scale()->get_name(), "SCALE");
+    EXPECT_EQ(attrs.get_attn_scale()->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(attrs.get_attn_scale()->get_dim(), (std::vector<int64_t>{1}));
+    EXPECT_EQ(attrs.get_attn_scale()->get_stride(), (std::vector<int64_t>{1}));
 
     ASSERT_NE(attrs.get_bias(), nullptr);
     EXPECT_EQ(attrs.get_bias()->get_uid(), K_SDPA_TENSOR_ATTN_MASK_UID);
@@ -420,10 +424,16 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropWithAllOptionalAttributes
     ASSERT_NE(attrs.get_seed(), nullptr);
     EXPECT_EQ(attrs.get_seed()->get_uid(), K_SDPA_TENSOR_SEED_UID);
     EXPECT_EQ(attrs.get_seed()->get_name(), "SEED");
+    EXPECT_EQ(attrs.get_seed()->get_data_type(), DataType::INT32);
+    EXPECT_EQ(attrs.get_seed()->get_dim(), (std::vector<int64_t>{1}));
+    EXPECT_EQ(attrs.get_seed()->get_stride(), (std::vector<int64_t>{1}));
 
     ASSERT_NE(attrs.get_offset(), nullptr);
     EXPECT_EQ(attrs.get_offset()->get_uid(), K_SDPA_TENSOR_OFFSET_UID);
     EXPECT_EQ(attrs.get_offset()->get_name(), "OFFSET");
+    EXPECT_EQ(attrs.get_offset()->get_data_type(), DataType::INT32);
+    EXPECT_EQ(attrs.get_offset()->get_dim(), (std::vector<int64_t>{1}));
+    EXPECT_EQ(attrs.get_offset()->get_stride(), (std::vector<int64_t>{1}));
 
     ASSERT_NE(attrs.get_dropout_mask(), nullptr);
     EXPECT_EQ(attrs.get_dropout_mask()->get_uid(), K_SDPA_TENSOR_DROPOUT_MASK_UID);
@@ -435,6 +445,9 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropWithAllOptionalAttributes
     ASSERT_NE(attrs.get_dropout_scale(), nullptr);
     EXPECT_EQ(attrs.get_dropout_scale()->get_uid(), K_SDPA_TENSOR_DROPOUT_SCALE_UID);
     EXPECT_EQ(attrs.get_dropout_scale()->get_name(), "DROPOUT_SCALE");
+    EXPECT_EQ(attrs.get_dropout_scale()->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(attrs.get_dropout_scale()->get_dim(), (std::vector<int64_t>{1}));
+    EXPECT_EQ(attrs.get_dropout_scale()->get_stride(), (std::vector<int64_t>{1}));
 
     // Boolean flags (direct member access -- not optional)
     EXPECT_TRUE(attrs.alibi_mask);
