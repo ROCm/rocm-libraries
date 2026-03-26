@@ -333,8 +333,9 @@ namespace hipdnn_frontend::detail
         attributes.set_amax_o(amaxOTensor);
     }
 
-    // Unpack mma_core_mode — the packer omits this attribute when NOT_SET because the
-    // backend descriptor does not accept NOT_SET as a valid data type value.
+    // Unpack mma_core_mode — the packer omits this attribute when NOT_SET because
+    // toHipdnnDataType() has no mapping for NOT_SET, so setDescriptorAttrDataType()
+    // would return an error. The attribute is therefore absent when not explicitly set.
     {
         auto [mmaCoreMode, mmaCoreModeErr] = unpackGraphDataType(
             opDesc, HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, "sdpa mma_core_mode");
