@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "HipdnnOperationType.h"
+#include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/BatchnormInferenceVarianceExtOperationDescriptor.hpp"
 #include "descriptors/NodeFactory.hpp"
@@ -22,6 +23,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
+using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
@@ -108,53 +110,6 @@ protected:
         node.compute_data_type = computeType;
         node.attributes.Set(createStandardBatchnormInferenceVarianceExtAttrs());
         return node;
-    }
-
-    // Verifies that a packed tensor descriptor (retrieved via getAttribute) has the
-    // expected UID, data_type, dimensions, and strides.
-    static void verifyTensorDescriptor(hipdnnBackendDescriptor_t tensorDesc,
-                                       int64_t expectedUid,
-                                       hipdnnDataType_t expectedDataType,
-                                       const std::vector<int64_t>& expectedDims,
-                                       const std::vector<int64_t>& expectedStrides)
-    {
-        int64_t uid = 0;
-        int64_t uidCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uidCount, &uid);
-        EXPECT_EQ(uid, expectedUid);
-
-        hipdnnDataType_t dataType = {};
-        int64_t dtCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &dataType);
-        EXPECT_EQ(dataType, expectedDataType);
-
-        int64_t dimCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, 0, &dimCount, nullptr);
-        ASSERT_EQ(dimCount, static_cast<int64_t>(expectedDims.size()));
-        std::vector<int64_t> dims(static_cast<size_t>(dimCount));
-        int64_t actualDimCount = 0;
-        tensorDesc->getAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS,
-                                 HIPDNN_TYPE_INT64,
-                                 dimCount,
-                                 &actualDimCount,
-                                 dims.data());
-        EXPECT_EQ(dims, expectedDims);
-
-        int64_t strideCount = 0;
-        tensorDesc->getAttribute(
-            HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, 0, &strideCount, nullptr);
-        ASSERT_EQ(strideCount, static_cast<int64_t>(expectedStrides.size()));
-        std::vector<int64_t> strides(static_cast<size_t>(strideCount));
-        int64_t actualStrideCount = 0;
-        tensorDesc->getAttribute(HIPDNN_ATTR_TENSOR_STRIDES,
-                                 HIPDNN_TYPE_INT64,
-                                 strideCount,
-                                 &actualStrideCount,
-                                 strides.data());
-        EXPECT_EQ(strides, expectedStrides);
     }
 };
 
@@ -258,44 +213,44 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, SetsTensorReferencesW
     ASSERT_NE(desc->getXDesc(), nullptr);
     EXPECT_EQ(desc->getXDesc()->getData().uid, K_BN_INF_VAR_EXT_X_UID);
     EXPECT_EQ(desc->getXDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getXDesc()->getData().dims, (std::vector<int64_t>{1, 64, 32, 32}));
-    EXPECT_EQ(desc->getXDesc()->getData().strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
+    EXPECT_EQ(desc->getXDesc()->getData().dims, toVec(K_BN_INF_VAR_EXT_X_DIMS));
+    EXPECT_EQ(desc->getXDesc()->getData().strides, toVec(K_BN_INF_VAR_EXT_X_STRIDES));
 
     ASSERT_NE(desc->getMeanDesc(), nullptr);
     EXPECT_EQ(desc->getMeanDesc()->getData().uid, K_BN_INF_VAR_EXT_MEAN_UID);
     EXPECT_EQ(desc->getMeanDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getMeanDesc()->getData().dims, (std::vector<int64_t>{1, 64, 1, 1}));
-    EXPECT_EQ(desc->getMeanDesc()->getData().strides, (std::vector<int64_t>{64, 1, 1, 1}));
+    EXPECT_EQ(desc->getMeanDesc()->getData().dims, toVec(K_BN_INF_VAR_EXT_MEAN_DIMS));
+    EXPECT_EQ(desc->getMeanDesc()->getData().strides, toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
 
     ASSERT_NE(desc->getVarianceDesc(), nullptr);
     EXPECT_EQ(desc->getVarianceDesc()->getData().uid, K_BN_INF_VAR_EXT_VARIANCE_UID);
     EXPECT_EQ(desc->getVarianceDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getVarianceDesc()->getData().dims, (std::vector<int64_t>{1, 64, 1, 1}));
-    EXPECT_EQ(desc->getVarianceDesc()->getData().strides, (std::vector<int64_t>{64, 1, 1, 1}));
+    EXPECT_EQ(desc->getVarianceDesc()->getData().dims, toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS));
+    EXPECT_EQ(desc->getVarianceDesc()->getData().strides, toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
 
     ASSERT_NE(desc->getScaleDesc(), nullptr);
     EXPECT_EQ(desc->getScaleDesc()->getData().uid, K_BN_INF_VAR_EXT_SCALE_UID);
     EXPECT_EQ(desc->getScaleDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getScaleDesc()->getData().dims, (std::vector<int64_t>{1, 64, 1, 1}));
-    EXPECT_EQ(desc->getScaleDesc()->getData().strides, (std::vector<int64_t>{64, 1, 1, 1}));
+    EXPECT_EQ(desc->getScaleDesc()->getData().dims, toVec(K_BN_INF_VAR_EXT_SCALE_DIMS));
+    EXPECT_EQ(desc->getScaleDesc()->getData().strides, toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
 
     ASSERT_NE(desc->getBiasDesc(), nullptr);
     EXPECT_EQ(desc->getBiasDesc()->getData().uid, K_BN_INF_VAR_EXT_BIAS_UID);
     EXPECT_EQ(desc->getBiasDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getBiasDesc()->getData().dims, (std::vector<int64_t>{1, 64, 1, 1}));
-    EXPECT_EQ(desc->getBiasDesc()->getData().strides, (std::vector<int64_t>{64, 1, 1, 1}));
+    EXPECT_EQ(desc->getBiasDesc()->getData().dims, toVec(K_BN_INF_VAR_EXT_BIAS_DIMS));
+    EXPECT_EQ(desc->getBiasDesc()->getData().strides, toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
 
     ASSERT_NE(desc->getYDesc(), nullptr);
     EXPECT_EQ(desc->getYDesc()->getData().uid, K_BN_INF_VAR_EXT_Y_UID);
     EXPECT_EQ(desc->getYDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getYDesc()->getData().dims, (std::vector<int64_t>{1, 64, 32, 32}));
-    EXPECT_EQ(desc->getYDesc()->getData().strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
+    EXPECT_EQ(desc->getYDesc()->getData().dims, toVec(K_BN_INF_VAR_EXT_Y_DIMS));
+    EXPECT_EQ(desc->getYDesc()->getData().strides, toVec(K_BN_INF_VAR_EXT_Y_STRIDES));
 
     ASSERT_NE(desc->getEpsilonDesc(), nullptr);
     EXPECT_EQ(desc->getEpsilonDesc()->getData().uid, K_BN_INF_VAR_EXT_EPSILON_UID);
     EXPECT_EQ(desc->getEpsilonDesc()->getData().data_type, DataType::FLOAT);
-    EXPECT_EQ(desc->getEpsilonDesc()->getData().dims, (std::vector<int64_t>{1, 1, 1, 1}));
-    EXPECT_EQ(desc->getEpsilonDesc()->getData().strides, (std::vector<int64_t>{1, 1, 1, 1}));
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().dims, toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS));
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().strides, toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
 }
 
 TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, FailsWithMissingXTensor)
@@ -434,8 +389,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
     verifyTensorDescriptor(xScoped.get(),
                            K_BN_INF_VAR_EXT_X_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 64, 32, 32},
-                           {65536, 1024, 32, 1});
+                           toVec(K_BN_INF_VAR_EXT_X_DIMS),
+                           toVec(K_BN_INF_VAR_EXT_X_STRIDES));
 
     // Verify mean tensor
     hipdnn_backend::ScopedDescriptor meanScoped;
@@ -450,8 +405,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
     verifyTensorDescriptor(meanScoped.get(),
                            K_BN_INF_VAR_EXT_MEAN_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 64, 1, 1},
-                           {64, 1, 1, 1});
+                           toVec(K_BN_INF_VAR_EXT_MEAN_DIMS),
+                           toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
 
     // Verify variance tensor
     hipdnn_backend::ScopedDescriptor varianceScoped;
@@ -466,8 +421,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
     verifyTensorDescriptor(varianceScoped.get(),
                            K_BN_INF_VAR_EXT_VARIANCE_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 64, 1, 1},
-                           {64, 1, 1, 1});
+                           toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS),
+                           toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
 
     // Verify scale tensor
     hipdnn_backend::ScopedDescriptor scaleScoped;
@@ -482,8 +437,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
     verifyTensorDescriptor(scaleScoped.get(),
                            K_BN_INF_VAR_EXT_SCALE_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 64, 1, 1},
-                           {64, 1, 1, 1});
+                           toVec(K_BN_INF_VAR_EXT_SCALE_DIMS),
+                           toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
 
     // Verify bias tensor
     hipdnn_backend::ScopedDescriptor biasScoped;
@@ -498,8 +453,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
     verifyTensorDescriptor(biasScoped.get(),
                            K_BN_INF_VAR_EXT_BIAS_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 64, 1, 1},
-                           {64, 1, 1, 1});
+                           toVec(K_BN_INF_VAR_EXT_BIAS_DIMS),
+                           toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
 
     // Verify y tensor
     hipdnn_backend::ScopedDescriptor yScoped;
@@ -514,8 +469,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
     verifyTensorDescriptor(yScoped.get(),
                            K_BN_INF_VAR_EXT_Y_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 64, 32, 32},
-                           {65536, 1024, 32, 1});
+                           toVec(K_BN_INF_VAR_EXT_Y_DIMS),
+                           toVec(K_BN_INF_VAR_EXT_Y_STRIDES));
 
     // Verify epsilon tensor
     hipdnn_backend::ScopedDescriptor epsilonScoped;
@@ -530,8 +485,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationFromNode, GetAttributeWorksAfte
     verifyTensorDescriptor(epsilonScoped.get(),
                            K_BN_INF_VAR_EXT_EPSILON_UID,
                            HIPDNN_DATA_FLOAT,
-                           {1, 1, 1, 1},
-                           {1, 1, 1, 1});
+                           toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS),
+                           toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
 
     // Verify operation type
     hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
