@@ -293,8 +293,8 @@ TEST_F(TestCustomOpOperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_EQ(retrievedInputCount, 2);
 
     // Wrap in ScopedDescriptor for RAII
-    hipdnn_backend::ScopedDescriptor input0Scoped(inputDescs[0]);
-    hipdnn_backend::ScopedDescriptor input1Scoped(inputDescs[1]);
+    const hipdnn_backend::ScopedDescriptor input0Scoped(inputDescs[0]);
+    const hipdnn_backend::ScopedDescriptor input1Scoped(inputDescs[1]);
     ASSERT_NE(input0Scoped.get(), nullptr);
     ASSERT_NE(input1Scoped.get(), nullptr);
 
@@ -336,7 +336,7 @@ TEST_F(TestCustomOpOperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_EQ(retrievedOutputCount, 1);
 
     // Wrap in ScopedDescriptor for RAII
-    hipdnn_backend::ScopedDescriptor output0Scoped(outputDescs[0]);
+    const hipdnn_backend::ScopedDescriptor output0Scoped(outputDescs[0]);
     ASSERT_NE(output0Scoped.get(), nullptr);
 
     hipdnn_backend::test_utilities::verifyTensorDescriptor(output0Scoped.get(),
