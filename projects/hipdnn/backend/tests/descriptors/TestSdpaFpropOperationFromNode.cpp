@@ -1188,8 +1188,7 @@ TEST_F(TestSdpaFpropOperationFromNode, FromNodeFailsWithWrongAttributeType)
     // A node with ConvolutionFwdAttributes should fail SDPA fromNode — wrong union type.
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
-    hipdnn_data_sdk::data_objects::ConvolutionFwdAttributesT convAttrs;
-    node.attributes.Set(convAttrs);
+    node.attributes.Set(hipdnn_data_sdk::data_objects::ConvolutionFwdAttributesT{});
 
     ASSERT_THROW_HIPDNN_STATUS(SdpaFpropOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
