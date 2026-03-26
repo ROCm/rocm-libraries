@@ -9,9 +9,9 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 >
 > ⏳ = In progress
 
-## P0 ~ Q1 2026 (Current milestone)
+## P0 ~ Q1 2026
 
-**Focus:** Stable foundation, core operations & initial PyTorch integration
+**Focus:** Stable foundation & core operations
 
 ### Conv
 - **Convolution MIOpen plugin support** ✅
@@ -21,36 +21,44 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 ### Normalization
 - **Batch normalization MIOpen plugin support** ✅
   - Including basic fusions ✅
+- **Batch normalization Fusilli plugin support** ✅
+- **LayerNorm & RMSNorm frontend API** ✅
 
 ### GEMM
 - **Initial frontend GEMM API support** ✅
 - Fusilli plugin integration (see note) ✅
-- hipBLASLt plugin initial enablement ⏳
-
-### Core
-- **Stable, robust library to build upon** ⏳
-- Kernel engine settings (Engine knob configurations API + implementation) ⏳
-  - Ex. Flag for enabling benchmarking mode on MIOpen plugin
-
-### PyTorch
-- **PyTorch integration for opt-in hipDNN backend** ⏳
-
-> **Notes:** Fusilli plugin is opt-in, and not defaulted on yet.
-
-## P1 ~ Q2 2026
-
-**Focus:** More operations, basic engine selection heuristic & core improvements
-
-### GEMM
-- **hipBLASLt plugin expanded operation & datatype support**
+- hipBLASLt plugin initial enablement ✅
 
 ### SDPA
-- Initial limited SDPA frontend API support
-- Initial limited SDPA kernel provider (TBD)
+- **SDPA frontend API & backend descriptors** ✅
+
+### Core
+- **Stable, robust library to build upon** ✅
+- Kernel engine settings (Engine knob configurations API + implementation) ✅
+  - Ex. Flag for enabling benchmarking mode on MIOpen plugin
+- Initial Python bindings POC ✅
+- Initial benchmarking & performance tooling ✅
+
+> **Notes:**
+> - Fusilli plugin is opt-in, and not defaulted on yet.
+> - PyTorch integration was moved to early Q2
+
+## P1 ~ Q2 2026 (Current milestone)
+
+**Focus:** PyTorch integration, more operations, basic engine selection heuristic & core improvements
+
+### PyTorch
+- **PyTorch integration for opt-in hipDNN backend** ⏳(Early Q2)
+
+### GEMM
+- **hipBLASLt plugin expanded operation & datatype support** ⏳
+
+### SDPA
+- Limited SDPA provided by Fusilli, CK & ASM ⏳
 
 ### Normalization
-- Adding new **HIP kernel provider plugin** to expand normalization support
-- Expanded operation API & coverage to support Layernorm & RMS
+- Adding new **HIP kernel provider plugin** to expand normalization support ⏳
+- Expanded operation API & coverage to support Layernorm & RMS ⏳
 - Expanded layout & datatype coverage for batchnorm
 
 ### Heuristics
@@ -61,6 +69,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Plugin SDK utilities to streamline plugin development for new providers ⏳
 - Benchmarking & performance python tools ⏳
 - Python API wrappers ⏳
+- **Client auto-tuning API**
 
 ## P2 ~ Q3 2026
 
@@ -77,7 +86,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Kernel engine tagging & filtering
   - Behavioral & numeric notes for filtering
   - Client API to enable filtering
-- **Client auto-tuning API**
+
 
 ## P3 ~ Q4 2026 & beyond
 

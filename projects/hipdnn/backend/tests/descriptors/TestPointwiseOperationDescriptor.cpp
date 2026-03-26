@@ -368,8 +368,8 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &rawIn0));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedIn0(rawIn0);
+                                       static_cast<void*>(&rawIn0)));
+    const std::unique_ptr<HipdnnBackendDescriptor> retrievedIn0(rawIn0);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedIn0, nullptr);
@@ -580,7 +580,7 @@ TEST_F(TestPointwiseOperationDescriptor, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("PointwiseOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("in_0_uid=40"), std::string::npos);
     ASSERT_NE(str.find("out_0_uid=41"), std::string::npos);
@@ -876,7 +876,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeIn1ReturnsZeroCountForUnary
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrieved));
+                                       static_cast<void*>(&retrieved)));
     ASSERT_EQ(elementCount, 0);
     ASSERT_EQ(retrieved, nullptr);
 }
@@ -892,7 +892,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeIn2ReturnsZeroCountForUnary
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrieved));
+                                       static_cast<void*>(&retrieved)));
     ASSERT_EQ(elementCount, 0);
     ASSERT_EQ(retrieved, nullptr);
 }

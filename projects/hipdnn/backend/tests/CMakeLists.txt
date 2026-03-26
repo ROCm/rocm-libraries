@@ -19,6 +19,7 @@ set(TEST_ENGINE_PLUGIN1_NAME "hipdnn_test_engine_plugin1")
 add_executable(
     hipdnn_backend_tests
     descriptors/TestBackendDescriptor.cpp
+    descriptors/TestBlockScaleDequantizeOperationDescriptor.cpp
     descriptors/TestBlockScaleQuantizeOperationDescriptor.cpp
     descriptors/TestDescriptorFactory.cpp
     descriptors/TestEngineConfigDescriptor.cpp
@@ -27,11 +28,18 @@ add_executable(
     descriptors/TestExecutionPlanDescriptor.cpp
     descriptors/TestGraphDescriptor.cpp
     descriptors/TestTensorDescriptor.cpp
+    descriptors/TestCustomOpOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorCustomOp.cpp
     descriptors/TestConvolutionFwdOperationDescriptor.cpp
     descriptors/TestConvolutionWrwOperationDescriptor.cpp
+    descriptors/TestConvolutionWrwOperationFromNode.cpp
     descriptors/TestGraphDescriptorConvolutionWrw.cpp
     descriptors/TestBatchnormInferenceOperationDescriptor.cpp
+    descriptors/TestBatchnormOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorBatchnorm.cpp
     descriptors/TestGraphDescriptorBatchnormInference.cpp
+    descriptors/TestGraphDescriptorBlockScaleDequantize.cpp
+    descriptors/TestKnobDescriptor.cpp
     descriptors/TestKnobSettingDescriptor.cpp
     descriptors/TestBatchnormBackwardOperationDescriptor.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
@@ -44,13 +52,20 @@ add_executable(
     descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
     descriptors/TestGraphDescriptorLayernorm.cpp
     descriptors/TestGraphDescriptorOps.cpp
+    descriptors/TestGraphDescriptorLifting.cpp
     descriptors/TestGraphDescriptorPointwise.cpp
     descriptors/TestGraphDescriptorRMSNorm.cpp
     descriptors/TestGraphDescriptorSdpaFprop.cpp
     descriptors/TestLayernormOperationDescriptor.cpp
+    descriptors/TestLayernormOperationFromNode.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
+    descriptors/TestPointwiseOperationFromNode.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
+    descriptors/TestRMSNormOperationFromNode.cpp
+    descriptors/TestSdpaBpropOperationDescriptor.cpp
+    descriptors/TestSdpaBpropOperationFromNode.cpp
     descriptors/TestSdpaFpropOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorSdpaBprop.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp
@@ -64,6 +79,7 @@ add_executable(
     TestHandle.cpp
     TestHelpers.cpp
     TestBackendLogger.cpp
+    TestGraphLogger.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestPlugin.cpp

@@ -214,7 +214,7 @@ public:
                                         + std::to_string(kernelSize) + ") and dilation ("
                                         + std::to_string(dilationVal) + ")");
 
-                int64_t expectedOutputSize = (numerator / strideVal) + 1;
+                const int64_t expectedOutputSize = (numerator / strideVal) + 1;
 
                 HIPDNN_RETURN_IF_NE(
                     outputSize,

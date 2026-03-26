@@ -1,0 +1,17 @@
+// Packer Name Addition for {{ op.class_name }}
+//
+// The lift-only path adds HIPDNN_ATTR_OPERATION_NAME_EXT support to the
+// descriptor. The existing packer MUST also be updated to pack the name.
+//
+// Add this block to the packer ({{ op.packer_filename }}) BEFORE the
+// finalizeDescriptor() call:
+
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(
+            opDesc.get(), HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "{{ op.effective_packer_operation_label }} operation name"));
+    }
+
+// Without this, pack-then-unpack round-trips will silently lose the operation name.

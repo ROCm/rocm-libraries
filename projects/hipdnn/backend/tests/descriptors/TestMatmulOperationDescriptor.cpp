@@ -280,8 +280,8 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &rawA));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedA(rawA);
+                                       static_cast<void*>(&rawA)));
+    const std::unique_ptr<HipdnnBackendDescriptor> retrievedA(rawA);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedA, nullptr);
@@ -445,7 +445,7 @@ TEST_F(TestMatmulOperationDescriptor, ToStringContainsExpectedInfo)
     setAllAttributesExcept();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("MatmulOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("a_uid=" + std::to_string(K_TENSOR_A_UID)), std::string::npos);
     ASSERT_NE(str.find("b_uid=" + std::to_string(K_TENSOR_B_UID)), std::string::npos);

@@ -37,10 +37,11 @@ inline Error setDescriptorAttrString(hipdnnBackendDescriptor_t desc,
 }
 
 // Sets a vector-valued attribute on a backend descriptor.
+template <typename T>
 inline Error setDescriptorAttrVec(hipdnnBackendDescriptor_t desc,
                                   hipdnnBackendAttributeName_t attrName,
                                   hipdnnBackendAttributeType_t attrType,
-                                  const std::vector<int64_t>& values,
+                                  const std::vector<T>& values,
                                   const std::string& errorContext)
 {
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -139,10 +140,10 @@ inline Error setDescriptorAttrTensorRef(
                 "Tensor UID " + std::to_string(tensorUid) + " not found when setting "
                     + errorContext};
     }
-    auto descPtr = it->second.get();
+    const auto descPtr = it->second.get();
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendSetAttribute(
-            desc, attrName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &descPtr),
+            desc, attrName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&descPtr)),
         "Failed to set " + errorContext);
     return {};
 }
@@ -202,7 +203,7 @@ inline Error
                                             tensor->get_stride(),
                                             "tensor strides"));
 
-    bool isVirtual = tensor->get_is_virtual();
+    const bool isVirtual = tensor->get_is_virtual();
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
                                                HIPDNN_ATTR_TENSOR_IS_VIRTUAL,
                                                HIPDNN_TYPE_BOOLEAN,
@@ -275,7 +276,7 @@ inline Error ensureAndSetTensorArrayRef(
                                              attrName,
                                              HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                              static_cast<int64_t>(descPtrs.size()),
-                                             descPtrs.data()),
+                                             static_cast<const void*>(descPtrs.data())),
         "Failed to set " + errorContext);
     return {};
 }

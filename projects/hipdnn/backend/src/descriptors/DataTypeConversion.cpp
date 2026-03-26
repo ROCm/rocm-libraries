@@ -30,6 +30,16 @@ hipdnn_data_sdk::data_objects::DataType toSdkDataType(hipdnnDataType_t type)
         return DataType::FP8_E4M3;
     case HIPDNN_DATA_FP8_E5M2:
         return DataType::FP8_E5M2;
+    case HIPDNN_DATA_FP8_E8M0:
+        return DataType::FP8_E8M0;
+    case HIPDNN_DATA_FP4_E2M1:
+        return DataType::FP4_E2M1;
+    case HIPDNN_DATA_INT4:
+        return DataType::INT4;
+    case HIPDNN_DATA_FP6_E2M3:
+        return DataType::FP6_E2M3;
+    case HIPDNN_DATA_FP6_E3M2:
+        return DataType::FP6_E3M2;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnDataType_t value");
     }
@@ -59,6 +69,16 @@ hipdnnDataType_t fromSdkDataType(hipdnn_data_sdk::data_objects::DataType type)
         return HIPDNN_DATA_FP8_E4M3;
     case DataType::FP8_E5M2:
         return HIPDNN_DATA_FP8_E5M2;
+    case DataType::FP8_E8M0:
+        return HIPDNN_DATA_FP8_E8M0;
+    case DataType::FP4_E2M1:
+        return HIPDNN_DATA_FP4_E2M1;
+    case DataType::INT4:
+        return HIPDNN_DATA_INT4;
+    case DataType::FP6_E2M3:
+        return HIPDNN_DATA_FP6_E2M3;
+    case DataType::FP6_E3M2:
+        return HIPDNN_DATA_FP6_E3M2;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK DataType");
     }
@@ -74,17 +94,13 @@ int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type)
     case DataType::DOUBLE:
         return 8;
     case DataType::HALF:
-        return 2;
     case DataType::BFLOAT16:
         return 2;
     case DataType::INT32:
         return 4;
     case DataType::UINT8:
-        return 1;
     case DataType::INT8:
-        return 1;
     case DataType::FP8_E4M3:
-        return 1;
     case DataType::FP8_E5M2:
         return 1;
     default:
