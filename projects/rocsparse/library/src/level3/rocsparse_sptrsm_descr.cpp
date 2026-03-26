@@ -25,6 +25,36 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_logging.hpp"
 
+rocsparse_status _rocsparse_sptrsm_descr::destroy(hipStream_t stream)
+{
+    this->m_stage            = ((rocsparse_sptrsm_stage)-1);
+    this->m_alg              = ((rocsparse_sptrsm_alg)-1);
+    this->m_operation_A      = ((rocsparse_operation)-1);
+    this->m_operation_X      = ((rocsparse_operation)-1);
+    this->m_X_datatype       = ((rocsparse_datatype)-1);
+    this->m_Y_datatype       = ((rocsparse_datatype)-1);
+    this->m_X_order          = ((rocsparse_order)-1);
+    this->m_Y_order          = ((rocsparse_order)-1);
+    this->m_scalar_datatype  = ((rocsparse_datatype)-1);
+    this->m_compute_datatype = ((rocsparse_datatype)-1);
+    this->m_nrhs             = -1;
+    this->m_scalar_alpha     = nullptr;
+    this->m_analysis_policy  = ((rocsparse_analysis_policy)-1);
+    this->m_scalar_alpha     = nullptr;
+
+    if(this->m_csrsm_info.use_count() == 1)
+    {
+        auto info = this->m_csrsm_info.get();
+        if(info)
+        {
+            info->destroy(stream);
+        }
+    }
+
+    this->m_csrsm_info.reset();
+    return rocsparse_status_success;
+}
+
 void _rocsparse_sptrsm_descr::set_csrsm_info(rocsparse_csrsm_info value)
 {
     this->m_csrsm_info = std::shared_ptr<_rocsparse_csrsm_info>(value);
@@ -39,24 +69,6 @@ void _rocsparse_sptrsm_descr::set_shared_csrsm_info(std::shared_ptr<_rocsparse_c
     this->m_csrsm_info = value;
 }
 
-_rocsparse_sptrsm_descr::~_rocsparse_sptrsm_descr()
-{
-    m_stage            = ((rocsparse_sptrsm_stage)-1);
-    m_alg              = ((rocsparse_sptrsm_alg)-1);
-    m_operation_A      = ((rocsparse_operation)-1);
-    m_operation_X      = ((rocsparse_operation)-1);
-    m_X_datatype       = ((rocsparse_datatype)-1);
-    m_Y_datatype       = ((rocsparse_datatype)-1);
-    m_X_order          = ((rocsparse_order)-1);
-    m_Y_order          = ((rocsparse_order)-1);
-    m_scalar_datatype  = ((rocsparse_datatype)-1);
-    m_compute_datatype = ((rocsparse_datatype)-1);
-    m_nrhs             = -1;
-    m_scalar_alpha     = nullptr;
-    m_analysis_policy  = ((rocsparse_analysis_policy)-1);
-    this->m_csrsm_info.reset();
-    this->m_scalar_alpha = nullptr;
-}
 _rocsparse_sptrsm_descr::_rocsparse_sptrsm_descr()
     : m_stage((rocsparse_sptrsm_stage)-1)
     , m_alg((rocsparse_sptrsm_alg)-1)
@@ -221,8 +233,10 @@ extern "C" rocsparse_status rocsparse_destroy_sptrsm_descr(rocsparse_sptrsm_desc
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-    if(descr != nullptr)
+    if(descr)
     {
+        hipStream_t default_stream{};
+        RETURN_IF_ROCSPARSE_ERROR(descr->destroy(default_stream));
         delete descr;
     }
     return rocsparse_status_success;

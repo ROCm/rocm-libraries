@@ -24,6 +24,7 @@
 #include "rocsparse-types.h"
 #include "rocsparse_csrsv_info.hpp"
 #include <memory>
+
 struct _rocsparse_sptrsv_descr
 {
     const void* m_scalar_alpha;
@@ -38,15 +39,19 @@ protected:
     rocsparse_analysis_policy              m_analysis_policy;
     std::shared_ptr<_rocsparse_csrsv_info> m_csrsv_info;
     rocsparse_format                       m_format{};
+    int64_t                                m_batch_count{};
 
 public:
-    int64_t m_batch_count{};
-    ~_rocsparse_sptrsv_descr();
+    ~_rocsparse_sptrsv_descr() = default;
     _rocsparse_sptrsv_descr();
+
+    rocsparse_status destroy(hipStream_t);
 
     rocsparse_format get_format() const;
     void             set_format(rocsparse_format format);
 
+    void                   set_batch_count(int64_t);
+    int64_t                get_batch_count() const;
     rocsparse_sptrsv_stage get_stage() const;
     rocsparse_sptrsv_alg   get_alg() const;
     rocsparse_operation    get_operation() const;

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,15 +45,18 @@ protected:
     float                                  m_local_host_alpha_value[4];
 
 public:
+    rocsparse_status destroy(hipStream_t);
+
     void* get_local_host_alpha()
     {
         return &this->m_local_host_alpha_value[0];
     }
+
     rocsparse_csrsm_info get_csrsm_info();
     void                 set_csrsm_info(rocsparse_csrsm_info value);
     void                 set_shared_csrsm_info(std::shared_ptr<_rocsparse_csrsm_info> value);
 
-    ~_rocsparse_sptrsm_descr();
+    ~_rocsparse_sptrsm_descr() = default;
 
     _rocsparse_sptrsm_descr();
     rocsparse_analysis_policy get_analysis_policy() const;

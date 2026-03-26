@@ -304,19 +304,20 @@ try
 
         if(determine_singularity)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_async(handle,
-                                                                       sptrsv_descr->m_batch_count,
-                                                                       symbolic_pivot,
-                                                                       exact_pivot,
-                                                                       near_pivot,
-                                                                       handle->pointer_mode,
-                                                                       data));
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::singularity_get_async(handle,
+                                                 sptrsv_descr->get_batch_count(),
+                                                 symbolic_pivot,
+                                                 exact_pivot,
+                                                 near_pivot,
+                                                 handle->pointer_mode,
+                                                 data));
         }
         else
         {
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::singularity_get_position_async(handle,
-                                                          sptrsv_descr->m_batch_count,
+                                                          sptrsv_descr->get_batch_count(),
                                                           symbolic_pivot,
                                                           exact_pivot,
                                                           near_pivot,
@@ -548,7 +549,7 @@ namespace rocsparse
             //
             //
             sptrsv_descr->set_format(format);
-            sptrsv_descr->m_batch_count = dnvec_descr_y->get_batch_count();
+            sptrsv_descr->set_batch_count(dnvec_descr_y->get_batch_count());
 
             switch(format)
             {
@@ -670,7 +671,7 @@ namespace rocsparse
                 handle, sptrsv_descr, sptrsv_descr->get_scalar_alpha(), &alpha));
 
             const rocsparse_datatype alpha_datatype = sptrsv_descr->get_compute_datatype();
-            sptrsv_descr->m_batch_count             = dnvec_descr_y->get_batch_count();
+            sptrsv_descr->set_batch_count(dnvec_descr_y->get_batch_count());
             switch(format)
             {
             case rocsparse_format_csr:

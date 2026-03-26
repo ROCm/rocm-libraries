@@ -95,12 +95,14 @@ void* _rocsparse_spvec_descr::get_val_data() const
 }
 const void* _rocsparse_spvec_descr::get_const_idx_data() const
 {
-    return this->idx_data;
+    return this->const_idx_data;
 }
+
 const void* _rocsparse_spvec_descr::get_const_val_data() const
 {
-    return this->val_data;
+    return this->const_val_data;
 }
+
 rocsparse_indextype _rocsparse_spvec_descr::get_idx_type() const
 {
     return this->idx_type;

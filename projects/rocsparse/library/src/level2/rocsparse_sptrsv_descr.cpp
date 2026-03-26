@@ -24,6 +24,42 @@
 #include "rocsparse_sptrsv_descr.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_logging.hpp"
+
+void _rocsparse_sptrsv_descr::set_batch_count(const int64_t value)
+{
+    this->m_batch_count = value;
+}
+
+int64_t _rocsparse_sptrsv_descr::get_batch_count() const
+{
+    return this->m_batch_count;
+}
+
+rocsparse_status _rocsparse_sptrsv_descr::destroy(hipStream_t stream)
+{
+
+    m_stage            = ((rocsparse_sptrsv_stage)-1);
+    m_alg              = ((rocsparse_sptrsv_alg)-1);
+    m_operation        = ((rocsparse_operation)-1);
+    m_scalar_datatype  = ((rocsparse_datatype)-1);
+    m_compute_datatype = ((rocsparse_datatype)-1);
+    m_analysis_policy  = ((rocsparse_analysis_policy)-1);
+    this->m_csrsv_info.reset();
+    this->m_scalar_alpha = nullptr;
+
+    if(this->m_csrsv_info.use_count() == 1)
+    {
+        auto info = this->m_csrsv_info.get();
+        if(info)
+        {
+            info->destroy(stream);
+        }
+    }
+
+    this->m_csrsv_info.reset();
+    return rocsparse_status_success;
+}
+
 rocsparse_format _rocsparse_sptrsv_descr::get_format() const
 {
     return this->m_format;
@@ -46,18 +82,6 @@ rocsparse_csrsv_info _rocsparse_sptrsv_descr::get_csrsv_info()
 void _rocsparse_sptrsv_descr::set_shared_csrsv_info(std::shared_ptr<_rocsparse_csrsv_info> value)
 {
     this->m_csrsv_info = value;
-}
-
-_rocsparse_sptrsv_descr::~_rocsparse_sptrsv_descr()
-{
-    m_stage            = ((rocsparse_sptrsv_stage)-1);
-    m_alg              = ((rocsparse_sptrsv_alg)-1);
-    m_operation        = ((rocsparse_operation)-1);
-    m_scalar_datatype  = ((rocsparse_datatype)-1);
-    m_compute_datatype = ((rocsparse_datatype)-1);
-    m_analysis_policy  = ((rocsparse_analysis_policy)-1);
-    this->m_csrsv_info.reset();
-    this->m_scalar_alpha = nullptr;
 }
 
 _rocsparse_sptrsv_descr::_rocsparse_sptrsv_descr()
@@ -144,7 +168,7 @@ try
 {
     ROCSPARSE_ROUTINE_TRACE;
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    *descr = new _rocsparse_sptrsv_descr();
+    descr[0] = new _rocsparse_sptrsv_descr();
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -157,8 +181,10 @@ extern "C" rocsparse_status rocsparse_destroy_sptrsv_descr(rocsparse_sptrsv_desc
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-    if(descr != nullptr)
+    if(descr)
     {
+        hipStream_t default_stream{};
+        RETURN_IF_ROCSPARSE_ERROR(descr->destroy(default_stream));
         delete descr;
     }
     return rocsparse_status_success;
@@ -195,8 +221,9 @@ try
 {
     ROCSPARSE_ROUTINE_TRACE;
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
-    if(sptrsv_descr != nullptr)
+    if(sptrsv_descr)
     {
+        RETURN_IF_ROCSPARSE_ERROR(sptrsv_descr->destroy(handle->stream));
         delete sptrsv_descr;
     }
     return rocsparse_status_success;

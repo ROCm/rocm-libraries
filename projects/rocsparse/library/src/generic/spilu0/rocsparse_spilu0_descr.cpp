@@ -68,13 +68,23 @@ rocsparse_status _rocsparse_spilu0_descr::destroy(hipStream_t stream)
     this->m_tolerance_pointer_mode = ((rocsparse_pointer_mode)-1);
     if(this->m_csrilu0_info.use_count() == 1)
     {
-        this->m_csrilu0_info.get()->destroy(stream);
+        auto info = this->m_csrilu0_info.get();
+        if(info)
+        {
+            info->destroy(stream);
+        }
     }
+
     this->m_csrilu0_info.reset();
     if(this->m_bsrilu0_info.use_count() == 1)
     {
-        this->m_bsrilu0_info.get()->destroy(stream);
+        auto info = this->m_bsrilu0_info.get();
+        if(info)
+        {
+            info->destroy(stream);
+        }
     }
+
     this->m_bsrilu0_info.reset();
     return rocsparse_status_success;
 }
