@@ -65,9 +65,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define ROCRAND_PHILOX_W32_1 0xBB67AE85U
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)
-    #define ROCRAND_PHI_ADDC(a, b, carry_in, carry_out) __builtin_addc(a, b, carry_in, carry_out);
+    #define ROCRAND_BUILTIN_ADDC(a, b, carry_in, carry_out) __builtin_addc(a, b, carry_in, carry_out);
 #else
-    #define ROCRAND_PHI_ADDC(a, b, carry_in, carry_out)                         \
+    #define ROCRAND_BUILTIN_ADDC(a, b, carry_in, carry_out)                         \
         (                                                                       \
             [&]()                                                               \
             {                                                                   \
@@ -259,8 +259,8 @@ protected:
         const unsigned int hi    = static_cast<unsigned int>(subsequence >> 32);
         unsigned int       carry = 0;
 
-        m_state.counter_z = ROCRAND_PHI_ADDC(m_state.counter_z, lo, 0, &carry);
-        m_state.counter_w = ROCRAND_PHI_ADDC(m_state.counter_w, hi, carry, &carry);
+        m_state.counter_z = ROCRAND_BUILTIN_ADDC(m_state.counter_z, lo, 0, &carry);
+        m_state.counter_w = ROCRAND_BUILTIN_ADDC(m_state.counter_w, hi, carry, &carry);
     }
 
     // Advances the internal state by offset times.
@@ -272,10 +272,10 @@ protected:
         const unsigned int hi    = static_cast<unsigned int>(offset >> 32);
         unsigned int       carry = 0;
 
-        m_state.counter_x = ROCRAND_PHI_ADDC(m_state.counter_x, lo, 0, &carry);
-        m_state.counter_y = ROCRAND_PHI_ADDC(m_state.counter_y, hi, carry, &carry);
-        m_state.counter_z = ROCRAND_PHI_ADDC(m_state.counter_z, 0, carry, &carry);
-        m_state.counter_w = ROCRAND_PHI_ADDC(m_state.counter_w, 0, carry, &carry);
+        m_state.counter_x = ROCRAND_BUILTIN_ADDC(m_state.counter_x, lo, 0, &carry);
+        m_state.counter_y = ROCRAND_BUILTIN_ADDC(m_state.counter_y, hi, carry, &carry);
+        m_state.counter_z = ROCRAND_BUILTIN_ADDC(m_state.counter_z, 0, carry, &carry);
+        m_state.counter_w = ROCRAND_BUILTIN_ADDC(m_state.counter_w, 0, carry, &carry);
     }
 
     // Advances the internal state to the next state
@@ -293,12 +293,12 @@ protected:
         {
             unsigned int x, y, z, w;
         };
-        counter_scalars* s     = reinterpret_cast<counter_scalars*>(&counter);
+        counter_scalars& s     = *reinterpret_cast<counter_scalars*>(&counter);
         unsigned int     carry = 0;
-        s->x                   = ROCRAND_PHI_ADDC(s->x, 1, 0, &carry);
-        s->y                   = ROCRAND_PHI_ADDC(s->y, 0, carry, &carry);
-        s->z                   = ROCRAND_PHI_ADDC(s->z, 0, carry, &carry);
-        s->w                   = ROCRAND_PHI_ADDC(s->w, 0, carry, &carry);
+        s.x                   = ROCRAND_BUILTIN_ADDC(s.x, 1, 0, &carry);
+        s.y                   = ROCRAND_BUILTIN_ADDC(s.y, 0, carry, &carry);
+        s.z                   = ROCRAND_BUILTIN_ADDC(s.z, 0, carry, &carry);
+        s.w                   = ROCRAND_BUILTIN_ADDC(s.w, 0, carry, &carry);
         return counter;
     }
 
