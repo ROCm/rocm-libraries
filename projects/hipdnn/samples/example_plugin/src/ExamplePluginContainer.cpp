@@ -22,10 +22,8 @@ namespace example_plugin
 // that detects hash collisions with other registered engines at startup.
 // The using declarations bring the SDK types into scope for the macro.
 // ============================================================================
-using hipdnn_data_sdk::utilities::engineNameToId;
-using hipdnn_data_sdk::utilities::EngineRegistrar;
-HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_RELU_ENGINE, "EXAMPLE_PLUGIN_RELU_ENGINE")
-HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_CONV_FWD_ENGINE, "EXAMPLE_PLUGIN_CONV_FWD_ENGINE")
+HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_RELU_ENGINE)
+HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_CONV_FWD_ENGINE)
 
 const std::vector<ExamplePluginContainer::EngineDefinition>&
     ExamplePluginContainer::getEngineDefinitions()
