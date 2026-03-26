@@ -86,10 +86,10 @@ protected:
         ConvDgradAttributes attrs;
         attrs.set_name("test_op");
         attrs.set_convolution_mode(ConvolutionMode::CONVOLUTION);
-        attrs.set_pre_padding({1, 1});
-        attrs.set_post_padding({1, 1});
-        attrs.set_stride({1, 1});
-        attrs.set_dilation({1, 1});
+        attrs.set_pre_padding(toVec(K_CONV_PADDING));
+        attrs.set_post_padding(toVec(K_CONV_PADDING));
+        attrs.set_stride(toVec(K_CONV_STRIDE));
+        attrs.set_dilation(toVec(K_CONV_DILATION));
 
         auto dx = graph->conv_dgrad(dy, w, attrs);
         dx->set_uid(K_TENSOR_DX_UID).set_output(true).set_name("dx");
@@ -127,7 +127,7 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, BasicConvolutionBwdRoundTrip)
 
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_GE(tensorMap.size(), 3u);
+    ASSERT_EQ(tensorMap.size(), 3u);
 
     // Verify dy tensor
     ASSERT_NE(tensorMap.count(K_TENSOR_DY_UID), 0u);
@@ -266,7 +266,7 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, ConvolutionBwdLiftWithoutFina
 
     // Verify tensor dims and strides
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_GE(tensorMap.size(), 3u);
+    ASSERT_EQ(tensorMap.size(), 3u);
 
     ASSERT_NE(tensorMap.count(K_TENSOR_DY_UID), 0u);
     EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_dim(), toVec(K_TENSOR_DY_DIMS));
