@@ -295,6 +295,11 @@ void UnitTestConvSolverParams::SetTolerance(Gpu gpu, miopenDataType_t type, floa
     tolerances.Set(gpu, type, value);
 }
 
+void UnitTestConvSolverParams::ExcludeDevice(std::string_view name)
+{
+    excluded_devices.emplace(name);
+}
+
 std::ostream& operator<<(std::ostream& os, const UnitTestConvSolverParams& p)
 {
     os << "(";
@@ -854,6 +859,10 @@ void UnitTestConvSolverBase::SetUpImpl(const UnitTestConvSolverParams& params)
     {
         GTEST_SKIP();
     }
+    else if(params.excluded_devices.count(get_handle().GetDeviceName()) > 0)
+    {
+        GTEST_SKIP();
+    }
     else if(params.check_xnack_disabled && get_handle_xnack())
     {
         GTEST_SKIP();
@@ -892,7 +901,8 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
     const auto all_known_devs = GetAllKnownDevices();
     for(const auto& [dev, dev_descr] : all_known_devs)
     {
-        const auto supported = IsDeviceSupported(params.supported_devs, dev);
+        const auto supported = IsDeviceSupported(params.supported_devs, dev) &&
+                               params.excluded_devices.count(dev_descr.name) == 0;
         // std::cout << "Test " << dev_descr << " (supported: " << supported << ")" << std::endl;
 
         auto handle    = MockHandle{dev_descr, params.check_xnack_disabled};
