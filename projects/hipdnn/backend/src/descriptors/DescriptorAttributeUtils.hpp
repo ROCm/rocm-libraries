@@ -14,6 +14,7 @@
 #include "TensorDescriptor.hpp"
 #include <cstring>
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
+#include <hipdnn_data_sdk/data_objects/pooling_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
@@ -456,5 +457,18 @@ void getKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& sour
                        int64_t* elementCount,
                        void* arrayOfElements,
                        const char* errorPrefix);
+
+void setPoolingMode(hipdnn_data_sdk::data_objects::PoolingMode& target,
+                 hipdnnBackendAttributeType_t attributeType,
+                 int64_t elementCount,
+                 const void* arrayOfElements,
+                 const char* errorPrefix);
+
+void getPoolingMode(hipdnn_data_sdk::data_objects::PoolingMode source,
+                 hipdnnBackendAttributeType_t attributeType,
+                 int64_t requestedElementCount,
+                 int64_t* elementCount,
+                 void* arrayOfElements,
+                 const char* errorPrefix);
 
 } // namespace hipdnn_backend

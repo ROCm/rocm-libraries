@@ -278,4 +278,20 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT = 30,
 
+    /**
+     * @brief Pooling forward operation descriptor
+     *
+     * Represents a forward pooling operation with input (X) and output (Y)
+     * tensors plus pooling parameters (mode, padding, stride, window size).
+     */
+    HIPDNN_BACKEND_OPERATION_POOLING_FORWARD_DESCRIPTOR = 31,
+
+    /**
+     * @brief Pooling backward operation descriptor
+     *
+     * Represents a backward pooling operation with output gradient (DY) and
+     * input gradient (DX) tensors plus pooling parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_POOLING_BACKWARD_DESCRIPTOR = 32,
+
 } hipdnnBackendDescriptorType_t;

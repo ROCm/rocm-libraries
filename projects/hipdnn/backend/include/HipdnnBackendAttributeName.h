@@ -54,6 +54,9 @@
  * - 2900-2913: Batchnorm training forward operation attributes
  * - 3000-3099: Custom op operation attributes
  * - 3100-3199: SDPA backward propagation operation attributes
+ * - 3200-3299: Pooling forward operation attributes
+ * - 3300-3399: Shared pooling descriptor attributes
+ * - 3400-3499: Pooling backward operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -1062,6 +1065,61 @@ typedef enum
 
     /** @brief Compute data type for SDPA backward */
     HIPDNN_ATTR_SDPA_BPROP_MATH_PREC_EXT = 3128,
+
+    /** @} */
+
+    /**
+     * @name Pooling Forward Operation Attributes (3200-3299)
+     * Attributes for HIPDNN_BACKEND_OPERATION_POOLING_FORWARD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Input tensor for forward pooling */
+    HIPDNN_ATTR_OPERATION_POOLING_FORWARD_X = 3200,
+
+    /** @brief Output tensor for forward pooling */
+    HIPDNN_ATTR_OPERATION_POOLING_FORWARD_Y = 3201,
+
+    /** @} */
+
+    /**
+     * @name Shared Pooling Descriptor Attributes (3300-3399)
+     * Attributes shared across pooling operation descriptors (forward, backward).
+     * These are set directly on the operation descriptor.
+     * @{
+     */
+
+    /** @brief Compute data type for pooling */
+    HIPDNN_ATTR_POOLING_COMP_TYPE = 3300,
+
+    /** @brief Pooling mode (max, average, average_inclusive) */
+    HIPDNN_ATTR_POOLING_MODE = 3301,
+
+    /** @brief Pre-padding values for each spatial dimension */
+    HIPDNN_ATTR_POOLING_PRE_PADDINGS = 3302,
+
+    /** @brief Post-padding values for each spatial dimension */
+    HIPDNN_ATTR_POOLING_POST_PADDINGS = 3303,
+
+    /** @brief Stride values for each spatial dimension */
+    HIPDNN_ATTR_POOLING_STRIDES = 3304,
+
+    /** @brief Pooling window size for each spatial dimension */
+    HIPDNN_ATTR_POOLING_WINDOW_SIZE = 3305,
+
+    /** @} */
+
+    /**
+     * @name Pooling Backward Operation Attributes (3400-3499)
+     * Attributes for HIPDNN_BACKEND_OPERATION_POOLING_BACKWARD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Output gradient tensor for backward pooling */
+    HIPDNN_ATTR_OPERATION_POOLING_BACKWARD_DY = 3400,
+
+    /** @brief Input gradient tensor for backward pooling */
+    HIPDNN_ATTR_OPERATION_POOLING_BACKWARD_DX = 3401,
 
     /** @} */
 

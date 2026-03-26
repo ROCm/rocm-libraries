@@ -1,0 +1,11 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_data_sdk.data_objects;
+
+enum PoolingMode : byte {
+    UNSET = 0,
+    MAX = 1,
+    AVERAGE = 2,
+    AVERAGE_INCLUSIVE = 3
+}
