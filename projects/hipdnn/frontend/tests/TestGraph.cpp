@@ -3495,12 +3495,12 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
     auto sortedSubnodesDueToGraphConstructionOrderCopy = graph.getPrivateGraphSubnodes();
 
     auto& subNodes = graph.getPrivateGraphSubnodes();
-    // Randomize the node order to mess it up
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::shuffle(subNodes.begin(), subNodes.end(), gen);
+    // Deterministically scramble the node order.
+    // std::shuffle was flaky — it could randomly produce the original order.
+    std::swap(subNodes.front(), subNodes.back());
+    std::swap(subNodes[1], subNodes[subNodes.size() - 2]);
 
-    //verify for sure the nodes arent sorted.
+    // Verify the nodes are no longer in the original order.
     bool notSortedAnymore = false;
     for(size_t i = 0; i < subNodes.size(); i++)
     {
