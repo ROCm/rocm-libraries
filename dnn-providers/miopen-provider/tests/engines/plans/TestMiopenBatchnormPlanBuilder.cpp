@@ -328,12 +328,13 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvali
 
 TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvalidLayout)
 {
-    // Create backward graph with 3D tensors (invalid)
+    // Create backward graph with 3D tensors in unsupported stride order (not NCL or NLC)
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> strides3D = {42, 14, 1};
+    // Invalid stride order: {0, 1, 2} which is neither NCL {2, 1, 0} nor NLC {2, 0, 1}
+    std::vector<int64_t> strides3D = {1, 14, 42};
     std::vector<int64_t> dims3D = {1, 3, 14};
     std::vector<int64_t> derivedStrides = {3, 1, 1};
     std::vector<int64_t> derivedDims = {1, 3, 1};
