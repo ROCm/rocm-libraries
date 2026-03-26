@@ -160,6 +160,18 @@ namespace
                     }
                 }
 
+                if(arg.skip_xnack_plus)
+                {
+                    std::string gcnArchName(prop.gcnArchName);
+                    const char* hsa_xnack     = getenv("HSA_XNACK");
+                    const bool  is_xnack_plus = gcnArchName.find("xnack+") != std::string::npos
+                                               || (hsa_xnack && strcmp(hsa_xnack, "1") == 0);
+                    if(is_xnack_plus)
+                    {
+                        return false;
+                    }
+                }
+
                 return true;
             }
 
