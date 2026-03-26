@@ -5,14 +5,13 @@
 #include "ck_tile/core/numeric/vector_type.hpp"
 
 #include "amdgcn_mma.hpp"
-#include "ck_tile/core/utility/type_traits.hpp"
 #include "mma_selector.hpp"
 #include "mma_traits.hpp"
 #include "mma_transforms.hpp"
 
 namespace ck_tile::core::arch::mma {
 
-enum struct MmaPipelineOptionFlag
+enum struct MmaPipelineOptionFlag : unsigned
 {
     NONE        = 0x0,
     C_TRANSPOSE = 0x1,
