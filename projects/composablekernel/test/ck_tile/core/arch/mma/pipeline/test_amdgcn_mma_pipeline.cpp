@@ -20,18 +20,21 @@ TEST(MmaPipelineOptionFlagsTests, ConversionTests)
     MmaPipelineOptionFlags flags_2{MmaPipelineOptionFlag::COMPRESS_A};
     MmaPipelineOptionFlags flags_3{0b11};
 
-    EXPECT_EQ(flags_0, 0);
     EXPECT_TRUE(flags_0.testFlag(MmaPipelineOptionFlag::NONE));
+    EXPECT_FALSE(flags_0.testFlag(MmaPipelineOptionFlag::C_TRANSPOSE));
+    EXPECT_FALSE(flags_0.testFlag(MmaPipelineOptionFlag::COMPRESS_A));
 
-    EXPECT_EQ(flags_1, 1);
     EXPECT_TRUE(flags_1.testFlag(MmaPipelineOptionFlag::C_TRANSPOSE));
+    EXPECT_FALSE(flags_1.testFlag(MmaPipelineOptionFlag::NONE));
+    EXPECT_FALSE(flags_1.testFlag(MmaPipelineOptionFlag::COMPRESS_A));
 
-    EXPECT_EQ(flags_2, 2);
     EXPECT_TRUE(flags_2.testFlag(MmaPipelineOptionFlag::COMPRESS_A));
+    EXPECT_FALSE(flags_2.testFlag(MmaPipelineOptionFlag::NONE));
+    EXPECT_FALSE(flags_2.testFlag(MmaPipelineOptionFlag::C_TRANSPOSE));
 
-    EXPECT_EQ(flags_3, 3);
     EXPECT_TRUE(flags_3.testFlag(MmaPipelineOptionFlag::COMPRESS_A));
     EXPECT_TRUE(flags_3.testFlag(MmaPipelineOptionFlag::C_TRANSPOSE));
+    EXPECT_FALSE(flags_3.testFlag(MmaPipelineOptionFlag::NONE));
 }
 
 TEST(MmaPipelineOptionFlagsTests, OperatorsTests)
