@@ -13,6 +13,25 @@ IFS=$(printf '\n\t')
 find . -name CMakeFiles     -type d -exec rm -rfv {} +
 find . -name CMakeCache.txt -type f -exec rm -rv  {} +
 
+# Default preset
+PRESET="dev"
+
+# Check for preset flags
+if [ $# -ge 1 ]; then
+    case "$1" in
+        --minimal)
+            PRESET="dev-minimal"
+            shift 1
+            echo "Using minimal preset (fast configure ~5s vs ~150s)"
+            ;;
+        --preset=*)
+            PRESET="${1#--preset=}"
+            shift 1
+            echo "Using preset: $PRESET"
+            ;;
+    esac
+fi
+
 if [ $# -ge 1 ]; then
     MY_PROJECT_SOURCE="$1"
     shift 1
@@ -38,4 +57,4 @@ else
     REST_ARGS=("$@")
 fi
 
-cmake "${MY_PROJECT_SOURCE}" --preset dev -DGPU_TARGETS="$GPU_TARGETS" "${REST_ARGS[@]}"
+cmake "${MY_PROJECT_SOURCE}" --preset "$PRESET" -DGPU_TARGETS="$GPU_TARGETS" "${REST_ARGS[@]}"
