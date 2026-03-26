@@ -1062,7 +1062,7 @@ class LocalReadMFMA(LocalRead):
                                                                                 comment="select K=%u%u for vector=%u"%(0, 1, vgprOffset)))
                                                         vgprOffset += 1
                                                 elif kernel["MIInputPerThread%s"%tc] == 1:
-                                                    destVgpr_ = vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, grIdx%(kernel["MIInputPerThread%s"%tc]), vIdx*numVgpr + i))
+                                                    destVgpr_ = vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, rIdx%(kernel["MIInputPerThread%s"%tc]), vIdx*numVgpr + i))
                                                     bitShift = 0
                                                     for elementIdx in range(0, numSplitMetadata+1):
                                                         # go to next vgpr
