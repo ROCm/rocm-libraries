@@ -164,8 +164,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
         // check early exit if no work to do.
         if(num_total_loop <= 0)
         {
-            // Note: here dk_acc&dv_acc are all cleard, return it
-            // Note: v loaded but no fence, ignore it.
+            // Note: here dk_acc&dv_acc are all cleared, return it
             return make_tuple(dk_acc, dv_acc);
         }
         KDataType* k_lds_ptr =
