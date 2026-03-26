@@ -217,6 +217,65 @@ TEST_F(TestGraphDescriptorCustomOp, FinalizeSucceedsWithZeroInputTensors)
     EXPECT_EQ(customAttrs->output_tensor_uids[0], K_CUSTOM_OP_OUTPUT_UID_0);
 }
 
+TEST_F(TestGraphDescriptorCustomOp, FinalizeSucceedsWithZeroOutputTensors)
+{
+    auto input0Desc = createFinalizedTensor(K_CUSTOM_OP_INPUT_UID_0, {2, 3}, {3, 1});
+
+    // Build a zero-output custom op inline (cannot use createFinalizedCustomOp which hardcodes 1
+    // output)
+    auto wrapper = createDescriptor<CustomOpOperationDescriptor>();
+    auto desc = wrapper->asDescriptor<CustomOpOperationDescriptor>();
+
+    std::array<HipdnnBackendDescriptor*, 1> inputs = {input0Desc.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(inputs.data()));
+
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT,
+                       HIPDNN_TYPE_CHAR,
+                       static_cast<int64_t>(K_CUSTOM_OP_ID.size()),
+                       K_CUSTOM_OP_ID.c_str());
+
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT,
+                       HIPDNN_TYPE_CHAR,
+                       static_cast<int64_t>(K_CUSTOM_OP_OPAQUE_DATA.size()),
+                       K_CUSTOM_OP_OPAQUE_DATA.data());
+
+    hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT;
+    desc->setAttribute(HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+
+    ASSERT_NO_THROW(desc->finalize());
+
+    // Serialize into a graph descriptor and verify output_tensor_uids is empty
+    auto graphDesc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {wrapper.get()};
+    ASSERT_NO_THROW(graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                            1,
+                                            static_cast<const void*>(ops.data())));
+    ASSERT_NO_THROW(graphDesc->finalize());
+
+    auto serialized = graphDesc->getSerializedGraph();
+    ASSERT_NE(serialized.ptr, nullptr);
+    ASSERT_GT(serialized.size, 0UL);
+
+    auto graph = GetGraph(serialized.ptr);
+    auto graphT = graph->UnPack();
+
+    ASSERT_EQ(graphT->nodes.size(), 1);
+    const auto& node = *graphT->nodes[0];
+    ASSERT_EQ(node.attributes.type, NodeAttributes::CustomOpAttributes);
+
+    auto* customAttrs = node.attributes.AsCustomOpAttributes();
+    ASSERT_NE(customAttrs, nullptr);
+    ASSERT_EQ(customAttrs->input_tensor_uids.size(), 1);
+    EXPECT_EQ(customAttrs->input_tensor_uids[0], K_CUSTOM_OP_INPUT_UID_0);
+    EXPECT_TRUE(customAttrs->output_tensor_uids.empty());
+}
+
 TEST_F(TestGraphDescriptorCustomOp, ComputeDataTypePreserved)
 {
     auto input0Desc
