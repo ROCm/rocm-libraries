@@ -17,6 +17,7 @@
 #include <hipdnn_test_sdk/constants/SdpaFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -620,11 +621,44 @@ class TestSdpaFpropOptionalTensorMissing : public TestSdpaFpropOperationFromNode
 
 TEST_P(TestSdpaFpropOptionalTensorMissing, SucceedsWhenOptionalTensorMissing)
 {
-    _tensorMap.erase(GetParam());
+    const int64_t erasedUid = GetParam();
+    _tensorMap.erase(erasedUid);
     auto node = createStandardNode();
     auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
+
+    // Verify the erased tensor's getter returns nullptr
+    const std::unordered_map<int64_t, std::function<std::shared_ptr<TensorDescriptor>()>> getterMap
+        = {
+            {K_SDPA_TENSOR_ATTN_MASK_UID, [&] { return desc->getAttnMaskDesc(); }},
+            {K_SDPA_TENSOR_SCALE_UID, [&] { return desc->getScaleDesc(); }},
+            {K_SDPA_TENSOR_SEQ_LEN_Q_UID, [&] { return desc->getSeqLenQDesc(); }},
+            {K_SDPA_TENSOR_SEQ_LEN_KV_UID, [&] { return desc->getSeqLenKvDesc(); }},
+            {K_SDPA_TENSOR_SEED_UID, [&] { return desc->getSeedDesc(); }},
+            {K_SDPA_TENSOR_OFFSET_UID, [&] { return desc->getOffsetDesc(); }},
+            {K_SDPA_TENSOR_DROPOUT_MASK_UID, [&] { return desc->getDropoutMaskDesc(); }},
+            {K_SDPA_TENSOR_DROPOUT_SCALE_UID, [&] { return desc->getDropoutScaleDesc(); }},
+            {K_SDPA_TENSOR_PAGE_TABLE_K_UID, [&] { return desc->getPageTableKDesc(); }},
+            {K_SDPA_TENSOR_PAGE_TABLE_V_UID, [&] { return desc->getPageTableVDesc(); }},
+            {K_SDPA_TENSOR_BLOCK_MASK_UID, [&] { return desc->getBlockMaskDesc(); }},
+            {K_SDPA_TENSOR_SINK_TOKEN_UID, [&] { return desc->getSinkTokenDesc(); }},
+            {K_SDPA_TENSOR_DESCALE_Q_UID, [&] { return desc->getDescaleQDesc(); }},
+            {K_SDPA_TENSOR_DESCALE_K_UID, [&] { return desc->getDescaleKDesc(); }},
+            {K_SDPA_TENSOR_DESCALE_V_UID, [&] { return desc->getDescaleVDesc(); }},
+            {K_SDPA_TENSOR_DESCALE_S_UID, [&] { return desc->getDescaleSDesc(); }},
+            {K_SDPA_TENSOR_SCALE_S_UID, [&] { return desc->getScaleSDesc(); }},
+            {K_SDPA_TENSOR_SCALE_O_UID, [&] { return desc->getScaleODesc(); }},
+            {K_SDPA_TENSOR_STATS_UID, [&] { return desc->getStatsDesc(); }},
+            {K_SDPA_TENSOR_MAX_UID, [&] { return desc->getMaxDesc(); }},
+            {K_SDPA_TENSOR_SUM_EXP_UID, [&] { return desc->getSumExpDesc(); }},
+            {K_SDPA_TENSOR_RNG_DUMP_UID, [&] { return desc->getRngDumpDesc(); }},
+            {K_SDPA_TENSOR_AMAX_S_UID, [&] { return desc->getAmaxSDesc(); }},
+            {K_SDPA_TENSOR_AMAX_O_UID, [&] { return desc->getAmaxODesc(); }},
+        };
+    auto it = getterMap.find(erasedUid);
+    ASSERT_NE(it, getterMap.end());
+    EXPECT_EQ(it->second(), nullptr);
 }
 
 INSTANTIATE_TEST_SUITE_P(OptionalTensors,
