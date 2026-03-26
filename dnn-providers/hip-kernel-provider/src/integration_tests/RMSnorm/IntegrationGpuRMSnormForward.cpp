@@ -15,7 +15,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_test_sdk::utilities::rmsnorm;
 using namespace hip_kernel_provider::test_utilities;
 
 namespace hip_kernel_provider::rmsnorm::test
@@ -64,16 +64,26 @@ protected:
         graph::RMSNormAttributes rmsnormAttrs;
         rmsnormAttrs.set_epsilon(epsilon);
         rmsnormAttrs.set_bias(biasTensorAttr);
-        rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
+        rmsnormAttrs.set_forward_phase(testCase.isTraining ? NormFwdPhase::TRAINING
+                                                           : NormFwdPhase::INFERENCE);
 
-        auto [yTensorAttr, invRMS] = graphObj.rmsnorm(xTensorAttr, scaleTensorAttr, rmsnormAttrs);
+        auto [yTensorAttr, invRMSAttr]
+            = graphObj.rmsnorm(xTensorAttr, scaleTensorAttr, rmsnormAttrs);
 
         yTensorAttr->set_output(true);
-        invRMS->set_output(true);
-        invRMS->set_data_type(computeDataType);
+        this->registerValidator(yTensorAttr, getTolerance<IODataType>());
 
-        this->registerValidator(yTensorAttr, batchnorm::getRmsToleranceTraining<IODataType>());
-        this->registerValidator(invRMS, batchnorm::getRmsToleranceTraining<ComputeDataType>());
+        if(testCase.isTraining)
+        {
+            invRMSAttr->set_output(true);
+            invRMSAttr->set_data_type(computeDataType);
+            this->registerValidator(invRMSAttr, getTolerance<ComputeDataType>());
+        }
+        else
+        {
+            EXPECT_EQ(invRMSAttr, nullptr)
+                << "Inverse RMS output tensor should be null for inference";
+        }
 
         this->verifyGraph(graphObj, testCase.seed);
     }

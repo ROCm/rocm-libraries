@@ -124,14 +124,6 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                                            + std::to_string(numWorkgroups));
     }
 
-    // Calculate block and grid dimensions
-    const uint64_t xlocalsize = LOCAL_SIZE;
-    const uint64_t xgridsize = static_cast<uint64_t>(nSize * cStride) * xlocalsize;
-    const uint64_t ylocalsize = 1;
-    const uint64_t ygridsize = 1;
-    const uint64_t zlocalsize = 1;
-    const uint64_t zgridsize = 1;
-
     // Prepare compilation options
     std::vector<std::string> options;
     auto rocmPath
@@ -159,12 +151,15 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     _compiledProgram = kernelCompiler.compile("RMSNormFwd.cpp", options);
     _runnableKernel = _compiledProgram->getKernel("RMSnormFwd");
 
-    _runnableKernel->setBlockSize(static_cast<unsigned int>(xlocalsize),
-                                  static_cast<unsigned int>(ylocalsize),
-                                  static_cast<unsigned int>(zlocalsize));
-    _runnableKernel->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
-                                 static_cast<unsigned int>(ygridsize / ylocalsize),
-                                 static_cast<unsigned int>(zgridsize / zlocalsize));
+    // Calculate block and grid dimensions
+    const unsigned int xlocalsize = LOCAL_SIZE;
+    const auto xgridsize = static_cast<unsigned int>(nSize * cStride);
+    const unsigned int ylocalsize = 1;
+    const unsigned int ygridsize = 1;
+    const unsigned int zlocalsize = 1;
+    const unsigned int zgridsize = 1;
+    _runnableKernel->setBlockSize(xlocalsize, ylocalsize, zlocalsize);
+    _runnableKernel->setGridSize(xgridsize, ygridsize, zgridsize);
 }
 
 void RMSnormFwdPlan::execute(const HipKernelHandle& handle,
