@@ -40,7 +40,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib
 
 # Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories)
 if(NOT DEFINED ROCM_LIBRARIES_ROOT)
-  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../")
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 endif()
 
 # Set a default build type if none was specified
