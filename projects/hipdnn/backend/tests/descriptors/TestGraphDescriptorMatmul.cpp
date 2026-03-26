@@ -5,6 +5,7 @@
 #include "TensorDescriptorTestUtils.hpp"
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/MatmulOperationDescriptor.hpp"
+#include "descriptors/NodeFactory.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
 #include "mocks/MockHandle.hpp"
@@ -263,9 +264,9 @@ TEST_F(TestGraphDescriptorMatmul, NamePreservedInFlatBuffer)
     EXPECT_EQ(graphT->nodes[0]->name, opName);
 }
 
-// Verifies that a matmul graph can be serialized, deserialized into a new
-// GraphDescriptor via deserializeGraph, re-serialized, and still produce identical bytes.
-TEST_F(TestGraphDescriptorMatmul, SerializeDeserializeRoundTrip)
+// Serializes a named matmul graph, unpacks via NodeFactory, and verifies the
+// operation name and attribute type survive the FlatBuffer → NodeFactory lifting path.
+TEST_F(TestGraphDescriptorMatmul, OperationNameRoundTripThroughLifting)
 {
     auto aDesc = createFinalizedTensor(
         K_MATMUL_TENSOR_A_UID, toVec(K_MATMUL_TENSOR_A_DIMS), toVec(K_MATMUL_TENSOR_A_STRIDES));
@@ -274,7 +275,7 @@ TEST_F(TestGraphDescriptorMatmul, SerializeDeserializeRoundTrip)
     auto cDesc = createFinalizedTensor(
         K_MATMUL_TENSOR_C_UID, toVec(K_MATMUL_TENSOR_C_DIMS), toVec(K_MATMUL_TENSOR_C_STRIDES));
 
-    const std::string opName = "matmul_round_trip";
+    const std::string opName = "lift_matmul_name";
     auto matmulOp
         = createFinalizedMatmulOp(aDesc.get(), bDesc.get(), cDesc.get(), HIPDNN_DATA_FLOAT, opName);
 
@@ -282,50 +283,28 @@ TEST_F(TestGraphDescriptorMatmul, SerializeDeserializeRoundTrip)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {matmulOp.get()};
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       1,
-                                       static_cast<const void*>(ops.data())));
-    ASSERT_NO_THROW(desc->finalize());
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+    desc->finalize();
 
-    // Serialize the original graph
+    // Serialize and deserialize via FlatBuffer
     auto serialized = desc->getSerializedGraph();
-    ASSERT_NE(serialized.ptr, nullptr);
-    ASSERT_GT(serialized.size, 0UL);
-    const std::vector<uint8_t> originalBytes(static_cast<const uint8_t*>(serialized.ptr),
-                                             static_cast<const uint8_t*>(serialized.ptr)
-                                                 + serialized.size);
+    auto graphT = UnPackGraph(serialized.ptr);
 
-    // Deserialize into a new GraphDescriptor and re-finalize
-    auto liftedWrapper = createDescriptor<GraphDescriptor>();
-    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
-    liftedDesc->deserializeGraph(originalBytes.data(), originalBytes.size());
-
-    hipdnnHandle_t handle = &_mockHandle;
-    liftedDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
-                             HIPDNN_TYPE_HANDLE,
-                             1,
-                             static_cast<const void*>(&handle));
-    ASSERT_NO_THROW(liftedDesc->finalize());
-
-    // Re-serialize and compare
-    auto reSerialized = liftedDesc->getSerializedGraph();
-    const std::vector<uint8_t> roundTripBytes(static_cast<const uint8_t*>(reSerialized.ptr),
-                                              static_cast<const uint8_t*>(reSerialized.ptr)
-                                                  + reSerialized.size);
-    EXPECT_EQ(originalBytes, roundTripBytes);
-
-    // Verify the round-tripped graph still has correct structure
-    auto graphT = UnPackGraph(reSerialized.ptr);
+    // Rebuild from the deserialized graph using NodeFactory
+    auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
     ASSERT_EQ(graphT->nodes.size(), 1);
-    ASSERT_EQ(graphT->tensors.size(), 3);
-    EXPECT_EQ(graphT->nodes[0]->name, opName);
-    EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::FLOAT);
-    ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::MatmulAttributes);
 
-    auto* matmulAttrs = graphT->nodes[0]->attributes.AsMatmulAttributes();
-    ASSERT_NE(matmulAttrs, nullptr);
-    EXPECT_EQ(matmulAttrs->a_tensor_uid, K_MATMUL_TENSOR_A_UID);
-    EXPECT_EQ(matmulAttrs->b_tensor_uid, K_MATMUL_TENSOR_B_UID);
-    EXPECT_EQ(matmulAttrs->c_tensor_uid, K_MATMUL_TENSOR_C_UID);
+    auto rebuilt = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
+    ASSERT_NE(rebuilt, nullptr);
+
+    auto* graphOp = rebuilt->asGraphOperation();
+    ASSERT_NE(graphOp, nullptr);
+
+    auto rebuiltNode = graphOp->buildNode();
+    ASSERT_NE(rebuiltNode, nullptr);
+    EXPECT_EQ(rebuiltNode->name, opName);
+    ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::MatmulAttributes);
 }

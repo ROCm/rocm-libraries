@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
