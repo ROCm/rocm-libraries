@@ -25,7 +25,7 @@ TEST(TestNodeWrapper, EnsureTheNodeIsWrappedCorrectly)
     auto shallowGraph
         = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Graph>(serializedGraph.data());
 
-    NodeWrapper const wrapper(shallowGraph->nodes()->Get(0));
+    const NodeWrapper wrapper(shallowGraph->nodes()->Get(0));
 
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.attributesType(),

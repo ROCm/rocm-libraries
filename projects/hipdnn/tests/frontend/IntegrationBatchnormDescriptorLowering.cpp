@@ -389,7 +389,7 @@ TEST_F(IntegrationBatchnormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
         << " not found in graph tensors";
 
     // All seven tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> const nodeUids = {bnFwd->x_tensor_uid,
+    const std::unordered_set<int64_t> nodeUids = {bnFwd->x_tensor_uid,
                                                   bnFwd->scale_tensor_uid,
                                                   bnFwd->bias_tensor_uid,
                                                   bnFwd->epsilon_tensor_uid,

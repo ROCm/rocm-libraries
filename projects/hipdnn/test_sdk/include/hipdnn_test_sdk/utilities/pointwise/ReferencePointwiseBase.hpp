@@ -287,7 +287,7 @@ private:
             return false;
         }
 
-        PointwiseMode const operation = attrs->operation();
+        const PointwiseMode operation = attrs->operation();
 
         if(hipdnn_data_sdk::utilities::isImplementedUnaryPointwiseMode(operation))
         {

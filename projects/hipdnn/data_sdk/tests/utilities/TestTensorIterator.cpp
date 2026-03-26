@@ -214,7 +214,7 @@ TEST(TestTypeErasedIterator, MoveConstructor)
 
 TEST(TestTypeErasedIterator, EmptyTensor)
 {
-    std::vector<int64_t> const dims;
+    const std::vector<int64_t> dims;
     Tensor<float> tensor(dims);
     ITensor* iTensor = &tensor;
 
@@ -323,8 +323,8 @@ TEST(TestTypeErasedIteratorInt, BasicIteration)
 
 TEST(TestTypeErasedIterator, StridedTensor)
 {
-    std::vector<int64_t> const dims = {2, 2};
-    std::vector<int64_t> const strides = {3, 1}; // Non-standard strides
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {3, 1}; // Non-standard strides
 
     Tensor<float> tensor(dims, strides);
 

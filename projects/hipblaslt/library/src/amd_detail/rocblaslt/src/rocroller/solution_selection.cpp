@@ -32,10 +32,10 @@ constexpr std::array<WorkGroupTileSize, possibleTileSizesCount> possibleTileSize
         {32, 32, 128},   {32, 32, 64},    {16, 256, 128},  {64, 16, 128},   {16, 64, 128},
         {32, 16, 128},   {16, 32, 128},   {16, 16, 128},   {16, 16, 256},   {16, 64, 256}}};
 
-constexpr size_t possibleSwizzleTileSizesCount = 34;
+constexpr size_t possibleSwizzleTileSizesCount = 38;
 
 constexpr std::array<WorkGroupTileSize, possibleSwizzleTileSizesCount> possibleSwizzleTileSizes
-    = {{//{32,32,128}, {64, 32, 128}, {64, 64, 128}, {128, 32, 128}, TODO: Add these in once rocRoller supports swizzleB
+    = {{{32,32,128}, {64, 32, 128}, {64, 64, 128}, {128, 32, 128},
         {32, 128, 128},  {32, 256, 128},  {32, 384, 128},  {32, 512, 128},  {32, 640, 128},
         {32, 768, 128},  {32, 896, 128},  {32, 1024, 128}, {64, 128, 128},  {64, 256, 128},
         {64, 384, 128},  {64, 512, 128},  {64, 640, 128},  {64, 768, 128},  {64, 896, 128},
@@ -147,8 +147,8 @@ std::vector<origami::config_t> getTileListForKernelType(const KernelType& kernel
     bool hasPreTile    = (kernelType.scaleTypeA.preTile.size() == 2
                        && kernelType.scaleTypeB.preTile.size() == 2);
 
-    // Use swizzle tile sizes only for FP4 x FP4 with swizzleB enabled
-    if(kernelType.swizzleB && kernelType.typeA == rocRoller::DataType::FP4
+    // Use swizzle tile sizes only for FP4 x FP4 with swizzleA enabled
+    if(kernelType.swizzleA && kernelType.typeA == rocRoller::DataType::FP4
        && kernelType.typeB == rocRoller::DataType::FP4)
     {
         return fp4SwizzleTileGenerator(hasPreSwizzle, hasPreTile);

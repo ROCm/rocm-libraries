@@ -32,22 +32,22 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
     //     return ConvolutionBwdOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::ConvolutionFwdAttributes:
         return ConvolutionFwdOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::ConvolutionWrwAttributes:
-    //     return ConvolutionWrwOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::ConvolutionWrwAttributes:
+        return ConvolutionWrwOperationDescriptor::fromNode(nodeT, tensorMap);
     // case NodeAttributes::CustomOpAttributes:
     //     return CustomOpOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::LayernormAttributes:
-    //     return LayernormOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::LayernormAttributes:
+        return LayernormOperationDescriptor::fromNode(nodeT, tensorMap);
     // case NodeAttributes::MatmulAttributes:
     //     return MatmulOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::PointwiseAttributes:
-    //     return PointwiseOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::RMSNormAttributes:
-    //     return RMSNormOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::PointwiseAttributes:
+        return PointwiseOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::RMSNormAttributes:
+        return RMSNormOperationDescriptor::fromNode(nodeT, tensorMap);
     // case NodeAttributes::SdpaAttributes:
     //     return SdpaFpropOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::SdpaBackwardAttributes:
-    //     return SdpaBackwardOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::SdpaBackwardAttributes:
+        return SdpaBpropOperationDescriptor::fromNode(nodeT, tensorMap);
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
