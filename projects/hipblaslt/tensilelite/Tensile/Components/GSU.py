@@ -1055,7 +1055,6 @@ class GSUOn(GSU):
             module.add(VMovB32(dst=vgpr(tmpV01+1), src=sgpr("SrdSync+1"), comment="copy SrdSync to vgpr"))
             module.add(VMovB32(dst=vgpr(tmpV02), src=0, comment="reset synchronizer"))
             module.add(FlatStoreB32(vaddr=vgpr(tmpV01, 2), src=vgpr(tmpV02), flat=FLATModifiers(dlc=True), comment="reset synchronizer"))
-            module.add(SWaitCnt(waitAll=True, comment="Wait for synchronizer reset to complete"))
             writer.vgprPool.checkIn(tmpV01)
             writer.vgprPool.checkIn(tmpV02)
         else:
