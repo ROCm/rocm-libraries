@@ -175,7 +175,10 @@ public:
     // --- Forward convolution (fprop) ---
 
     // Overload for uniform padding
-    template <class SrcType, class WeiType = SrcType, class DstType = SrcType, class AccType = double>
+    template <class SrcType,
+              class WeiType = SrcType,
+              class DstType = SrcType,
+              class AccType = double>
     static void fprop(hipdnn_data_sdk::utilities::TensorBase<SrcType>& x,
                       hipdnn_data_sdk::utilities::TensorBase<WeiType>& w,
                       hipdnn_data_sdk::utilities::TensorBase<DstType>& y,
@@ -190,7 +193,10 @@ public:
             x, w, y, convStrides, dilations, padding, padding, alpha, beta, useTf32);
     }
 
-    template <class SrcType, class WeiType = SrcType, class DstType = SrcType, class AccType = double>
+    template <class SrcType,
+              class WeiType = SrcType,
+              class DstType = SrcType,
+              class AccType = double>
     static void fprop(hipdnn_data_sdk::utilities::TensorBase<SrcType>& x,
                       hipdnn_data_sdk::utilities::TensorBase<WeiType>& w,
                       hipdnn_data_sdk::utilities::TensorBase<DstType>& y,
@@ -285,9 +291,8 @@ private:
 
         if(nDims != 3 && nDims != 4 && nDims != 5)
         {
-            throw std::invalid_argument(
-                "Input tensor must have 3 dimensions (1D conv), "
-                "4 dimensions (2D conv), or 5 dimensions (3D conv)");
+            throw std::invalid_argument("Input tensor must have 3 dimensions (1D conv), "
+                                        "4 dimensions (2D conv), or 5 dimensions (3D conv)");
         }
 
         if(w.dims().size() != nDims)

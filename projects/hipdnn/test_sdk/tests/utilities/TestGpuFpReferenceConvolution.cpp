@@ -99,9 +99,17 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         float fillRange = 1.0f)
 {
     const auto& layout = defaultLayout(xDims.size());
-    runGpuVsCpuConvFwd<DataType, AccType>(
-        xDims, wDims, yDims, strides, dilations, prePadding, postPadding, tolerance, layout, layout,
-        fillRange);
+    runGpuVsCpuConvFwd<DataType, AccType>(xDims,
+                                          wDims,
+                                          yDims,
+                                          strides,
+                                          dilations,
+                                          prePadding,
+                                          postPadding,
+                                          tolerance,
+                                          layout,
+                                          layout,
+                                          fillRange);
 }
 
 // Overload for uniform padding with explicit layout
@@ -117,9 +125,17 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         const TensorLayout& yLayout,
                         float fillRange = 1.0f)
 {
-    runGpuVsCpuConvFwd<DataType, AccType>(
-        xDims, wDims, yDims, strides, dilations, padding, padding, tolerance, xLayout, yLayout,
-        fillRange);
+    runGpuVsCpuConvFwd<DataType, AccType>(xDims,
+                                          wDims,
+                                          yDims,
+                                          strides,
+                                          dilations,
+                                          padding,
+                                          padding,
+                                          tolerance,
+                                          xLayout,
+                                          yLayout,
+                                          fillRange);
 }
 
 // Overload for uniform padding with default packed layout
@@ -134,9 +150,17 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         float fillRange = 1.0f)
 {
     const auto& layout = defaultLayout(xDims.size());
-    runGpuVsCpuConvFwd<DataType, AccType>(
-        xDims, wDims, yDims, strides, dilations, padding, padding, tolerance, layout, layout,
-        fillRange);
+    runGpuVsCpuConvFwd<DataType, AccType>(xDims,
+                                          wDims,
+                                          yDims,
+                                          strides,
+                                          dilations,
+                                          padding,
+                                          padding,
+                                          tolerance,
+                                          layout,
+                                          layout,
+                                          fillRange);
 }
 
 } // namespace
