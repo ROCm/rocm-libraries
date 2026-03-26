@@ -88,6 +88,11 @@ public:
     {
     }
 
+    std::vector<int64_t> getOutputTensorIds() const override
+    {
+        return {_params.dxTensor.uid, _params.dscaleTensor.uid, _params.dbiasTensor.uid};
+    }
+
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
         auto shallowDyTensor = createShallowTensor<DyDataType>(
