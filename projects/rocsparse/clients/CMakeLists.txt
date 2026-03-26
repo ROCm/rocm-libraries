@@ -171,7 +171,6 @@ endif()
 add_subdirectory(tools)
 
 if(BUILD_CLIENTS_TESTS)
-  enable_testing()
   add_subdirectory(tests)
 
   if(NOT CONVERT_SOURCE)

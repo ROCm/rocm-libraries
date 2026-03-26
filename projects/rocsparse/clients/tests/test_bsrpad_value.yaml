@@ -85,11 +85,13 @@ Tests:
   direction: [rocsparse_direction_column]
   storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
+  filename: [nos1,
              nos2,
+             nos3,
              nos4,
+             nos5,
              nos6,
-             scircuit]
+             nos7]
 
 - name: bsrpad_value
   category: nightly

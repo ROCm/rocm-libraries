@@ -1,0 +1,100 @@
+# ########################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+# rocSPARSE Test Categories Configuration
+# Organizes GTest suites into CTest categories for CI/CD pipeline efficiency.
+#
+# The rocsparse-test binary uses INSTANTIATE_TEST_SUITE_P with category prefixes:
+#   quick/testclass.category/suffix
+#   pre_checkin/testclass.category/suffix
+#   nightly/testclass.category/suffix
+#   stress/testclass.category/suffix
+#   known_bug/testclass.category/suffix
+
+test_categories:
+  quick:
+    description: "Fast sanity checks (target: < 5 min)"
+    test_patterns:
+      - "quick/*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "quick"
+      - "pre-commit"
+
+  pre_checkin:
+    description: "Pre-checkin validation (target: < 30 min)"
+    test_patterns:
+      - "quick/*"
+      - "pre_checkin/*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "pre_checkin"
+
+  nightly:
+    description: "Nightly comprehensive tests (target: < 4 hours)"
+    test_patterns:
+      - "quick/*"
+      - "pre_checkin/*"
+      - "nightly/*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "nightly"
+
+  stress:
+    description: "Stress tests with large matrices"
+    test_patterns:
+      - "stress/*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "stress"
+
+# Uncomment and populate to exclude specific tests on certain GPU architectures.
+# exclude_gpu:
+#   exclude_gpu_gfx11X:
+#     test_patterns:
+#       - "*test_pattern_that_fails_on_gfx11*"
+#     labels:
+#       - "quick"
+#       - "pre_checkin"
+#       - "nightly"
+#       - "ex_gpu_gfx11X"
+#
+#   exclude_gpu_gfx1150:
+#     test_patterns:
+#       - "*test_pattern_specific_to_gfx1150*"
+#     labels:
+#       - "quick"
+#       - "pre_checkin"
+#       - "ex_gpu_gfx1150"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300
+    pre_checkin: 1800
+    nightly: 14400
+    stress: 28800

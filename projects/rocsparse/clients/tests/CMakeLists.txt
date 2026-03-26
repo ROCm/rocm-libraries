@@ -470,6 +470,36 @@ add_dependencies(rocsparse-test  rocsparse-test-data rocsparse-common)
 
 rocm_install(FILES ${ROCSPARSE_TEST_DATA} DESTINATION "${CMAKE_INSTALL_DATADIR}/rocsparse/test" COMPONENT tests)
 
+# CTest YAML-based test categorization
+include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
+
+set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
+file(WRITE "${INSTALL_TEST_FILE}"
+[=[
+# Generated test definitions for install-time execution.
+# Tests use relative paths to the test binary.
+]=]
+)
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+    message(STATUS "YAML-based test categorization enabled for rocsparse")
+    apply_test_category_labels(
+        rocsparse-test
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+        "${PROJECT_BINARY_DIR}/staging"
+        "${INSTALL_TEST_FILE}"
+    )
+else()
+    message(STATUS "No test categorization YAML found for rocsparse")
+endif()
+
+rocm_install(
+    FILES "${INSTALL_TEST_FILE}"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    COMPONENT tests
+    RENAME "CTestTestfile.cmake"
+)
+
 if (WIN32)
   # for now adding in all .dll as dependency chain is not cmake based on win32
   file( GLOB third_party_dlls
