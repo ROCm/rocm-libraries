@@ -279,69 +279,24 @@ Before considering tests complete, verify:
 
 ---
 
-## Step 10: Extract Test Constants
+## Step 10: Place Generated Constants File
 
-The generator inlines literal test values from the YAML config (e.g., `{1, 1}` for padding, `1` for tensor UIDs). After placing the generated files, review the test code and replace inline literals with named constants.
+The generator automatically produces a shared constants header (`<Op>Constants.hpp`) from the YAML config's `test_data` section. This file contains `K_TENSOR_<NAME>_UID`, `K_TENSOR_<NAME>_DIMS`, `K_TENSOR_<NAME>_STRIDES` constants for each tensor, plus constants for vector data fields (e.g., `K_CONV_PADDING`). All generated test files reference this header.
 
-### When to Use Shared Constants (test_sdk)
-
-If the test values are shared across multiple operations or test files, define them in a constants header in the test SDK:
-
-**Location:** `test_sdk/include/hipdnn_test_sdk/constants/<Op>Constants.hpp`
-
-**Example:** `ConvFpropConstants.hpp`
-```cpp
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
-
-#pragma once
-
-#include <array>
-#include <cstdint>
-
-namespace hipdnn_tests::constants
-{
-
-constexpr int64_t K_TENSOR_X_UID = 1;
-constexpr std::array<int64_t, 4> K_TENSOR_X_DIMS = {1, 3, 32, 32};
-constexpr std::array<int64_t, 4> K_TENSOR_X_STRIDES = {3072, 1024, 32, 1};
-
-constexpr std::array<int64_t, 2> K_CONV_PADDING = {1, 1};
-constexpr std::array<int64_t, 2> K_CONV_STRIDE = {1, 1};
-constexpr std::array<int64_t, 2> K_CONV_DILATION = {1, 1};
-
-} // namespace hipdnn_tests::constants
+**When `constants_include` is NOT set** in the YAML (the common case for new operations), the generator produces the constants file at:
 ```
-
-Then in the test files, replace inline values:
-```cpp
-#include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
-#include <hipdnn_test_sdk/utilities/ToVec.hpp>
-
-using namespace hipdnn_tests::constants;
-using hipdnn_tests::toVec;
-
-// Before (generated):
-_xDesc = createFinalizedTensor(1, {1, 3, 32, 32}, {3072, 1024, 32, 1});
-std::vector<int64_t> prePadding = {1, 1};
-
-// After (with constants):
-_xDesc = createFinalizedTensor(K_TENSOR_X_UID, toVec(K_TENSOR_X_DIMS), toVec(K_TENSOR_X_STRIDES));
-auto prePadding = toVec(K_CONV_PADDING);
+test_sdk/include/hipdnn_test_sdk/constants/<Op>Constants.hpp
 ```
+Place this file alongside the other generated files.
 
-The `toVec()` utility converts `std::array` constants to `std::vector` and is located at `test_sdk/include/hipdnn_test_sdk/utilities/ToVec.hpp`.
+**When `constants_include` IS set** (for operations with pre-existing hand-written constants headers), the generator skips constants file generation and the test files reference the existing header.
 
-### When to Keep Values Inline
+### Post-placement review
 
-If the test values are only used in a single test file and are not meaningful beyond that file, it's fine to leave them as inline literals or define them as local constants at the top of the test file.
-
-### Guidelines
-
-- **Convolution ops** (ConvFwd, ConvBwd, ConvWrw) share tensor dimensions and convolution parameters — use shared constants in `test_sdk/constants/`
-- **Operation-specific values** (e.g., pointwise mode, batchnorm epsilon) that only appear in one test file — keep inline or define as file-local constants
-- **Tensor UIDs** should use named constants when shared across test files (unit tests, graph tests, integration tests for the same operation)
-- Constants follow the naming convention `K_<CATEGORY>_<NAME>` (e.g., `K_TENSOR_X_UID`, `K_CONV_PADDING`)
+After placing the generated constants file:
+1. Verify the values match the YAML config's `test_data` section
+2. If your operation shares constants with related operations (e.g., ConvBwd shares tensor shapes with ConvFwd), consider using the existing shared header by setting `constants_include` in the YAML instead
+3. Constants follow the naming convention `K_TENSOR_<NAME>_UID/DIMS/STRIDES` for tensors and `K_<CATEGORY>_<NAME>` for data fields (e.g., `K_CONV_PADDING`)
 
 ---
 
@@ -355,12 +310,7 @@ The generated integration test (`Integration<Op>DescriptorLowering.cpp`) include
 
 ### Additional Hand-Written Tests
 
-The generated tests cover the basic single-input scenario. Consider adding these as needed:
-
-**`AutoAssignedUidsPreservedInRoundTrip`** — Round-trip with auto-assigned UIDs:
-- Create tensors without setting UIDs (let the frontend auto-assign)
-- Lower to backend, deserialize
-- Verify all tensor UIDs are unique and the node references them correctly
+The generated tests cover the basic single-input scenario and include an `AutoAssignedUidsPreservedInLiftingRoundTrip` test. Consider adding these as needed:
 
 **Multi-input/ternary variants** — For operations like pointwise that have optional additional inputs (in_1, in_2), add tests exercising binary and ternary graph method overloads.
 

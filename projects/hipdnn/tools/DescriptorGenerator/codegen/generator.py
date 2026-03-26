@@ -67,6 +67,10 @@ class DescriptorGenerator:
         additions_path.write_text(additions)
         written.append("fragments/descriptor_lifting_additions.txt")
 
+        # Generate constants file (when constants_include is not set — no pre-existing header)
+        if not config.test_data.constants_include:
+            written += self._render_constants(config, output_dir)
+
         return written
 
     def _render_descriptor_lifting_additions(self, config: OperationConfig) -> str:
@@ -281,6 +285,10 @@ class DescriptorGenerator:
         if config.generatable_mode_fields:
             written += self.render_mode_enums(config, output_dir)
 
+        # Generate constants file (when constants_include is not set — no pre-existing header)
+        if not config.test_data.constants_include:
+            written += self._render_constants(config, output_dir)
+
         return written
 
     def render_frontend(self, config: OperationConfig, output_dir: Path) -> list[str]:
@@ -386,6 +394,18 @@ class DescriptorGenerator:
             written.append(f"fragments/mode_frontend_tests_{df.name}.txt")
 
         return written
+
+    def _render_constants(self, config: OperationConfig, output_dir: Path) -> list[str]:
+        """Render the shared constants header. Returns list of written files."""
+        rel_path = (
+            Path("test_sdk/include/hipdnn_test_sdk/constants")
+            / f"{config.effective_constants_include}.hpp"
+        )
+        out_path = output_dir / rel_path
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        content = self._render_template("constants.hpp.j2", config)
+        out_path.write_text(content)
+        return [str(rel_path)]
 
     def _render_template(self, template_name: str, config: OperationConfig) -> str:
         try:

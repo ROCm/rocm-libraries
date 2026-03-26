@@ -1,3 +1,4 @@
+{% from "macros.j2" import vector_const_name %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
@@ -16,9 +17,7 @@
 #include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-{% if op.test_data.constants_include %}
-#include <hipdnn_test_sdk/constants/{{ op.test_data.constants_include }}.hpp>
-{% endif %}
+#include <hipdnn_test_sdk/constants/{{ op.effective_constants_include }}.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <array>
@@ -29,9 +28,7 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
-{% if op.test_data.constants_include %}
 using namespace hipdnn_tests::constants;
-{% endif %}
 using hipdnn_tests::toVec;
 
 namespace
@@ -55,16 +52,10 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
 {% endfor %}
 {% for df in op.required_data_fields %}
 {% if df.is_vector %}
-{% if op.test_data.constants_include %}
-{% set const_name = df.test_constant_name if df.test_constant_name else ("K_CONV_" ~ (df.name | upper) if "conv" in op.effective_error_label else "K_" ~ (df.name | upper)) %}
+{% set const_name = vector_const_name(df, op) %}
 
     auto {{ df.camel_name }} = toVec({{ const_name }});
     desc->setAttribute({{ df.attr_name }}, {{ df.backend_type }}, static_cast<int64_t>({{ df.camel_name }}.size()), {{ df.camel_name }}.data());
-{% else %}
-
-    std::vector<int64_t> {{ df.camel_name }} = {{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }};
-    desc->setAttribute({{ df.attr_name }}, {{ df.backend_type }}, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
-{% endif %}
 {% elif df.is_mode %}
 
     auto {{ df.camel_name }} = {{ df.test_backend_value }};
@@ -200,16 +191,13 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
 {% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
 {% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
 {% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% endif %}
-{% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }});
 {% endif %}
 {% endfor %}
     auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %});
@@ -239,7 +227,6 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
 {% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
 {% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
@@ -248,13 +235,6 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
                  toVec({{ dims_const }}),
                  toVec({{ strides_const }}),
                  DataType::FLOAT);
-{% else %}
-    verifyTensor(findTensorByUid(*graphT, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}),
-                 {{ op.test_data.tensor_uids.get(tf.name, loop.index) }},
-                 {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }},
-                 {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }},
-                 DataType::FLOAT);
-{% endif %}
 {% endif %}
 {% endfor %}
 
@@ -265,25 +245,15 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
                       DataType::FLOAT,
 {% endif %}
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
                       {{ uid_const }}{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
 
-{% else %}
-                      {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
-
-{% endif %}
 {% endfor %}
 {% for df in op.graph_verifiable_data_fields %}
 {% if df.is_vector %}
-{% if op.test_data.constants_include %}
-{% set const_name = df.test_constant_name if df.test_constant_name else ("K_CONV_" ~ (df.name | upper) if "conv" in op.effective_error_label else "K_" ~ (df.name | upper)) %}
+{% set const_name = vector_const_name(df, op) %}
                       toVec({{ const_name }}){% if not loop.last %},{% endif %}
 
-{% else %}
-                      std::vector<int64_t>{{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }}{% if not loop.last %},{% endif %}
-
-{% endif %}
 {% elif df.is_mode %}
                       {{ df.enum_short_type }}::{{ df.test_enum_value }}{% if not loop.last %},{% endif %}
 
@@ -304,12 +274,8 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
 
     // Verify tensor UID references
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(attrs->{{ tf.uid_field }}, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(attrs->{{ tf.uid_field }}, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endfor %}
 {% endif %}
 {% for taf in op.tensor_array_fields %}
@@ -328,16 +294,13 @@ TEST_F(TestGraphDescriptor{{ op.name }}, ComputeDataTypePreserved)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
 {% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
 {% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
 {% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% endif %}
-{% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }});
 {% endif %}
 {% endfor %}
     auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %}, HIPDNN_DATA_HALF);
@@ -365,16 +328,13 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildWith{{ taf.test_label or taf.name 
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
 {% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
 {% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
 {% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% endif %}
-{% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }});
 {% endif %}
 {% endfor %}
 {% for uid in taf.test_uids %}
@@ -415,21 +375,13 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
 {% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
 {% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
 {% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% endif %}
-{% else %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }});
-{% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endif %}
 {% endfor %}
 
@@ -491,7 +443,6 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
 {% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
 {% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
@@ -500,13 +451,6 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
                  toVec({{ dims_const }}),
                  toVec({{ strides_const }}),
                  DataType::FLOAT);
-{% else %}
-    verifyTensor(findTensorByUid(*graphT, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}),
-                 {{ op.test_data.tensor_uids.get(tf.name, loop.index) }},
-                 {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }},
-                 {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }},
-                 DataType::FLOAT);
-{% endif %}
 {% endif %}
 {% endfor %}
 
@@ -516,14 +460,9 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
                       DataType::FLOAT,
 {% endif %}
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
                       {{ uid_const }}{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
 
-{% else %}
-                      {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
-
-{% endif %}
 {% endfor %}
 {% for df in op.graph_verifiable_data_fields %}
 {% if df.is_vector %}

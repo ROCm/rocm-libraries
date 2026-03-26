@@ -224,6 +224,12 @@ def _preview_files(config, mode: str) -> list[str]:
             files.append(f"fragments/mode_frontend_plumbing_{df.name}.txt")
             files.append(f"fragments/mode_frontend_tests_{df.name}.txt")
 
+    # Constants file (only when no pre-existing constants header)
+    if not config.test_data.constants_include:
+        constants_path = f"test_sdk/include/hipdnn_test_sdk/constants/{config.effective_constants_include}.hpp"
+        if mode in (MODE_BACKEND, MODE_FULL, MODE_LIFT_ONLY):
+            files.append(constants_path)
+
     return files
 
 
