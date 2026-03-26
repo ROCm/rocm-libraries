@@ -22,9 +22,7 @@
  * ************************************************************************ */
 
 /*! \file
- *  \brief rocsparse_spic0_descr.h provides auxilary functions in rocsparse
- *  but without using a rocsparse_handle.
- * Causing a disruption in the stream to use, as the default is the only available.
+ *  \brief rocsparse_spic0_descr.h provides auxiliary functions in rocsparse.
  */
 
 #ifndef ROCSPARSE_SPIC0_DESCR_H

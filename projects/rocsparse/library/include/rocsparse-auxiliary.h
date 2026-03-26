@@ -22,7 +22,7 @@
  * ************************************************************************ */
 
 /*! \file
- *  \brief rocsparse-auxiliary.h provides auxilary functions in rocsparse
+ *  \brief rocsparse-auxiliary.h provides auxiliary functions in rocsparse
  */
 
 #ifndef ROCSPARSE_AUXILIARY_H

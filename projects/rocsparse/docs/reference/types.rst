@@ -105,6 +105,11 @@ rocsparse_const_dnmat_descr
 
 .. doxygentypedef:: rocsparse_const_dnmat_descr
 
+rocsparse_spattern_descr
+------------------------
+
+.. doxygentypedef:: rocsparse_spattern_descr
+
 rocsparse_color_info
 --------------------
 

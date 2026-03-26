@@ -638,8 +638,8 @@ rocsparse_idvec_descr_create
 
 .. doxygenfunction:: rocsparse_idvec_descr_create
 
-rocsparse_idvec_descr_create_batched
-------------------------------------
+rocsparse_idvec_descr_create_batch
+----------------------------------
 
 .. doxygenfunction:: rocsparse_idvec_descr_create_batch
 

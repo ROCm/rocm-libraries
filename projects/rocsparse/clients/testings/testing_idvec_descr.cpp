@@ -224,7 +224,7 @@ void testing_idvec_descr(const Arguments& arg)
     rocsparse_indextype    indextype = rocsparse_indextype_i32;
     rocsparse_error        p_error[1]{};
     int64_t                size          = 10;
-    int64_t                sizelm        = sizeof(float);
+    int64_t                sizelm        = sizeof(int32_t);
     int64_t                inc           = 1;
     const void*            const_data    = (const void*)0x4;
     void*                  data          = (void*)0x4;

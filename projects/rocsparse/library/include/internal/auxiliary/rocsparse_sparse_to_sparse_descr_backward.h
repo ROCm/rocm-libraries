@@ -22,7 +22,7 @@
  * ************************************************************************ */
 
 /*! \file
- *  \brief rocsparse_sparse_to_sparse_descr_backward.h provides auxilary functions in rocsparse
+ *  \brief rocsparse_sparse_to_sparse_descr_backward.h provides auxiliary functions in rocsparse
  *  but without using a rocsparse_handle.
  * Causing a disruption in the stream to use, as the default is the only available.
  */

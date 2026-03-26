@@ -22,7 +22,7 @@
  * ************************************************************************ */
 
 /*! \file
- *  \brief rocsparse_dnvec_backward_descr.h provides auxilary functions in rocsparse
+ *  \brief rocsparse_dnvec_backward_descr.h provides auxiliary functions in rocsparse
  */
 
 #ifndef ROCSPARSE_DNVEC_BACKWARD_DESCR_H

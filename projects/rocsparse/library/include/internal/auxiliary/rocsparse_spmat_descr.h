@@ -22,7 +22,7 @@
  * ************************************************************************ */
 
 /*! \file
- *  \brief rocsparse_spmat_descr.h provides auxilary functions in rocsparse
+ *  \brief rocsparse_spmat_descr.h provides auxiliary functions in rocsparse
  */
 
 #ifndef ROCSPARSE_SPMAT_DESCR_H

@@ -22,7 +22,7 @@
  * ************************************************************************ */
 
 /*! \file
- *  \brief rocsparse_dnvec_descr.h provides auxilary functions in rocsparse
+ *  \brief rocsparse_dnvec_descr.h provides auxiliary functions in rocsparse
  */
 
 #ifndef ROCSPARSE_DNVEC_DESCR_H
@@ -66,7 +66,7 @@ extern "C" {
    *
    *  \retval rocsparse_status_success the operation completed successfully.
    *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
-   *  \retval rocsparse_status_invalid_pointer if \p descr, \p const_data is invalid, \p const_data are invalid if these are null pointers wheras \p size is positive; or if \p data is a non-null pointer and is different from \p const_data.
+   *  \retval rocsparse_status_invalid_pointer if \p descr, \p const_data is invalid, \p const_data are invalid if these are null pointers whereas \p size is positive; or if \p data is a non-null pointer and is different from \p const_data.
    *  \retval rocsparse_status_invalid_size if \p size is negative.
    *  \retval rocsparse_status_invalid_value if \p datatype is invalid.
    */
@@ -96,7 +96,7 @@ rocsparse_status rocsparse_dnvec_descr_create(rocsparse_handle       handle,
    *    e := A[j * batch_dist][i * inc], where j is the batch index, and A is the appropriate pointer type.
    *  \f]
    *
-   *  Note: The values of the batch distance \p batch_dist and the increment \p inc are voluntarily left as arbitrary to maximize the flexbility.
+   *  Note: The values of the batch distance \p batch_dist and the increment \p inc are voluntarily left as arbitrary to maximize the flexibility.
    *
    *  @param[in]
    *  handle       handle to the rocsparse library context queue.
@@ -126,7 +126,7 @@ rocsparse_status rocsparse_dnvec_descr_create(rocsparse_handle       handle,
    *
    *  \retval rocsparse_status_success the operation completed successfully.
    *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
-   *  \retval rocsparse_status_invalid_pointer if \p descr, \p const_data is invalid, \p const_data are invalid if these are null pointers wheras \p size is positive; or if \p data is a non-null pointer and is different from \p const_data.
+   *  \retval rocsparse_status_invalid_pointer if \p descr, \p const_data is invalid, \p const_data are invalid if these are null pointers whereas \p size is positive; or if \p data is a non-null pointer and is different from \p const_data.
    *  \retval rocsparse_status_invalid_size if \p size is negative.
    *  \retval rocsparse_status_invalid_value if \p batch_type or \p datatype is invalid.
    */
@@ -168,10 +168,10 @@ rocsparse_status rocsparse_dnvec_descr_destroy(rocsparse_handle      handle,
                                                rocsparse_error*      p_error);
 
 /*! \ingroup aux_module
-   *  \brief Set a property of the dense vector descriptor
+   *  \brief Get a property of the dense vector descriptor
    *
    *  \details
-   *  \p rocsparse_dnvec_set_prop gets a property of the dense vector descriptor.
+   *  \p rocsparse_dnvec_get_prop gets a property of the dense vector descriptor.
    *
    *  @param[in]
    *  handle  handle to the rocsparse library context queue.
@@ -237,7 +237,7 @@ rocsparse_status rocsparse_dnvec_set_prop(rocsparse_handle      handle,
    *  \details
    *  \p rocsparse_dnvec_get_data gets the pointer of mutable data of the dense vector descriptor.
    *
-   *  \note The pointer to mutable data is null if the vector has been defined with non-mutanle data only.
+   *  \note The pointer to mutable data is null if the vector has been defined with non-mutable data only.
    *
    *  @param[in]
    *  handle  handle to the rocsparse library context queue.

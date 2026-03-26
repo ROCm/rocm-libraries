@@ -22,7 +22,7 @@
  * ************************************************************************ */
 
 /*! \file
- *  \brief rocsparse_spmv_descr.h provides auxilary functions in rocsparse
+ *  \brief rocsparse_spmv_descr.h provides auxiliary functions in rocsparse
  *  but without using a rocsparse_handle.
  * Causing a disruption in the stream to use, as the default is the only available.
  */
@@ -41,31 +41,42 @@ extern "C" {
    *  \brief Sparse matrix spmv.
    *
    *  \details
-   *  \p rocsparse_create_spmv_descr creates the descriptor of the \ref rocsparse_v2_spmv_buffer_size and
+   *  \p rocsparse_spmv_descr_create creates the descriptor of the \ref rocsparse_v2_spmv_buffer_size and
    *  \ref rocsparse_v2_spmv routines.
-
+ *  @param[in]
+ *  handle  the handle to the rocSPARSE library context.
    *  @param[out]
    *  descr        pointer to the descriptor of the SpMV routine.
+   *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
    *
    *  \retval      rocsparse_status_success the operation completed successfully.
    *  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
    */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_create_spmv_descr(rocsparse_spmv_descr* descr);
+rocsparse_status rocsparse_spmv_descr_create(rocsparse_handle      handle,
+                                             rocsparse_spmv_descr* descr,
+                                             rocsparse_error*      p_error);
 
 /*! \ingroup aux_module
    *  \brief Sparse matrix spmv.
    *
    *  \details
-   *  \p rocsparse_destroy_spmv_descr destroys the descriptor of the \ref rocsparse_v2_spmv_buffer_size and
+   *  \p rocsparse_spmv_descr_destroy destroys the descriptor of the \ref rocsparse_v2_spmv_buffer_size and
    *  \ref rocsparse_v2_spmv routines.
    *
+ *  @param[in]
+ *  handle  the handle to the rocSPARSE library context.
    *  @param[in]
    *  descr        descriptor of the v2_spmv routine.
+   *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
 *  \retval      rocsparse_status_success the operation completed successfully.
 */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_destroy_spmv_descr(rocsparse_spmv_descr descr);
+rocsparse_status rocsparse_spmv_descr_destroy(rocsparse_handle     handle,
+                                              rocsparse_spmv_descr descr,
+                                              rocsparse_error*     p_error);
 
 /*! \ingroup aux_module
    *  \brief Set the requested \ref rocsparse_spmv_input data in the SpMV descriptor

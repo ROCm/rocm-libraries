@@ -48,7 +48,7 @@ public:
         return rocsparse_status_success;
     }
 
-    ~_rocsparse_extract_descr() = default;
+    virtual ~_rocsparse_extract_descr() = default;
 
     ///
     /// @brief Get which algorithm is used.

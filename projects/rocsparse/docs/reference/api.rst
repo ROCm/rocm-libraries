@@ -322,7 +322,7 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_idvec_descr_create_batch`       |
 +-----------------------------------------------------+
-|:cpp:func:`rocsparse_idvec_destroy`                  |
+|:cpp:func:`rocsparse_idvec_descr_destroy`            |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_idvec_get_prop`                 |
 +-----------------------------------------------------+
