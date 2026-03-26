@@ -1,13 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Auto-generated from kernel_sources.hpp.in by embed_kernel_sources() - DO NOT EDIT
+// Auto-generated from kernel_sources.hpp.in by EmbedKernelSources.cmake - DO NOT EDIT
 //
 // Kernel source embedding overview
 // ---------------------------------
 // HIPRTC compiles GPU kernels at runtime from source text. Since HIPRTC has no
 // filesystem access, all source text must be provided programmatically. At CMake
-// configure time, embed_kernel_sources() reads kernel .cpp and .h/.hpp files
+// build time, EmbedKernelSources.cmake reads kernel .cpp and .h/.hpp files
 // from disk and embeds them as C++ raw string literals in generated code.
 //
 // hiprtcCreateProgram() takes two separate sets of embedded text:
@@ -29,7 +29,9 @@
 
 #include <string_view>
 
+// Kernel declarations generation begin
 @KERNEL_DECLARATIONS@
+// Kernel declarations generation end
 
 namespace example_plugin {
 

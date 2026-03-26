@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Auto-generated from kernel_includes.hpp.in by embed_kernel_sources() - DO NOT EDIT
+// Auto-generated from kernel_includes.hpp.in by EmbedKernelSources.cmake - DO NOT EDIT
 //
 // Embeds kernel header files (.h/.hpp) as string literals for HIPRTC. These are
 // passed in bulk to hiprtcCreateProgram() so that kernel .cpp sources can
@@ -18,7 +18,9 @@
 #include <string_view>
 #include <vector>
 
+// Header declarations generation begin
 @HEADER_DECLARATIONS@
+// Header declarations generation end
 
 namespace example_plugin {
 

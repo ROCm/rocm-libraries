@@ -21,6 +21,8 @@ add_library(
     ${KERNEL_GENERATED_SOURCES}
 )
 
+add_dependencies(example_plugin_impl example_plugin_kernel_embed)
+
 target_include_directories(example_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(example_plugin_impl PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/../kernels)
 target_link_libraries(example_plugin_impl PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk hip::host hiprtc::hiprtc)

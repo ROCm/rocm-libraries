@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Auto-generated from kernel_includes.cpp.in by embed_kernel_sources() - DO NOT EDIT
+// Auto-generated from kernel_includes.cpp.in by EmbedKernelSources.cmake - DO NOT EDIT
 //
 // Defines the embedded kernel header string literals, the filename-to-header
 // lookup map, and getKernelIncList() which provides all headers to HIPRTC in
@@ -14,14 +14,18 @@
 #include <unordered_map>
 #include <stdexcept>
 
+// Header definitions generation begin
 @HEADER_DEFINITIONS@
+// Header definitions generation end
 
 namespace example_plugin {
 
 static const std::unordered_map<std::string_view, std::string_view>& getKernelIncludes()
 {
     static const std::unordered_map<std::string_view, std::string_view> s_data{
+        // s_data content generation begin
 @HEADER_MAP_ENTRIES@
+        // s_data content generation end
     };
     return s_data;
 }
