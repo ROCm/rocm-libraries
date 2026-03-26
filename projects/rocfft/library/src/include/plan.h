@@ -30,6 +30,7 @@
 
 #include "../../../shared/array_predicate.h"
 #include "data_layout.h"
+#include "exec_info.h"
 #include "function_pool.h"
 #include "load_store_ops.h"
 #include "rocfft_mpi.h"
@@ -333,9 +334,9 @@ struct rocfft_plan_t
     void AddAntecedent(size_t itemIdx, size_t antecedentIdx);
 
     // Execute the multi-GPU plan.
-    void Execute(void* in_buffer[], void* out_buffer[], rocfft_execution_info info);
+    void Execute(void* in_buffer[], void* out_buffer[], const rocfft_execution_info_internal& info);
 
-    size_t WorkBufBytes() const;
+    std::vector<size_t> WorkBufBytesPerDevice() const;
 
     // Construct an optimized multi-device plan for the FFT
     // parameters in *this.  Returns false if:

@@ -345,6 +345,17 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorFailsNullPointer)
 // SetAttribute Tests - Data Fields
 // =============================================================================
 
+TEST_F(TestLayernormOperationDescriptor, SetNormalizedDimCount)
+{
+    auto desc = getDescriptor();
+    int64_t dimCount = 3;
+
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT, HIPDNN_TYPE_INT64, 1, &dimCount));
+
+    ASSERT_EQ(desc->getData().normalized_dim_count, 3);
+}
+
 TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhase)
 {
     auto desc = getDescriptor();
@@ -508,6 +519,26 @@ INSTANTIATE_TEST_SUITE_P(
 // =============================================================================
 // GetAttribute Tests - Data Fields
 // =============================================================================
+
+TEST_F(TestLayernormOperationDescriptor, GetAttributeNormalizedDimCount)
+{
+    auto desc = getDescriptor();
+    int64_t dimCount = 3;
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT, HIPDNN_TYPE_INT64, 1, &dimCount);
+    setRequiredAttributes();
+    desc->finalize();
+
+    int64_t retrieved = 0;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT,
+                                       HIPDNN_TYPE_INT64,
+                                       1,
+                                       &elementCount,
+                                       &retrieved));
+    ASSERT_EQ(elementCount, 1);
+    EXPECT_EQ(retrieved, 3);
+}
 
 TEST_F(TestLayernormOperationDescriptor, GetAttributeLayernormParams)
 {
@@ -844,6 +875,23 @@ TEST_F(TestLayernormOperationDescriptor, BuildNodeProducesCorrectNodeT)
     ASSERT_TRUE(attrs->inv_variance_tensor_uid.has_value());
     ASSERT_EQ(attrs->inv_variance_tensor_uid.value(), K_LAYERNORM_TENSOR_INV_VARIANCE_UID);
     ASSERT_EQ(attrs->forward_phase, NormFwdPhase::INFERENCE);
+    ASSERT_EQ(attrs->normalized_dim_count, 0); // not set via setAttribute in makeFinalized()
+}
+
+TEST_F(TestLayernormOperationDescriptor, BuildNodePreservesNormalizedDimCount)
+{
+    auto desc = getDescriptor();
+    int64_t dimCount = 3;
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT, HIPDNN_TYPE_INT64, 1, &dimCount);
+    setRequiredAttributes();
+    desc->finalize();
+
+    auto node = desc->buildNode();
+    ASSERT_NE(node, nullptr);
+    auto* attrs = node->attributes.AsLayernormAttributes();
+    ASSERT_NE(attrs, nullptr);
+    EXPECT_EQ(attrs->normalized_dim_count, 3);
 }
 
 TEST_F(TestLayernormOperationDescriptor, BuildNodeWithHalfComputeType)

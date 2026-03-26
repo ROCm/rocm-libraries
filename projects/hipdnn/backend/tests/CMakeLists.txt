@@ -28,8 +28,11 @@ add_executable(
     descriptors/TestExecutionPlanDescriptor.cpp
     descriptors/TestGraphDescriptor.cpp
     descriptors/TestTensorDescriptor.cpp
+    descriptors/TestCustomOpOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorCustomOp.cpp
     descriptors/TestConvolutionFwdOperationDescriptor.cpp
     descriptors/TestConvolutionWrwOperationDescriptor.cpp
+    descriptors/TestConvolutionWrwOperationFromNode.cpp
     descriptors/TestGraphDescriptorConvolutionWrw.cpp
     descriptors/TestBatchnormInferenceOperationDescriptor.cpp
     descriptors/TestBatchnormOperationDescriptor.cpp
@@ -54,10 +57,14 @@ add_executable(
     descriptors/TestGraphDescriptorRMSNorm.cpp
     descriptors/TestGraphDescriptorSdpaFprop.cpp
     descriptors/TestLayernormOperationDescriptor.cpp
+    descriptors/TestLayernormOperationFromNode.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestPointwiseOperationFromNode.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
+    descriptors/TestSdpaBpropOperationDescriptor.cpp
+    descriptors/TestSdpaBpropOperationFromNode.cpp
     descriptors/TestSdpaFpropOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorSdpaBprop.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp
