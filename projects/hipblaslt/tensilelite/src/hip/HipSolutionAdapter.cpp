@@ -91,12 +91,54 @@ namespace TensileLite
             Debug::Instance().markerStart("loadCodeObjectFile", path);
             hipModule_t module;
 
-            HIP_CHECK_RETURN_WITH_LOG(hipModuleLoad(&module, path.c_str()),
-                [&](hipError_t error) {
-                    std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
-                            << " error: " << hipGetErrorString(error) << std::endl;
+            hipError_t error = hipModuleLoad(&module, path.c_str());
+            // Large problem sizes may cause global memory to run out of space 
+            // when loading the module, which can lead to hipErrorLaunchFailure or hipErrorNoBinaryForGpu.
+            if(error == hipErrorLaunchFailure || error == hipErrorNoBinaryForGpu)
+            {        
+                // Reset the error code from previous hipModuleLoad failure
+                (void)hipGetLastError();
+                std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
+                for(auto m_module : m_modules)
+                {
+                    HIP_CHECK_PRINT(hipModuleUnload(m_module),
+                        [&](hipError_t error_t) {
+                            std::cerr << "hipModuleUnload failed: " << std::endl
+                                      << " error: " << hipGetErrorString(error_t) << std::endl;
+                        }
+                    );
                 }
-            );
+                // Need to clean up all these old modules' data structures, otherwise next problem will getKernel failed
+                m_access.lock();
+                m_modules.clear();
+                m_loadedModuleNames.clear();
+                m_loadedCOFiles.clear();
+                m_kernels.clear();
+                m_access.unlock();
+                // Need to re-run lazy-loading for hsaco(helper kernels) module reload
+                std::string lazyArch;
+                std::string lazyDir;
+                lazyArch = m_lazyLoadArchitecture;
+                lazyDir  = m_codeObjectDirectory;
+                HIP_CHECK_RETURN_WITH_LOG(initializeLazyLoading(lazyArch, lazyDir),
+                    [&](hipError_t error_t) {
+                        std::cerr << "initializeLazyLoading after module clear failed: " << std::endl
+                                  << " error: " << hipGetErrorString(error_t) << std::endl;
+                    }
+                );
+                HIP_CHECK_RETURN_WITH_LOG(hipModuleLoad(&module, path.c_str()),
+                    [&](hipError_t error_t) {
+                        std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
+                                  << " error: " << hipGetErrorString(error_t) << std::endl;
+                    }
+                );
+            }
+            else if(error)
+            {
+                std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
+                          << " error: " << hipGetErrorString(error) << std::endl;
+                return error;
+            }
 
             if(m_debug)
                 std::cout << "loaded code object " << path << std::endl;
@@ -318,7 +360,10 @@ namespace TensileLite
             std::string helperKernelName = std::string("Kernels.so-000-") + arch;
 
             m_access.lock();
-            m_codeObjectDirectory = codeObjDir;
+
+            // Record for module reload
+            m_lazyLoadArchitecture = arch;
+            m_codeObjectDirectory  = codeObjDir;
 
             //If required code object file hasn't yet been loaded, load it now
             bool loaded = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco")

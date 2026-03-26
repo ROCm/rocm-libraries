@@ -52,7 +52,7 @@ inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::pa
 inline std::filesystem::path getCurrentExecutableDirectory()
 {
     std::array<char, PATH_MAX + 1> result{}; // +1 for trailing null termination
-    ssize_t count = readlink("/proc/self/exe", result.data(), PATH_MAX);
+    const ssize_t count = readlink("/proc/self/exe", result.data(), PATH_MAX);
     if(count == -1)
     {
         throw std::runtime_error("Failed to get executable path");

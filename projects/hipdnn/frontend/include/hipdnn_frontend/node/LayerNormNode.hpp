@@ -14,6 +14,8 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
+#include <hipdnn_frontend/detail/LayerNormPacker.hpp>
+#include <hipdnn_frontend/detail/LayerNormUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
@@ -27,7 +29,7 @@ namespace hipdnn_frontend::graph
  *
  * @see LayernormAttributes, Graph::layernorm()
  */
-class LayerNormNode : public BaseNode<LayerNormNode>
+class LayerNormNode : public BaseNode<LayerNormNode, NodeType::LAYER_NORM>
 {
 public:
     LayernormAttributes attributes;
@@ -36,6 +38,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(layernormAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        LayernormAttributes lnAttr;
+        HIPDNN_CHECK_ERROR(detail::unpackLayernormOperation(opDesc, tensorMap, lnAttr));
+        attributes = std::move(lnAttr);
+        return {};
     }
 
     Error pre_validate_node() const override
@@ -268,6 +280,35 @@ public:
             }
         }
 
+        // Infer normalized dimension count if not available
+        if(attributes.get_normalized_dim_count() <= 0)
+        {
+            if(attributes.get_x()->get_dim().size()
+               == attributes.get_scale()
+                      ->get_dim()
+                      .size()) // Dimensions not used by scale have been set to 1
+            {
+                int64_t normalizedDimCount = 1;
+                for(int64_t i = static_cast<int64_t>(attributes.get_scale()->get_dim().size()) - 1;
+                    i >= 0;
+                    --i)
+                {
+                    if(attributes.get_scale()->get_dim()[static_cast<size_t>(i)] == 1)
+                    {
+                        break;
+                    }
+                    normalizedDimCount
+                        = static_cast<int64_t>(attributes.get_scale()->get_dim().size()) - i;
+                }
+                attributes.set_normalized_dim_count(normalizedDimCount);
+            }
+            else // Dimensions not used by scale have been omitted
+            {
+                attributes.set_normalized_dim_count(
+                    static_cast<int64_t>(attributes.get_scale()->get_dim().size()));
+            }
+        }
+
         return {};
     }
 
@@ -280,6 +321,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createLayernormOperation(attributes, tensorDescs, operations);
     }
 };
 } // namespace hipdnn_frontend::graph
