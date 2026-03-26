@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <cstring>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
@@ -314,6 +315,90 @@ template <typename T>
     tensor->set_uid(uid).set_data_type(dt).set_dim(dims).set_stride(strides).set_is_virtual(
         isVirtual);
     tensor->set_name(name);
+
+    // Restore pass-by-value scalar if present.
+    bool isByValue = false;
+    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(tensorDesc,
+                                               HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT,
+                                               HIPDNN_TYPE_BOOLEAN,
+                                               isByValue,
+                                               "tensor is_by_value"));
+    if(isByValue)
+    {
+        // Read the raw bytes and dispatch on the already-known data type.
+        // Pass the buffer size (8) as requestedElementCount — the backend validates
+        // it is >= the data type's byte size and returns the actual count.
+        std::array<uint8_t, 8> valueBytes = {};
+        int64_t actualByteCount = 0;
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendGetAttribute(tensorDesc,
+                                                 HIPDNN_ATTR_TENSOR_VALUE_EXT,
+                                                 HIPDNN_TYPE_CHAR,
+                                                 static_cast<int64_t>(valueBytes.size()),
+                                                 &actualByteCount,
+                                                 valueBytes.data()),
+            "Failed to get tensor pass-by-value");
+
+        switch(dt)
+        {
+        case DataType::FLOAT:
+        {
+            float val = 0;
+            std::memcpy(&val, valueBytes.data(), sizeof(float));
+            tensor->set_value(val);
+            break;
+        }
+        case DataType::DOUBLE:
+        {
+            double val = 0;
+            std::memcpy(&val, valueBytes.data(), sizeof(double));
+            tensor->set_value(val);
+            break;
+        }
+        case DataType::HALF:
+        {
+            half val{};
+            std::memcpy(&val, valueBytes.data(), sizeof(half));
+            tensor->set_value(val);
+            break;
+        }
+        case DataType::BFLOAT16:
+        {
+            bfloat16 val{};
+            std::memcpy(&val, valueBytes.data(), sizeof(bfloat16));
+            tensor->set_value(val);
+            break;
+        }
+        case DataType::INT32:
+        {
+            int32_t val = 0;
+            std::memcpy(&val, valueBytes.data(), sizeof(int32_t));
+            tensor->set_value(val);
+            break;
+        }
+        case DataType::UINT8:
+        case DataType::INT8:
+        case DataType::FP8_E4M3:
+        case DataType::FP8_E5M2:
+        {
+            const uint8_t val = valueBytes[0];
+            tensor->set_value(val);
+            break;
+        }
+        default:
+            break;
+        }
+
+        // set_value() overwrites _dataType via getDataTypeEnumFromType<T>(),
+        // which is wrong for types that share a C++ type (e.g. INT8, FP8_E4M3,
+        // FP8_E5M2 all use uint8_t → UINT8). Restore the original data type.
+        // set_value() also resets _dim and _stride to {1}. Restore the
+        // dimensions and strides that were read from the backend descriptor
+        // so the round-trip is symmetric with lowering.
+        tensor->set_data_type(dt);
+        tensor->set_dim(dims);
+        tensor->set_stride(strides);
+    }
 
     return {};
 }
