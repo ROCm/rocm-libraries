@@ -89,8 +89,8 @@ template <class VerifyT>
 auto CompareResults(VerifyT&& verifier, double tolerance = 80.f)
     -> std::pair<decltype(verifier.cpu()), decltype(verifier.gpu())>
 {
-    const auto gpu_result = verifier.gpu();
     const auto cpu_result = verifier.cpu();
+    const auto gpu_result = verifier.gpu();
     if(!Compare(cpu_result, gpu_result, tolerance))
     {
         verifier.fail();

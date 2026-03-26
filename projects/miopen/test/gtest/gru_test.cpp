@@ -13,6 +13,21 @@
 
 #include <math.h>
 namespace {
+/// Specific version for compating CPU and GPU results, because this test is order-dependent
+template <class VerifyT>
+auto GruTestCompareResults(VerifyT&& verifier, double tolerance = 80.f)
+    -> std::pair<decltype(verifier.cpu()), decltype(verifier.gpu())>
+{
+    const auto gpu_result = verifier.gpu();
+    const auto cpu_result = verifier.cpu();
+    if(!test_helpers::Compare(cpu_result, gpu_result, tolerance))
+    {
+        verifier.fail();
+    }
+
+    return std::make_pair(cpu_result, gpu_result);
+}
+
 /**********************************************
  * CPU verification functions
  *
@@ -3043,24 +3058,24 @@ public:
         fill_buffers(input, hx, weights);
 
         auto fwdTrainOutputPair =
-            test_helpers::CompareResults(verify_forward_train_gru<T>{rnnDesc,
-                                                                     input,
-                                                                     hx,
-                                                                     weights,
-                                                                     param.batchSeq,
-                                                                     param.hiddenSize,
-                                                                     batch_n,
-                                                                     param.seqLength,
-                                                                     param.numLayers,
-                                                                     param.biasMode,
-                                                                     param.dirMode,
-                                                                     param.inputMode,
-                                                                     inVecReal,
-                                                                     hx_sz,
-                                                                     param.nohx,
-                                                                     param.nohy,
-                                                                     param.useDropout},
-                                         tolerance);
+            GruTestCompareResults(verify_forward_train_gru<T>{rnnDesc,
+                                                              input,
+                                                              hx,
+                                                              weights,
+                                                              param.batchSeq,
+                                                              param.hiddenSize,
+                                                              batch_n,
+                                                              param.seqLength,
+                                                              param.numLayers,
+                                                              param.biasMode,
+                                                              param.dirMode,
+                                                              param.inputMode,
+                                                              inVecReal,
+                                                              hx_sz,
+                                                              param.nohx,
+                                                              param.nohy,
+                                                              param.useDropout},
+                                  tolerance);
 
         /// RETURNS std::make_tuple(output, hiddenState, reserveSpace);
         auto yin = std::get<0>(fwdTrainOutputPair.second);
@@ -3072,80 +3087,80 @@ public:
         fill_bwd_buffers(dyin, dhyin);
 
         auto bwdDataOutputPair =
-            test_helpers::CompareResults(verify_backward_data_gru<T>{rnnDesc,
-                                                                     yin,
-                                                                     dyin,
-                                                                     dhyin,
-                                                                     hx,
-                                                                     weights,
-                                                                     reserveSpaceFwdTrain,
-                                                                     param.batchSeq,
-                                                                     param.hiddenSize,
-                                                                     batch_n,
-                                                                     param.seqLength,
-                                                                     param.numLayers,
-                                                                     param.biasMode,
-                                                                     param.dirMode,
-                                                                     param.inputMode,
-                                                                     inVecReal,
-                                                                     hx_sz,
-                                                                     param.nohx,
-                                                                     param.nodhy,
-                                                                     param.nodhx,
-                                                                     param.useDropout},
-                                         tolerance);
+            GruTestCompareResults(verify_backward_data_gru<T>{rnnDesc,
+                                                              yin,
+                                                              dyin,
+                                                              dhyin,
+                                                              hx,
+                                                              weights,
+                                                              reserveSpaceFwdTrain,
+                                                              param.batchSeq,
+                                                              param.hiddenSize,
+                                                              batch_n,
+                                                              param.seqLength,
+                                                              param.numLayers,
+                                                              param.biasMode,
+                                                              param.dirMode,
+                                                              param.inputMode,
+                                                              inVecReal,
+                                                              hx_sz,
+                                                              param.nohx,
+                                                              param.nodhy,
+                                                              param.nodhx,
+                                                              param.useDropout},
+                                  tolerance);
 
         // RETURNS:  std::make_tuple(dx, dhx, reserveSpace, workSpace);
         auto reserveSpaceBwdData = std::get<2>(bwdDataOutputPair.second);
         auto workSpaceBwdData    = std::get<3>(bwdDataOutputPair.second);
         // auto dweights_pair       =
-        test_helpers::CompareResults(verify_backward_weights_gru<T>{rnnDesc,
-                                                                    input,
-                                                                    dyin,
-                                                                    hx,
-                                                                    reserveSpaceBwdData,
-                                                                    workSpaceBwdData,
-                                                                    param.batchSeq,
-                                                                    param.hiddenSize,
-                                                                    static_cast<int>(wei_sz),
-                                                                    batch_n,
-                                                                    param.seqLength,
-                                                                    param.numLayers,
-                                                                    param.biasMode,
-                                                                    param.dirMode,
-                                                                    param.inputMode,
-                                                                    inVecReal,
-                                                                    hx_sz,
-                                                                    param.nohx,
-                                                                    param.useDropout},
-                                     tolerance);
+        GruTestCompareResults(verify_backward_weights_gru<T>{rnnDesc,
+                                                             input,
+                                                             dyin,
+                                                             hx,
+                                                             reserveSpaceBwdData,
+                                                             workSpaceBwdData,
+                                                             param.batchSeq,
+                                                             param.hiddenSize,
+                                                             static_cast<int>(wei_sz),
+                                                             batch_n,
+                                                             param.seqLength,
+                                                             param.numLayers,
+                                                             param.biasMode,
+                                                             param.dirMode,
+                                                             param.inputMode,
+                                                             inVecReal,
+                                                             hx_sz,
+                                                             param.nohx,
+                                                             param.useDropout},
+                              tolerance);
 
         if(!param.useDropout)
         {
-            test_helpers::CompareResults(verify_forward_infer_gru<T>{rnnDesc,
-                                                                     input,
-                                                                     hx,
-                                                                     weights,
-                                                                     param.batchSeq,
-                                                                     param.hiddenSize,
-                                                                     batch_n,
-                                                                     param.seqLength,
-                                                                     param.numLayers,
-                                                                     param.biasMode,
-                                                                     param.dirMode,
-                                                                     param.inputMode,
-                                                                     inVecReal,
-                                                                     hx_sz,
-                                                                     param.nohx,
-                                                                     param.nohy},
-                                         tolerance);
+            GruTestCompareResults(verify_forward_infer_gru<T>{rnnDesc,
+                                                              input,
+                                                              hx,
+                                                              weights,
+                                                              param.batchSeq,
+                                                              param.hiddenSize,
+                                                              batch_n,
+                                                              param.seqLength,
+                                                              param.numLayers,
+                                                              param.biasMode,
+                                                              param.dirMode,
+                                                              param.inputMode,
+                                                              inVecReal,
+                                                              hx_sz,
+                                                              param.nohx,
+                                                              param.nohy},
+                                  tolerance);
         }
         // DLOWELL: Subtracting delta weights may produce NAN and infinities. Further investigation
         // is needed.
         //        auto dweights = std::get<1>(dweights_pair);
         //        std::transform(weightData.begin( ), weightData.end( ), dweights.begin( ),
         //        weightData.begin( ),std::minus<T>( ));
-        //        test_helpers::CompareResults(verify_forward_infer_gru<T>{rnnDesc, inputData,
+        //        GruTestCompareResults(verify_forward_infer_gru<T>{rnnDesc, inputData,
         //                                        curHiddenState, curCellState, weightData,
         //                                        batchSeq,
         //                                        hiddenSize, batch_n,
