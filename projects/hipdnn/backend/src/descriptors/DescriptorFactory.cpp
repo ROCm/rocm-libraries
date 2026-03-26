@@ -24,6 +24,7 @@
 #include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
+#include "PoolingFwdOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
 #include "ReductionOperationDescriptor.hpp"
 #include "SdpaBwdOperationDescriptor.hpp"
@@ -124,6 +125,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR:
         privateDesc = std::make_shared<ReductionOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_POOLING_FORWARD_DESCRIPTOR:
+        privateDesc = std::make_shared<PoolingFwdOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

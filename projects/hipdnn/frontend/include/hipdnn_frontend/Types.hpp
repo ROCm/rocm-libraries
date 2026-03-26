@@ -31,7 +31,9 @@
 #include <HipdnnDataType.h>
 #include <HipdnnDiagonalAlignment.h>
 #include <HipdnnNormFwdPhase.h>
+#include <HipdnnPaddingMode.h>
 #include <HipdnnPointwiseMode.h>
+#include <HipdnnPoolingMode.h>
 #include <HipdnnReduceTensorOp.h>
 #include <hipdnn_data_sdk/types.hpp>
 
@@ -147,6 +149,31 @@ enum class ReductionMode
     MUL_NO_ZEROS = 9, ///< Product reduction excluding zeros
 };
 typedef ReductionMode ReductionMode_t; ///< @brief Type alias for ReductionMode
+
+/**
+ * @enum PoolingMode
+ * @brief Specifies the pooling operation mode
+ */
+enum class PoolingMode
+{
+    NOT_SET = 0, ///< Pooling mode not specified
+    MAX = 1, ///< Maximum pooling
+    AVERAGE = 2, ///< Average pooling (excludes padding)
+    AVERAGE_INCLUSIVE = 3 ///< Average pooling (includes padding)
+};
+typedef PoolingMode PoolingMode_t; ///< @brief Type alias for PoolingMode
+
+/**
+ * @enum PaddingMode
+ * @brief Specifies the padding mode for pooling operations
+ */
+enum class PaddingMode
+{
+    NOT_SET = 0, ///< Padding mode not specified
+    NEG_INF_PAD = 1, ///< Pad with negative infinity
+    ZERO_PAD = 2 ///< Pad with zeros
+};
+typedef PaddingMode PaddingMode_t; ///< @brief Type alias for PaddingMode
 
 /**
  * @enum DataType
@@ -1340,6 +1367,78 @@ inline bool isBinaryPointwiseMode(PointwiseMode mode)
 inline bool isTernaryPointwiseMode(PointwiseMode mode)
 {
     return mode == PointwiseMode::BINARY_SELECT;
+}
+
+/**
+ * @brief Convert frontend PoolingMode to backend hipdnnPoolingMode_t
+ */
+inline std::optional<hipdnnPoolingMode_t> toBackendPoolingMode(const PoolingMode& type)
+{
+    switch(type)
+    {
+    case PoolingMode::MAX:
+        return HIPDNN_POOLING_MODE_MAX;
+    case PoolingMode::AVERAGE:
+        return HIPDNN_POOLING_MODE_AVERAGE;
+    case PoolingMode::AVERAGE_INCLUSIVE:
+        return HIPDNN_POOLING_MODE_AVERAGE_INCLUSIVE;
+    default:
+        return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnPoolingMode_t to frontend PoolingMode
+ */
+inline std::pair<PoolingMode, Error> fromHipdnnPoolingMode(hipdnnPoolingMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_POOLING_MODE_MAX:
+        return {PoolingMode::MAX, {}};
+    case HIPDNN_POOLING_MODE_AVERAGE:
+        return {PoolingMode::AVERAGE, {}};
+    case HIPDNN_POOLING_MODE_AVERAGE_INCLUSIVE:
+        return {PoolingMode::AVERAGE_INCLUSIVE, {}};
+    default:
+        return {PoolingMode::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnPoolingMode_t value: " + std::to_string(static_cast<int>(mode))}};
+    }
+}
+
+/**
+ * @brief Convert frontend PaddingMode to backend hipdnnPaddingMode_t
+ */
+inline std::optional<hipdnnPaddingMode_t> toBackendPaddingMode(const PaddingMode& type)
+{
+    switch(type)
+    {
+    case PaddingMode::NEG_INF_PAD:
+        return HIPDNN_PADDING_NEG_INF_PAD;
+    case PaddingMode::ZERO_PAD:
+        return HIPDNN_PADDING_ZERO_PAD;
+    default:
+        return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnPaddingMode_t to frontend PaddingMode
+ */
+inline std::pair<PaddingMode, Error> fromHipdnnPaddingMode(hipdnnPaddingMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_PADDING_NEG_INF_PAD:
+        return {PaddingMode::NEG_INF_PAD, {}};
+    case HIPDNN_PADDING_ZERO_PAD:
+        return {PaddingMode::ZERO_PAD, {}};
+    default:
+        return {PaddingMode::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnPaddingMode_t value: " + std::to_string(static_cast<int>(mode))}};
+    }
 }
 
 } // namespace hipdnn_frontend

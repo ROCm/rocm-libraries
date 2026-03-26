@@ -55,6 +55,8 @@
  * - 3000-3099: Custom op operation attributes
  * - 3100-3199: SDPA backward propagation operation attributes
  * - 3200-3299: Reduction operation attributes
+ * - 3300-3399: Pooling forward operation attributes
+ * - 3400-3499: Shared pooling descriptor attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -1092,6 +1094,53 @@ typedef enum
 
     /** @brief Whether reduction is deterministic (bool) */
     HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC = 3204,
+
+    /** @} */
+
+    /**
+     * @name Pooling Forward Operation Attributes (3300-3399)
+     * Attributes for HIPDNN_BACKEND_OPERATION_POOLING_FORWARD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Input tensor for forward pooling */
+    HIPDNN_ATTR_OPERATION_POOLING_FORWARD_X_EXT = 3300,
+
+    /** @brief Output tensor for forward pooling */
+    HIPDNN_ATTR_OPERATION_POOLING_FORWARD_Y_EXT = 3301,
+
+    /** @brief Optional index tensor for max pooling */
+    HIPDNN_ATTR_OPERATION_POOLING_FORWARD_INDEX_EXT = 3302,
+
+    /** @} */
+
+    /**
+     * @name Shared Pooling Descriptor Attributes (3400-3499)
+     * Attributes shared across pooling operation descriptors (forward, backward).
+     * These are set directly on the operation descriptor.
+     * @{
+     */
+
+    /** @brief Pooling mode (max, average, average_inclusive) */
+    HIPDNN_ATTR_POOLING_MODE_EXT = 3400,
+
+    /** @brief Pre-padding values for each spatial dimension */
+    HIPDNN_ATTR_POOLING_PRE_PADDINGS_EXT = 3401,
+
+    /** @brief Post-padding values for each spatial dimension */
+    HIPDNN_ATTR_POOLING_POST_PADDINGS_EXT = 3402,
+
+    /** @brief Stride values for each spatial dimension */
+    HIPDNN_ATTR_POOLING_STRIDES_EXT = 3403,
+
+    /** @brief Pooling window for each spatial dimension */
+    HIPDNN_ATTR_POOLING_WINDOW_EXT = 3404,
+
+    /** @brief Padding mode for pooling (zero pad, neg inf pad) */
+    HIPDNN_ATTR_POOLING_PADDING_MODE_EXT = 3405,
+
+    /** @brief Whether to generate index output (for max pooling) */
+    HIPDNN_ATTR_POOLING_GENERATE_INDEX_EXT = 3406,
 
     /** @} */
 

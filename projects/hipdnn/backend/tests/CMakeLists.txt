@@ -85,6 +85,9 @@ add_executable(
     descriptors/TestSdpaFwdOperationDescriptor.cpp
     descriptors/TestSdpaFwdOperationFromNode.cpp
     descriptors/TestGraphDescriptorSdpaBwd.cpp
+    descriptors/TestPoolingFwdOperationDescriptor.cpp
+    descriptors/TestPoolingFwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorPoolingFwd.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp

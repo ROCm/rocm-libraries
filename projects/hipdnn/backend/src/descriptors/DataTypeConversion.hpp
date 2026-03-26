@@ -9,12 +9,15 @@
 #include "HipdnnDiagonalAlignment.h"
 #include "HipdnnException.hpp"
 #include "HipdnnNormFwdPhase.h"
+#include "HipdnnPaddingMode.h"
 #include "HipdnnPointwiseMode.h"
+#include "HipdnnPoolingMode.h"
 #include "HipdnnReduceTensorOp.h"
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pooling_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 
@@ -58,5 +61,13 @@ hipdnnNormFwdPhase_t fromSdkNormFwdPhase(hipdnn_flatbuffers_sdk::data_objects::N
 hipdnn_flatbuffers_sdk::data_objects::ReductionMode toSdkReductionMode(hipdnnReduceTensorOp_t mode);
 hipdnnReduceTensorOp_t
     fromSdkReductionMode(hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode);
+
+// Converts between C-API hipdnnPoolingMode_t and SDK PoolingMode enum values.
+hipdnn_flatbuffers_sdk::data_objects::PoolingMode toSdkPoolingMode(hipdnnPoolingMode_t mode);
+hipdnnPoolingMode_t fromSdkPoolingMode(hipdnn_flatbuffers_sdk::data_objects::PoolingMode mode);
+
+// Converts between C-API hipdnnPaddingMode_t and SDK PaddingMode enum values.
+hipdnn_flatbuffers_sdk::data_objects::PaddingMode toSdkPaddingMode(hipdnnPaddingMode_t mode);
+hipdnnPaddingMode_t fromSdkPaddingMode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode mode);
 
 } // namespace hipdnn_backend

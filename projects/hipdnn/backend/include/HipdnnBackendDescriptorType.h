@@ -286,4 +286,13 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR = 31,
 
+    /**
+     * @brief Pooling forward operation descriptor
+     *
+     * Represents a pooling forward operation (max, average, etc.).
+     * Takes an input tensor X and produces an output tensor Y,
+     * with optional index tensor IDX for max pooling.
+     */
+    HIPDNN_BACKEND_OPERATION_POOLING_FORWARD_DESCRIPTOR = 32,
+
 } hipdnnBackendDescriptorType_t;

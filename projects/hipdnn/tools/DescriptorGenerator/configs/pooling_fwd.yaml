@@ -1,0 +1,207 @@
+operation:
+  name: "PoolingFwd"
+  class_name: "PoolingFwdOperationDescriptor"
+  fbs_table: "PoolingFwdAttributes"
+  fbs_generated_header: "pooling_fwd_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_POOLING_FORWARD_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_POOLING_FORWARD"
+
+  error_label: "pooling"
+  packer_operation_label: "pooling forward"
+  packer_finalize_label: "pooling"
+  test_params_method_name: "setPoolingParams"
+  data_fields_section_label: "Pooling Parameters"
+  build_node_attrs_var: "poolAttrs"
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_POOLING_FORWARD"
+
+  frontend:
+    packer_function: "createPoolingFwdOperation"
+    unpacker_function: "unpackPoolingFwdOperation"
+    node_class: "PoolingFwdNode"
+    attributes_class: "PoolingFwdAttributes"
+    attributes_include: "PoolingFwdAttributes"
+
+    inputs:
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+    outputs:
+      - name: "y"
+        enum_name: "Y"
+        required: true
+        getter_name: "get_y"
+        setter_name: "set_y"
+      - name: "index"
+        enum_name: "INDEX"
+        required: false
+        getter_name: "get_index"
+        setter_name: "set_index"
+    graph_method_name: "pooling_fwd"
+    graph_method_params:
+      - name: "x"
+        tensor_name: "x"
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "y"
+    node_type_enum: "NodeType::POOLING_FWD"
+    node_attributes_union_type: "PoolingFwdAttributes"
+    compatibility_typedef: "Pooling_fwd_attributes"
+
+  infer_properties:
+    strategy: "stub"
+    dimension_formula: "output = (input + pre_padding + post_padding - window) / stride + 1"
+
+  validation:
+    required_input_tensors:
+      - "x"
+    required_input_dims:
+      - "x"
+    custom_checks:
+      - "Validate stride > 0 for each spatial dimension"
+      - "Validate window > 0 for each spatial dimension"
+
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X"
+      required: true
+      frontend_getter: "get_x()"
+
+    - name: "y"
+      fbs_field: "y_tensor_uid"
+      attr_suffix: "Y"
+      required: true
+      frontend_getter: "get_y()"
+
+    - name: "index"
+      fbs_field: "index_tensor_uid"
+      attr_suffix: "INDEX"
+      required: false
+      frontend_getter: "get_index()"
+
+  data_fields:
+    - name: "pre_padding"
+      fbs_field: "pre_padding"
+      attr_name: "HIPDNN_ATTR_POOLING_PRE_PADDINGS_EXT"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_pre_padding()"
+      test_label: "Pooling"
+      test_value: [1, 1]
+
+    - name: "post_padding"
+      fbs_field: "post_padding"
+      attr_name: "HIPDNN_ATTR_POOLING_POST_PADDINGS_EXT"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_post_padding()"
+      test_label: "Pooling"
+      test_value: [1, 1]
+      build_node_check: false
+
+    - name: "stride"
+      fbs_field: "stride"
+      attr_name: "HIPDNN_ATTR_POOLING_STRIDES_EXT"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_stride()"
+      test_label: "Pooling"
+      test_value: [2, 2]
+
+    - name: "window"
+      fbs_field: "window"
+      attr_name: "HIPDNN_ATTR_POOLING_WINDOW_EXT"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_window()"
+      test_label: "Pooling"
+      test_value: [3, 3]
+
+    - name: "pooling_mode"
+      fbs_field: "pooling_mode"
+      attr_name: "HIPDNN_ATTR_POOLING_MODE_EXT"
+      type: "mode"
+      cpp_enum: "hipdnn_data_sdk::data_objects::PoolingMode"
+      frontend_type: "PoolingMode"
+      default_value: "PoolingMode::MAX"
+      required: false
+      frontend_getter: "get_pooling_mode()"
+      backend_setter: "setPoolingMode"
+      backend_getter: "getPoolingMode"
+      backend_converter: "toBackendPoolingMode"
+      frontend_inverse_converter: "fromHipdnnPoolingMode"
+      backend_type_name: "HIPDNN_TYPE_POOLING_MODE"
+      test_enum_value: "MAX_POOLING"
+      test_alt_enum_value: "AVERAGE"
+      test_backend_value: "HIPDNN_POOLING_MODE_MAX"
+      test_c_type: "hipdnnPoolingMode_t"
+      test_default_value: "HIPDNN_POOLING_MODE_AVERAGE"
+      enum_def:
+        backend_header: "HipdnnPoolingMode.h"
+        backend_prefix: "HIPDNN_POOLING_MODE_"
+        values:
+          - { name: "UNSET", value: 0, sentinel: true }
+          - { name: "MAX", value: 1, sdk_name: "MAX_POOLING", description: "Maximum pooling" }
+          - { name: "AVERAGE", value: 2, description: "Average pooling (excludes padding)" }
+          - { name: "AVERAGE_INCLUSIVE", value: 3, description: "Average pooling (includes padding)" }
+
+    - name: "padding_mode"
+      fbs_field: "padding_mode"
+      attr_name: "HIPDNN_ATTR_POOLING_PADDING_MODE_EXT"
+      type: "mode"
+      cpp_enum: "hipdnn_data_sdk::data_objects::PaddingMode"
+      frontend_type: "PaddingMode"
+      default_value: "PaddingMode::ZERO_PAD"
+      required: false
+      frontend_getter: "get_padding_mode()"
+      backend_setter: "setPaddingMode"
+      backend_getter: "getPaddingMode"
+      backend_converter: "toBackendPaddingMode"
+      frontend_inverse_converter: "fromHipdnnPaddingMode"
+      backend_type_name: "HIPDNN_TYPE_PADDING_MODE"
+      test_enum_value: "ZERO_PAD"
+      test_alt_enum_value: "NEG_INF_PAD"
+      test_backend_value: "HIPDNN_PADDING_ZERO_PAD"
+      test_c_type: "hipdnnPaddingMode_t"
+      test_default_value: "HIPDNN_PADDING_NEG_INF_PAD"
+      enum_def:
+        backend_header: "HipdnnPaddingMode.h"
+        backend_prefix: "HIPDNN_PADDING_"
+        values:
+          - { name: "PADDING_NOT_SET", value: 0, sentinel: true, frontend_name: "NOT_SET" }
+          - { name: "NEG_INF_PAD", value: 1, description: "Pad with negative infinity" }
+          - { name: "ZERO_PAD", value: 2, description: "Pad with zeros" }
+
+    - name: "generate_index"
+      fbs_field: "generate_index"
+      attr_name: "HIPDNN_ATTR_POOLING_GENERATE_INDEX_EXT"
+      type: "bool"
+      default_value: "false"
+      required: false
+      frontend_getter: "get_generate_index()"
+      backend_type_name: "HIPDNN_TYPE_BOOLEAN"
+      test_value: false
+      test_alt_value: true
+
+  tensor_array_fields: []
+
+  has_compute_data_type: false
+
+  test_data:
+    constants_include: "PoolingFwdConstants"
+    tensor_uids: { x: 40, y: 41, index: 42 }
+    tensor_configs:
+      x: { dims: [1, 3, 32, 32], strides: [3072, 1024, 32, 1] }
+      y: { dims: [1, 3, 16, 16], strides: [768, 256, 16, 1] }
+      index: { dims: [1, 3, 16, 16], strides: [768, 256, 16, 1] }
+    field_values:
+      pre_padding: [1, 1]
+      post_padding: [1, 1]
+      stride: [2, 2]
+      window: [3, 3]

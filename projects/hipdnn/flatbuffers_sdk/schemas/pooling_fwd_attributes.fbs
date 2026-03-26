@@ -1,0 +1,26 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+include "pooling_common.fbs";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+table PoolingFwdAttributes {
+    // Input/Output tensor UIDs
+    x_tensor_uid: long;          // Input tensor
+    y_tensor_uid: long;          // Output tensor
+    index_tensor_uid: long = null; // Optional index tensor (for max pooling indices)
+
+    // Pooling parameters (N-dimensional support)
+    pre_padding: [long];         // Padding before each spatial dimension
+    post_padding: [long];        // Padding after each spatial dimension
+    stride: [long];              // Stride for each spatial dimension
+    window: [long];              // Pooling window for each spatial dimension
+
+    // Algorithm/mode selection
+    pooling_mode: PoolingMode;
+    padding_mode: PaddingMode;
+
+    // Whether to generate index output (for max pooling)
+    generate_index: bool = null;
+}

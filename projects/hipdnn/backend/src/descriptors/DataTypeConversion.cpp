@@ -519,4 +519,68 @@ hipdnnReduceTensorOp_t
     }
 }
 
+hipdnn_flatbuffers_sdk::data_objects::PoolingMode toSdkPoolingMode(hipdnnPoolingMode_t mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PoolingMode;
+
+    switch(mode)
+    {
+    case HIPDNN_POOLING_MODE_MAX:
+        return PoolingMode::MAX_POOLING;
+    case HIPDNN_POOLING_MODE_AVERAGE:
+        return PoolingMode::AVERAGE;
+    case HIPDNN_POOLING_MODE_AVERAGE_INCLUSIVE:
+        return PoolingMode::AVERAGE_INCLUSIVE;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnPoolingMode_t value");
+    }
+}
+
+hipdnnPoolingMode_t fromSdkPoolingMode(hipdnn_flatbuffers_sdk::data_objects::PoolingMode mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PoolingMode;
+
+    switch(mode)
+    {
+    case PoolingMode::MAX_POOLING:
+        return HIPDNN_POOLING_MODE_MAX;
+    case PoolingMode::AVERAGE:
+        return HIPDNN_POOLING_MODE_AVERAGE;
+    case PoolingMode::AVERAGE_INCLUSIVE:
+        return HIPDNN_POOLING_MODE_AVERAGE_INCLUSIVE;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK PoolingMode value");
+    }
+}
+
+hipdnn_flatbuffers_sdk::data_objects::PaddingMode toSdkPaddingMode(hipdnnPaddingMode_t mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PaddingMode;
+
+    switch(mode)
+    {
+    case HIPDNN_PADDING_NEG_INF_PAD:
+        return PaddingMode::NEG_INF_PAD;
+    case HIPDNN_PADDING_ZERO_PAD:
+        return PaddingMode::ZERO_PAD;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnPaddingMode_t value");
+    }
+}
+
+hipdnnPaddingMode_t fromSdkPaddingMode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PaddingMode;
+
+    switch(mode)
+    {
+    case PaddingMode::NEG_INF_PAD:
+        return HIPDNN_PADDING_NEG_INF_PAD;
+    case PaddingMode::ZERO_PAD:
+        return HIPDNN_PADDING_ZERO_PAD;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK PaddingMode value");
+    }
+}
+
 } // namespace hipdnn_backend
