@@ -56,13 +56,13 @@ class ActivationPASTHRU
 {
 public:
     template <class T, class Tparam>
-    static T Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
+    static T Forward(Tparam /*alpha*/, Tparam /*beta*/, Tparam /*gamma*/, T x)
     {
         return x;
     }
 
     template <class T, class Tparam>
-    static T Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
+    static T Backward(Tparam /*alpha*/, Tparam /*beta*/, Tparam /*gamma*/, T dy, T /*x*/, T /*y*/)
     {
         return dy;
     }
@@ -72,13 +72,13 @@ class ActivationLOGISTIC
 {
 public:
     template <class T, class Tparam>
-    static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
+    static Tparam Forward(Tparam /*alpha*/, Tparam /*beta*/, Tparam /*gamma*/, T x)
     {
         return 1 / (1 + std::exp(-x));
     }
 
     template <class T, class Tparam>
-    static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
+    static Tparam Backward(Tparam /*alpha*/, Tparam /*beta*/, Tparam /*gamma*/, T dy, T /*x*/, T y)
     {
         return static_cast<Tparam>(dy) * y * (static_cast<Tparam>(1) - y);
     }
@@ -88,13 +88,13 @@ class ActivationTANH
 {
 public:
     template <class T, class Tparam>
-    static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
+    static Tparam Forward(Tparam alpha, Tparam beta, Tparam /*gamma*/, T x)
     {
         return beta * std::tanh(alpha * x);
     }
 
     template <class T, class Tparam>
-    static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
+    static Tparam Backward(Tparam alpha, Tparam beta, Tparam /*gamma*/, T dy, T /*x*/, T y)
     {
         return dy * alpha * (beta - static_cast<Tparam>(y) * y / beta);
     }
@@ -104,13 +104,13 @@ class ActivationRELU
 {
 public:
     template <class T, class Tparam>
-    static T Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
+    static T Forward(Tparam /*alpha*/, Tparam /*beta*/, Tparam /*gamma*/, T x)
     {
         return (x > static_cast<Tparam>(0)) ? x : static_cast<T>(0);
     }
 
     template <class T, class Tparam>
-    static T Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
+    static T Backward(Tparam /*alpha*/, Tparam /*beta*/, Tparam /*gamma*/, T dy, T x, T /*y*/)
     {
         return (x > static_cast<Tparam>(0)) ? dy : static_cast<T>(0);
     }
@@ -120,13 +120,13 @@ class ActivationSOFTRELU
 {
 public:
     template <class T, class Tparam>
-    static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
+    static Tparam Forward(Tparam /*alpha*/, Tparam /*beta*/, Tparam /*gamma*/, T x)
     {
         return std::log1p(std::exp(x));
     }
 
     template <class T, class Tparam>
-    static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
+    static Tparam Backward(Tparam /*alpha*/, Tparam /*beta*/, Tparam /*gamma*/, T dy, T x, T /*y*/)
     {
         const Tparam threshold = 50.0;
         const Tparam expval    = std::exp(std::min(static_cast<Tparam>(x), threshold));
@@ -138,13 +138,13 @@ class ActivationABS
 {
 public:
     template <class T, class Tparam>
-    static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
+    static Tparam Forward(Tparam /*alpha*/, Tparam /*beta*/, Tparam /*gamma*/, T x)
     {
         return std::abs(x);
     }
 
     template <class T, class Tparam>
-    static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
+    static Tparam Backward(Tparam /*alpha*/, Tparam /*beta*/, Tparam /*gamma*/, T dy, T x, T /*y*/)
     {
         return dy * static_cast<Tparam>((x > static_cast<Tparam>(0)) ? 1 : -1);
     }
@@ -161,7 +161,7 @@ public:
     }
 
     template <class T, class Tparam>
-    static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
+    static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T /*dy*/, T x, T y)
     {
         const auto v = alpha + beta * x;
         return v <= std::numeric_limits<decltype(v)>::epsilon() ? 0 : gamma * beta * y / v;
@@ -172,13 +172,13 @@ class ActivationCLIPPEDRELU
 {
 public:
     template <class T, class Tparam>
-    static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
+    static Tparam Forward(Tparam alpha, Tparam /*beta*/, Tparam /*gamma*/, T x)
     {
         return std::clamp(static_cast<Tparam>(x), static_cast<Tparam>(0), alpha);
     }
 
     template <class T, class Tparam>
-    static T Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
+    static T Backward(Tparam alpha, Tparam /*beta*/, Tparam /*gamma*/, T dy, T x, T /*y*/)
     {
         Tparam x_native = x;
         return (x_native > 0 && x_native <= alpha) ? dy : static_cast<T>(0);
@@ -189,14 +189,14 @@ class ActivationLEAKYRELU
 {
 public:
     template <class T, class Tparam>
-    static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
+    static Tparam Forward(Tparam alpha, Tparam /*beta*/, Tparam /*gamma*/, T x)
     {
         Tparam x_native = x;
         return (x_native > 0) ? x_native : x_native * alpha;
     }
 
     template <class T, class Tparam>
-    static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
+    static Tparam Backward(Tparam alpha, Tparam /*beta*/, Tparam /*gamma*/, T dy, T x, T /*y*/)
     {
         return dy * ((x > static_cast<Tparam>(0)) ? 1 : alpha);
     }
@@ -206,14 +206,14 @@ class ActivationELU
 {
 public:
     template <class T, class Tparam>
-    static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
+    static Tparam Forward(Tparam alpha, Tparam /*beta*/, Tparam /*gamma*/, T x)
     {
         Tparam x_native = x;
         return (x_native > 0) ? x_native : alpha * std::expm1(x_native);
     }
 
     template <class T, class Tparam>
-    static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
+    static Tparam Backward(Tparam alpha, Tparam /*beta*/, Tparam /*gamma*/, T dy, T x, T y)
     {
         return dy * ((x > static_cast<Tparam>(0)) ? 1 : y + alpha);
     }
@@ -356,7 +356,7 @@ void CpuActivationPacked(std::size_t num_items, Ts&&... xs)
 }
 
 template <Direction direction, class A, class... Ts>
-void CpuActivationNonPacked(std::size_t num_items, Ts&&... xs)
+[[noreturn]] void CpuActivationNonPacked(std::size_t /*num_items*/, Ts&&... /*xs*/)
 {
     throw std::runtime_error("CpuActivationNonPacked is not implemented yet");
 }

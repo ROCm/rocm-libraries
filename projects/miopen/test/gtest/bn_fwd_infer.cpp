@@ -48,7 +48,6 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
                            ConstData_t x,
                            const miopen::TensorDescriptor& yDesc,
                            Data_t y,
-                           const miopen::TensorDescriptor& bnScaleBiasMeanVarDesc,
                            ConstData_t bnScale,
                            ConstData_t bnBias,
                            ConstData_t estimatedMean,
@@ -138,7 +137,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     std::string network_config = ss.str();
 
     // add the kernel to the handle
-    [[maybe_unused]] auto kernelInvoke =
+    auto kernelInvoke =
         handle.AddKernel(kernel_name, network_config, kernel_file, kernel_name, vld, vgd, params);
 
     if constexpr(PERF_ENABLE)
@@ -222,7 +221,6 @@ struct BatchNormFwdInferTester : public BatchNormInferTester<XDataType,
                               this->in_dev.get(),
                               this->output.desc,
                               this->out_dev.get(),
-                              this->scale.desc,
                               this->scale_dev.get(),
                               this->shift_dev.get(),
                               this->estMean_dev.get(),

@@ -29,6 +29,7 @@
 #include <limits>
 #include <type_traits>
 #include <utility>
+#include <half/half.hpp>
 
 #include <iostream>
 
@@ -60,13 +61,13 @@ std::vector<T> const& GetResultData(tensor<T> const& result)
 }
 
 template <class T>
-constexpr double GetResultDataErrorMargin(std::vector<T> const& result, double tolerance)
+constexpr double GetResultDataErrorMargin(std::vector<T> const& /*result*/, double tolerance)
 {
     return (std::numeric_limits<T>::epsilon() * tolerance);
 }
 
 template <class T>
-constexpr double GetResultDataErrorMargin(tensor<T> const& result, double tolerance)
+constexpr double GetResultDataErrorMargin(tensor<T> const& /*result*/, double tolerance)
 {
     return (std::numeric_limits<T>::epsilon() * tolerance);
 }
@@ -83,19 +84,20 @@ bool CompareFloatTensorTuples(LeftTuple const& left,
         ...);
 }
 
-template <class... CpuT, class... GpuT>
-std::enable_if_t<!(any_float_tensors<CpuT...>() || any_float_tensors<GpuT...>()), bool>
-Compare(std::tuple<CpuT...> const& cpu_result, std::tuple<GpuT...> const& gpu_result, double)
+template <typename... CpuT, typename... GpuT>
+bool Compare(std::tuple<CpuT...> const& cpu_result,
+             std::tuple<GpuT...> const& gpu_result,
+             double tolerance)
 {
-    return cpu_result == gpu_result;
-}
-
-template <class... CpuT, class... GpuT>
-std::enable_if_t<(any_float_tensors<CpuT...>() || any_float_tensors<GpuT...>()), bool> Compare(
-    std::tuple<CpuT...> const& cpu_result, std::tuple<GpuT...> const& gpu_result, double tolerance)
-{
-    return CompareFloatTensorTuples(
-        cpu_result, gpu_result, tolerance, std::index_sequence_for<CpuT...>{});
+    if constexpr(any_float_tensors<CpuT...>() || any_float_tensors<GpuT...>())
+    {
+        return CompareFloatTensorTuples(
+            cpu_result, gpu_result, tolerance, std::index_sequence_for<CpuT...>{});
+    }
+    else
+    {
+        return cpu_result == gpu_result;
+    }
 }
 
 template <typename T>

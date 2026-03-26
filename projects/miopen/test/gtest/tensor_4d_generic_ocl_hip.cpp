@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,12 +23,13 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <miopen/datatype.hpp>
-#include <gtest/gtest.h>
-
 #include "get_handle.hpp"
-#include "verify.hpp"
 #include "perf_helper.hpp"
+
+#include <miopen/datatype.hpp>
+#include <verify.hpp>
+
+#include <gtest/gtest.h>
 
 #define MAX_TENSOR_ELEM 17
 #define PERF_ENABLE 0
@@ -83,34 +84,41 @@ std::vector<TensorsConfig> TensorsConfigs()
 
     if constexpr(PERF_ENABLE)
     {
-        // Determine a cache-aware cap on total tensor elements for HIP/AMD:
-        // 1) Query L2 size via HIP and use 2x L2 as working set
-        // 2) Fallback to per-architecture table if L2 is not reported
-        size_t maxTotalSize = 0;
 
-        // 1) HIP L2 cache query
-        int dev = -1;
-        if(hipSuccess == hipGetDevice(&dev))
-        {
-            int L2_bytes = 0;
-            if(hipSuccess == hipDeviceGetAttribute(&L2_bytes, hipDeviceAttributeL2CacheSize, dev) &&
-               L2_bytes > 0)
-            {
-                // Use 2x L2 as a working-set heuristic
-                maxTotalSize = 2ul * static_cast<size_t>(L2_bytes);
-                // Convert bytes -> elements of type T
-                maxTotalSize /= sizeof(T);
-            }
-        }
-
-        // 2) Fallback table by architecture family
-        if(maxTotalSize == 0)
-        {
-            maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
-        }
+        const auto& handle = get_handle();
+        size_t maxTotalSize;
 
         // Generate all NCHW tensors that are limited by L3 cache size
         // or 2xL2 cache size when L3 is not available
+        if(miopen::StartsWith(handle.GetDeviceName(), "gfx90a") ||
+           miopen::StartsWith(handle.GetDeviceName(), "gfx908"))
+        {
+            maxTotalSize = 16; // twice the 8MB L2
+        }
+        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx803"))
+        {
+            maxTotalSize = 4; // twice the 2MB L2
+        }
+        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx900") ||
+                miopen::StartsWith(handle.GetDeviceName(), "gfx906"))
+        {
+            maxTotalSize = 8; // twice the 4MB L2
+        }
+        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx942"))
+        {
+            maxTotalSize = 256; // 256MB L3
+        }
+        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx103"))
+        {
+            maxTotalSize = 128; // 128MB L3
+        }
+        else
+        {
+            maxTotalSize = 4; // twice the 2MB L2, default case.
+        }
+
+        maxTotalSize = maxTotalSize * 1024ull * 1024ull / sizeof(T);
+
         if constexpr(POW_2)
         {
             for(size_t N = 1; N <= maxTotalSize; N *= 2)
@@ -345,9 +353,9 @@ protected:
             beta,
             bitmap,
             work_per_wg,
-            0L,
-            0L,
-            0L,
+            static_cast<long>(0),
+            static_cast<long>(0),
+            static_cast<long>(0),
             num_wg_orig);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
@@ -357,6 +365,7 @@ protected:
             ph.perfTest(handle,
                         kernel_name,
                         network_config_ocl,
+                        false,
                         tensA_dev.get(),
                         static_cast<int>(tensorsConfig.acstrides[0]),
                         static_cast<int>(tensorsConfig.acstrides[1]),
@@ -380,9 +389,9 @@ protected:
                         beta,
                         bitmap,
                         work_per_wg,
-                        0L,
-                        0L,
-                        0L,
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        static_cast<long>(0),
                         num_wg_orig);
         }
     }
@@ -427,9 +436,9 @@ protected:
             beta,
             bitmap,
             work_per_wg,
-            0L,
-            0L,
-            0L,
+            static_cast<long>(0),
+            static_cast<long>(0),
+            static_cast<long>(0),
             num_wg_orig);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
@@ -439,6 +448,7 @@ protected:
             ph.perfTest(handle,
                         kernel_name,
                         network_config_hip,
+                        false,
                         tensA_dev.get(),
                         static_cast<int>(tensorsConfig.acstrides[0]),
                         static_cast<int>(tensorsConfig.acstrides[1]),
@@ -462,9 +472,9 @@ protected:
                         beta,
                         bitmap,
                         work_per_wg,
-                        0L,
-                        0L,
-                        0L,
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        static_cast<long>(0),
                         num_wg_orig);
         }
     }
@@ -478,7 +488,7 @@ protected:
     void verifyCPU()
     {
         auto error = miopen::rms_range(tensC_hip, tensC_cpu);
-        EXPECT_TRUE(error == 0) << "GPU outputs do not match CPU results. Error: " << error;
+        EXPECT_TRUE(error == 0) << "GPU outputs do not match each other. Error: " << error;
     }
 
     void TearDown() override
@@ -505,7 +515,7 @@ protected:
             stats += "_alpha0_" + std::to_string(alpha0) + "_alpha1_" + std::to_string(alpha1) +
                      "_beta_" + std::to_string(beta) + "_" + miopen::GetDataType(data_type);
 
-            ph.writeStatsToCSV("tensor_4d_generic.csv", stats);
+            ph.writeStatsToCSV("tensor_4d.csv", stats);
         }
     }
 

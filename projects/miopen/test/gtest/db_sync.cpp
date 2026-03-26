@@ -121,6 +121,7 @@ static bool TransformFindDbItem10to20(std::string& id, std::string& values)
 #endif
 
 namespace miopen {
+
 conv::Direction GetDirectionFromString(const std::string& direction)
 {
     if(direction == "F")
@@ -131,6 +132,7 @@ conv::Direction GetDirectionFromString(const std::string& direction)
         return conv::Direction::BackwardWeights;
     throw std::runtime_error("Invalid Direction");
 }
+
 miopenTensorLayout_t GetLayoutFromString(const std::string& layout)
 {
     if(layout == "NCHW")
@@ -143,6 +145,7 @@ miopenTensorLayout_t GetLayoutFromString(const std::string& layout)
         return miopenTensorNDHWC;
     throw std::runtime_error("Invalid Layout");
 }
+
 miopenDataType_t GetDataTypeFromString(const std::string& data_type)
 {
     if(data_type == "FP32")
@@ -159,6 +162,7 @@ miopenDataType_t GetDataTypeFromString(const std::string& data_type)
         return miopenDouble;
     throw std::runtime_error("Invalid data type in find db key");
 }
+
 void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_desc)
 {
     std::string key = key_;
@@ -576,29 +580,23 @@ TEST(CPU_DBSync_NONE, KDBTargetID)
 #endif
 }
 
-bool LogBuildMessage()
-{
-    MIOPEN_LOG_W("Unable to produce missing binary due to COMGR being enabled");
-    return true;
-}
-
 void BuildKernel(const fs::path& program_file,
                  const std::string& program_args,
-                 [[maybe_unused]] const miopen::Handle& handle)
+                 const miopen::Handle& handle)
 {
     // Build the code object entry
     // This will write the code object in the user kdb which Jenkins can archive
     // This has to be done with the offline clang compiler and not COMGR (or hipRTC) otherwise the
     // code object would be target ID specific
 #if MIOPEN_USE_COMGR
-    static const bool discard = LogBuildMessage();
-    std::ignore               = discard;
-    std::ignore               = program_file;
-    std::ignore               = program_args;
+    std::ignore = program_file;
+    std::ignore = program_args;
+    std::ignore = handle;
+    MIOPEN_LOG_W("Unable to produce missing binary due to COMGR being enabled");
 #else
     try
     {
-        auto p = handle.LoadProgram(program_file, program_args, "");
+        (void)handle.LoadProgram(program_file, program_args, "");
     }
     catch(std::exception&)
     {

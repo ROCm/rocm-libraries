@@ -105,9 +105,7 @@ std::vector<TensorsConfig> TensorsConfigs()
 
     // 2) Fallback table by architecture family
     if(maxTotalSize == 0)
-    {
         maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
-    }
 
     for(int N = 1; N < maxTotalSize; N *= 4)
     {
@@ -290,9 +288,9 @@ protected:
                                  alpha0,
                                  alpha1,
                                  beta,
-                                 0L, // Aoffset
-                                 0L, // Boffset
-                                 0L, // Coffset
+                                 uint64_t(0), // Aoffset
+                                 uint64_t(0), // Boffset
+                                 uint64_t(0), // Coffset
                                  num_wg,
                                  incr_wg);
 
@@ -317,9 +315,9 @@ protected:
                     alpha0,
                     alpha1,
                     beta,
-                    0L,
-                    0L,
-                    0L,
+                    uint64_t(0),
+                    uint64_t(0),
+                    uint64_t(0),
                     num_wg,
                     incr_wg);
 #endif
@@ -359,9 +357,9 @@ protected:
                                  alpha0,
                                  alpha1,
                                  beta,
-                                 0L, // Aoffset
-                                 0L, // Boffset
-                                 0L, // Coffset
+                                 uint64_t(0), // Aoffset
+                                 uint64_t(0), // Boffset
+                                 uint64_t(0), // Coffset
                                  num_wg,
                                  incr_wg);
 
@@ -386,9 +384,9 @@ protected:
                     alpha0,
                     alpha1,
                     beta,
-                    0L,
-                    0L,
-                    0L,
+                    uint64_t(0),
+                    uint64_t(0),
+                    uint64_t(0),
                     num_wg,
                     incr_wg);
 #endif
@@ -432,7 +430,7 @@ protected:
     std::string network_config{};
     std::string params{};
     std::vector<size_t> vld, vgd;
-    const int max_num_wg{4096};
+    const int max_num_wg = 4096;
     int work_per_wg, num_wg, incr_wg{0};
 
     tensor<T> tensA;

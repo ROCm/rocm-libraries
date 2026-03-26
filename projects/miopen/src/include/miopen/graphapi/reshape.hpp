@@ -73,7 +73,7 @@ public:
     OperationReshape build();
 };
 
-class MIOPEN_INTERNALS_EXPORT BackendOperationReshapeDescriptor : public BackendDescriptor
+class BackendOperationReshapeDescriptor : public BackendDescriptor
 {
 private:
     OperationReshapeBuilder mBuilder;

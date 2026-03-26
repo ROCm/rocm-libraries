@@ -138,7 +138,6 @@ rocblas_status miopen_rocblas_gemm_ex3(const miopen::Handle& handle,
 #if USE_ROCBLAS_GEMM_EX3
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdisabled-macro-expansion"
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     float alpha = gemm_desc.alpha;
     float beta  = gemm_desc.beta;
     auto flags  = FlagsForRocblasFp32Fp16Call(gemm_desc);
@@ -301,15 +300,15 @@ inline void ProfilingRecordStart(const Handle& handle, HipEventPtr& start, HipEv
 {
     start = make_hip_event();
     stop  = make_hip_event();
-    hipEventRecord(start.get(), handle.GetStream());
+    (void)hipEventRecord(start.get(), handle.GetStream());
 }
 
 inline void ProfilingRecordStop(const Handle& handle, HipEventPtr& start, HipEventPtr& stop)
 {
-    hipEventRecord(stop.get(), handle.GetStream());
-    hipEventSynchronize(stop.get());
+    (void)hipEventRecord(stop.get(), handle.GetStream());
+    (void)hipEventSynchronize(stop.get());
     float mS = 0;
-    hipEventElapsedTime(&mS, start.get(), stop.get());
+    (void)hipEventElapsedTime(&mS, start.get(), stop.get());
     handle.ResetKernelTime();
     handle.AccumKernelTime(mS);
 }

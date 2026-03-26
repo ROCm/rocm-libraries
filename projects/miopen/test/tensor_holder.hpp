@@ -151,7 +151,6 @@ struct tensor
 
 #if defined(__clang__) || defined(__GNUG__)
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
     tensor() : desc(miopen_type<T>{}) {}
@@ -307,15 +306,15 @@ struct tensor
             }
         };
 
-        void operator()(any = {},
-                        any = {},
-                        any = {},
-                        any = {},
-                        any = {},
-                        any = {},
-                        any = {},
-                        any = {},
-                        any = {}) const
+        [[noreturn]] void operator()(any = {},
+                                     any = {},
+                                     any = {},
+                                     any = {},
+                                     any = {},
+                                     any = {},
+                                     any = {},
+                                     any = {},
+                                     any = {}) const
         {
             throw std::runtime_error(
                 "Arguments to for_each do not match tensor size or the function " +

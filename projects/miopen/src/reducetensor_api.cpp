@@ -146,7 +146,7 @@ miopenGetReduceTensorDescriptor(const miopenReduceTensorDescriptor_t reduceTenso
 };
 
 extern "C" miopenStatus_t
-miopenGetReductionIndicesSize(miopenHandle_t handle,
+miopenGetReductionIndicesSize([[maybe_unused]] miopenHandle_t handle,
                               const miopenReduceTensorDescriptor_t reduceTensorDesc,
                               const miopenTensorDescriptor_t aDesc,
                               const miopenTensorDescriptor_t cDesc,

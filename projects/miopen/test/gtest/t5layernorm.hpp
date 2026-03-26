@@ -113,12 +113,11 @@ void cpu_t5layernorm_backward(tensor<T> dy,
 }
 
 template <class T>
-void cpu_t5layernorm_backward_weight(
-    tensor<T> dy, tensor<T> x, tensor<T> rstd, tensor<T>& ref_dw, miopenNormMode_t mode)
+void cpu_t5layernorm_backward_weight(tensor<T> dy, tensor<T> x, tensor<T> rstd, tensor<T>& ref_dw)
 {
     auto dims         = dy.desc.GetLengths();
-    size_t outer_size = 1;
     size_t inner_size = dims[dims.size() - 1];
+    size_t outer_size = 1;
 
     for(size_t i = 0ULL; i < dims.size() - 1; ++i)
     {
@@ -434,7 +433,7 @@ protected:
     {
         auto&& handle = get_handle();
         cpu_t5layernorm_backward<T>(dy, x, weight, rstd, ref_dx, ln_mode);
-        cpu_t5layernorm_backward_weight<T>(dy, x, rstd, ref_dw, ln_mode);
+        cpu_t5layernorm_backward_weight<T>(dy, x, rstd, ref_dw);
 
         miopenStatus_t status;
 

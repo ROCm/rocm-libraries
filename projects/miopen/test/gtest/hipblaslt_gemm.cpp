@@ -272,6 +272,7 @@ template <typename T, typename disabled_mask, typename enabled_mask>
 static void CheckExceptionsWithSkip(miopenDataType_t dataType)
 {
 #ifdef WORKAROUND_SWDEV_473387
+    (void)dataType;
     GTEST_SKIP();
 #else
     if(!IsTestSupportedForDevMask<disabled_mask, enabled_mask>())

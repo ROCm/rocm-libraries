@@ -70,7 +70,6 @@ set(__clang_cxx_compile_options
     -Wno-unused-command-line-argument
     -Wno-weak-vtables
     -Wno-covered-switch-default
-    -Wno-unused-result
     -Wno-unsafe-buffer-usage
     -Wno-deprecated-declarations
     -Wno-shadow-uncaptured-local
@@ -89,7 +88,6 @@ set(__clang_cxx_compile_options
     -Wno-float-equal
     -Wno-redundant-parens
     -Wno-format-nonliteral
-    -Wno-unused-template
     -Wno-comma
     -Wno-suggest-destructor-override
     -Wno-switch-enum
@@ -102,8 +100,6 @@ set(__clang_cxx_compile_options
     -Wno-documentation
     -Wno-deprecated-builtins
     -Wno-enum-constexpr-conversion
-    -Wno-unused-value
-    -Wno-unused-parameter
     -Wno-missing-noreturn
     -Wno-tautological-constant-out-of-range-compare
     -Wno-nrvo
@@ -120,17 +116,9 @@ if(WIN32)
         -fms-compatibility)
 endif()
 
-set(__gnu_cxx_compile_options
-    -Wno-missing-field-initializers
-)
-
 add_compile_options(
-    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:${__msvc_cxx_compile_options}>"
     "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:${__default_cxx_compile_options};${__clang_cxx_compile_options}>"
-    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:${__default_cxx_compile_options};${__gnu_cxx_compile_options}>"
 )
 
-unset(__msvc_cxx_compile_options)
 unset(__default_cxx_compile_options)
-unset(__gnu_cxx_compile_options)
 unset(__clang_cxx_compile_options)

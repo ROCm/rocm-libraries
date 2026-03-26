@@ -95,7 +95,7 @@ std::vector<std::string> StubbedDeviceOps::deviceOps = {};
 
 struct StubbedCKArgs
 {
-    StubbedCKArgs(const ProblemDescription& problem) {}
+    StubbedCKArgs(const ProblemDescription& /*problem*/) {}
 
     template <typename ConvPtr>
     bool IsSupportedBy(const ConvPtr&) const
@@ -152,7 +152,7 @@ TEST_P(CPU_UnitTestImplicitGemmCKUtil_NONE, TestParsing)
 #else
     GTEST_SKIP();
 #endif
-};
+}
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestImplicitGemmCKUtil_NONE,
