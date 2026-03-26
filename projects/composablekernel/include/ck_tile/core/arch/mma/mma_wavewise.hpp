@@ -26,6 +26,16 @@ enum struct MmaAccumPolicy
     COL_MAJOR
 };
 
+namespace dense::wavewise::detail {
+// TODO: c++20: return MmaPipelineOptionFlags directly
+template <bool TransposeC>
+constexpr inline int getPipelineFlags()
+{
+    return static_cast<int>(TransposeC ? MmaPipelineOptionFlag::C_TRANSPOSE
+                                       : MmaPipelineOptionFlag::NONE);
+}
+} // namespace dense::wavewise::detail
+
 /**
  * @class Mma
  * @brief Driver for the wave-tile Mma operation. Given a backend MmaOp implementation
@@ -39,6 +49,7 @@ enum struct MmaAccumPolicy
  * @tparam WaveTileN      Mma WaveTile K dimension
  * @tparam WaveTileK      Mma WaveTile M dimension
  * @tparam AccumPolicy    The fragment order of the accum. registers (row or col major frag order)
+ * @tparam TransposeC     Swaps A and B input vectors
  * @tparam CompilerTarget The compiler target
  * @tparam MmaOp_         Backend wrapper class that will perform the mma op (e.g., mfma or wmma)
  * @tparam MmaTransforms  The set of transforms to be applied to input/output WaveTiles
@@ -58,6 +69,7 @@ template <typename ADataType,
           uint32_t WaveTileK,
           MmaOpFamily OpFamily,
           MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR,
+          bool TransposeC            = false,
           typename CompilerTarget =
               decltype(get_compiler_target()), // TODO: c++20 amdgcn_target_arch_id GfxTargetId =
                                                // get_compiler_target(),
@@ -74,11 +86,11 @@ template <typename ADataType,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp_, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct WaveWiseMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), // TODO: c++20: use MmaPipelineOptionFlags directly
-                                            WaveWiseMmaPipeline<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, CompilerTarget, MmaOp_, MmaTransforms>>
+struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::getPipelineFlags<TransposeC>(),
+                                            WaveWiseMmaPipeline<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, TransposeC, CompilerTarget, MmaOp_, MmaTransforms>>
 {
-    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), // TODO: c++20: use MmaPipelineOptionFlags directly
-                                 WaveWiseMmaPipeline<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, CompilerTarget, MmaOp_, MmaTransforms>>;
+    using Base = MmaPipelineBase<dense::wavewise::detail::getPipelineFlags<TransposeC>(),
+                                 WaveWiseMmaPipeline<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, TransposeC, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
     using MmaOp = MmaOp_;
 

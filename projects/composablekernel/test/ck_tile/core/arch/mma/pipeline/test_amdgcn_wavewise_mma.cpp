@@ -6,6 +6,7 @@
 #include "ck_tile/core/arch/mma/mma_wavewise.hpp"
 
 #include "pipeline_tests_helper.hpp"
+#include <memory>
 
 using namespace ck_tile;
 using namespace ck_tile::core::arch;
@@ -30,6 +31,7 @@ __global__ void test_wavewise_pipeline(void* a, void* b, void* c, void* out)
                                          WaveTileK,
                                          MmaOpFamily::DENSE,
                                          MmaAccumPolicy::ROW_MAJOR,
+                                         CTranspose,
                                          CompilerTarget>;
 
     using AVecType = typename Pipeline::AVecType;
@@ -40,19 +42,7 @@ __global__ void test_wavewise_pipeline(void* a, void* b, void* c, void* out)
                                  *reinterpret_cast<BVecType*>(b),
                                  *reinterpret_cast<CVecType*>(c));
 
-    __builtin_memcpy(
-        out,
-        [&]() {
-            if constexpr(std::is_pointer_v<decltype(result)>)
-            {
-                return static_cast<const void*>(result);
-            }
-            else
-            {
-                return static_cast<const void*>(std::addressof(result));
-            }
-        }(),
-        sizeof(CVecType));
+    __builtin_memcpy(out, std::addressof(result), sizeof(CVecType));
 }
 
 namespace {
