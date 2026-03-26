@@ -615,7 +615,7 @@ TEST_F(Test{{ op.name }}OperationFromNode, GetAttributeWorksAfterFromNode)
     std::vector<int64_t> {{ vf.camel_name }}({{ fv | length }});
     int64_t {{ vf.camel_name }}Count = 0;
     desc->getAttribute({{ vf.attr_name }},
-                       HIPDNN_TYPE_INT64,
+                       {{ vf.backend_type }},
                        {{ fv | length }},
                        &{{ vf.camel_name }}Count,
                        {{ vf.camel_name }}.data());

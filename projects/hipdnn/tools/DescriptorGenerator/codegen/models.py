@@ -235,8 +235,9 @@ class DataField:
 
     @property
     def cpp_type(self) -> str:
-        """C++ type name for scalar fields."""
+        """C++ type name for the field's element type."""
         type_map = {
+            "vector_int64": "int64_t",
             "scalar_float": "float",
             "scalar_int64": "int64_t",
             "bool": "bool",
