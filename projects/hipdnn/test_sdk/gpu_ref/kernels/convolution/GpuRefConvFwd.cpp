@@ -2,13 +2,92 @@
 // SPDX-License-Identifier:  MIT
 
 // GPU reference convolution forward kernels.
-// Compiled via HipRTC with -DSRC_TYPE=<type> -DDST_TYPE=<type> -DACC_TYPE=<type>.
+// Compiled via HipRTC with -DSRC_TYPE=<type> -DWEI_TYPE=<type> -DDST_TYPE=<type> -DACC_TYPE=<type>.
 // One thread per output element. Uses stride-based indexing to handle any layout.
 
 #include "GpuRefTypes.h"
 
+extern "C" __global__ void convFwdRef1d(const SRC_TYPE* __restrict__ x,
+                                        const WEI_TYPE* __restrict__ w,
+                                        DST_TYPE* __restrict__ y,
+                                        Strides3 xStr,
+                                        Strides3 wStr,
+                                        Strides3 yStr,
+                                        long long N,
+                                        long long C,
+                                        long long Wi,
+                                        long long K,
+                                        long long Wo,
+                                        long long Kw,
+                                        long long strideW,
+                                        long long dilW,
+                                        long long padW,
+                                        long long groups,
+                                        double alpha,
+                                        double beta)
+{
+    long long totalOutputElements = N * K * Wo;
+    long long idx = static_cast<long long>(blockIdx.x) * static_cast<long long>(blockDim.x)
+                    + static_cast<long long>(threadIdx.x);
+    if(idx >= totalOutputElements)
+    {
+        return;
+    }
+
+    // Decompose linear index into (n, k, wo)
+    long long wo = idx % Wo;
+    long long tmp = idx / Wo;
+    long long k = tmp % K;
+    long long n = tmp / K;
+
+    // Group parameters
+    long long cPerGroup = C / groups;
+    long long kPerGroup = K / groups;
+    long long g = k / kPerGroup;
+    long long baseInputChannel = g * cPerGroup;
+
+    ACC_TYPE acc = static_cast<ACC_TYPE>(0);
+
+    for(long long c = 0; c < cPerGroup; ++c)
+    {
+        long long xChannel = baseInputChannel + c;
+
+        for(long long kw = 0; kw < Kw; ++kw)
+        {
+            long long wi = wo * strideW + kw * dilW - padW;
+            if(wi < 0 || wi >= Wi)
+            {
+                continue;
+            }
+
+            long long xIdx = n * xStr.s[0] + xChannel * xStr.s[1] + wi * xStr.s[2];
+            long long wIdx = k * wStr.s[0] + c * wStr.s[1] + kw * wStr.s[2];
+
+#ifdef USE_TF32
+            float xf = truncateToTf32(static_cast<float>(toAccum(x[xIdx])));
+            float wf = truncateToTf32(static_cast<float>(toAccum(w[wIdx])));
+            acc += static_cast<ACC_TYPE>(xf) * static_cast<ACC_TYPE>(wf);
+#else
+            acc += toAccum(x[xIdx]) * toAccum(w[wIdx]);
+#endif
+        }
+    }
+
+    long long yIdx = n * yStr.s[0] + k * yStr.s[1] + wo * yStr.s[2];
+    DST_TYPE* tag = nullptr;
+
+    if(beta == 0.0)
+    {
+        y[yIdx] = fromAccum(alpha * acc, tag);
+    }
+    else
+    {
+        y[yIdx] = fromAccum(alpha * acc + beta * toAccum(y[yIdx]), tag);
+    }
+}
+
 extern "C" __global__ void convFwdRef2d(const SRC_TYPE* __restrict__ x,
-                                        const SRC_TYPE* __restrict__ w,
+                                        const WEI_TYPE* __restrict__ w,
                                         DST_TYPE* __restrict__ y,
                                         Strides4 xStr,
                                         Strides4 wStr,
@@ -105,7 +184,7 @@ extern "C" __global__ void convFwdRef2d(const SRC_TYPE* __restrict__ x,
 }
 
 extern "C" __global__ void convFwdRef3d(const SRC_TYPE* __restrict__ x,
-                                        const SRC_TYPE* __restrict__ w,
+                                        const WEI_TYPE* __restrict__ w,
                                         DST_TYPE* __restrict__ y,
                                         Strides5 xStr,
                                         Strides5 wStr,

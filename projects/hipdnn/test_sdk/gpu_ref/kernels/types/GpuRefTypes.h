@@ -10,6 +10,11 @@
 
 // --- Stride structs for stride-based indexing ---
 
+struct Strides3
+{
+    long long s[3];
+};
+
 struct Strides4
 {
     long long s[4];
