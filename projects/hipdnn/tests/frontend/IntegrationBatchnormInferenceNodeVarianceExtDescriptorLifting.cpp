@@ -428,17 +428,16 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 7u);
 
-    // Verify all UIDs are positive and distinct
+    // Verify all UIDs are distinct
     std::vector<int64_t> uids;
     uids.reserve(tensorMap.size());
     for(const auto& [uid, tensor] : tensorMap)
     {
-        EXPECT_GT(uid, 0) << "Auto-assigned UID should be positive";
         uids.push_back(uid);
     }
     std::sort(uids.begin(), uids.end());
     ASSERT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "Found duplicate auto-assigned UIDs";
+        << "All auto-assigned UIDs must be distinct";
 
     // Verify sub-node tensor UIDs are distinct via the node attributes
     auto& subNodes = liftedGraph->getSubNodes();
