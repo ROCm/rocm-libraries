@@ -171,73 +171,73 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
 } // namespace
 
 // ============================================================================
-// GpuTestConvFwdRefFp32 — NCHW float forward convolution tests
+// TestGpuConvFwdRefFp32 — NCHW float forward convolution tests
 // ============================================================================
 
-TEST(GpuTestConvFwdRefFp32, BasicConvolution)
+TEST(TestGpuConvFwdRefFp32, BasicConvolution)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {1, 1, 4, 4}, {1, 1, 3, 3}, {1, 1, 2, 2}, {1, 1}, {1, 1}, {0, 0}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRefFp32, WithPadding)
+TEST(TestGpuConvFwdRefFp32, WithPadding)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {1, 1, 3, 3}, {1, 1, 3, 3}, {1, 1, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRefFp32, WithStride)
+TEST(TestGpuConvFwdRefFp32, WithStride)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {1, 1, 5, 5}, {1, 1, 3, 3}, {1, 1, 2, 2}, {2, 2}, {1, 1}, {0, 0}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRefFp32, WithDilation)
+TEST(TestGpuConvFwdRefFp32, WithDilation)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {1, 1, 7, 7}, {1, 1, 3, 3}, {1, 1, 3, 3}, {1, 1}, {2, 2}, {0, 0}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRefFp32, MultiChannel)
+TEST(TestGpuConvFwdRefFp32, MultiChannel)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {1, 3, 4, 4}, {2, 3, 3, 3}, {1, 2, 2, 2}, {1, 1}, {1, 1}, {0, 0}, 1e-4f);
 }
 
-TEST(GpuTestConvFwdRefFp32, MultiBatch)
+TEST(TestGpuConvFwdRefFp32, MultiBatch)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {2, 1, 4, 4}, {1, 1, 3, 3}, {2, 1, 2, 2}, {1, 1}, {1, 1}, {0, 0}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRefFp32, GroupedConvolution)
+TEST(TestGpuConvFwdRefFp32, GroupedConvolution)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {1, 4, 4, 4}, {4, 2, 3, 3}, {1, 4, 2, 2}, {1, 1}, {1, 1}, {0, 0}, 1e-4f);
 }
 
-TEST(GpuTestConvFwdRefFp32, PointwiseConvolution)
+TEST(TestGpuConvFwdRefFp32, PointwiseConvolution)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {1, 3, 4, 4}, {2, 3, 1, 1}, {1, 2, 4, 4}, {1, 1}, {1, 1}, {0, 0}, 1e-4f);
 }
 
-TEST(GpuTestConvFwdRefFp32, AsymmetricPadding)
+TEST(TestGpuConvFwdRefFp32, AsymmetricPadding)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {1, 1, 3, 3}, {1, 1, 3, 3}, {1, 1, 2, 2}, {1, 1}, {1, 1}, {1, 0}, {0, 1}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRefFp32, SingleElementOutput)
+TEST(TestGpuConvFwdRefFp32, SingleElementOutput)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
@@ -245,31 +245,31 @@ TEST(GpuTestConvFwdRefFp32, SingleElementOutput)
 }
 
 // ============================================================================
-// GpuTestConvFwdRefFp16
+// TestGpuConvFwdRefFp16
 // ============================================================================
 
-TEST(GpuTestConvFwdRefFp16, BasicConvolution)
+TEST(TestGpuConvFwdRefFp16, BasicConvolution)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<half>(
         {1, 1, 4, 4}, {1, 1, 3, 3}, {1, 1, 2, 2}, {1, 1}, {1, 1}, {0, 0}, 5e-2f);
 }
 
-TEST(GpuTestConvFwdRefFp16, MultiChannel)
+TEST(TestGpuConvFwdRefFp16, MultiChannel)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<half>(
         {1, 3, 4, 4}, {2, 3, 3, 3}, {1, 2, 2, 2}, {1, 1}, {1, 1}, {0, 0}, 5e-2f);
 }
 
-TEST(GpuTestConvFwdRefFp16, WithPadding)
+TEST(TestGpuConvFwdRefFp16, WithPadding)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<half>(
         {1, 1, 3, 3}, {1, 1, 3, 3}, {1, 1, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 5e-2f);
 }
 
-TEST(GpuTestConvFwdRefFp16, GroupedConvolution)
+TEST(TestGpuConvFwdRefFp16, GroupedConvolution)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<half>(
@@ -277,24 +277,24 @@ TEST(GpuTestConvFwdRefFp16, GroupedConvolution)
 }
 
 // ============================================================================
-// GpuTestConvFwdRefBfp16
+// TestGpuConvFwdRefBfp16
 // ============================================================================
 
-TEST(GpuTestConvFwdRefBfp16, BasicConvolution)
+TEST(TestGpuConvFwdRefBfp16, BasicConvolution)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<bfloat16>(
         {1, 1, 4, 4}, {1, 1, 3, 3}, {1, 1, 2, 2}, {1, 1}, {1, 1}, {0, 0}, 0.1f);
 }
 
-TEST(GpuTestConvFwdRefBfp16, MultiChannel)
+TEST(TestGpuConvFwdRefBfp16, MultiChannel)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<bfloat16>(
         {1, 3, 4, 4}, {2, 3, 3, 3}, {1, 2, 2, 2}, {1, 1}, {1, 1}, {0, 0}, 0.1f);
 }
 
-TEST(GpuTestConvFwdRefBfp16, GroupedConvolution)
+TEST(TestGpuConvFwdRefBfp16, GroupedConvolution)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<bfloat16>(
@@ -302,10 +302,10 @@ TEST(GpuTestConvFwdRefBfp16, GroupedConvolution)
 }
 
 // ============================================================================
-// GpuTestConvFwdRefNhwcFp32 — NHWC layout tests
+// TestGpuConvFwdRefNhwcFp32 — NHWC layout tests
 // ============================================================================
 
-TEST(GpuTestConvFwdRefNhwcFp32, BasicConvolution)
+TEST(TestGpuConvFwdRefNhwcFp32, BasicConvolution)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>({1, 1, 4, 4},
@@ -319,7 +319,7 @@ TEST(GpuTestConvFwdRefNhwcFp32, BasicConvolution)
                               TensorLayout::NHWC);
 }
 
-TEST(GpuTestConvFwdRefNhwcFp32, WithPadding)
+TEST(TestGpuConvFwdRefNhwcFp32, WithPadding)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>({1, 1, 3, 3},
@@ -333,7 +333,7 @@ TEST(GpuTestConvFwdRefNhwcFp32, WithPadding)
                               TensorLayout::NHWC);
 }
 
-TEST(GpuTestConvFwdRefNhwcFp32, WithStride)
+TEST(TestGpuConvFwdRefNhwcFp32, WithStride)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>({1, 1, 5, 5},
@@ -347,7 +347,7 @@ TEST(GpuTestConvFwdRefNhwcFp32, WithStride)
                               TensorLayout::NHWC);
 }
 
-TEST(GpuTestConvFwdRefNhwcFp32, GroupedConvolution)
+TEST(TestGpuConvFwdRefNhwcFp32, GroupedConvolution)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>({1, 4, 4, 4},
@@ -361,7 +361,7 @@ TEST(GpuTestConvFwdRefNhwcFp32, GroupedConvolution)
                               TensorLayout::NHWC);
 }
 
-TEST(GpuTestConvFwdRefNhwcFp32, MultiChannel)
+TEST(TestGpuConvFwdRefNhwcFp32, MultiChannel)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>({1, 3, 4, 4},
@@ -376,10 +376,10 @@ TEST(GpuTestConvFwdRefNhwcFp32, MultiChannel)
 }
 
 // ============================================================================
-// GpuTestConvFwdRef3dFp32 — 3D convolution tests
+// TestGpuConvFwdRef3dFp32 — 3D convolution tests
 // ============================================================================
 
-TEST(GpuTestConvFwdRef3dFp32, BasicNcdhw)
+TEST(TestGpuConvFwdRef3dFp32, BasicNcdhw)
 {
     SKIP_IF_NO_DEVICES();
     // 1x1x4x4x4 input, 1x1x3x3x3 weight -> 1x1x2x2x2 output
@@ -387,35 +387,35 @@ TEST(GpuTestConvFwdRef3dFp32, BasicNcdhw)
         {1, 1, 4, 4, 4}, {1, 1, 3, 3, 3}, {1, 1, 2, 2, 2}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRef3dFp32, WithPadding)
+TEST(TestGpuConvFwdRef3dFp32, WithPadding)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {1, 1, 3, 3, 3}, {1, 1, 3, 3, 3}, {1, 1, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRef3dFp32, WithStride)
+TEST(TestGpuConvFwdRef3dFp32, WithStride)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {1, 1, 5, 5, 5}, {1, 1, 3, 3, 3}, {1, 1, 2, 2, 2}, {2, 2, 2}, {1, 1, 1}, {0, 0, 0}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRef3dFp32, WithDilation)
+TEST(TestGpuConvFwdRef3dFp32, WithDilation)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {1, 1, 7, 7, 7}, {1, 1, 3, 3, 3}, {1, 1, 3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {0, 0, 0}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRef3dFp32, MultiChannel)
+TEST(TestGpuConvFwdRef3dFp32, MultiChannel)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>(
         {1, 3, 4, 4, 4}, {2, 3, 3, 3, 3}, {1, 2, 2, 2, 2}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, 1e-4f);
 }
 
-TEST(GpuTestConvFwdRef3dFp32, Ndhwc)
+TEST(TestGpuConvFwdRef3dFp32, Ndhwc)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>({1, 3, 4, 4, 4},
@@ -430,10 +430,10 @@ TEST(GpuTestConvFwdRef3dFp32, Ndhwc)
 }
 
 // ============================================================================
-// GpuTestConvFwdRefAlphaBeta — alpha/beta scaling tests
+// TestGpuConvFwdRefAlphaBeta — alpha/beta scaling tests
 // ============================================================================
 
-TEST(GpuTestConvFwdRefAlphaBeta, AlphaOnly)
+TEST(TestGpuConvFwdRefAlphaBeta, AlphaOnly)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -461,7 +461,7 @@ TEST(GpuTestConvFwdRefAlphaBeta, AlphaOnly)
     }
 }
 
-TEST(GpuTestConvFwdRefAlphaBeta, BetaAccumulate)
+TEST(TestGpuConvFwdRefAlphaBeta, BetaAccumulate)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -491,7 +491,7 @@ TEST(GpuTestConvFwdRefAlphaBeta, BetaAccumulate)
     }
 }
 
-TEST(GpuTestConvFwdRefAlphaBeta, BetaZeroSkipsRead)
+TEST(TestGpuConvFwdRefAlphaBeta, BetaZeroSkipsRead)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -522,11 +522,11 @@ TEST(GpuTestConvFwdRefAlphaBeta, BetaZeroSkipsRead)
 }
 
 // ============================================================================
-// GpuTestConvFwdRefStridedFp32 — non-packed (strided) tensor tests
+// TestGpuConvFwdRefStridedFp32 — non-packed (strided) tensor tests
 // Verifies stride-based indexing with memory gaps between elements.
 // ============================================================================
 
-TEST(GpuTestConvFwdRefStridedFp32, NonPackedInput)
+TEST(TestGpuConvFwdRefStridedFp32, NonPackedInput)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -552,7 +552,7 @@ TEST(GpuTestConvFwdRefStridedFp32, NonPackedInput)
     compareTensors(yCpu, yGpu, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRefStridedFp32, NonPackedOutput)
+TEST(TestGpuConvFwdRefStridedFp32, NonPackedOutput)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -578,7 +578,7 @@ TEST(GpuTestConvFwdRefStridedFp32, NonPackedOutput)
     compareTensors(yCpu, yGpu, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRefStridedFp32, NonPackedInputAndOutput)
+TEST(TestGpuConvFwdRefStridedFp32, NonPackedInputAndOutput)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -607,7 +607,7 @@ TEST(GpuTestConvFwdRefStridedFp32, NonPackedInputAndOutput)
     compareTensors(yCpu, yGpu, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRefStridedFp32, NonPackedWithPadding)
+TEST(TestGpuConvFwdRefStridedFp32, NonPackedWithPadding)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -634,10 +634,10 @@ TEST(GpuTestConvFwdRefStridedFp32, NonPackedWithPadding)
 }
 
 // ============================================================================
-// GpuTestConvFwdRefInt8 — int8 input with int32 or float output
+// TestGpuConvFwdRefInt8 — int8 input with int32 or float output
 // ============================================================================
 
-TEST(GpuTestConvFwdRefInt8, Int8ToInt32)
+TEST(TestGpuConvFwdRefInt8, Int8ToInt32)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -678,7 +678,7 @@ TEST(GpuTestConvFwdRefInt8, Int8ToInt32)
     }
 }
 
-TEST(GpuTestConvFwdRefInt8, Int8ToFloat)
+TEST(TestGpuConvFwdRefInt8, Int8ToFloat)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -717,10 +717,10 @@ TEST(GpuTestConvFwdRefInt8, Int8ToFloat)
 }
 
 // ============================================================================
-// GpuTestConvFwdRefTf32 — TF32 truncation test
+// TestGpuConvFwdRefTf32 — TF32 truncation test
 // ============================================================================
 
-TEST(GpuTestConvFwdRefTf32, DiffersFromNonTf32)
+TEST(TestGpuConvFwdRefTf32, DiffersFromNonTf32)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -761,10 +761,10 @@ TEST(GpuTestConvFwdRefTf32, DiffersFromNonTf32)
 }
 
 // ============================================================================
-// GpuTestConvFwdRefMixedType — separate WEI_TYPE tests
+// TestGpuConvFwdRefMixedType — separate WEI_TYPE tests
 // ============================================================================
 
-TEST(GpuTestConvFwdRefMixedType, Fp32InputFp16Weight)
+TEST(TestGpuConvFwdRefMixedType, Fp32InputFp16Weight)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -777,7 +777,7 @@ TEST(GpuTestConvFwdRefMixedType, Fp32InputFp16Weight)
         xTensor, wTensor, yCpu, yGpu, {1, 1}, {1, 1}, {0, 0}, {0, 0}, 5e-2f, 1.0f);
 }
 
-TEST(GpuTestConvFwdRefMixedType, Fp16InputFp32Weight)
+TEST(TestGpuConvFwdRefMixedType, Fp16InputFp32Weight)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -791,56 +791,56 @@ TEST(GpuTestConvFwdRefMixedType, Fp16InputFp32Weight)
 }
 
 // ============================================================================
-// GpuTestConvFwdRef1dFp32 — 1D convolution tests (NCW format)
+// TestGpuConvFwdRef1dFp32 — 1D convolution tests (NCW format)
 // ============================================================================
 
-TEST(GpuTestConvFwdRef1dFp32, BasicConvolution)
+TEST(TestGpuConvFwdRef1dFp32, BasicConvolution)
 {
     SKIP_IF_NO_DEVICES();
     // NCW: 1x1x8 input, 1x1x3 weight -> 1x1x6 output
     runGpuVsCpuConvFwd<float>({1, 1, 8}, {1, 1, 3}, {1, 1, 6}, {1}, {1}, {0}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRef1dFp32, WithPadding)
+TEST(TestGpuConvFwdRef1dFp32, WithPadding)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>({1, 1, 6}, {1, 1, 3}, {1, 1, 6}, {1}, {1}, {1}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRef1dFp32, WithStride)
+TEST(TestGpuConvFwdRef1dFp32, WithStride)
 {
     SKIP_IF_NO_DEVICES();
     // stride=2: 1x1x10 input, 1x1x3 weight -> 1x1x4 output
     runGpuVsCpuConvFwd<float>({1, 1, 10}, {1, 1, 3}, {1, 1, 4}, {2}, {1}, {0}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRef1dFp32, WithDilation)
+TEST(TestGpuConvFwdRef1dFp32, WithDilation)
 {
     SKIP_IF_NO_DEVICES();
     // dilation=2: effective kernel size = 5, 1x1x9 -> 1x1x5
     runGpuVsCpuConvFwd<float>({1, 1, 9}, {1, 1, 3}, {1, 1, 5}, {1}, {2}, {0}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRef1dFp32, MultiChannel)
+TEST(TestGpuConvFwdRef1dFp32, MultiChannel)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>({1, 3, 8}, {2, 3, 3}, {1, 2, 6}, {1}, {1}, {0}, 1e-4f);
 }
 
-TEST(GpuTestConvFwdRef1dFp32, MultiBatch)
+TEST(TestGpuConvFwdRef1dFp32, MultiBatch)
 {
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<float>({2, 1, 8}, {1, 1, 3}, {2, 1, 6}, {1}, {1}, {0}, 1e-5f);
 }
 
-TEST(GpuTestConvFwdRef1dFp32, GroupedConvolution)
+TEST(TestGpuConvFwdRef1dFp32, GroupedConvolution)
 {
     SKIP_IF_NO_DEVICES();
     // 4 input channels, 2 groups of 2 channels each, 4 output channels
     runGpuVsCpuConvFwd<float>({1, 4, 8}, {4, 2, 3}, {1, 4, 6}, {1}, {1}, {0}, 1e-4f);
 }
 
-TEST(GpuTestConvFwdRef1dFp32, PointwiseConvolution)
+TEST(TestGpuConvFwdRef1dFp32, PointwiseConvolution)
 {
     SKIP_IF_NO_DEVICES();
     // 1x1 kernel (pointwise)
@@ -848,10 +848,10 @@ TEST(GpuTestConvFwdRef1dFp32, PointwiseConvolution)
 }
 
 // ============================================================================
-// GpuTestConvFwdRefPerformance — timing comparisons
+// TestGpuConvFwdRefPerformance — timing comparisons
 // ============================================================================
 
-TEST(GpuTestConvFwdRefPerformance, MediumTensorTimingComparison)
+TEST(TestGpuConvFwdRefPerformance, MediumTensorTimingComparison)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -907,7 +907,7 @@ TEST(GpuTestConvFwdRefPerformance, MediumTensorTimingComparison)
     compareTensors(yCpu, yGpu, 1e-3f);
 }
 
-TEST(GpuTestConvFwdRefPerformance, LargeTensorTimingComparison)
+TEST(TestGpuConvFwdRefPerformance, LargeTensorTimingComparison)
 {
     SKIP_IF_NO_DEVICES();
 
