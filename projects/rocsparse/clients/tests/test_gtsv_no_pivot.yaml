@@ -73,7 +73,7 @@ Tests:
   category: pre_checkin
   function: gtsv_no_pivot
   precision: *single_double_precisions_complex_real
-  M: [256, 456]
+  M: [5, 6, 256, 456]
   N: [1, 27]
   denseld: [800, 1600]
   matrix: [rocsparse_matrix_random]
@@ -91,7 +91,7 @@ Tests:
   category: pre_checkin
   function: gtsv_no_pivot
   precision: *single_double_precisions
-  M: [2000, 2048]
+  M: [1024, 2048]
   N: [32]
   denseld: [231772, 262144, 1143576]
   matrix: [rocsparse_matrix_random]

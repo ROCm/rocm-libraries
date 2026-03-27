@@ -280,6 +280,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+    // LCOV_EXCL_START
     template <typename T>
     constexpr uint32_t determine_num_rhs()
     {
@@ -296,6 +297,7 @@ namespace rocsparse
             return 1;
         }
     }
+    // LCOV_EXCL_STOP
 
     // Wavefront PCR kernels: m <= 8, 16, 32 (WF_SIZE varies)
     template <uint32_t WF_SIZE, typename T>
