@@ -8,8 +8,6 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false)
     String compiler = 'amdclang++'
     String hipClangArgs = jobName.contains('hipclang') ? ' --hip-clang' : ''
     String staticArgs = jobName.contains('static') ? ' -s' : ''
-    //Temporary workaround due to bug in container
-    String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
 
     def getDependenciesCommand = ""
     if (project.installLibraryDependenciesFromCI)
@@ -24,7 +22,6 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false)
                 cd ${project.paths.project_build_prefix}
                 ${getDependenciesCommand}
                 export LD_LIBRARY_PATH=/opt/rocm/lib/
-                ${centos7Workaround}
                 ${auxiliary.gfxTargetParser()}
                 CXX=/opt/rocm/bin/${compiler} ${project.paths.build_command} ${hipClangArgs} ${staticArgs}
             """
@@ -35,9 +32,6 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false)
 
 def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, String dirmode = "release")
 {
-    //Temporary workaround due to bug in container
-    String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
-
     def hmmTestCommand= """GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*"""
     if (platform.jenkinsLabel.contains('gfx90a') || platform.jenkinsLabel.contains('gfx942'))
     {
@@ -51,7 +45,6 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
                 set -ex
                 cd ${project.paths.project_build_prefix}/build/${dirmode}/clients/staging
                 export LD_LIBRARY_PATH=/opt/rocm/lib/
-                ${centos7Workaround}
                 ${hmmTestCommand}
             """
 
@@ -88,15 +81,11 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
 
 def runTestWithSanitizerCommand (platform, project, gfilter, String dirmode = "release")
 {
-    //Temporary workaround due to bug in container
-    String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
-
     def command = """#!/usr/bin/env bash
                 set -ex
                 cd ${project.paths.project_build_prefix}/build/${dirmode}/clients/staging
 		        export ASAN_LIB_PATH=\$(/opt/rocm/llvm/bin/clang -print-file-name=libclang_rt.asan-x86_64.so)
                 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:\$(dirname "\${ASAN_LIB_PATH}")
-                ${centos7Workaround}
                 GTEST_LISTENER=NO_PASS_LINE_IN_LOG ASAN_SYMBOLIZER_PATH=/opt/rocm/llvm/bin/llvm-symbolizer ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS=suppressions=../../../../suppr.txt ./rocsparse-test --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
             """
 
