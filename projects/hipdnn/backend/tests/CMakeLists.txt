@@ -70,6 +70,7 @@ add_executable(
     descriptors/TestSdpaBpropOperationDescriptor.cpp
     descriptors/TestSdpaBpropOperationFromNode.cpp
     descriptors/TestSdpaFpropOperationDescriptor.cpp
+    descriptors/TestSdpaFpropOperationFromNode.cpp
     descriptors/TestGraphDescriptorSdpaBprop.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp

@@ -26,7 +26,7 @@
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
-// #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
+#include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -121,8 +121,8 @@ namespace hipdnn_frontend::detail
     case HIPDNN_OPERATION_TYPE_SDPA_BACKWARD:
         return {std::make_shared<graph::SdpaBpropNode>(graph::SdpaBackwardAttributes{}, graphAttrs),
                 {}};
-    // case HIPDNN_OPERATION_TYPE_SDPA_FORWARD:
-    //     return {std::make_shared<graph::SdpaFpropNode>(graph::SdpaAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_SDPA_FORWARD:
+        return {std::make_shared<graph::SdpaFpropNode>(graph::SdpaAttributes{}, graphAttrs), {}};
     default:
         return {nullptr,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,

@@ -45,8 +45,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return PointwiseOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::RMSNormAttributes:
         return RMSNormOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::SdpaAttributes:
-    //     return SdpaFpropOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::SdpaAttributes:
+        return SdpaFpropOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::SdpaBackwardAttributes:
         return SdpaBpropOperationDescriptor::fromNode(nodeT, tensorMap);
     default:
