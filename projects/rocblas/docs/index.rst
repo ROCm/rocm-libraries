@@ -5,7 +5,7 @@
 .. _rocblas:
 
 ********************************************************************
-rocBLAS documentation
+rocBLAS documentation (preview)
 ********************************************************************
 
 rocBLAS is the ROCm Basic Linear Algebra Subprograms (BLAS) library. rocBLAS is implemented in :doc:`HIP C++ <hip:index>` and optimized for AMD GPUs.
