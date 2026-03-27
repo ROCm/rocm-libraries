@@ -6,10 +6,10 @@
 // HOST ONLY: arg assembly, launch helpers, host-side validation.
 // This header must NOT be included from .hip files (device compilation).
 // Device code includes gemm_dev.hpp; shared types and make_kernel()
-// live in gemm_kernel.hpp.
+// live in gemm_spec.hpp.
 //
 // Compilation boundary:
-//   _kernel.hpp — schema types + consteval factory (both passes)
+//   _spec.hpp — schema types + consteval factory (both passes)
 //   _api.hpp (this) — host-only helpers (host pass only, #error on device)
 //   _dev.hpp     — CK Tile bridge + __device__ code (device pass only, #error on host)
 
@@ -19,7 +19,7 @@
 #error "gemm_api.hpp is host-only. Device code should include gemm_dev.hpp."
 #endif
 
-#include "gemm_kernel.hpp"
+#include <rocm_ck/gemm_spec.hpp>
 
 namespace rocm_ck {
 
@@ -34,6 +34,6 @@ namespace rocm_ck {
 //   - Error types:  rich error reporting with std::string, std::optional
 //
 // Metaprogramming (consteval factories, structural types, static_asserts)
-// lives in gemm_kernel.hpp, which is shared with device code.
+// lives in gemm_spec.hpp, which is shared with device code.
 
 } // namespace rocm_ck

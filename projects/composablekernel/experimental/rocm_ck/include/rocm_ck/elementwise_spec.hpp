@@ -1,20 +1,22 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// VectorAddKernel — structural NTTP descriptor and consteval factory for
+// ElementwiseSpec — structural NTTP descriptor and consteval factory for
 // elementwise template instantiation.
 //
 // SHARED header: compiled in both host and device (--cuda-device-only) passes.
 // Contains structural types and consteval make_kernel() factory. No runtime code.
 //
 // Compilation boundary:
-//   _kernel.hpp (this) — schema types + consteval factory (both passes)
+//   _spec.hpp (this) — schema types + consteval factory (both passes)
 //   _api.hpp           — host-only helpers (host pass only, #error on device)
 //   _dev.hpp           — CK Tile bridge + __device__ code (device pass only, #error on host)
 
 #pragma once
 
 #include <rocm_ck/datatype_utils.hpp>
+#include <rocm_ck/layout.hpp>
+#include <rocm_ck/physical_tensor.hpp>
 #include <rocm_ck/resolve.hpp>
 #include <rocm_ck/tensor_desc.hpp>
 #include <rocm_ck/types.hpp>
@@ -33,22 +35,39 @@ struct ElementwiseAlgorithm
 
 /// Validated kernel descriptor used as NTTP and host launch info.
 /// All members are structural types (no std::optional, no pointers, etc.).
-struct VectorAddKernel
+///
+/// Physical tensor table layout (ordered by args_slot):
+///   [0] = lhs (left input operand — name is user-chosen, e.g., "A")
+///   [1] = rhs (right input operand — name is user-chosen, e.g., "B")
+///   [2] = output (result — name is user-chosen, e.g., "C")
+struct ElementwiseSpec
 {
+    // Physical tensor table — the kernel's view of Args::tensors[]
+    int num_physical_tensors;
+    std::array<PhysicalTensor, kMaxPhysicalTensors> physical_tensors;
+
+    // Tile geometry
     int block_tile;        // Elements per thread block (for grid calculation)
     int thread_block_size; // Threads per block (= warp_size * block_warps)
-    DataType in_dtype;     // Input storage type (a, b)
-    DataType out_dtype;    // Output storage type (c)
     int block_warps;       // Warps per block
     int warp_tile;         // Warp tile size
     bool pad;              // Padding enabled
+
+    /// Left-hand input operand (position 0 in the physical tensor table).
+    constexpr PhysicalTensor lhs() const { return physical_tensors[0]; }
+
+    /// Right-hand input operand (position 1 in the physical tensor table).
+    constexpr PhysicalTensor rhs() const { return physical_tensors[1]; }
+
+    /// Output tensor (position 2 in the physical tensor table).
+    constexpr PhysicalTensor output() const { return physical_tensors[2]; }
 };
 
 /// Check if problem size N is aligned to a variant's block_tile (no padding needed).
-constexpr bool isAligned(VectorAddKernel k, int n) { return n > 0 && n % k.block_tile == 0; }
+constexpr bool isAligned(ElementwiseSpec k, int n) { return n > 0 && n % k.block_tile == 0; }
 
 // ============================================================================
-// make_kernel: operator-centric Signature -> VectorAddKernel
+// make_kernel: operator-centric Signature -> ElementwiseSpec
 // ============================================================================
 
 /// Resolve and validate a vector add using the operator-centric Signature.
@@ -62,7 +81,7 @@ constexpr bool isAligned(VectorAddKernel k, int n) { return n > 0 && n % k.block
 ///   - block_warps is power of 2 (CK Tile reduce_on_sequence requirement)
 ///   - warp_tile >= warp_size (64)
 ///   - kVectorM >= 1 and block_tile divisibility
-consteval VectorAddKernel make_kernel(Signature sig, ElementwiseAlgorithm algo)
+consteval ElementwiseSpec make_kernel(Signature sig, ElementwiseAlgorithm algo)
 {
     ResolvedSignature resolved = resolve(sig);
 
@@ -112,10 +131,16 @@ consteval VectorAddKernel make_kernel(Signature sig, ElementwiseAlgorithm algo)
     if(kRepeatM < 1)
         throw "computed kRepeatM must be >= 1 (block_tile too small for given warps)";
 
-    return {algo.block_tile,
+    // Build physical tensor table
+    std::array<PhysicalTensor, kMaxPhysicalTensors> phys{};
+    phys[0] = {add.lhs, a_td.dtype, Layout::Contiguous, 0};
+    phys[1] = {add.rhs, b_td.dtype, Layout::Contiguous, 1};
+    phys[2] = {add.out, out_td.dtype, Layout::Contiguous, 2};
+
+    return {3,
+            phys,
+            algo.block_tile,
             warp_size * algo.block_warps,
-            a_td.dtype,
-            out_td.dtype,
             algo.block_warps,
             algo.warp_tile,
             algo.pad};
@@ -125,26 +150,34 @@ consteval VectorAddKernel make_kernel(Signature sig, ElementwiseAlgorithm algo)
 // Compile-time tests
 // ============================================================================
 
-// --- Homogeneous: dtype sets all tensors ---
+// --- Physical tensor table ---
 static_assert(make_kernel(Signature{.dtype = DataType::FP32,
                                     .ops   = {AddOp{.lhs = "A", .rhs = "B", .out = "C"}}},
                           ElementwiseAlgorithm{1024, 1, 1024, true})
-                  .in_dtype == DataType::FP32);
+                  .num_physical_tensors == 3);
 static_assert(make_kernel(Signature{.dtype = DataType::FP32,
                                     .ops   = {AddOp{.lhs = "A", .rhs = "B", .out = "C"}}},
                           ElementwiseAlgorithm{1024, 1, 1024, true})
-                  .out_dtype == DataType::FP32);
+                  .lhs()
+                  .dtype == DataType::FP32);
+static_assert(make_kernel(Signature{.dtype = DataType::FP32,
+                                    .ops   = {AddOp{.lhs = "A", .rhs = "B", .out = "C"}}},
+                          ElementwiseAlgorithm{1024, 1, 1024, true})
+                  .output()
+                  .dtype == DataType::FP32);
 
 // --- Mixed types via Tensor override ---
 static_assert(make_kernel(Signature{.dtype   = DataType::FP16,
                                     .tensors = {Tensor{.name = "C", .dtype = DataType::FP32}},
                                     .ops     = {AddOp{.lhs = "A", .rhs = "B", .out = "C"}}},
                           ElementwiseAlgorithm{1024, 1, 1024, true})
-                  .in_dtype == DataType::FP16);
+                  .lhs()
+                  .dtype == DataType::FP16);
 static_assert(make_kernel(Signature{.dtype   = DataType::FP16,
                                     .tensors = {Tensor{.name = "C", .dtype = DataType::FP32}},
                                     .ops     = {AddOp{.lhs = "A", .rhs = "B", .out = "C"}}},
                           ElementwiseAlgorithm{1024, 1, 1024, true})
-                  .out_dtype == DataType::FP32);
+                  .output()
+                  .dtype == DataType::FP32);
 
 } // namespace rocm_ck

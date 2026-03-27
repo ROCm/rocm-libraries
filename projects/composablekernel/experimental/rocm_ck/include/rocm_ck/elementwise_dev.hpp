@@ -16,11 +16,12 @@
 
 #ifndef __HIP_DEVICE_COMPILE__
 #error \
-    "rocm_vector_add_dev.hpp requires device compilation. Host code should include rocm_vector_add_api.hpp."
+    "elementwise_dev.hpp requires device compilation. Host code should include the example's api header."
 #endif
 
-#include "rocm_vector_add_kernel.hpp"
+#include <rocm_ck/elementwise_spec.hpp>
 
+#include <rocm_ck/args.hpp>
 #include <rocm_ck/ck_type_map.hpp>
 
 #include "ck_tile/core.hpp"
@@ -38,32 +39,32 @@ namespace rocm_ck {
 ///   scalars[0].f32 = alpha,  scalars[1].f32 = beta
 ///
 /// Call this from an extern "C" __global__ wrapper.
-template <VectorAddKernel K>
-__device__ void runVectorAdd(Args args)
+template <ElementwiseSpec S>
+__device__ void run(Args args)
 {
     // Device-side validation — catches invalid manual construction.
-    static_assert(K.block_tile > 0, "block_tile must be positive");
-    static_assert(K.thread_block_size > 0, "thread_block_size must be positive");
-    static_assert(K.block_warps > 0, "block_warps must be positive");
+    static_assert(S.block_tile > 0, "block_tile must be positive");
+    static_assert(S.thread_block_size > 0, "thread_block_size must be positive");
+    static_assert(S.block_warps > 0, "block_warps must be positive");
 
-    using X = typename CkTypeMap<K.in_dtype>::type;
-    using Y = typename CkTypeMap<K.out_dtype>::type;
+    using X = typename CkTypeMap<S.lhs().dtype>::type;
+    using Y = typename CkTypeMap<S.output().dtype>::type;
 
     // Use the wider type for ElementWiseShape so kVectorM is valid for both
     // input loads and output stores.
     using WiderType = std::conditional_t<(sizeof(X) >= sizeof(Y)), X, Y>;
-    using Shape     = ck_tile::ElementWiseShape<ck_tile::sequence<K.block_warps>,
-                                                ck_tile::sequence<K.block_tile>,
-                                                ck_tile::sequence<K.warp_tile>,
+    using Shape     = ck_tile::ElementWiseShape<ck_tile::sequence<S.block_warps>,
+                                                ck_tile::sequence<S.block_tile>,
+                                                ck_tile::sequence<S.warp_tile>,
                                                 WiderType>;
 
     static_assert(sizeof(rocm_ck::index_t) == sizeof(ck_tile::index_t),
                   "rocm_ck::index_t and ck_tile::index_t must match");
 
     // Unpack generic Args — compiler generates s_load at fixed offsets.
-    const TensorArg& t_a = args.tensors[0];
-    const TensorArg& t_b = args.tensors[1];
-    const TensorArg& t_c = args.tensors[2];
+    const TensorArg& t_a = args.tensors[S.lhs().args_slot];
+    const TensorArg& t_b = args.tensors[S.rhs().args_slot];
+    const TensorArg& t_c = args.tensors[S.output().args_slot];
 
     const auto n       = static_cast<ck_tile::index_t>(t_a.lengths[0]);
     const auto iM      = ck_tile::get_block_id() * Shape::kBlockM;
@@ -96,7 +97,7 @@ __device__ void runVectorAdd(Args args)
                                            ck_tile::make_tuple(ck_tile::make_index_sequence<1>{}),
                                            ck_tile::make_tuple(ck_tile::sequence<0>{})),
             ck_tile::make_tuple(ck_tile::number<Shape::kBlockM>{}),
-            ck_tile::sequence<K.pad>{});
+            ck_tile::sequence<S.pad>{});
 
         return ck_tile::make_tile_window(
             transformed, ck_tile::make_tuple(ck_tile::number<Shape::kBlockM>{}), {iM}, dist);
@@ -133,7 +134,7 @@ __device__ void runVectorAdd(Args args)
                                        ck_tile::make_tuple(ck_tile::make_index_sequence<1>{}),
                                        ck_tile::make_tuple(ck_tile::sequence<0>{})),
         ck_tile::make_tuple(ck_tile::number<Shape::kBlockM>{}),
-        ck_tile::sequence<K.pad>{});
+        ck_tile::sequence<S.pad>{});
 
     auto y_window =
         ck_tile::make_tile_window(y_transformed,

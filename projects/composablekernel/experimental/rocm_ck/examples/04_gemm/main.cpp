@@ -32,8 +32,8 @@
 using rocm_ck::AddOp;
 using rocm_ck::DataType;
 using rocm_ck::GemmAlgorithm;
-using rocm_ck::GemmKernel;
 using rocm_ck::GemmOp;
+using rocm_ck::GemmSpec;
 using rocm_ck::make_kernel;
 using rocm_ck::ReluOp;
 using rocm_ck::Signature;
@@ -45,7 +45,7 @@ using rocm_ck::Signature;
 struct GemmVariant
 {
     const char* name;
-    GemmKernel kernel;
+    GemmSpec kernel;
 };
 
 /// Build a GemmVariant from Signature + Algorithm.
@@ -151,7 +151,7 @@ int main(int argc, char** argv)
 
     for(const auto& variant : ALL_GEMM_VARIANTS)
     {
-        const GemmKernel& k = variant.kernel;
+        const GemmSpec& k = variant.kernel;
 
         // Per-variant grid dimensions from tile geometry
         int grid_m    = (M + k.block_tile.m - 1) / k.block_tile.m;

@@ -1,11 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "rocm_vector_add_dev.hpp"
+#include <rocm_ck/elementwise_dev.hpp>
 
 // Widening: FP16 inputs -> FP32 output. Tensor override sets output type.
 // The wider type (FP32) constrains kVectorM to 4 (vs 8 for homogeneous FP16).
-static constexpr rocm_ck::VectorAddKernel kernel = rocm_ck::make_kernel(
+static constexpr rocm_ck::ElementwiseSpec spec = rocm_ck::make_kernel(
     rocm_ck::Signature{
         .dtype = rocm_ck::DataType::FP16,
         .tensors = {rocm_ck::Tensor{.name = "C", .dtype = rocm_ck::DataType::FP32}},
@@ -15,5 +15,5 @@ static constexpr rocm_ck::VectorAddKernel kernel = rocm_ck::make_kernel(
 
 extern "C" __global__ void vector_add_fp16_fp32_b1024(rocm_ck::Args args)
 {
-    rocm_ck::runVectorAdd<kernel>(args);
+    rocm_ck::run<spec>(args);
 }

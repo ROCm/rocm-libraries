@@ -14,7 +14,7 @@ namespace rocm_ck {
 struct VariantDescriptor
 {
     const char* name;
-    VectorAddKernel kernel;
+    ElementwiseSpec kernel;
 };
 
 /// Complete table of all compiled variants, matching the kpack archive contents.
@@ -82,7 +82,7 @@ findVariant(DataType in_dtype, DataType out_dtype, int problem_size)
     for(int i = 0; i < ALL_VARIANTS_COUNT; ++i)
     {
         const auto& v = ALL_VARIANTS[i];
-        if(v.kernel.in_dtype != in_dtype || v.kernel.out_dtype != out_dtype)
+        if(v.kernel.lhs().dtype != in_dtype || v.kernel.output().dtype != out_dtype)
             continue;
 
         if(isAligned(v.kernel, problem_size))

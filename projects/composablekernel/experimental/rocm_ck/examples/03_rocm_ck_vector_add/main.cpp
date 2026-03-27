@@ -36,8 +36,8 @@ static bool runVariant(const rocm_ck::VariantDescriptor& variant,
                        float beta)
 {
     const int num_elements = static_cast<int>(host_a.size());
-    const auto in_dtype    = variant.kernel.in_dtype;
-    const auto out_dtype   = variant.kernel.out_dtype;
+    const auto in_dtype    = variant.kernel.lhs().dtype;
+    const auto out_dtype   = variant.kernel.output().dtype;
 
     // Load kernel
     rocm_ck::KpackKernel kernel;

@@ -5,9 +5,9 @@
 // epilogue with bias addition and fused activation. Accumulates in fp32,
 // stores fp16 output via CShuffleEpilogue.
 
-#include "gemm_dev.hpp"
+#include <rocm_ck/gemm_dev.hpp>
 
-static constexpr rocm_ck::GemmKernel kernel = rocm_ck::make_kernel(
+static constexpr rocm_ck::GemmSpec spec = rocm_ck::make_kernel(
     rocm_ck::Signature{
         .dtype = rocm_ck::DataType::FP16,
         .ops = {rocm_ck::GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
@@ -19,5 +19,5 @@ static constexpr rocm_ck::GemmKernel kernel = rocm_ck::make_kernel(
 
 extern "C" __global__ void gemm_fp16_add_relu(rocm_ck::Args args)
 {
-    rocm_ck::runGemm<kernel>(args);
+    rocm_ck::run<spec>(args);
 }

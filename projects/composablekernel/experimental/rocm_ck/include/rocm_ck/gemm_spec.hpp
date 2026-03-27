@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// GemmKernel — structural NTTP descriptor and consteval factory for GEMM
+// GemmSpec — structural NTTP descriptor and consteval factory for GEMM
 // template instantiation.
 //
 // SHARED header: compiled in both host and device (--cuda-device-only) passes.
@@ -9,7 +9,7 @@
 // and warp tile validation. No runtime code.
 //
 // Compilation boundary:
-//   _kernel.hpp (this) — schema types + consteval factory (both passes)
+//   _spec.hpp (this) — schema types + consteval factory (both passes)
 //   _api.hpp           — host-only helpers (host pass only, #error on device)
 //   _dev.hpp           — CK Tile bridge + __device__ code (device pass only, #error on host)
 
@@ -43,7 +43,7 @@ namespace rocm_ck {
 ///   Silu     — x * sigmoid(x)  (aka Swish with beta=1)
 ///   Sigmoid  — 1 / (1 + exp(-x))
 ///
-/// Operations compose as an ordered sequence in GemmKernel::epilogue_ops[].
+/// Operations compose as an ordered sequence in GemmSpec::epilogue_ops[].
 /// The Signature's operator chain (AddOp -> ReluOp) maps directly to this
 /// array, minus the string names (which aren't structural types for NTTP).
 enum class EpilogueOp
@@ -80,7 +80,7 @@ struct GemmAlgorithm
 };
 
 // ============================================================================
-// GemmKernel — structural NTTP for template instantiation
+// GemmSpec — structural NTTP for template instantiation
 // ============================================================================
 
 /// Validated kernel descriptor with all types, layouts, and tile geometry resolved.
@@ -92,7 +92,7 @@ struct GemmAlgorithm
 ///   [2] = output (final output — name varies by epilogue chain)
 ///   [3] = D0 (optional — first auxiliary tensor, e.g., "bias")
 ///   [4] = D1 (optional — second auxiliary tensor)
-struct GemmKernel
+struct GemmSpec
 {
     // Physical tensor table — the kernel's view of Args::tensors[]
     int num_physical_tensors;
@@ -137,8 +137,8 @@ struct GemmKernel
 
 /// Lookup a physical tensor by name. consteval — compile-time only.
 /// Used in static_asserts and consteval make_kernel() result inspection.
-/// For runtime access, use GemmKernel::output() or physical_tensors[] directly.
-consteval PhysicalTensor tensor(GemmKernel k, std::string_view name)
+/// For runtime access, use GemmSpec::output() or physical_tensors[] directly.
+consteval PhysicalTensor tensor(GemmSpec k, std::string_view name)
 {
     for(int i = 0; i < k.num_physical_tensors; ++i)
         if(k.physical_tensors[i].name == name)
@@ -147,13 +147,13 @@ consteval PhysicalTensor tensor(GemmKernel k, std::string_view name)
 }
 
 /// Slot index lookup by name. consteval — compile-time only.
-consteval int slot(GemmKernel k, std::string_view name) { return tensor(k, name).args_slot; }
+consteval int slot(GemmSpec k, std::string_view name) { return tensor(k, name).args_slot; }
 
 /// Dtype lookup by name. consteval — compile-time only.
-consteval DataType dtype(GemmKernel k, std::string_view name) { return tensor(k, name).dtype; }
+consteval DataType dtype(GemmSpec k, std::string_view name) { return tensor(k, name).dtype; }
 
 /// Layout lookup by name. consteval — compile-time only.
-consteval Layout layout(GemmKernel k, std::string_view name) { return tensor(k, name).layout; }
+consteval Layout layout(GemmSpec k, std::string_view name) { return tensor(k, name).layout; }
 
 // ============================================================================
 // Warp tile validation
@@ -189,7 +189,7 @@ consteval bool is_valid_warp_gemm(DataType a_dtype, int m, int n, int k)
 }
 
 // ============================================================================
-// make_kernel: operator-centric Signature -> GemmKernel
+// make_kernel: operator-centric Signature -> GemmSpec
 // ============================================================================
 
 /// Resolve and validate a GEMM using the operator-centric Signature.
@@ -211,7 +211,7 @@ consteval bool is_valid_warp_gemm(DataType a_dtype, int m, int n, int k)
 ///   - Block tile is divisible by (block_warps x warp_tile) in each dimension
 ///
 /// Derives thread_block_size = block_warps.m x block_warps.n x block_warps.k x 64.
-consteval GemmKernel make_kernel(Signature sig, GemmAlgorithm algo)
+consteval GemmSpec make_kernel(Signature sig, GemmAlgorithm algo)
 {
     ResolvedSignature resolved = resolve(sig);
 

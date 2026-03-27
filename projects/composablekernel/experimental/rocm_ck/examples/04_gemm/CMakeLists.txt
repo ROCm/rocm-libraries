@@ -42,7 +42,7 @@ get_filename_component(ROCM_CK_INCLUDE_DIR "${ROCM_CK_INCLUDE_DIR}" ABSOLUTE)
 
 # --- Compile each variant x architecture into .hsaco code objects ---
 # Uses --cuda-device-only to produce raw code objects without host stubs.
-# -std=c++20 is required for CK Tile headers and GemmKernel schema (consteval, structural NTTPs).
+# -std=c++20 is required for CK Tile headers and GemmSpec schema (consteval, structural NTTPs).
 set(HSACO_FILES "")
 foreach(variant IN LISTS KERNEL_VARIANTS)
     foreach(arch IN LISTS GPU_TARGETS)
@@ -61,8 +61,8 @@ foreach(variant IN LISTS KERNEL_VARIANTS)
                     -o ${hsaco_output}
                     ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
             DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
-                    ${CMAKE_CURRENT_SOURCE_DIR}/gemm_kernel.hpp
-                    ${CMAKE_CURRENT_SOURCE_DIR}/gemm_dev.hpp
+                    ${ROCM_CK_INCLUDE_DIR}/rocm_ck/gemm_spec.hpp
+                    ${ROCM_CK_INCLUDE_DIR}/rocm_ck/gemm_dev.hpp
             COMMENT "Compiling ${variant}.hip -> ${arch}.hsaco"
         )
         list(APPEND HSACO_FILES ${hsaco_output})
