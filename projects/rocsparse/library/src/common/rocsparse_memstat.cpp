@@ -625,6 +625,7 @@ hipError_t memstat_allocator<MODE>::check_guards(char* d, size_t size)
         }
         return hipSuccess;
     }
+    return hipSuccess;
 }
 
 template <memstat_mode::value_t MODE>
