@@ -139,6 +139,23 @@ When requested to build/test:
 - Use CMake for managing C/C++ dependencies
 - Use Flatbuffers for serialization needs
 
+### RAII & Resource Management
+
+**All owning raw pointers must be wrapped in RAII (smart pointers) immediately after acquisition.** Never rely on manual `delete` — if an assertion, exception, or early return occurs between allocation and `delete`, the resource leaks. This project runs under AddressSanitizer (ASAN) in CI, and any leak fails the build.
+
+**Common patterns and pitfalls:**
+
+| Pattern | Wrong | Right |
+|---------|-------|-------|
+| FlatBuffers Graph unpacking | `auto obj = graph->UnPack();` (raw `GraphT*`) | `auto obj = UnPackGraph(serialized.ptr);` (returns `unique_ptr<GraphT>`) |
+| FlatBuffers `UnPack()` (other types) | `auto obj = table->UnPack();` (raw `T*`) | `auto obj = std::unique_ptr<T>(table->UnPack());` |
+| `getAttribute()` for tensor arrays | Use raw pointer, forget cleanup | Wrap immediately: `auto owned = std::unique_ptr<HipdnnBackendDescriptor>(rawPtr);` |
+| `createDescriptorPtr<T>()` | Store raw pointer | Use `createDescriptor<T>()` which returns `unique_ptr` |
+
+**FlatBuffers `UnPack()` returns owning raw pointers.** The generated `Graph::UnPack()`, `Node::UnPack()`, etc. all return `T*` allocated with `new`. Prefer the generated helpers like `UnPackGraph()` which return `std::unique_ptr<T>` directly. For types without helpers, wrap manually: `std::unique_ptr<T>(table->UnPack())`.
+
+**`getAttribute()` with `HIPDNN_TYPE_BACKEND_DESCRIPTOR` allocates new descriptors.** The C API packs shared descriptors into fresh `HipdnnBackendDescriptor*` via `packDescriptor()`. Ownership transfers to the caller — wrap in `std::unique_ptr<HipdnnBackendDescriptor>` immediately after retrieval.
+
 ### Testing
 - Use Google Test (gtest) framework for all C/C++ tests
 - Never generate a `main()` function in test files — gtest provides its own
