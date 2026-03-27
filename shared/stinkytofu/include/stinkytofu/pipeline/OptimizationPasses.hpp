@@ -22,46 +22,28 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/pipeline/OptLevel.hpp"
 
-#include <array>
-#include <string>
+#include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
+#include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 
 namespace stinkytofu
 {
-    class StinkyAsmModule;
-
-    /// Architecture-specific optimization entry point.
-    ///
-    /// Bound to a single StinkyAsmModule. Looks up the registered PipelineBuilder
-    /// for the module's architecture, creates a PassManager, calls the builder to
-    /// populate it with ScopeAdaptor passes, configures, and runs.
-    ///
-    /// @code
-    /// Backend backend(module);
-    /// backend.runOptimization();
-    /// @endcode
-    class Backend
+    /// Add optimization passes (Peephole, RedundantMovElim, DCE) to PassManager.
+    /// Pass selection depends on OptLevel.
+    /// Shared across backends.
+    inline void addOptimizationPasses(PassManager& pm, OptLevel optLevel)
     {
-    public:
-        explicit Backend(StinkyAsmModule& module);
+        if(optLevel >= OptLevel::O1)
+            pm.addPass(createPeepholeOptimizationPass());
 
-        Backend(const Backend&)            = delete;
-        Backend& operator=(const Backend&) = delete;
+        if(optLevel >= OptLevel::O3)
+            pm.addPass(createRedundantMovEliminationPass());
 
-        /// Architecture of the member module [major, minor, stepping].
-        std::array<int, 3> getArch() const;
-
-        /// Run the full pipeline on the member module.
-        /// Looks up the PipelineBuilder, populates a PM, configures, and runs.
-        bool runOptimization();
-
-    private:
-        /// Configure the PassManager with GemmTileConfig, PassFeatureConfig,
-        /// and debug options derived from the module.
-        void configurePassManager(PassManager& pm);
-
-        StinkyAsmModule& module;
-    };
+        if(optLevel >= OptLevel::O2)
+            pm.addPass(createDeadCodeEliminationPass());
+    }
 
 } // namespace stinkytofu

@@ -23,12 +23,24 @@
 /// @file Gfx1250Backend.cpp
 /// @brief Registers the gfx1250 (RDNA4, arch 12.5.0) optimization pipeline with BackendRegistry.
 ///
-/// When this translation unit is linked, the gfx1250 pipelines are registered globally
-/// so that Backend(module) automatically picks them up for modules with arch {12, 5, 0}.
+/// When this translation unit is linked, the gfx1250 pipeline builder is registered globally
+/// so that Backend(module).runOptimization() automatically picks it up for modules with
+/// arch {12, 5, 0}.
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/pipeline/OptimizationPasses.hpp"
+#include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+
+#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
+#include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
 #include <algorithm>
 
@@ -38,103 +50,100 @@ namespace stinkytofu
     {
         constexpr std::array<int, 3> GFX1250_ARCH{12, 5, 0};
 
-        // Will enable after milestone 1
-        PipelineConfig createDefaultPipeline(const StinkyAsmModule& module,
-                                             BasicBlockFilter       bbFilter,
-                                             const std::string&     groupName,
-                                             OptLevel               optLevel)
+        /// Build the gfx1250 per-region optimization passes into a PassManager.
+        /// TODO: enableWaitCnt is a per-pass toggle for the
+        /// bring-up phase. Once the pipeline stabilizes, pass selection should
+        /// be controlled by OptLevel.
+        void addGfx1250RegionPasses(PassManager&           pm,
+                                    const StinkyAsmModule& module,
+                                    OptLevel               optLevel,
+                                    bool                   enableWaitCnt)
         {
-            // Create pipeline configuration with full scheduling and optimization
-            auto config = stinkytofu::PipelineConfig::fromProfile(
-                stinkytofu::PipelineProfile::FullPipeline, optLevel);
+            // ========== Phase 0: IR Verification ==========
+            // Verify IR integrity before running any passes
+            // This catches IR corruption early before it propagates through optimization
+            pm.addPass(createStinkyIRVerifierPass());
 
-            const auto& moduleOptions = module.getModuleOptions();
+            // ========== Phase 1: CFG Building ==========
+            // Build CFG first so optimizations can use block structure and liveness info
+            pm.addPass(createCFGBuilderPass());
 
-            // Use waitcnt insertion
-            config.enableWaitCnt = moduleOptions.EnableWaitCntInsertion;
-            config.waitCntMode   = PipelineConfig::WaitCntMode::Classical;
-            config.verbose       = true;
+            // ========== Phase 1.5: Remove WaitCnts ==========
+            if(enableWaitCnt)
+            {
+                pm.addPass(createStinkyRemoveWaitCntPass());
+            }
 
-            // disable all optimzation passes
-            config.enablePeephole         = false;
-            config.enableDCE              = false;
-            config.enableDuplicateElim    = false;
-            config.enableCFGBuilder       = true;
-            config.enableDAGScheduler     = false;
-            config.enableScheduleLastLRs  = false;
-            config.enableScheduleFirstLRs = true;
+            // ========== Phase 2: Optimization ==========
+            // Run optimizations AFTER CFG (for liveness analysis) but BEFORE scheduling
+            // This ensures scheduling works on the final optimized instruction count
+            // addOptimizationPasses(pm, optLevel);
 
-            // Configure GEMM-specific tile parameters
-            config.withGemmTileConfig(GFX1250_ARCH,
-                                      moduleOptions.TileA0,
-                                      moduleOptions.TileB0,
-                                      moduleOptions.TileM0,
-                                      moduleOptions.NumGRA,
-                                      moduleOptions.NumGRB,
-                                      moduleOptions.NumGRM,
-                                      moduleOptions.WaveGroup0 * moduleOptions.WaveGroup1);
-
-            // Configure pass features (GEMM-specific optimizations)
-            config
-                .withBarrierSemantics(true) // unrollGemmMovableBarrier
-                .withLoopUnroll(true) // unrollGemm
-                .withDagFeatures(true); // distributeGlobalRead
-
-            // Configure basic block filter
-            config.basicBlockFilter = bbFilter;
-
-            // Apply debug output from moduleOptions (set via GlobalParameters).
-            config.withDebugLevel(moduleOptions.DebugLevel, groupName)
-                .withPrintPasses(
-                    moduleOptions.PrintBeforePass, moduleOptions.PrintAfterPass, groupName)
-                .withDebugPass(moduleOptions.DebugPass);
-
-            return config;
+            // ========== Phase 3: Instruction Scheduling ==========
+            pm.addPass(createStinkyBuildImplicitDependencyPass());
+            pm.addPass(createScheduleFirstLRsPass());
+            // pm.addPass(createStinkyDAGSchedulerPass());
+            // pm.addPass(createScheduleLastLRsPass());
         }
 
-        /**
-         * @brief Populate the pipeline specifications for the GFX1250 architecture.
-         * @param module The StinkyAsmModule to populate the pipeline specifications for.
-         * @param specs The vector of pipeline specifications to populate.
-         */
-        void pipelineSpecPopulator(const StinkyAsmModule&                      module,
-                                   std::vector<BackendRegistry::PipelineSpec>& specs)
+        /// Build the full gfx1250 pipeline into \p pm using ScopeAdaptors.
+        /// TODO: EnableWaitCntInsertion is a per-pass toggle for the
+        /// bring-up phase. Once the pipeline stabilizes, pass selection should
+        /// be controlled by OptLevel.
+        bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module)
         {
-            const auto& moduleOptions = module.getModuleOptions();
-
-            // Use moduleOptions.OptLevel directly (set via GlobalParameters).
-            const OptLevel optLevel = static_cast<OptLevel>(
+            const auto&    moduleOptions = module.getModuleOptions();
+            const OptLevel optLevel      = static_cast<OptLevel>(
                 std::max(0, std::min(moduleOptions.OptLevel, static_cast<int>(OptLevel::O3))));
 
-            /* Add pipelines for O3 optimization level */
-            specs.emplace_back(
-                /* PipelineConfig */ createDefaultPipeline(
-                    module,
-                    stinkytofu::BasicBlockFilterBuilder::byLabelPrefix("label_LoopBegin"),
-                    "loopWithPrefetch",
-                    optLevel),
-                /* groupName */ "loopWithPrefetch");
-
-            specs.emplace_back(
-                /* PipelineConfig */ createDefaultPipeline(
-                    module, stinkytofu::BasicBlockFilterBuilder::all(), "noLoadLoopBody", optLevel),
-                /* groupName */ "noLoadLoopBody");
-        }
-
-        void requiredPassesPopulator(const StinkyAsmModule&              module,
-                                     std::vector<std::unique_ptr<Pass>>& passes)
-        {
-            passes.push_back(createInsertVgprMsbPass());
-        }
-
-        struct Gfx1250BackendRegistrar
-        {
-            Gfx1250BackendRegistrar()
+            if(optLevel != OptLevel::O0)
             {
-                BackendRegistry::setArchPipeline(GFX1250_ARCH, pipelineSpecPopulator);
-                BackendRegistry::setArchRequiredPasses(GFX1250_ARCH, requiredPassesPopulator);
+                // Single-region adapter: loopWithPrefetch
+                {
+                    PassManager innerPM;
+                    innerPM.setBasicBlockFilter(
+                        BasicBlockFilterBuilder::byLabelPrefix("label_LoopBegin"));
+                    addGfx1250RegionPasses(
+                        innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion);
+                    pm.addPass(createKernelToRegionPassAdaptor(
+                        module, "loopWithPrefetch", std::move(innerPM)));
+                }
+
+                // Single-region adapter: noLoadLoopBody
+                {
+                    PassManager innerPM;
+                    addGfx1250RegionPasses(
+                        innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion);
+                    pm.addPass(createKernelToRegionPassAdaptor(
+                        module, "noLoadLoopBody", std::move(innerPM)));
+                }
+
+                // Multi-region adapter for waitcnt reinsertion
+                if(moduleOptions.EnableWaitCntInsertion)
+                {
+                    PassManager waitcntPM;
+                    waitcntPM.addPass(createCFGBuilderPass());
+                    waitcntPM.addPass(createStinkyRemoveWaitCntPass());
+                    waitcntPM.addPass(createStinkyWaitCntInsertionPass(true));
+                    pm.addPass(createKernelToRegionsPassAdaptor(
+                        module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(waitcntPM)));
+                }
+            }
+
+            // Whole-kernel pass. Always run regardless of OptLevel.
+            pm.addPass(createInsertVgprMsbPass());
+
+            return true;
+        }
+
+        struct Gfx1250Registrar
+        {
+            Gfx1250Registrar()
+            {
+                BackendRegistry::setArchPipeline(
+                    GFX1250_ARCH, {buildGfx1250Pipeline, {"loopWithPrefetch", "noLoadLoopBody"}});
             }
         };
-        static Gfx1250BackendRegistrar s_gfx1250BackendRegistrar;
+        static Gfx1250Registrar s_gfx1250Registrar;
     } // namespace
 } // namespace stinkytofu

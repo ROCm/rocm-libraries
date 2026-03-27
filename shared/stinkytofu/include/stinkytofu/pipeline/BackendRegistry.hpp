@@ -22,74 +22,51 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/pipeline/OptimizationPipeline.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 
 #include <array>
 #include <functional>
-#include <memory>
 #include <string>
 #include <vector>
 
 namespace stinkytofu
 {
-    class Pass;
     class StinkyAsmModule;
 
-    /// Global registry of pipeline spec populators per architecture.
+    /// Global registry of per-architecture pipeline configuration.
     ///
-    /// Stores one PipelineSpecPopulator per architecture [major, minor, stepping].
-    /// Backend(module) calls getArchPopulator(module.getArch()) at construction and, if set,
-    /// invokes it to fill a vector of PipelineSpec. Register with setArchPipeline(); typically
-    /// from a static initializer in a backend TU (e.g. Gfx1250Backend.cpp). Query with
-    /// getArchPopulator(), hasPipelines(), getPipelineCount(); clear with clearArch() or clear().
+    /// Each architecture registers an ArchPipeline (pipeline builder + group names)
+    /// at static init time. Backend::runOptimization() retrieves the builder, and
+    /// module construction code queries group names to set up instruction tracking.
     ///
     /// @code
     /// // Static registrar (runs when TU is linked)
-    /// BackendRegistry::setArchPipeline({12, 5, 0}, myPipelineSpecPopulator);
+    /// BackendRegistry::setArchPipeline({12, 5, 0}, {myBuilder, {"group0", "group1"}});
     /// @endcode
     class BackendRegistry
     {
     public:
-        /// Specification for an optimization pipeline.
-        struct PipelineSpec
+        /// Function type: builds the pipeline for a module into a PassManager.
+        /// Returns true if passes were added, false if nothing to do.
+        using PipelineBuilder = std::function<bool(PassManager&, StinkyAsmModule&)>;
+
+        /// Per-architecture pipeline configuration.
+        struct ArchPipeline
         {
-            PipelineConfig config; ///< Pipeline configuration.
-            std::string    groupName; ///< Group name this pipeline applies to (optional).
+            PipelineBuilder          builder; ///< Populates a PM with ScopeAdaptor passes.
+            std::vector<std::string> groupNames; ///< Instruction groups the builder operates on.
         };
 
-        /// Function type: populate pipeline specifications from a StinkyAsmModule.
-        using PipelineSpecPopulator
-            = std::function<void(const StinkyAsmModule&, std::vector<PipelineSpec>&)>;
+        /// Register the pipeline for \p arch (one per arch).
+        static void setArchPipeline(const std::array<int, 3>& arch, ArchPipeline pipeline);
 
-        /// Function type: populate required (always-run) passes from a StinkyAsmModule.
-        /// FIXME: This is a temporary workaround. A cleaner mechanism for
-        /// registering arch-specific required passes is being designed.
-        using RequiredPassesPopulator
-            = std::function<void(const StinkyAsmModule&, std::vector<std::unique_ptr<Pass>>&)>;
+        /// Return the pipeline for \p arch, or nullptr if none registered.
+        static const ArchPipeline* getArchPipeline(const std::array<int, 3>& arch);
 
-        /// Set the pipeline spec populator for \p arch (one per arch).
-        static void setArchPipeline(const std::array<int, 3>& arch,
-                                    PipelineSpecPopulator     populator);
-
-        /// Return the pipeline spec populator for \p arch, or empty if none registered.
-        static PipelineSpecPopulator getArchPopulator(const std::array<int, 3>& arch);
-
-        /// Set the required passes populator for \p arch (one per arch).
-        /// FIXME: Workaround — will be replaced by a proper required-pass mechanism.
-        static void setArchRequiredPasses(const std::array<int, 3>& arch,
-                                          RequiredPassesPopulator   populator);
-
-        /// Return the required passes populator for \p arch, or empty if none registered.
-        /// FIXME: Workaround — will be replaced by a proper required-pass mechanism.
-        static RequiredPassesPopulator getArchRequiredPassesPopulator(const std::array<int, 3>& arch);
-
-        /// True if a pipeline spec populator is registered for \p arch.
-        static bool hasPipelines(const std::array<int, 3>& arch);
-
-        /// Remove all registered populators (all architectures). Mainly for tests.
+        /// Remove all registered entries (all architectures). Mainly for tests.
         static void clear();
 
-        /// Remove the pipeline spec populator for \p arch.
+        /// Remove all registered entries for \p arch.
         static void clearArch(const std::array<int, 3>& arch);
 
         /// Format arch as arch name.

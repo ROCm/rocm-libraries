@@ -22,46 +22,16 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/pipeline/BackendRegistry.hpp"
-
-#include <array>
-#include <string>
-
 namespace stinkytofu
 {
-    class StinkyAsmModule;
-
-    /// Architecture-specific optimization entry point.
-    ///
-    /// Bound to a single StinkyAsmModule. Looks up the registered PipelineBuilder
-    /// for the module's architecture, creates a PassManager, calls the builder to
-    /// populate it with ScopeAdaptor passes, configures, and runs.
-    ///
-    /// @code
-    /// Backend backend(module);
-    /// backend.runOptimization();
-    /// @endcode
-    class Backend
+    /// Optimization level for pipelines.
+    /// Used by backend populators to decide which passes to include.
+    enum class OptLevel
     {
-    public:
-        explicit Backend(StinkyAsmModule& module);
-
-        Backend(const Backend&)            = delete;
-        Backend& operator=(const Backend&) = delete;
-
-        /// Architecture of the member module [major, minor, stepping].
-        std::array<int, 3> getArch() const;
-
-        /// Run the full pipeline on the member module.
-        /// Looks up the PipelineBuilder, populates a PM, configures, and runs.
-        bool runOptimization();
-
-    private:
-        /// Configure the PassManager with GemmTileConfig, PassFeatureConfig,
-        /// and debug options derived from the module.
-        void configurePassManager(PassManager& pm);
-
-        StinkyAsmModule& module;
+        O0, ///< No optimization
+        O1, ///< Fast compile: Peephole only
+        O2, ///< Balanced: Peephole + DCE (default)
+        O3, ///< Aggressive: All optimization passes
     };
 
 } // namespace stinkytofu
