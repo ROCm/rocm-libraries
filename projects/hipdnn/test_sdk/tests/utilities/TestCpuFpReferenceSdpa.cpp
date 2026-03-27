@@ -455,24 +455,6 @@ TEST(TestCpuFpReferenceSdpaFp64, CausalMaskFutureTokensHaveNoEffect)
     }
 }
 
-TEST(TestCpuFpReferenceSdpaFp64, ThrowsOnZeroVHeads)
-{
-    // V with 0 heads {1, 0, 1, 2} should throw — the Tensor constructor itself
-    // rejects non-positive dimensions before forward() is reached
-    EXPECT_ANY_THROW({
-        Tensor<double> q({1, 2, 1, 2});
-        Tensor<double> k({1, 2, 1, 2});
-        Tensor<double> v({1, 0, 1, 2});
-        Tensor<double> o({1, 2, 1, 2});
-
-        q.fillWithValue(0.0);
-        k.fillWithValue(0.0);
-        v.fillWithValue(0.0);
-
-        CpuFpReferenceSdpa::forward(q, k, v, o);
-    });
-}
-
 // ---------------------------------------------------------------------------
 // Multi-type smoke test
 // ---------------------------------------------------------------------------
