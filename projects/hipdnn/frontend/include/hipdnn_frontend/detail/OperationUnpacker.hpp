@@ -15,7 +15,7 @@
 // #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 // #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
-// #include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
 // #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
@@ -89,10 +89,10 @@ namespace hipdnn_frontend::detail
     //     return {std::make_shared<graph::BlockScaleDequantizeNode>(
     //                 graph::BlockScaleDequantizeAttributes{}, graphAttrs),
     //             {}};
-    // case HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE:
-    //     return {std::make_shared<graph::BlockScaleQuantizeNode>(
-    //                 graph::BlockScaleQuantizeAttributes{}, graphAttrs),
-    //             {}};
+    case HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE:
+        return {std::make_shared<graph::BlockScaleQuantizeNode>(
+                    graph::BlockScaleQuantizeAttributes{}, graphAttrs),
+                {}};
     // case HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_DATA:
     //     return {std::make_shared<graph::ConvolutionDgradNode>(graph::ConvDgradAttributes{},
     //                                                           graphAttrs),
