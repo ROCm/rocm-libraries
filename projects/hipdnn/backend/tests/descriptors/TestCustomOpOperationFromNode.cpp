@@ -39,27 +39,24 @@ protected:
         TensorAttributesT input0Attrs;
         input0Attrs.uid = K_CUSTOM_OP_INPUT_UID_0;
         input0Attrs.data_type = DataType::FLOAT;
-        input0Attrs.dims = {K_CUSTOM_OP_TENSOR_DIMS.begin(), K_CUSTOM_OP_TENSOR_DIMS.end()};
-        input0Attrs.strides
-            = {K_CUSTOM_OP_TENSOR_STRIDES.begin(), K_CUSTOM_OP_TENSOR_STRIDES.end()};
+        input0Attrs.dims = hipdnn_tests::toVec(K_CUSTOM_OP_TENSOR_DIMS);
+        input0Attrs.strides = hipdnn_tests::toVec(K_CUSTOM_OP_TENSOR_STRIDES);
         _tensorMap[K_CUSTOM_OP_INPUT_UID_0] = TensorDescriptor::fromFlatBuffer(input0Attrs);
 
         // Input tensor 1
         TensorAttributesT input1Attrs;
         input1Attrs.uid = K_CUSTOM_OP_INPUT_UID_1;
         input1Attrs.data_type = DataType::FLOAT;
-        input1Attrs.dims = {K_CUSTOM_OP_TENSOR_DIMS.begin(), K_CUSTOM_OP_TENSOR_DIMS.end()};
-        input1Attrs.strides
-            = {K_CUSTOM_OP_TENSOR_STRIDES.begin(), K_CUSTOM_OP_TENSOR_STRIDES.end()};
+        input1Attrs.dims = hipdnn_tests::toVec(K_CUSTOM_OP_TENSOR_DIMS);
+        input1Attrs.strides = hipdnn_tests::toVec(K_CUSTOM_OP_TENSOR_STRIDES);
         _tensorMap[K_CUSTOM_OP_INPUT_UID_1] = TensorDescriptor::fromFlatBuffer(input1Attrs);
 
         // Output tensor 0
         TensorAttributesT output0Attrs;
         output0Attrs.uid = K_CUSTOM_OP_OUTPUT_UID_0;
         output0Attrs.data_type = DataType::FLOAT;
-        output0Attrs.dims = {K_CUSTOM_OP_TENSOR_DIMS.begin(), K_CUSTOM_OP_TENSOR_DIMS.end()};
-        output0Attrs.strides
-            = {K_CUSTOM_OP_TENSOR_STRIDES.begin(), K_CUSTOM_OP_TENSOR_STRIDES.end()};
+        output0Attrs.dims = hipdnn_tests::toVec(K_CUSTOM_OP_TENSOR_DIMS);
+        output0Attrs.strides = hipdnn_tests::toVec(K_CUSTOM_OP_TENSOR_STRIDES);
         _tensorMap[K_CUSTOM_OP_OUTPUT_UID_0] = TensorDescriptor::fromFlatBuffer(output0Attrs);
     }
 
@@ -481,8 +478,8 @@ TEST_F(TestCustomOpOperationFromNode, FromNodeWithTwoOutputs)
     TensorAttributesT output1Attrs;
     output1Attrs.uid = K_CUSTOM_OP_OUTPUT_UID_1;
     output1Attrs.data_type = DataType::FLOAT;
-    output1Attrs.dims = {K_CUSTOM_OP_TENSOR_DIMS.begin(), K_CUSTOM_OP_TENSOR_DIMS.end()};
-    output1Attrs.strides = {K_CUSTOM_OP_TENSOR_STRIDES.begin(), K_CUSTOM_OP_TENSOR_STRIDES.end()};
+    output1Attrs.dims = hipdnn_tests::toVec(K_CUSTOM_OP_TENSOR_DIMS);
+    output1Attrs.strides = hipdnn_tests::toVec(K_CUSTOM_OP_TENSOR_STRIDES);
     _tensorMap[K_CUSTOM_OP_OUTPUT_UID_1] = TensorDescriptor::fromFlatBuffer(output1Attrs);
 
     NodeT node;
