@@ -131,20 +131,28 @@ public:
 
         // Rule 5: num_heads % K_heads == 0; num_heads % V_heads == 0 (GQA/MQA)
         const auto numHeads = qDims[1];
-        const auto numKvHeadsK = kDims[1];
-        const auto numKvHeadsV = vDims[1];
-        HIPDNN_RETURN_IF_TRUE(numHeads % numKvHeadsK != 0,
+        const auto numHeadsK = kDims[1];
+        const auto numHeadsV = vDims[1];
+        HIPDNN_RETURN_IF_TRUE(numHeadsK <= 0,
                               ErrorCode::INVALID_VALUE,
-                              "SdpaBpropNode: num_heads must be divisible by num_kv_heads_k for "
+                              "SdpaBpropNode: num_heads_k must be positive, got "
+                                  + std::to_string(numHeadsK));
+        HIPDNN_RETURN_IF_TRUE(numHeads % numHeadsK != 0,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaBpropNode: num_heads must be divisible by num_heads_k for "
                               "GQA/MQA. num_heads="
                                   + std::to_string(numHeads)
-                                  + ", num_kv_heads_k=" + std::to_string(numKvHeadsK));
-        HIPDNN_RETURN_IF_TRUE(numHeads % numKvHeadsV != 0,
+                                  + ", num_heads_k=" + std::to_string(numHeadsK));
+        HIPDNN_RETURN_IF_TRUE(numHeadsV <= 0,
                               ErrorCode::INVALID_VALUE,
-                              "SdpaBpropNode: num_heads must be divisible by num_kv_heads_v for "
+                              "SdpaBpropNode: num_heads_v must be positive, got "
+                                  + std::to_string(numHeadsV));
+        HIPDNN_RETURN_IF_TRUE(numHeads % numHeadsV != 0,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaBpropNode: num_heads must be divisible by num_heads_v for "
                               "GQA/MQA. num_heads="
                                   + std::to_string(numHeads)
-                                  + ", num_kv_heads_v=" + std::to_string(numKvHeadsV));
+                                  + ", num_heads_v=" + std::to_string(numHeadsV));
 
         // Rule 6: dO must match O shape [batch, num_heads, seq_q, head_dim_v]
         const auto& oDims = o->get_dim();

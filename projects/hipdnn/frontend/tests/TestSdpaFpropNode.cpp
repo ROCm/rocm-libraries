@@ -104,6 +104,32 @@ TEST(TestSdpaFpropNode, PreValidateFailsInvalidGQAVHeads)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
+TEST(TestSdpaFpropNode, PreValidateFailsZeroKvHeads)
+{
+    // K has 0 heads — should fail positivity check before divisibility
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 0, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFpropNode, PreValidateFailsInvalidGQAKHeads)
+{
+    // Q=8 heads, K=3 (8%3!=0), V=4 (8%4==0) — K invalid, V valid
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 3, 32, 64);
+    auto v = makeTensor4D(2, 4, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
 TEST(TestSdpaFpropNode, PreValidateFailsMissingQ)
 {
     SdpaAttributes attrs;

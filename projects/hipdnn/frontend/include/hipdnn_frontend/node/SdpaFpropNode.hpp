@@ -94,20 +94,28 @@ public:
 
         // Rule 4: num_heads % K_heads == 0; num_heads % V_heads == 0 (GQA/MQA)
         const auto numHeads = qDims[1];
-        const auto numKvHeadsK = kDims[1];
-        const auto numKvHeadsV = vDims[1];
-        HIPDNN_RETURN_IF_TRUE(numHeads % numKvHeadsK != 0,
+        const auto numHeadsK = kDims[1];
+        const auto numHeadsV = vDims[1];
+        HIPDNN_RETURN_IF_TRUE(numHeadsK <= 0,
                               ErrorCode::INVALID_VALUE,
-                              "SdpaFpropNode: num_heads must be divisible by num_kv_heads_k for "
+                              "SdpaFpropNode: num_heads_k must be positive, got "
+                                  + std::to_string(numHeadsK));
+        HIPDNN_RETURN_IF_TRUE(numHeads % numHeadsK != 0,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFpropNode: num_heads must be divisible by num_heads_k for "
                               "GQA/MQA. num_heads="
                                   + std::to_string(numHeads)
-                                  + ", num_kv_heads_k=" + std::to_string(numKvHeadsK));
-        HIPDNN_RETURN_IF_TRUE(numHeads % numKvHeadsV != 0,
+                                  + ", num_heads_k=" + std::to_string(numHeadsK));
+        HIPDNN_RETURN_IF_TRUE(numHeadsV <= 0,
                               ErrorCode::INVALID_VALUE,
-                              "SdpaFpropNode: num_heads must be divisible by num_kv_heads_v for "
+                              "SdpaFpropNode: num_heads_v must be positive, got "
+                                  + std::to_string(numHeadsV));
+        HIPDNN_RETURN_IF_TRUE(numHeads % numHeadsV != 0,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFpropNode: num_heads must be divisible by num_heads_v for "
                               "GQA/MQA. num_heads="
                                   + std::to_string(numHeads)
-                                  + ", num_kv_heads_v=" + std::to_string(numKvHeadsV));
+                                  + ", num_heads_v=" + std::to_string(numHeadsV));
 
         // Rule 5: Optional attention mask validation
         const auto attnMask = attributes.get_bias();
