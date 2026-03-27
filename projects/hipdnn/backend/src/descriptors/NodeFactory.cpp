@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "NodeFactory.hpp"
+#include "BatchnormOperationDescriptor.hpp"
 #include "HipdnnException.hpp"
 
 namespace hipdnn_backend
@@ -16,18 +17,18 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
     switch(nodeT.attributes.type)
     {
     // Uncomment when fromNode() is implemented in the lifting PR:
-    // case NodeAttributes::BatchnormAttributes:
-    //     return BatchnormOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::BatchnormAttributes:
+        return BatchnormOperationDescriptor::fromNode(nodeT, tensorMap);
     // case NodeAttributes::BatchnormBackwardAttributes:
     //     return BatchnormBackwardOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::BatchnormInferenceAttributes:
-    //     return BatchnormInferenceOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::BatchnormInferenceAttributes:
+        return BatchnormInferenceOperationDescriptor::fromNode(nodeT, tensorMap);
     // case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
     //     return BatchnormInferenceVarianceExtOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::BlockScaleDequantizeAttributes:
-    //     return BlockScaleDequantizeOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::BlockScaleQuantizeAttributes:
-    //     return BlockScaleQuantizeOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::BlockScaleDequantizeAttributes:
+        return BlockScaleDequantizeOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::BlockScaleQuantizeAttributes:
+        return BlockScaleQuantizeOperationDescriptor::fromNode(nodeT, tensorMap);
     // case NodeAttributes::ConvolutionBwdAttributes:
     //     return ConvolutionBwdOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::ConvolutionFwdAttributes:
@@ -38,14 +39,14 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
     //     return CustomOpOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::LayernormAttributes:
         return LayernormOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::MatmulAttributes:
-    //     return MatmulOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::MatmulAttributes:
+        return MatmulOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::PointwiseAttributes:
         return PointwiseOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::RMSNormAttributes:
         return RMSNormOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::SdpaAttributes:
-    //     return SdpaFpropOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::SdpaAttributes:
+        return SdpaFpropOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::SdpaBackwardAttributes:
         return SdpaBpropOperationDescriptor::fromNode(nodeT, tensorMap);
     default:

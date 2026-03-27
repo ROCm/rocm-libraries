@@ -1,3 +1,4 @@
+{% from "macros.j2" import vector_const_name %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
@@ -13,10 +14,8 @@
 #include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-{% if op.test_data.constants_include %}
-#include <hipdnn_test_sdk/constants/{{ op.test_data.constants_include }}.hpp>
+#include <hipdnn_test_sdk/constants/{{ op.effective_constants_include }}.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
-{% endif %}
 
 #include <memory>
 #include <optional>
@@ -25,10 +24,8 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_data_sdk::data_objects;
-{% if op.test_data.constants_include %}
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
-{% endif %}
 
 // =============================================================================
 // {{ op.class_name }}::fromNode() Tests
@@ -44,7 +41,6 @@ protected:
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
 {% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
 {% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
@@ -56,16 +52,6 @@ protected:
 
         _tensorMap[{{ uid_const }}] = TensorDescriptor::fromFlatBuffer({{ tf.camel_name }}Attrs);
 {% else %}
-        TensorAttributesT {{ tf.camel_name }}Attrs;
-        {{ tf.camel_name }}Attrs.uid = {{ op.test_data.tensor_uids.get(tf.name, loop.index) }};
-        {{ tf.camel_name }}Attrs.data_type = DataType::FLOAT;
-        {{ tf.camel_name }}Attrs.dims = {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }};
-        {{ tf.camel_name }}Attrs.strides = {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }};
-
-        _tensorMap[{{ op.test_data.tensor_uids.get(tf.name, loop.index) }}] = TensorDescriptor::fromFlatBuffer({{ tf.camel_name }}Attrs);
-{% endif %}
-{% else %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
         TensorAttributesT {{ tf.camel_name }}Attrs;
         {{ tf.camel_name }}Attrs.uid = {{ uid_const }};
@@ -74,15 +60,6 @@ protected:
         {{ tf.camel_name }}Attrs.strides = {1};
 
         _tensorMap[{{ uid_const }}] = TensorDescriptor::fromFlatBuffer({{ tf.camel_name }}Attrs);
-{% else %}
-        TensorAttributesT {{ tf.camel_name }}Attrs;
-        {{ tf.camel_name }}Attrs.uid = {{ op.test_data.tensor_uids.get(tf.name, loop.index) }};
-        {{ tf.camel_name }}Attrs.data_type = DataType::FLOAT;
-        {{ tf.camel_name }}Attrs.dims = {1};
-        {{ tf.camel_name }}Attrs.strides = {1};
-
-        _tensorMap[{{ op.test_data.tensor_uids.get(tf.name, loop.index) }}] = TensorDescriptor::fromFlatBuffer({{ tf.camel_name }}Attrs);
-{% endif %}
 {% endif %}
 {% endfor %}
 {% for taf in op.tensor_array_fields %}
@@ -102,21 +79,13 @@ protected:
     {
         {{ op.fbs_namespace }}::{{ op.fbs_t_type }} attrs;
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
         attrs.{{ tf.uid_field }} = {{ uid_const }};
-{% else %}
-        attrs.{{ tf.uid_field }} = {{ op.test_data.tensor_uids.get(tf.name, loop.index) }};
-{% endif %}
 {% endfor %}
 {% for df in op.data_fields %}
 {% if df.is_vector %}
-{% if op.test_data.constants_include %}
-{% set const_name = df.test_constant_name if df.test_constant_name else ("K_CONV_" ~ (df.name | upper) if "conv" in op.effective_error_label else "K_" ~ (df.name | upper)) %}
+{% set const_name = vector_const_name(df, op) %}
         attrs.{{ df.fbs_field }} = toVec({{ const_name }});
-{% else %}
-        attrs.{{ df.fbs_field }} = {{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }};
-{% endif %}
 {% elif df.is_mode or df.is_enum %}
         attrs.{{ df.fbs_field }} = {{ df.enum_short_type }}::{{ df.test_enum_value }};
 {% elif df.is_scalar %}
@@ -192,12 +161,8 @@ TEST_F(Test{{ op.name }}OperationFromNode, CreatesValidFinalizedDescriptor)
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), {{ op.descriptor_type_enum }});
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (op.tensor_fields[0].name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->getData().{{ op.tensor_fields[0].uid_field }}, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(desc->getData().{{ op.tensor_fields[0].uid_field }}, {{ op.test_data.tensor_uids.get(op.tensor_fields[0].name, 1) }});
-{% endif %}
 }
 
 TEST_F(Test{{ op.name }}OperationFromNode, NodeFactoryDelegatesCorrectly)
@@ -220,20 +185,12 @@ TEST_F(Test{{ op.name }}OperationFromNode, NodeFactoryDelegatesCorrectly)
 
     // Verify all attributes are correctly populated via the delegated path
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->getData().{{ tf.uid_field }}, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(desc->getData().{{ tf.uid_field }}, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endfor %}
 {% for vf in op.vector_fields %}
-{% if op.test_data.constants_include %}
-{% set const_name = vf.test_constant_name if vf.test_constant_name else ("K_CONV_" ~ (vf.name | upper) if "conv" in op.effective_error_label else "K_" ~ (vf.name | upper)) %}
+{% set const_name = vector_const_name(vf, op) %}
     EXPECT_EQ(desc->getData().{{ vf.fbs_field }}, toVec({{ const_name }}));
-{% else %}
-    EXPECT_EQ(desc->getData().{{ vf.fbs_field }}, (std::vector<int64_t>{{ '{' }}{{ op.test_data.field_values.get(vf.name, [1, 1]) | join(', ') }}{{ '}' }}));
-{% endif %}
 {% endfor %}
 {% for cf in op.mode_fields %}
     EXPECT_EQ(desc->getData().{{ cf.fbs_field }}, {{ cf.enum_short_type }}::{{ cf.test_enum_value }});
@@ -246,22 +203,14 @@ TEST_F(Test{{ op.name }}OperationFromNode, NodeFactoryDelegatesCorrectly)
 {% endif %}
 {% for tf in op.required_tensor_fields %}
 {% if op.test_data.tensor_configs.get(tf.name) %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endif %}
 {% endfor %}
 {% for tf in op.optional_tensor_fields %}
 {% if op.test_data.tensor_configs.get(tf.name) %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endif %}
 {% endfor %}
 }
@@ -297,12 +246,8 @@ TEST_F(Test{{ op.name }}OperationFromNode, PreservesDataFields)
     auto desc = {{ op.class_name }}::fromNode(node, _tensorMap);
 
 {% for vf in op.vector_fields %}
-{% if op.test_data.constants_include %}
-{% set const_name = vf.test_constant_name if vf.test_constant_name else ("K_CONV_" ~ (vf.name | upper) if "conv" in op.effective_error_label else "K_" ~ (vf.name | upper)) %}
+{% set const_name = vector_const_name(vf, op) %}
     EXPECT_EQ(desc->getData().{{ vf.fbs_field }}, toVec({{ const_name }}));
-{% else %}
-    EXPECT_EQ(desc->getData().{{ vf.fbs_field }}, (std::vector<int64_t>{{ '{' }}{{ op.test_data.field_values.get(vf.name, [1, 1]) | join(', ') }}{{ '}' }}));
-{% endif %}
 {% endfor %}
 {% for ef in op.enum_fields %}
     EXPECT_EQ(desc->getData().{{ ef.fbs_field }}, {{ ef.enum_short_type }}::{{ ef.test_enum_value }});
@@ -321,23 +266,15 @@ TEST_F(Test{{ op.name }}OperationFromNode, SetsTensorReferences)
 {% for tf in op.required_tensor_fields %}
 {% if op.test_data.tensor_configs.get(tf.name) %}
     ASSERT_NE(desc->{{ tf.getter_name }}(), nullptr);
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endif %}
 {% endfor %}
 {% for tf in op.optional_tensor_fields %}
 {% if op.test_data.tensor_configs.get(tf.name) %}
     ASSERT_NE(desc->{{ tf.getter_name }}(), nullptr);
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endif %}
 {% endfor %}
 }
@@ -349,22 +286,14 @@ TEST_F(Test{{ op.name }}OperationFromNode, TensorReferencesMatchTensorMap)
 
 {% for tf in op.required_tensor_fields %}
 {% if op.test_data.tensor_configs.get(tf.name) %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->{{ tf.getter_name }}(), _tensorMap[{{ uid_const }}]);
-{% else %}
-    EXPECT_EQ(desc->{{ tf.getter_name }}(), _tensorMap[{{ op.test_data.tensor_uids.get(tf.name, loop.index) }}]);
-{% endif %}
 {% endif %}
 {% endfor %}
 {% for tf in op.optional_tensor_fields %}
 {% if op.test_data.tensor_configs.get(tf.name) %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->{{ tf.getter_name }}(), _tensorMap[{{ uid_const }}]);
-{% else %}
-    EXPECT_EQ(desc->{{ tf.getter_name }}(), _tensorMap[{{ op.test_data.tensor_uids.get(tf.name, loop.index) }}]);
-{% endif %}
 {% endif %}
 {% endfor %}
 }
@@ -378,23 +307,15 @@ TEST_F(Test{{ op.name }}OperationFromNode, SetsTensorReferencesWithFullValues)
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
     ASSERT_NE(desc->{{ tf.getter_name }}(), nullptr);
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().dims, (std::vector<int64_t>{{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}));
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().strides, (std::vector<int64_t>{{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }}));
 {% else %}
     ASSERT_NE(desc->{{ tf.getter_name }}(), nullptr);
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().dims, (std::vector<int64_t>{1}));
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().strides, (std::vector<int64_t>{1}));
@@ -405,23 +326,15 @@ TEST_F(Test{{ op.name }}OperationFromNode, SetsTensorReferencesWithFullValues)
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
     ASSERT_NE(desc->{{ tf.getter_name }}(), nullptr);
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().dims, (std::vector<int64_t>{{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}));
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().strides, (std::vector<int64_t>{{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }}));
 {% else %}
     ASSERT_NE(desc->{{ tf.getter_name }}(), nullptr);
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().data_type, DataType::FLOAT);
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().dims, (std::vector<int64_t>{1}));
     EXPECT_EQ(desc->{{ tf.getter_name }}()->getData().strides, (std::vector<int64_t>{1}));
@@ -433,12 +346,8 @@ TEST_F(Test{{ op.name }}OperationFromNode, SetsTensorReferencesWithFullValues)
 
 TEST_F(Test{{ op.name }}OperationFromNode, FailsWithMissing{{ tf.pascal_name }}Tensor)
 {
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     _tensorMap.erase({{ uid_const }});
-{% else %}
-    _tensorMap.erase({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS({{ op.class_name }}::fromNode(node, _tensorMap),
@@ -475,12 +384,8 @@ TEST_F(Test{{ op.name }}OperationFromNode, SucceedsWithOnlyRequiredTensors)
 
 TEST_F(Test{{ op.name }}OperationFromNode, FailsWhenOptional{{ tf.pascal_name }}UidSetButTensorMissing)
 {
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     _tensorMap.erase({{ uid_const }});
-{% else %}
-    _tensorMap.erase({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
     auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS({{ op.class_name }}::fromNode(node, _tensorMap),
@@ -498,12 +403,8 @@ TEST_F(Test{{ op.name }}OperationFromNode, GetTensorDescriptorsReturnsAllTensors
     ASSERT_EQ(tensors.size(), {{ op.tensor_fields | length }});
 {% for tf in op.tensor_fields %}
 {% if op.test_data.tensor_configs.get(tf.name) %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(tensors[{{ loop.index0 }}]->getData().uid, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(tensors[{{ loop.index0 }}]->getData().uid, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endif %}
 {% endfor %}
 }
@@ -523,20 +424,12 @@ TEST_F(Test{{ op.name }}OperationFromNode, BuildNodeRoundTrip)
     const auto* rebuiltAttrs = rebuiltNode->attributes.As{{ op.fbs_table }}();
     ASSERT_NE(rebuiltAttrs, nullptr);
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(rebuiltAttrs->{{ tf.uid_field }}, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(rebuiltAttrs->{{ tf.uid_field }}, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endfor %}
 {% for vf in op.vector_fields %}
-{% if op.test_data.constants_include %}
-{% set const_name = vf.test_constant_name if vf.test_constant_name else ("K_CONV_" ~ (vf.name | upper) if "conv" in op.effective_error_label else "K_" ~ (vf.name | upper)) %}
+{% set const_name = vector_const_name(vf, op) %}
     EXPECT_EQ(rebuiltAttrs->{{ vf.fbs_field }}, toVec({{ const_name }}));
-{% else %}
-    EXPECT_EQ(rebuiltAttrs->{{ vf.fbs_field }}, (std::vector<int64_t>{{ '{' }}{{ op.test_data.field_values.get(vf.name, [1, 1]) | join(', ') }}{{ '}' }}));
-{% endif %}
 {% endfor %}
 {% for ef in op.enum_fields %}
     EXPECT_EQ(rebuiltAttrs->{{ ef.fbs_field }}, {{ ef.enum_short_type }}::{{ ef.test_enum_value }});
@@ -620,12 +513,8 @@ TEST_F(Test{{ op.name }}OperationFromNode, GetAttributeWorksAfterFromNode)
                        &{{ vf.camel_name }}Count,
                        {{ vf.camel_name }}.data());
     ASSERT_EQ({{ vf.camel_name }}Count, {{ fv | length }});
-{% if op.test_data.constants_include %}
-{% set const_name = vf.test_constant_name if vf.test_constant_name else ("K_CONV_" ~ (vf.name | upper) if "conv" in op.effective_error_label else "K_" ~ (vf.name | upper)) %}
+{% set const_name = vector_const_name(vf, op) %}
     EXPECT_EQ({{ vf.camel_name }}, toVec({{ const_name }}));
-{% else %}
-    EXPECT_EQ({{ vf.camel_name }}, (std::vector<int64_t>{{ '{' }}{{ fv | join(', ') }}{{ '}' }}));
-{% endif %}
 
 {% endfor %}
 {% if op.has_compute_data_type %}
@@ -659,16 +548,10 @@ TEST_F(Test{{ op.name }}OperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>({{ tf.camel_name }}Scoped.getPtr()));
     ASSERT_EQ({{ tf.camel_name }}Count, 1);
     ASSERT_NE({{ tf.camel_name }}Scoped.get(), nullptr);
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     verifyTensorDescriptor({{ tf.camel_name }}Scoped.get(), {{ uid_const }}, HIPDNN_DATA_FLOAT,
                            {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }},
                            {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% else %}
-    verifyTensorDescriptor({{ tf.camel_name }}Scoped.get(), {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, HIPDNN_DATA_FLOAT,
-                           {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }},
-                           {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% endif %}
 
 {% else %}
     // Verify {{ tf.name }} tensor
@@ -681,14 +564,9 @@ TEST_F(Test{{ op.name }}OperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>({{ tf.camel_name }}Scoped.getPtr()));
     ASSERT_EQ({{ tf.camel_name }}Count, 1);
     ASSERT_NE({{ tf.camel_name }}Scoped.get(), nullptr);
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     verifyTensorDescriptor({{ tf.camel_name }}Scoped.get(), {{ uid_const }}, HIPDNN_DATA_FLOAT,
                            {1}, {1});
-{% else %}
-    verifyTensorDescriptor({{ tf.camel_name }}Scoped.get(), {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, HIPDNN_DATA_FLOAT,
-                           {1}, {1});
-{% endif %}
 
 {% endif %}
 {% endfor %}
@@ -705,16 +583,10 @@ TEST_F(Test{{ op.name }}OperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>({{ tf.camel_name }}Scoped.getPtr()));
     ASSERT_EQ({{ tf.camel_name }}Count, 1);
     ASSERT_NE({{ tf.camel_name }}Scoped.get(), nullptr);
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     verifyTensorDescriptor({{ tf.camel_name }}Scoped.get(), {{ uid_const }}, HIPDNN_DATA_FLOAT,
                            {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }},
                            {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% else %}
-    verifyTensorDescriptor({{ tf.camel_name }}Scoped.get(), {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, HIPDNN_DATA_FLOAT,
-                           {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }},
-                           {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% endif %}
 
 {% else %}
     // Verify {{ tf.name }} tensor (optional)
@@ -727,14 +599,9 @@ TEST_F(Test{{ op.name }}OperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>({{ tf.camel_name }}Scoped.getPtr()));
     ASSERT_EQ({{ tf.camel_name }}Count, 1);
     ASSERT_NE({{ tf.camel_name }}Scoped.get(), nullptr);
-{% if op.test_data.constants_include %}
 {% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     verifyTensorDescriptor({{ tf.camel_name }}Scoped.get(), {{ uid_const }}, HIPDNN_DATA_FLOAT,
                            {1}, {1});
-{% else %}
-    verifyTensorDescriptor({{ tf.camel_name }}Scoped.get(), {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, HIPDNN_DATA_FLOAT,
-                           {1}, {1});
-{% endif %}
 
 {% endif %}
 {% endfor %}
