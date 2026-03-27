@@ -77,6 +77,44 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     return wrapper;
 }
 
+} // namespace
+
+class TestGraphDescriptorCustomOp : public ::testing::Test
+{
+public:
+    std::shared_ptr<GraphDescriptor> getDescriptor() const
+    {
+        return _wrapper->asDescriptor<GraphDescriptor>();
+    }
+
+    void setHandle() const
+    {
+        auto desc = getDescriptor();
+        hipdnnHandle_t handle = &_mockHandle;
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                           HIPDNN_TYPE_HANDLE,
+                           1,
+                           static_cast<const void*>(&handle));
+    }
+
+protected:
+    std::unique_ptr<HipdnnBackendDescriptor> _wrapper = nullptr;
+    mutable MockHandle _mockHandle;
+
+    void SetUp() override
+    {
+        _wrapper = createDescriptor<GraphDescriptor>();
+    }
+
+    void TearDown() override
+    {
+        _wrapper.reset();
+    }
+};
+
+namespace
+{
+
 // Helper: builds and serializes a custom op with one tensor on the given side
 // (zero on the other). Returns the unpacked GraphT for assertion.
 //
@@ -84,7 +122,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
 // @param tensorSideAttr  The attribute to set — either INPUTS or OUTPUTS — controls which side
 //                        receives the tensor (the other side remains zero).
 // @param fixture  The test fixture (provides getDescriptor() and setHandle()).
-static std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT>
+std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT>
     buildAndSerializeZeroPortCustomOp(HipdnnBackendDescriptor* tensorDesc,
                                       hipdnnBackendAttributeName_t tensorSideAttr,
                                       TestGraphDescriptorCustomOp& fixture)
@@ -131,39 +169,6 @@ static std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT>
 }
 
 } // namespace
-
-class TestGraphDescriptorCustomOp : public ::testing::Test
-{
-public:
-    std::shared_ptr<GraphDescriptor> getDescriptor() const
-    {
-        return _wrapper->asDescriptor<GraphDescriptor>();
-    }
-
-    void setHandle() const
-    {
-        auto desc = getDescriptor();
-        hipdnnHandle_t handle = &_mockHandle;
-        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
-                           HIPDNN_TYPE_HANDLE,
-                           1,
-                           static_cast<const void*>(&handle));
-    }
-
-protected:
-    std::unique_ptr<HipdnnBackendDescriptor> _wrapper = nullptr;
-    mutable MockHandle _mockHandle;
-
-    void SetUp() override
-    {
-        _wrapper = createDescriptor<GraphDescriptor>();
-    }
-
-    void TearDown() override
-    {
-        _wrapper.reset();
-    }
-};
 
 TEST_F(TestGraphDescriptorCustomOp, BuildFromSingleCustomOpOperation)
 {
