@@ -321,3 +321,12 @@ inline void dprint(I size_, const T* v, const char* name_ = nullptr, I short_siz
                 s.str().c_str());                                                     \
         }                                                                             \
     }
+
+#define PRINT_IF_ROCSPARSE_ERROR(INPUT_STATUS_FOR_CHECK, MESSAGE)         \
+    {                                                                     \
+        rocsparse_status TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK); \
+        if(TMP_STATUS_FOR_CHECK != rocsparse_status_success)              \
+        {                                                                 \
+            ROCSPARSE_ERROR_MESSAGE(TMP_STATUS_FOR_CHECK, MESSAGE);       \
+        }                                                                 \
+    }
