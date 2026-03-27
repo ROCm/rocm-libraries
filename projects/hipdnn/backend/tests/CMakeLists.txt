@@ -20,6 +20,7 @@ add_executable(
     hipdnn_backend_tests
     descriptors/TestBackendDescriptor.cpp
     descriptors/TestBlockScaleDequantizeOperationDescriptor.cpp
+    descriptors/TestBlockScaleDequantizeOperationFromNode.cpp
     descriptors/TestBlockScaleQuantizeOperationDescriptor.cpp
     descriptors/TestBlockScaleQuantizeOperationFromNode.cpp
     descriptors/TestDescriptorFactory.cpp

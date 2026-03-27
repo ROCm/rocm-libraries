@@ -64,6 +64,16 @@ inline Error createBlockScaleDequantizeOperation(
                                                  attributes.compute_data_type,
                                                  "block_scale_dequantize compute data type"));
 
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(opDesc.get(),
+                                                   HIPDNN_ATTR_OPERATION_NAME_EXT,
+                                                   opName,
+                                                   "block scale dequantize operation name"));
+    }
+
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(
         finalizeDescriptor(opDesc.get(), "block_scale_dequantize operation descriptor"));

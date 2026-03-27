@@ -61,7 +61,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecSuccess)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int64_t> values;
-    auto err = getDescriptorAttrVec(desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, values, "test dims");
+    auto err = getDescriptorAttrVec(
+        desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, values, "test dims");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     ASSERT_EQ(values.size(), 3u);
@@ -78,7 +79,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecZeroCount)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int64_t> values;
-    auto err = getDescriptorAttrVec(desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, values, "test dims");
+    auto err = getDescriptorAttrVec(
+        desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, values, "test dims");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_TRUE(values.empty());
@@ -92,7 +94,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecNegativeCount)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int64_t> values;
-    auto err = getDescriptorAttrVec(desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, values, "test dims");
+    auto err = getDescriptorAttrVec(
+        desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, values, "test dims");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_TRUE(values.empty());
@@ -107,7 +110,8 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecCountFails)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int64_t> values;
-    auto err = getDescriptorAttrVec(desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, values, "test dims");
+    auto err = getDescriptorAttrVec(
+        desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, values, "test dims");
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -125,7 +129,86 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecCountMismatch)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int64_t> values;
-    auto err = getDescriptorAttrVec(desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, values, "test dims");
+    auto err = getDescriptorAttrVec(
+        desc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, values, "test dims");
+
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+// ---------------------------------------------------------------------------
+// getDescriptorAttrVec (typed overload) tests
+// ---------------------------------------------------------------------------
+
+TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecInt32Success)
+{
+    // Count query returns 2
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_INT32, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{2}), Return(HIPDNN_STATUS_SUCCESS)));
+
+    // Data query returns {16, 32}
+    constexpr std::array<int32_t, 2> K_DATA = {16, 32};
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_INT32, 2, _, Ne(nullptr)))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{2}),
+                        Invoke([K_DATA](hipdnnBackendDescriptor_t,
+                                        hipdnnBackendAttributeName_t,
+                                        hipdnnBackendAttributeType_t,
+                                        int64_t,
+                                        int64_t*,
+                                        void* arrayOfElements) {
+                            std::memcpy(arrayOfElements, K_DATA.data(), 2 * sizeof(int32_t));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    std::vector<int32_t> values;
+    auto err = getDescriptorAttrVec(desc,
+                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+                                    HIPDNN_TYPE_INT32,
+                                    values,
+                                    "test block_size");
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    ASSERT_EQ(values.size(), 2u);
+    EXPECT_EQ(values[0], 16);
+    EXPECT_EQ(values[1], 32);
+}
+
+TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecInt32ZeroCount)
+{
+    // Count query returns 0
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_INT32, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{0}), Return(HIPDNN_STATUS_SUCCESS)));
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    std::vector<int32_t> values;
+    auto err = getDescriptorAttrVec(desc,
+                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+                                    HIPDNN_TYPE_INT32,
+                                    values,
+                                    "test block_size");
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_TRUE(values.empty());
+}
+
+TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecInt32CountMismatch)
+{
+    // Count query returns 2
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_INT32, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{2}), Return(HIPDNN_STATUS_SUCCESS)));
+
+    // Data query returns actualCount=3 (mismatches count=2)
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_INT32, 2, _, Ne(nullptr)))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{3}), Return(HIPDNN_STATUS_SUCCESS)));
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    std::vector<int32_t> values;
+    auto err = getDescriptorAttrVec(desc,
+                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+                                    HIPDNN_TYPE_INT32,
+                                    values,
+                                    "test block_size");
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);

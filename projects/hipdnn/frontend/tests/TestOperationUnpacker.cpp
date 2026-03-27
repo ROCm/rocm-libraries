@@ -14,7 +14,7 @@
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
 // #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
-// #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
 #include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
 // #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
@@ -437,6 +437,16 @@ TEST(TestCreateNodeForType, CreatesSdpaBpropNode)
 //     auto typedNode = std::dynamic_pointer_cast<SdpaFpropNode>(node);
 //     EXPECT_NE(typedNode, nullptr);
 // }
+
+TEST(TestCreateNodeForType, CreatesBlockScaleDequantizeNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto bsdNode = std::dynamic_pointer_cast<BlockScaleDequantizeNode>(node);
+    EXPECT_NE(bsdNode, nullptr);
+}
 
 TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
 {
