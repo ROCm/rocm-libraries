@@ -123,6 +123,8 @@ install(
 
 add_clang_tidy_custom_target()
 
+add_subdirectory(tests)
+
 install(
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_test_config.toml"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests_test_infra"
