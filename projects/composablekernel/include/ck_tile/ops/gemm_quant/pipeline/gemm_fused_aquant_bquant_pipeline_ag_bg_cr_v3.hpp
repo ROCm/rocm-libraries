@@ -162,6 +162,11 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
         CK_TILE_DEVICE static void LoadAndQuantizeATile(ABlockTile_& a_block_tile,
                                                         const ADramWindow& a_dram_window)
         {
+            if constexpr(std::is_same_v<ADataType, ck_tile::bf16_t> &&
+                         std::is_same_v<OverrideADataType, ck_tile::fp8_t>)
+            {
+                static_assert(false);
+            };
             constexpr index_t UnaryOpSize = 8;
             load_and_convert_tile<UnaryOpSize>(a_block_tile, a_dram_window);
         }
