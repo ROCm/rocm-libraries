@@ -682,6 +682,32 @@ struct sequence_unique_sort
 
 // Validates that a sequence is a permutation of {0, 1, ..., N-1}.
 // Uses a constexpr loop instead of instantiating sequence_sort.
+namespace detail {
+
+template <index_t... Is>
+constexpr bool check_valid_sequence_map()
+{
+    constexpr index_t n = sizeof...(Is);
+    if constexpr(n == 0)
+    {
+        return true;
+    }
+    else
+    {
+        constexpr index_t vals[] = {Is...};
+        static_array<bool, n> seen{};
+        for(index_t i = 0; i < n; ++i)
+        {
+            if(vals[i] < 0 || vals[i] >= n || seen[vals[i]])
+                return false;
+            seen[vals[i]] = true;
+        }
+        return true;
+    }
+}
+
+} // namespace detail
+
 template <typename SeqMap>
 struct is_valid_sequence_map : std::false_type
 {
@@ -689,28 +715,8 @@ struct is_valid_sequence_map : std::false_type
 
 template <index_t... Is>
 struct is_valid_sequence_map<sequence<Is...>>
+    : std::integral_constant<bool, detail::check_valid_sequence_map<Is...>()>
 {
-    static constexpr bool check()
-    {
-        constexpr index_t n = sizeof...(Is);
-        if constexpr(n == 0)
-        {
-            return true;
-        }
-        else
-        {
-            constexpr index_t vals[] = {Is...};
-            static_array<bool, n> seen{};
-            for(index_t i = 0; i < n; ++i)
-            {
-                if(vals[i] < 0 || vals[i] >= n || seen[vals[i]])
-                    return false;
-                seen[vals[i]] = true;
-            }
-            return true;
-        }
-    }
-    static constexpr bool value = check();
 };
 
 /**

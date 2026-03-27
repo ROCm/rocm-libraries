@@ -209,7 +209,10 @@ struct ford_applier<Decomposer, sequence<LinearIds...>>
     template <class F>
     CK_TILE_HOST_DEVICE constexpr void operator()(F f) const
     {
-        (f(typename Decomposer::template decompose<LinearIds>{}), ...);
+        if constexpr(sizeof...(LinearIds) > 0)
+        {
+            (f(typename Decomposer::template decompose<LinearIds>{}), ...);
+        }
     }
 };
 
@@ -223,7 +226,10 @@ struct ford_applier_reordered<Decomposer, New2Old, sequence<LinearIds...>>
     template <class F>
     CK_TILE_HOST_DEVICE constexpr void operator()(F f) const
     {
-        (f(typename Decomposer::template decompose_reordered<LinearIds, New2Old>{}), ...);
+        if constexpr(sizeof...(LinearIds) > 0)
+        {
+            (f(typename Decomposer::template decompose_reordered<LinearIds, New2Old>{}), ...);
+        }
     }
 };
 
