@@ -402,7 +402,8 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_VECTORIZE=")
                          + std::to_string(static_cast<int>(vectorsize > 1)));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_VEC_SIZE=") + std::to_string(vectorsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_stashMethod=") + std::to_string(stashMethod));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_STASH_METHOD=")
+                         + std::to_string(stashMethod));
     options.emplace_back(std::string("-DHIP_PLUGIN_NRN_OP_ID=") + std::to_string(nrnOpId));
     options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
 

@@ -583,7 +583,7 @@ struct BatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
         {
             variance = 0;
         }
-        invVariance = hip_kernel_provider::rsqrt(variance + (FpPrecType)epsilon);
+        invVariance = hip_kernel_provider::rsqrt(variance + static_cast<FpPrecType>(epsilon));
 
         if(lid < hip_plugin_bn_config::hw)
         {
