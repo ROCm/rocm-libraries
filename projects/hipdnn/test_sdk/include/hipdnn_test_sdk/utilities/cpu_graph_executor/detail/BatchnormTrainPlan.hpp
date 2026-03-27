@@ -100,6 +100,28 @@ public:
     {
     }
 
+    std::vector<int64_t> getOutputTensorIds() const override
+    {
+        std::vector<int64_t> ids = {_params.yTensor.uid};
+        if(_params.meanTensor.has_value())
+        {
+            ids.push_back(_params.meanTensor.value().uid);
+        }
+        if(_params.invVarianceTensor.has_value())
+        {
+            ids.push_back(_params.invVarianceTensor.value().uid);
+        }
+        if(_params.nextRunningMeanTensor.has_value())
+        {
+            ids.push_back(_params.nextRunningMeanTensor.value().uid);
+        }
+        if(_params.nextRunningVarianceTensor.has_value())
+        {
+            ids.push_back(_params.nextRunningVarianceTensor.value().uid);
+        }
+        return ids;
+    }
+
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
         auto shallowXTensor
