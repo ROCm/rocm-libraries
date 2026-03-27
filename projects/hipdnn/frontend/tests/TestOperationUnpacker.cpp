@@ -14,7 +14,7 @@
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
 // #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
-// #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
 #include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
 // #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
@@ -26,7 +26,7 @@
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
-// #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
+#include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 
 #include "fake_backend/MockHipdnnBackend.hpp"
 
@@ -428,15 +428,25 @@ TEST(TestCreateNodeForType, CreatesSdpaBpropNode)
     EXPECT_NE(sdpaNode, nullptr);
 }
 
-// TEST(TestCreateNodeForType, CreatesSdpaFpropNode)
-// {
-//     const GraphAttributes graphAttrs;
-//     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_SDPA_FORWARD, graphAttrs);
-//     EXPECT_EQ(err.code, ErrorCode::OK);
-//     ASSERT_NE(node, nullptr);
-//     auto typedNode = std::dynamic_pointer_cast<SdpaFpropNode>(node);
-//     EXPECT_NE(typedNode, nullptr);
-// }
+TEST(TestCreateNodeForType, CreatesSdpaFpropNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_SDPA_FORWARD, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<SdpaFpropNode>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
+
+TEST(TestCreateNodeForType, CreatesBlockScaleDequantizeNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto bsdNode = std::dynamic_pointer_cast<BlockScaleDequantizeNode>(node);
+    EXPECT_NE(bsdNode, nullptr);
+}
 
 TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
 {

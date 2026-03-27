@@ -20,6 +20,7 @@ add_executable(
     hipdnn_backend_tests
     descriptors/TestBackendDescriptor.cpp
     descriptors/TestBlockScaleDequantizeOperationDescriptor.cpp
+    descriptors/TestBlockScaleDequantizeOperationFromNode.cpp
     descriptors/TestBlockScaleQuantizeOperationDescriptor.cpp
     descriptors/TestBlockScaleQuantizeOperationFromNode.cpp
     descriptors/TestDescriptorFactory.cpp
@@ -69,6 +70,7 @@ add_executable(
     descriptors/TestSdpaBpropOperationDescriptor.cpp
     descriptors/TestSdpaBpropOperationFromNode.cpp
     descriptors/TestSdpaFpropOperationDescriptor.cpp
+    descriptors/TestSdpaFpropOperationFromNode.cpp
     descriptors/TestGraphDescriptorSdpaBprop.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp

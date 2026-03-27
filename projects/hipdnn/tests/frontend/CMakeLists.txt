@@ -17,6 +17,7 @@ add_executable(
     IntegrationBatchnormInferenceDescriptorLowering.cpp
     IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
     IntegrationBlockScaleDequantize.cpp
+    IntegrationBlockScaleDequantizeDescriptorLifting.cpp
     IntegrationBlockScaleDequantizeDescriptorLowering.cpp
     IntegrationBlockScaleQuantize.cpp
     IntegrationBlockScaleQuantizeDescriptorLifting.cpp
@@ -49,6 +50,7 @@ add_executable(
     IntegrationSetPluginPathsExt.cpp
     IntegrationSdpaBpropDescriptorLowering.cpp
     IntegrationSdpaBpropLifting.cpp
+    IntegrationSdpaFpropDescriptorLifting.cpp
     IntegrationSdpaFpropDescriptorLowering.cpp
 )
 

@@ -14,7 +14,7 @@
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
 // #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
-// #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
 #include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
 // #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
@@ -26,7 +26,7 @@
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
-// #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
+#include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -85,10 +85,10 @@ namespace hipdnn_frontend::detail
     //     return {std::make_shared<graph::BatchnormInferenceNodeVarianceExt>(
     //                 graph::BatchnormInferenceAttributesVarianceExt{}, graphAttrs),
     //             {}};
-    // case HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE:
-    //     return {std::make_shared<graph::BlockScaleDequantizeNode>(
-    //                 graph::BlockScaleDequantizeAttributes{}, graphAttrs),
-    //             {}};
+    case HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE:
+        return {std::make_shared<graph::BlockScaleDequantizeNode>(
+                    graph::BlockScaleDequantizeAttributes{}, graphAttrs),
+                {}};
     case HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE:
         return {std::make_shared<graph::BlockScaleQuantizeNode>(
                     graph::BlockScaleQuantizeAttributes{}, graphAttrs),
@@ -121,8 +121,8 @@ namespace hipdnn_frontend::detail
     case HIPDNN_OPERATION_TYPE_SDPA_BACKWARD:
         return {std::make_shared<graph::SdpaBpropNode>(graph::SdpaBackwardAttributes{}, graphAttrs),
                 {}};
-    // case HIPDNN_OPERATION_TYPE_SDPA_FORWARD:
-    //     return {std::make_shared<graph::SdpaFpropNode>(graph::SdpaAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_SDPA_FORWARD:
+        return {std::make_shared<graph::SdpaFpropNode>(graph::SdpaAttributes{}, graphAttrs), {}};
     default:
         return {nullptr,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
