@@ -10,7 +10,7 @@
 #include "BatchnormOperationDescriptor.hpp"
 #include "BlockScaleDequantizeOperationDescriptor.hpp"
 #include "BlockScaleQuantizeOperationDescriptor.hpp"
-// #include "ConvolutionBwdOperationDescriptor.hpp"
+#include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
 #include "ConvolutionWrwOperationDescriptor.hpp"
 // #include "CustomOpOperationDescriptor.hpp"
