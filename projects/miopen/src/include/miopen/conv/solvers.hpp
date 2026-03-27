@@ -4896,6 +4896,34 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd2D final
     uint32_t GetSupportedSolutionCount(const ExecutionContext&,
                                        const miopen::conv::ProblemDescription&) const;
 };
+
+/// Placeholder forward 3D depthwise convolution (BF16, default/NCDHW layout); stub kernel.
+struct MIOPEN_INTERNALS_EXPORT Conv3dDepthwiseFwd final : ConvSolver
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<Conv3dDepthwiseFwd>(); }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    /// \todo `true` here is temporary: when `ExecutionContext::use_dynamic_solutions_only` is set
+    /// (default find mode DYNAMIC_HYBRID), `SolverContainer::SearchForAllSolutions` skips any
+    /// solver with `IsDynamic()==false` before `IsApplicable` runs. Returning true lets this stub
+    /// participate in default Find. If the implementation becomes compile-time N/H/W (or D/H/W)
+    /// template specialization, set this to `false` and rely on NORMAL/HYBRID find (or refactor to
+    /// runtime shape parameters so `true` remains correct).
+    bool IsDynamic() const override { return true; }
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
+    {
+        return 0.02f;
+    }
+    size_t GetWorkspaceSize(const ExecutionContext&,
+                            const miopen::conv::ProblemDescription&) const override
+    {
+        return 0;
+    }
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&) const override;
+};
+
 /// Common base for ConvWinogradNHWC transposing solvers (tunable and non-tunable).
 /// Provides ConvertFromApiParams, ConvertForInnerSolver, Transpose, and GetTransposes.
 /// Template params:
