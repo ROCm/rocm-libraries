@@ -1026,8 +1026,7 @@ class LocalReadMFMA(LocalRead):
                                             # convert from [tile][MiInputPerThread][vector] to [tile][vector][MiInputPerThread]
                                             vgprIdx = int((vIdx*numVgpr+i)*tP["bpeDS"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr*min(writer.states.bpr//tP["bpeDS"],vectorWidth))
                                             if numSplitMetadata:
-                                                #TODO:
-                                                #vgprIdx = (vIdx*numVgpr+i)*ceil(tP["bpeDS"]*kernel["MIInputPerThread%s"%tc] / writer.states.bpr)*min(writer.states.bpr//tP["bpeDS"],vectorWidth)
+                                                vgprIdx = (vIdx*numVgpr+i)*ceil(tP["bpeDS"]*kernel["MIInputPerThread%s"%tc] / writer.states.bpr)*min(writer.states.bpr//tP["bpeDS"],vectorWidth)
                                                 if kernel["MIInputPerThread%s"%tc] == 4:
                                                     vgprOffset = 0
                                                     for elementIdx in range(0, numSplitMetadata+1):
