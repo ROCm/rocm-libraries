@@ -343,6 +343,24 @@ TEST(TestCalculateMatmulTolerance, ThrowsOnInvalidDimensions)
     EXPECT_THROW((calculateMatmulTolerance<float, float, float>(a, b)), std::invalid_argument);
 }
 
+TEST(TestCalculateMatmulTolerance, ThrowsOn1dTensorA)
+{
+    // A is 1D (vector), B is 2D — must reject A
+    hipdnn_data_sdk::utilities::Tensor<float> a({4});
+    auto b = createTensorFromRowValues<float>({4, 2}, {1.0, 1.0, 1.0, 1.0});
+
+    EXPECT_THROW((calculateMatmulTolerance<float, float, float>(a, b)), std::invalid_argument);
+}
+
+TEST(TestCalculateMatmulTolerance, ThrowsOn1dTensorB)
+{
+    // A is 2D, B is 1D (vector) — must reject B
+    auto a = createTensorFromRowValues<float>({2, 4}, {1.0, 2.0});
+    hipdnn_data_sdk::utilities::Tensor<float> b({4});
+
+    EXPECT_THROW((calculateMatmulTolerance<float, float, float>(a, b)), std::invalid_argument);
+}
+
 // Note: K=0 validation test removed. Tensor constructor's validateAllPositive() rejects
 // dimension <= 0 before calculateMatmulTolerance is reached, so K=0 cannot be tested
 // through the public API with real tensors.
