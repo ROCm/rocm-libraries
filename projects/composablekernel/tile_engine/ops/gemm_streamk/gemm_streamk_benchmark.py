@@ -382,7 +382,8 @@ class GemmBenchmark:
             results = self.benchmark_problem_size(
                 kernels,
                 m,
-                n,                    k,
+                n,                    
+                k,
                 verify=2 if verify else 0,
                 warmup=warmup,
                 repeat=repeat,
@@ -594,9 +595,6 @@ def main():
         default=["1024,1024,1024", "2048,2048,2048", "4096,4096,4096"],
         help="Problem sizes as M,N,K tuples",
     )
-    parser.add_argument(
-        "--split-k", nargs="+", type=int, default=[1], help="Split-K values to test"
-    )
     parser.add_argument("--verify", action="store_true", help="Enable verification")
     parser.add_argument(
         "--csv", default="gemm_benchmark_results.csv", help="CSV output filename"
@@ -618,10 +616,11 @@ def main():
         help="Number of benchmark iterations (default: 100)",
     )
     parser.add_argument(
-        "--flush-cache",
-        action="store_true",
+        "--no-flush-cache",
+        dest="flush_cache",
+        action="store_false",
         default=True,
-        help="Enable cache flushing (default: True)",
+        help="Disable cache flushing (default: enabled)",
     )
     parser.add_argument(
         "--rotating-count",
