@@ -253,6 +253,34 @@ TEST(TestCpuFpReferenceSdpaFp64, MqaSupport)
     }
 }
 
+TEST(TestCpuFpReferenceSdpaFp64, GqaDifferentKVHeads)
+{
+    // H=4, Hk=2, Hv=1: K has 2 heads, V has 1 head.
+    // Skv=1 → softmax trivially 1.0 → O = V[b, kvHeadV, 0, :]
+    // headsPerKvHeadV = 4/1 = 4, so all Q heads map to V[kvHead=0]
+    Tensor<double> q({1, 4, 1, 2});
+    Tensor<double> k({1, 2, 1, 2});
+    Tensor<double> v({1, 1, 1, 2});
+    Tensor<double> o({1, 4, 1, 2});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+
+    v.setHostValue(7.0, 0, 0, 0, 0);
+    v.setHostValue(8.0, 0, 0, 0, 1); // V[kvHead=0] = [7, 8]
+
+    CpuFpReferenceSdpa::forward(q, k, v, o);
+
+    const double tol = 1e-5;
+
+    // All Q heads map to V[kvHeadV=0] = [7, 8]
+    for(int64_t h = 0; h < 4; ++h)
+    {
+        EXPECT_NEAR(o.getHostValue(0, h, 0, 0), 7.0, tol);
+        EXPECT_NEAR(o.getHostValue(0, h, 0, 1), 8.0, tol);
+    }
+}
+
 TEST(TestCpuFpReferenceSdpaFp64, AttnMaskBroadcastRank2)
 {
     // Rank-2 mask [1, Skv]: dim[0]=1 broadcasts over all sq (and also over batch and head

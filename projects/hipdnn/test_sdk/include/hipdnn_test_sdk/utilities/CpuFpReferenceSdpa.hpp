@@ -23,7 +23,7 @@ class CpuFpReferenceSdpa
 public:
     /// SDPA forward: O = softmax(Q @ K^T * scale) @ V
     ///
-    /// Supports GQA/MQA: numHeads must be divisible by numKvHeads.
+    /// Supports GQA/MQA: numHeads must be divisible by both numKvHeadsK and numKvHeadsV.
     /// Optionally adds an additive attention mask before softmax.
     ///
     /// @param q              Query tensor [B, H, Sq, D]
@@ -69,11 +69,11 @@ public:
         const auto numHeads = q.dims()[1];
         const auto seqQ = q.dims()[2];
         const auto headDim = q.dims()[3];
-        const auto numKvHeads = k.dims()[1];
+        const auto numKvHeadsK = k.dims()[1];
         const auto seqKv = k.dims()[2];
         const auto headDimV = v.dims()[3];
-        if(batch <= 0 || numHeads <= 0 || seqQ <= 0 || headDim <= 0 || numKvHeads <= 0 || seqKv <= 0
-           || headDimV <= 0)
+        if(batch <= 0 || numHeads <= 0 || seqQ <= 0 || headDim <= 0 || numKvHeadsK <= 0
+           || seqKv <= 0 || headDimV <= 0)
         {
             throw std::invalid_argument("CpuFpReferenceSdpa: all dimensions must be positive");
         }
@@ -88,10 +88,11 @@ public:
             throw std::invalid_argument("CpuFpReferenceSdpa: Q head_dim (" + std::to_string(headDim)
                                         + ") != K head_dim (" + std::to_string(k.dims()[3]) + ")");
         }
-        if(v.dims()[1] != numKvHeads)
+        const auto numKvHeadsV = v.dims()[1];
+        if(numHeads % numKvHeadsV != 0)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa: K and V must have same number of heads");
+                "CpuFpReferenceSdpa: numHeads must be divisible by numKvHeadsV");
         }
         if(v.dims()[2] != seqKv)
         {
@@ -101,13 +102,14 @@ public:
         {
             throw std::invalid_argument("CpuFpReferenceSdpa: output shape must be [B, H, Sq, Dv]");
         }
-        if(numHeads % numKvHeads != 0)
+        if(numHeads % numKvHeadsK != 0)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpa: numHeads must be divisible by numKvHeads");
+                "CpuFpReferenceSdpa: numHeads must be divisible by numKvHeadsK");
         }
 
-        const auto headsPerKvHead = numHeads / numKvHeads;
+        const auto headsPerKvHeadK = numHeads / numKvHeadsK;
+        const auto headsPerKvHeadV = numHeads / numKvHeadsV;
 
         const float scale = attnScaleValue.has_value()
                                 ? attnScaleValue.value()
@@ -119,7 +121,8 @@ public:
             const auto b = indices[0];
             const auto h = indices[1];
             const auto sq = indices[2];
-            const auto kvHead = h / headsPerKvHead;
+            const auto kvHeadK = h / headsPerKvHeadK;
+            const auto kvHeadV = h / headsPerKvHeadV;
 
             // Step 1: Compute scaled dot-product scores S[skv]
             std::vector<float> scores(static_cast<size_t>(seqKv));
@@ -130,7 +133,7 @@ public:
                 {
                     dot += static_cast<float>(q.getHostValue(std::vector<int64_t>{b, h, sq, d}))
                            * static_cast<float>(
-                               k.getHostValue(std::vector<int64_t>{b, kvHead, skv, d}));
+                               k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
                 }
                 scores[static_cast<size_t>(skv)] = dot * scale;
             }
@@ -193,7 +196,7 @@ public:
                 {
                     acc += probs[static_cast<size_t>(skv)]
                            * static_cast<float>(
-                               v.getHostValue(std::vector<int64_t>{b, kvHead, skv, dv}));
+                               v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv}));
                 }
                 o.setHostValue(hipdnn_test_sdk::detail::safeConvert<ODataType>(acc),
                                std::vector<int64_t>{b, h, sq, dv});
