@@ -249,8 +249,10 @@ TEST_F(HipRTC_rocWMMA, RocwmmaBasicIncludeTest)
     ASSERT_HIPRTC_SUCCESS(hiprtcCreateProgram(&prog, vectorAddSourceRocwmmaInclude, nullptr, 0, nullptr, nullptr));
 
     // Build compile options
-    auto options    = buildCompileOptions();
-    options.push_back(getIncludeDirArg(binary_name).c_str());
+    auto        includeDirArg = getIncludeDirArg(binary_name);
+    auto        options       = buildCompileOptions();
+    if(!includeDirArg.empty())
+        options.push_back(includeDirArg.c_str());
     int  numOptions = options.size();
 
     // Compile the program
@@ -386,8 +388,10 @@ TEST_F(HipRTC_rocWMMA, RocwmmaGemmTest)
     ASSERT_HIPRTC_SUCCESS(hiprtcCreateProgram(&prog, basicRocwmmaGemmSource, nullptr, 0, nullptr, nullptr));
 
     // Build compile options
-    auto options    = buildCompileOptions();
-    options.push_back(getIncludeDirArg(binary_name).c_str());
+    auto        includeDirArg = getIncludeDirArg(binary_name);
+    auto        options       = buildCompileOptions();
+    if(!includeDirArg.empty())
+        options.push_back(includeDirArg.c_str());
     int  numOptions = options.size();
 
     // Compile the program
