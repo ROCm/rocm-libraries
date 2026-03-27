@@ -29,6 +29,8 @@
 #include <miopen/conv/solvers.hpp>
 #include <miopen/kernel_info.hpp>
 
+#include <string>
+
 namespace miopen {
 namespace solver {
 namespace conv {
@@ -37,8 +39,10 @@ namespace conv {
 
 namespace {
 
-// Must match pyhip test case3 + miopen_conv3d_depthwise_fwd.cpp compile-time BLOCK_H/W, KD/KH/KW,
-// padding.
+// Fused shape for one case only 
+//    B,C_in,C_out,D,H,W = 1,512,512,61,45,80; kernel (3,5,5); pad (0,2,2);
+//     groups = C_out)
+//   - miopen_conv3d_depthwise_fwd.cpp: BLOCK_H/W, KD/KH/KW, PaddingD/H/W.
 constexpr std::size_t kCase3Batch    = 1;
 constexpr std::size_t kCase3Channels = 512;
 constexpr std::size_t kCase3InD      = 61;
@@ -65,13 +69,17 @@ bool Conv3dDepthwiseFwd::IsApplicable(const ExecutionContext& ctx,
     if(!ctx.use_hip_kernels)
         return false;
 
+    const std::string dev_name = ctx.GetStream().GetDeviceName();
+    if(dev_name != "gfx942" && dev_name != "gfx950")
+        return false;
+
     if(!problem.Is3d())
         return false;
 
     if(!problem.IsDirectionForward())
         return false;
 
-    if(!problem.IsBfp16())
+    if(!problem.IsBfp16() && !problem.IsFp16())
         return false;
 
     if(!problem.IsLayoutDefault())
@@ -87,37 +95,33 @@ bool Conv3dDepthwiseFwd::IsApplicable(const ExecutionContext& ctx,
     if(g == 0 || problem.GetInChannels() != g || problem.GetOutChannels() != g)
         return false;
 
-    if(problem.GetBatchSize() != kCase3Batch)
-        return false;
-    if(problem.GetInChannels() != kCase3Channels || problem.GetOutChannels() != kCase3Channels)
-        return false;
-    if(problem.GetInDepth() != kCase3InD || problem.GetInHeight() != kCase3InH ||
-       problem.GetInWidth() != kCase3InW)
-        return false;
-    if(problem.GetOutDepth() != kCase3OutD || problem.GetOutHeight() != kCase3OutH ||
-       problem.GetOutWidth() != kCase3OutW)
-        return false;
-    if(static_cast<int>(problem.GetWeightsDepth()) != kCase3Kd ||
-       static_cast<int>(problem.GetWeightsHeight()) != kCase3Kh ||
-       static_cast<int>(problem.GetWeightsWidth()) != kCase3Kw)
-        return false;
-    if(problem.GetPadD() != kCase3PadD || problem.GetPadH() != kCase3PadH ||
-       problem.GetPadW() != kCase3PadW)
-        return false;
-    if(problem.GetKernelStrideD() != kCase3Stride || problem.GetKernelStrideH() != kCase3Stride ||
-       problem.GetKernelStrideW() != kCase3Stride)
-        return false;
-    if(problem.GetDilationD() != kCase3Dilation || problem.GetDilationH() != kCase3Dilation ||
-       problem.GetDilationW() != kCase3Dilation)
-        return false;
-    if(problem.GetGroupCount() != kCase3Group)
-        return false;
 
-    return true;
+    return problem.GetBatchSize() == kCase3Batch
+        && problem.GetInChannels() == kCase3Channels
+        && problem.GetOutChannels() == kCase3Channels
+        && problem.GetInDepth() == kCase3InD      // --in_d 61
+        && problem.GetInHeight() == kCase3InH     // -H 45
+        && problem.GetInWidth() == kCase3InW      // -W 80
+        && problem.GetOutDepth() == kCase3OutD
+        && problem.GetOutHeight() == kCase3OutH
+        && problem.GetOutWidth() == kCase3OutW
+        && static_cast<int>(problem.GetWeightsDepth()) == kCase3Kd   // --fil_d 3
+        && static_cast<int>(problem.GetWeightsHeight()) == kCase3Kh   // -y 5
+        && static_cast<int>(problem.GetWeightsWidth()) == kCase3Kw    // -x 5
+        && problem.GetPadD() == kCase3PadD       // --pad_d 0
+        && problem.GetPadH() == kCase3PadH        // -p 2
+        && problem.GetPadW() == kCase3PadW        // -q 2
+        && problem.GetKernelStrideD() == kCase3Stride
+        && problem.GetKernelStrideH() == kCase3Stride
+        && problem.GetKernelStrideW() == kCase3Stride
+        && problem.GetDilationD() == kCase3Dilation
+        && problem.GetDilationH() == kCase3Dilation
+        && problem.GetDilationW() == kCase3Dilation
+        && static_cast<std::size_t>(problem.GetGroupCount()) == kCase3Group; // -g 512, depthwise
 }
 
 ConvSolution Conv3dDepthwiseFwd::GetSolution(const ExecutionContext&,
-                                             const miopen::conv::ProblemDescription&) const
+                                             const miopen::conv::ProblemDescription& problem) const
 {
     ConvSolution result;
     KernelInfo kernel;
@@ -132,7 +136,11 @@ ConvSolution Conv3dDepthwiseFwd::GetSolution(const ExecutionContext&,
     kernel.g_wk.push_back(256 * kCase3Batch);
     kernel.g_wk.push_back(kCase3Channels);
     kernel.g_wk.push_back(kCase3OutD);
-    kernel.comp_options = std::string();
+    // Same source, two HIPRTC/hipcc builds: see miopen_conv3d_depthwise_fwd.cpp #ifndef IO_DTYPE.
+    if(problem.IsFp16())
+        kernel.comp_options = std::string(" -DIO_DTYPE=__half");
+    else
+        kernel.comp_options = std::string(" -DIO_DTYPE=__hip_bfloat16"); // IsApplicable: BFP16
 
     result.invoker_factory = [](const std::vector<Kernel>& kernels) {
         const auto kern = kernels[0];

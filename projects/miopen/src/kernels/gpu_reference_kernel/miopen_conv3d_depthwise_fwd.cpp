@@ -24,8 +24,12 @@
  *
  *******************************************************************************/
 
-// pyhip would inject these; fixed for MIOpen case3 (see conv_depthwise.py)
+//   FP16: -DIO_DTYPE=__half
+//   BF16: -DIO_DTYPE=__hip_bfloat16
+// If the macro is already set by the compiler, the #ifndef branch is skipped.
+#ifndef IO_DTYPE
 #define IO_DTYPE __hip_bfloat16
+#endif
 #define KD 3
 #define KH 5
 #define KW 5
@@ -70,9 +74,15 @@ constexpr T div_up(T a, T b)
     return (a + b - 1) / b;
 }
 
-constexpr int LDS_SIZE       = 32 * 1024;    // with 64-KB LDS, this allows occupancy=2
+// The solver fixes a single input shape, so `s_input` size is known at compile time and this LDS
+// budget is fixed accordingly.
+// Targets gfx942 / gfx950: per-workgroup LDS limit is sufficient for 32 KiB here with occupancy
+// headroom.
+constexpr int LDS_SIZE = 32 * 1024;
 constexpr int weight_size    = KD * KH * KW; // in unit of IO_DTYPE
 constexpr int max_input_size = LDS_SIZE / sizeof(IO_DTYPE) - (weight_size + 31) / 32 * 32;
+// __half and __hip_bfloat16 are both 2 bytes here → same LDS footprint for FP16 vs BF16 builds.
+static_assert(sizeof(IO_DTYPE) == 2, "LDS math assumes 16-bit elements");
 
 static_assert(PaddingD == 0);
 using int32x4_t   = __attribute__((__vector_size__(4 * sizeof(int)))) int;
@@ -90,7 +100,7 @@ __device__ __inline__ void s_waitcnt_vmcnt()
     asm volatile("s_waitcnt vmcnt(%0)\n" ::"i"(cnt));
 }
 
-__device__ __inline__ float ds_read_u16_d16_hi(__hip_bfloat16* psrc, int imm_offset)
+__device__ __inline__ float ds_read_u16_d16_hi(IO_DTYPE* psrc, int imm_offset)
 {
     float v;
     as3_u32_ptr vaddr = (as3_u32_ptr)(psrc);

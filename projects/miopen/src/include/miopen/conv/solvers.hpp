@@ -4897,7 +4897,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd2D final
                                        const miopen::conv::ProblemDescription&) const;
 };
 
-/// Placeholder forward 3D depthwise convolution (BF16, default/NCDHW layout); stub kernel.
+/// Placeholder forward 3D depthwise convolution (FP16/BF16, default/NCDHW layout); stub kernel.
 struct MIOPEN_INTERNALS_EXPORT Conv3dDepthwiseFwd final : ConvSolver
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<Conv3dDepthwiseFwd>(); }
