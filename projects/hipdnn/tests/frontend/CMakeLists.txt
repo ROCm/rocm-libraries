@@ -50,6 +50,7 @@ add_executable(
     IntegrationSetPluginPathsExt.cpp
     IntegrationSdpaBpropDescriptorLowering.cpp
     IntegrationSdpaBpropLifting.cpp
+    IntegrationSdpaFpropDescriptorLifting.cpp
     IntegrationSdpaFpropDescriptorLowering.cpp
 )
 

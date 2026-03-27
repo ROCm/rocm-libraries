@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/detail/SdpaFpropPacker.hpp>
+#include <hipdnn_frontend/detail/SdpaFpropUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
@@ -232,6 +233,16 @@ public:
             }
         }
 
+        return {};
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        SdpaAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackSdpaFpropOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
         return {};
     }
 

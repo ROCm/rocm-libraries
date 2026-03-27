@@ -580,6 +580,93 @@ TEST(TestTypes, FromHipdnnNormFwdPhaseRoundTrip)
     }
 }
 
+TEST(TestTypes, FromHipdnnDiagonalAlignmentValidValues)
+{
+    using namespace hipdnn_frontend;
+
+    auto [topLeft, topLeftErr]
+        = fromHipdnnDiagonalAlignment(HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT);
+    EXPECT_TRUE(topLeftErr.is_good());
+    EXPECT_EQ(topLeft, DiagonalAlignment::TOP_LEFT);
+
+    auto [bottomRight, bottomRightErr]
+        = fromHipdnnDiagonalAlignment(HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT);
+    EXPECT_TRUE(bottomRightErr.is_good());
+    EXPECT_EQ(bottomRight, DiagonalAlignment::BOTTOM_RIGHT);
+}
+
+TEST(TestTypes, FromHipdnnDiagonalAlignmentUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownVal = static_cast<hipdnnDiagonalAlignment_t>(9999);
+    auto [alignment, err] = fromHipdnnDiagonalAlignment(unknownVal);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(alignment, DiagonalAlignment::TOP_LEFT);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnDiagonalAlignmentRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
+    {
+        auto backend = toBackendDiagonalAlignment(alignment);
+        auto [roundTripped, err] = fromHipdnnDiagonalAlignment(backend);
+        EXPECT_TRUE(err.is_good());
+        EXPECT_EQ(roundTripped, alignment);
+    }
+}
+
+TEST(TestTypes, FromHipdnnAttentionImplementationValidValues)
+{
+    using namespace hipdnn_frontend;
+
+    auto [autoVal, autoErr]
+        = fromHipdnnAttentionImplementation(HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT);
+    EXPECT_TRUE(autoErr.is_good());
+    EXPECT_EQ(autoVal, AttentionImplementation::AUTO);
+
+    auto [composite, compositeErr]
+        = fromHipdnnAttentionImplementation(HIPDNN_ATTENTION_IMPLEMENTATION_COMPOSITE_EXT);
+    EXPECT_TRUE(compositeErr.is_good());
+    EXPECT_EQ(composite, AttentionImplementation::COMPOSITE);
+
+    auto [unified, unifiedErr]
+        = fromHipdnnAttentionImplementation(HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT);
+    EXPECT_TRUE(unifiedErr.is_good());
+    EXPECT_EQ(unified, AttentionImplementation::UNIFIED);
+}
+
+TEST(TestTypes, FromHipdnnAttentionImplementationUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownVal = static_cast<hipdnnAttentionImplementation_t>(9999);
+    auto [impl, err] = fromHipdnnAttentionImplementation(unknownVal);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(impl, AttentionImplementation::AUTO);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnAttentionImplementationRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto impl : {AttentionImplementation::AUTO,
+                     AttentionImplementation::COMPOSITE,
+                     AttentionImplementation::UNIFIED})
+    {
+        auto backend = toBackendAttentionImplementation(impl);
+        auto [roundTripped, err] = fromHipdnnAttentionImplementation(backend);
+        EXPECT_TRUE(err.is_good());
+        EXPECT_EQ(roundTripped, impl);
+    }
+}
+
 TEST(TestTypes, FromHipdnnPointwiseModeRoundTrip)
 {
     using namespace hipdnn_frontend;
