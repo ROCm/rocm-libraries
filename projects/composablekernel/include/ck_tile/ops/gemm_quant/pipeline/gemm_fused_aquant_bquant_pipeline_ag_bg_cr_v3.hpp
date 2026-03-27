@@ -11,6 +11,7 @@
 #include "ck_tile/ops/gemm_quant/pipeline/gemm_abquant_pipeline_ag_bg_cr_base.hpp"
 #include "ck_tile/host/concat.hpp"
 #include "ck_tile/ops/gemm_quant/pipeline/gemm_abquant_pipeline_ag_bg_cr_policy.hpp"
+#include "ck_tile/ops/gemm_quant/pipeline/gemm_quant_pipeline_problem.hpp"
 
 namespace ck_tile {
 
@@ -62,7 +63,24 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
     using BQLayout = remove_cvref_t<typename Problem::BQLayout>;
     using CLayout  = remove_cvref_t<typename Problem::CLayout>;
 
-    using BlockGemm = remove_cvref_t<decltype(Policy::template GetBlockGemm<Problem>())>;
+    // Keeping rest the same, change ADataType to FP8 for the BlockGemm call
+    using QuantizedABQuantProblem = GemmABQuantPipelineProblem<ck_tile::fp8_t,
+                                                               typename Problem::AQDataType,
+                                                               typename Problem::BDataType,
+                                                               typename Problem::BQDataType,
+                                                               typename Problem::CDataType,
+                                                               typename Problem::BlockGemmShape,
+                                                               typename Problem::Traits,
+                                                               typename Problem::AQuantGroupSize,
+                                                               typename Problem::BQuantGroupSize,
+                                                               Problem::TransposeC,
+                                                               typename Problem::ComputeDataType,
+                                                               Problem::Scheduler,
+                                                               Problem::HasHotLoop,
+                                                               Problem::TailNum>;
+
+    using BlockGemm =
+        remove_cvref_t<decltype(Policy::template GetBlockGemm<QuantizedABQuantProblem>())>;
 
     // A/B DataType gets converted from PkInt4/PkFp4 during loading
     using OverrideADataType = typename BlockGemm::OverrideADataType;
