@@ -28,18 +28,17 @@ struct PerformanceConfigSoftmax : PerfConfigBase<PerformanceConfigSoftmax>
     int local_size;
     bool vectorized;
     bool separate_stride;
-    bool stride_in_local_size;
     bool initialized = false;
-    PerformanceConfigSoftmax(int _local_size, bool _vectorized, bool _separate_stride, bool _stride_in_local_size)
-        : local_size(_local_size), vectorized(_vectorized), separate_stride(_separate_stride), stride_in_local_size(_stride_in_local_size)
+    PerformanceConfigSoftmax(int _local_size, bool _vectorized, bool _separate_stride)
+        : local_size(_local_size), vectorized(_vectorized), separate_stride(_separate_stride)
     {
     }
     PerformanceConfigSoftmax()
-        : local_size(static_cast<int>(start_local_size)), vectorized(start_vectorized), separate_stride(start_separate_stride), stride_in_local_size(start_stride_in_local_size)
+        : local_size(static_cast<int>(start_local_size)), vectorized(start_vectorized), separate_stride(start_separate_stride)
     {
     }
     PerformanceConfigSoftmax(bool)
-        : local_size(static_cast<int>(start_local_size)), vectorized(start_vectorized), separate_stride(start_separate_stride), stride_in_local_size(start_stride_in_local_size)
+        : local_size(static_cast<int>(start_local_size)), vectorized(start_vectorized), separate_stride(start_separate_stride)
     {
     }
     void HeuristicInit(const miopen::softmax::ProblemDescription& problem);
@@ -54,7 +53,6 @@ struct PerformanceConfigSoftmax : PerfConfigBase<PerformanceConfigSoftmax>
         f(s.local_size, "local_size");
         f(s.vectorized, "vectorized");
         f(s.separate_stride, "separate_stride");
-        f(s.stride_in_local_size, "stride_in_local_size");
     }
     bool operator==(const PerformanceConfigSoftmax& other) const;
 
@@ -69,8 +67,6 @@ public:
     static constexpr auto start_vectorized   = false;
     static constexpr auto default_separate_stride = true;
     static constexpr auto start_separate_stride = false;
-    static constexpr auto default_stride_in_local_size = true;
-    static constexpr auto start_stride_in_local_size = false;
 };
 
 struct Softmax final : SoftmaxTunableSolver<PerformanceConfigSoftmax>
