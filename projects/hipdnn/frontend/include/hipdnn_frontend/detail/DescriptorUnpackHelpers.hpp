@@ -525,10 +525,10 @@ template <typename T>
     std::vector<std::shared_ptr<graph::TensorAttributes>>& outTensors,
     const std::string& errorContext)
 {
-    auto [descs, err] = getDescriptorAttrDescArray(opDesc, tensorAttrName, errorContext);
-    if(err.is_bad())
+    auto [descs, descErr] = getDescriptorAttrDescArray(opDesc, tensorAttrName, errorContext);
+    if(descErr.is_bad())
     {
-        return err;
+        return descErr;
     }
 
     outTensors.clear();
