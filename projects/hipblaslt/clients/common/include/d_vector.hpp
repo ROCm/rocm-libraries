@@ -93,6 +93,9 @@ public:
         memStatus.dwLength = sizeof(memStatus);
         if(GlobalMemoryStatusEx(&memStatus))
         {
+            hipblaslt_cout << "!!!!!!!!!!!!!!!" << std::endl;
+            hipblaslt_cout << "Total physical memory: " << memStatus.ullTotalPhys << std::endl;
+            hipblaslt_cout << "allocated capacity: " << allocated_capacity << std::endl;
             // In the windows system, the host memory(pinned memory)'s capacity is the half of the physical memory
             const unsigned long long host_max_capacity = memStatus.ullTotalPhys / 2;
             if(allocated_capacity > host_max_capacity)
