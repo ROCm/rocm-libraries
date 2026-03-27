@@ -30,21 +30,21 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup conv_module
-*  \brief Convert a sparse HYB matrix into a sparse CSR matrix
+*  \brief Convert a sparse HYB matrix into a sparse CSR matrix.
 *
 *  \details
 *  \p hipsparseXhyb2csr converts a HYB matrix into a CSR matrix.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \deprecated
 *  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
 *  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
-*  handle            handle to the hipsparse library context queue.
+*  handle            handle to the hipSPARSE library context queue.
 *  @param[in]
 *  descrA            descriptor of the sparse HYB matrix. Currently, only
 *                    \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -61,7 +61,7 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p hybA, \p csrSortedValA,
-*          \p csrSortedRowPtrA or \p csrSortedColIndA is nullptr.
+*          \p csrSortedRowPtrA, or \p csrSortedColIndA is nullptr.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */

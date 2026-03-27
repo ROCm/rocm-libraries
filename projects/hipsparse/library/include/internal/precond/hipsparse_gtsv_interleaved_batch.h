@@ -35,21 +35,21 @@ extern "C" {
 *  The temporary storage buffer must be allocated by the user.
 *
 *  @param[in]
-*  handle             handle to the hipsparse library context queue.
+*  handle             handle to the hipSPARSE library context queue.
 *  @param[in]
-*  algo               Algorithm to use when solving tridiagonal systems. Options are thomas ( \p algo=0 ),
-*                     LU ( \p algo=1 ), or QR ( \p algo=2 ). Thomas algorithm is the fastest but is not
-*                     stable while LU and QR are slower but are stable.
+*  algo               Algorithm to use when solving tridiagonal systems. Options are Thomas ( \p algo=0 ),
+*                     LU ( \p algo=1 ), or QR ( \p algo=2 ). The Thomas algorithm is the fastest but is not
+*                     stable, while LU and QR are slower but are stable.
 *  @param[in]
-*  m                  size of the tri-diagonal linear system.
+*  m                  size of the tridiagonal linear system.
 *  @param[in]
-*  dl                 lower diagonal of tri-diagonal system. The first element of the lower diagonal must be zero.
+*  dl                 lower diagonal of the tridiagonal system. The first element of the lower diagonal must be zero.
 *  @param[in]
-*  d                  main diagonal of tri-diagonal system.
+*  d                  main diagonal of the tridiagonal system.
 *  @param[in]
-*  du                 upper diagonal of tri-diagonal system. The last element of the upper diagonal must be zero.
+*  du                 upper diagonal of the tridiagonal system. The last element of the upper diagonal must be zero.
 *  @param[inout]
-*  x                  Dense array of righthand-sides with dimension \p batchCount by \p m.
+*  x                  Dense array of right-hand sides with dimension \p batchCount by \p m.
 *  @param[in]
 *  batchCount         The number of systems to solve.
 *  @param[out]
@@ -58,7 +58,7 @@ extern "C" {
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p batchCount, \p dl, \p d, \p du,
-*              \p x or \p pBufferSizeInBytes pointer is invalid.
+*              \p x, or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 /**@{*/
@@ -108,7 +108,7 @@ hipsparseStatus_t hipsparseZgtsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 /**@}*/
 
 /*! \ingroup precond_module
-*  \brief Interleaved Batch tridiagonal solver
+*  \brief Interleaved batch tridiagonal solver.
 *
 *  \details
 *  \p hipsparseXgtsvInterleavedBatch solves a batched tridiagonal linear system
@@ -118,22 +118,22 @@ hipsparseStatus_t hipsparseZgtsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  where for each batch \f$i=0\ldots\f$ \p batchCount, \f$T^{i}\f$ is a sparse tridiagonal matrix and
 *  \f$x^{i}\f$ is a dense right-hand side vector. All of the tridiagonal matrices, \f$T^{i}\f$, are
 *  packed in an interleaved fashion into three vectors: \p dl for the lower diagonals, \p d for the main
-*  diagonals and \p du for the upper diagonals. See below for a description of what this interleaved
-*  memory pattern looks like.
+*  diagonals, and \p du for the upper diagonals. See below for a description of the interleaved
+*  memory pattern.
 *
 *  Solving the batched tridiagonal system involves two steps. First, the user calls
 *  \ref hipsparseSgtsvInterleavedBatch_bufferSizeExt "hipsparseXgtsvInterleavedBatch_bufferSizeExt()"
-*  in order to determine the size of the required temporary storage buffer. Once determined, the user allocates
+*  to determine the size of the required temporary storage buffer. Once determined, the user allocates
 *  this buffer and passes it to \ref hipsparseSgtsvInterleavedBatch "hipsparseXgtsvInterleavedBatch()"
 *  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are
 *  overwritten with the solution after the call to
 *  \ref hipsparseSgtsvInterleavedBatch "hipsparseXgtsvInterleavedBatch()".
 *
 *  The user can specify different algorithms for \p hipsparseXgtsvInterleavedBatch
-*  to use. Options are thomas ( \p algo=0 ),
+*  to use. Options are Thomas ( \p algo=0 ),
 *  LU ( \p algo=1 ), or QR ( \p algo=2 ).
 *
-*  Unlike the strided batch routines which write each batch matrix one after the other in memory, the interleaved
+*  Unlike the strided batch routines, which write each batch matrix one after the other in memory, the interleaved
 *  routines write the batch matrices such that each element from each matrix is written consecutively one after
 *  the other. For example, consider the following batch matrices:
 *
@@ -163,29 +163,29 @@ hipsparseStatus_t hipsparseZgtsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *    \text{upper} &= \begin{bmatrix} t^{0}_{01} & t^{1}_{01} & t^{2}_{01} & t^{0}_{12} & t^{1}_{12} & t^{2}_{12} & 0 & 0 & 0 \end{bmatrix} \\
 *    \end{align}
 *  \f]
-*  For the lower array, the first \p batchCount entries are zero and for the upper array the last \p batchCount
+*  For the lower array, the first \p batchCount entries are zero, and for the upper array, the last \p batchCount
 *  entries are zero.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
-*  algo        Algorithm to use when solving tridiagonal systems. Options are thomas ( \p algo=0 ),
-*              LU ( \p algo=1 ), or QR ( \p algo=2 ). Thomas algorithm is the fastest but is not
-*              stable while LU and QR are slower but are stable.
+*  algo        Algorithm to use when solving tridiagonal systems. Options are Thomas ( \p algo=0 ),
+*              LU ( \p algo=1 ), or QR ( \p algo=2 ). The Thomas algorithm is the fastest but is not
+*              stable, while LU and QR are slower but are stable.
 *  @param[in]
-*  m           size of the tri-diagonal linear system.
+*  m           size of the tridiagonal linear system.
 *  @param[inout]
-*  dl          lower diagonal of tri-diagonal system. The first element of the lower diagonal must be zero.
+*  dl          lower diagonal of the tridiagonal system. The first element of the lower diagonal must be zero.
 *  @param[inout]
-*  d           main diagonal of tri-diagonal system.
+*  d           main diagonal of the tridiagonal system.
 *  @param[inout]
-*  du          upper diagonal of tri-diagonal system. The last element of the upper diagonal must be zero.
+*  du          upper diagonal of the tridiagonal system. The last element of the upper diagonal must be zero.
 *  @param[inout]
-*  x           Dense array of righthand-sides with dimension \p batchCount by \p m.
+*  x           Dense array of right-hand sides with dimension \p batchCount by \p m.
 *  @param[in]
 *  batchCount  The number of systems to solve.
 *  @param[in]
@@ -193,7 +193,7 @@ hipsparseStatus_t hipsparseZgtsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p batchCount, \p dl, \p d,
-*              \p du, \p x or \p pBuffer pointer is invalid.
+*              \p du, \p x, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 /**@{*/

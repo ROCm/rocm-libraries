@@ -36,7 +36,7 @@ extern "C" {
  *  be allocated by the user.
  *
  *  @param[in]
- *  handle      handle to the hipsparse library context queue.
+ *  handle      handle to the hipSPARSE library context queue.
  *  @param[in]
  *  transA      matrix operation type.
  *  @param[in]
@@ -49,7 +49,7 @@ extern "C" {
  *  pBufferSizeInBytes temporary storage buffer size.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz or
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, or
  *              \p pBufferSizeInBytes is invalid.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
@@ -111,20 +111,20 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
  *  \f]
  *
  *  Performing the above operation involves two steps. First, the user calls
- *  \ref hipsparseSgemvi_bufferSize "hipsparseXgemvi_bufferSize()" in order to determine the size of
+ *  \ref hipsparseSgemvi_bufferSize "hipsparseXgemvi_bufferSize()" to determine the size of
  *  the temporary storage buffer. Next, the user allocates this temporary buffer and passes it to
- *  \p hipsparseXgemvi to complete the computation. Once all calls to \p hipsparseXgemvi are complete the
+ *  \p hipsparseXgemvi to complete the computation. After all calls to \p hipsparseXgemvi are complete, the
  *  temporary storage buffer can be freed.
  *
  *  \note
- *  This function is non blocking and executed asynchronously with respect to the host.
- *  It may return before the actual computation has finished.
+ *  This function is non-blocking and executed asynchronously with respect to the host.
+ *  It can return before the actual computation has finished.
  *
  *  \note
  *  Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
  *
  *  @param[in]
- *  handle      handle to the hipsparse library context queue.
+ *  handle      handle to the hipSPARSE library context queue.
  *  @param[in]
  *  transA      matrix operation type.
  *  @param[in]
@@ -136,13 +136,13 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
  *  @param[in]
  *  A           pointer to the dense matrix.
  *  @param[in]
- *  lda         leading dimension of the dense matrix
+ *  lda         leading dimension of the dense matrix.
  *  @param[in]
- *  nnz         number of non-zero entries in the sparse vector
+ *  nnz         number of non-zero entries in the sparse vector.
  *  @param[in]
- *  x           array of \p nnz elements containing the values of the sparse vector
+ *  x           array of \p nnz elements containing the values of the sparse vector.
  *  @param[in]
- *  xInd        array of \p nnz elements containing the indices of the sparse vector
+ *  xInd        array of \p nnz elements containing the indices of the sparse vector.
  *  @param[in]
  *  beta        scalar \f$\beta\f$.
  *  @param[inout]
@@ -151,11 +151,11 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
  *  @param[in]
  *  idxBase     \ref HIPSPARSE_INDEX_BASE_ZERO or \ref HIPSPARSE_INDEX_BASE_ONE.
  *  @param[in]
- *  pBuffer     temporary storage buffer
+ *  pBuffer     temporary storage buffer.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p nnz, \p alpha,
- *              \p A, \p x, \p xInd, \p beta, \p y or \p pBuffer is invalid.
+ *              \p A, \p x, \p xInd, \p beta, \p y, or \p pBuffer is invalid.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.

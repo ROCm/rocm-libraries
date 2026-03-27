@@ -31,21 +31,21 @@ extern "C" {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup conv_module
 *  \brief
-*  \p hipsparseXpruneDense2csr_bufferSize computes the the size of the user allocated temporary storage buffer
+*  \p hipsparseXpruneDense2csr_bufferSize computes the the size of the user-allocated temporary storage buffer
 *  used when converting a dense matrix to a pruned CSR matrix.
 *
 *  \details
-*  Specifically given an input dense column ordered matrix A, with leading dimension \p lda where \p lda>=m,
+*  Specifically given an input dense column-ordered matrix A, with leading dimension \p lda, where \p lda>=m,
 *  the resulting pruned sparse CSR matrix C is computed using:
 *  \f[
 *   |C(i,j)| = A(i, j) \text{  if |A(i, j)| > threshold}
 *  \f]
 *
-*  The first step in this conversion is to determine the required user allocated buffer size
+*  The first step in this conversion is to determine the required user-allocated buffer size
 *  using \p hipsparseXpruneDense2csr_bufferSize() that will be passed to the subsequent steps of the conversion.
-*  Once the buffer size has been determined the user must allocate it. This user allocated buffer is then passed
+*  After the buffer size has been determined, the user must allocate it. This user-allocated buffer is then passed
 *  to \ref hipsparseSpruneDense2csrNnz "hipsparseXpruneDense2csrNnz()" and \ref hipsparseSpruneDense2csr
-*  "hipsparseXpruneDense2csr()" to complete the conversion. The user is responsible to then free the buffer once
+*  "hipsparseXpruneDense2csr()" to complete the conversion. The user is responsible for then freeing the buffer after
 *  the conversion has been completed.
 *
 *  See hipsparseSpruneDense2csr() for a full code example.
@@ -55,7 +55,7 @@ extern "C" {
 *  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
-*  handle             handle to the hipsparse library context queue.
+*  handle             handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m                  number of rows of the dense matrix \p A. Must be non-negative.
 *  @param[in]
@@ -65,12 +65,12 @@ extern "C" {
 *  @param[in]
 *  lda                leading dimension of dense array \p A. Must be at least \p m.
 *  @param[in]
-*  threshold          pointer to the pruning non-negative threshold which can exist in either host or device memory.
+*  threshold          pointer to the pruning non-negative threshold, which can exist in either host or device memory.
 *  @param[in]
-*  descr              the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL
-*                     and also any valid value of the \ref hipsparseIndexBase_t.
+*  descr              the descriptor of the dense matrix \p A. The supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL
+*                     and any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
-*  csrVal             array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) nonzero elements of matrix \p A.
+*  csrVal             array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) non-zero elements of matrix \p A.
 *  @param[in]
 *  csrRowPtr          integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
 *  @param[in]
@@ -78,7 +78,7 @@ extern "C" {
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     hipsparseSpruneDense2csrNnz(), hipsparseDpruneDense2csrNnz(),
-*                     hipsparseSpruneDense2csr() and hipsparseDpruneDense2csr().
+*                     hipsparseSpruneDense2csr(), and hipsparseDpruneDense2csr().
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -147,22 +147,22 @@ hipsparseStatus_t hipsparseDpruneDense2csr_bufferSizeExt(hipsparseHandle_t      
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup conv_module
 *  \brief
-*  \p hipsparseXpruneDense2csrNnz function computes the number of nonzero elements per row and the total
-*  number of nonzero elements in a dense matrix once the elements less than the (non-negative) threshold are
+*  \p hipsparseXpruneDense2csrNnz computes the number of non-zero elements per row and the total
+*  number of non-zero elements in a dense matrix after the elements less than the (non-negative) threshold are
 *  pruned from the matrix.
 *
 *  \details
-*  Specifically given an input dense column ordered matrix A, with leading dimension \p lda where \p lda>=m,
-*  the resulting pruned sparse CSR matrix C is computed using:
+*  Given an input dense column ordered matrix \p A, with leading dimension \p lda where \p lda>=m,
+*  the resulting pruned sparse CSR matrix \f$C\f$ is computed using:
 *  \f[
 *   |C(i,j)| = A(i, j) \text{  if |A(i, j)| > threshold}
 *  \f]
 *
-*  First the user must determine the size of the required temporary buffer using the routine
-*  \ref hipsparseSpruneDense2csr_bufferSize "hipsparseXpruneDense2csr_bufferSize()" and then allocate it. Next
-*  the user allocates \p csrRowPtr with size \p m+1. Then the passes both the temporary storage buffer as well
-*  as \p csrRowPtr to \p hipsparseXpruneDense2csrNnz in order to determine the total number of non-zeros that
-*  will exist in the sparse CSR matrix C (after pruning has been performed on A) as well as fill the output CSR
+*  First, the user must determine the size of the required temporary buffer using the routine
+*  \ref hipsparseSpruneDense2csr_bufferSize "hipsparseXpruneDense2csr_bufferSize()" and then allocate it. Next,
+*  the user allocates \p csrRowPtr with size \p m+1. Then the function passes both the temporary storage buffer and
+*  \p csrRowPtr to \p hipsparseXpruneDense2csrNnz to determine the total number of non-zeros that
+*  will exist in the sparse CSR matrix C (after pruning has been performed on \p A ) as well as fill the output CSR
 *  row pointer array \p csrRowPtr.
 *
 *  For example, given the dense matrix:
@@ -185,7 +185,7 @@ hipsparseStatus_t hipsparseDpruneDense2csr_bufferSizeExt(hipsparseHandle_t      
 *    \end{bmatrix}
 *  \f]
 *
-*  and corresponding row pointer array and non-zero count:
+*  and the corresponding row pointer array and non-zero count:
 *
 *  \f[
 *    \begin{align}
@@ -194,40 +194,40 @@ hipsparseStatus_t hipsparseDpruneDense2csr_bufferSizeExt(hipsparseHandle_t      
 *    \end{align}
 *  \f]
 *
-*  The above example assumes a zero index base for the output CSR matrix. We can set the desired index base
+*  The above example assumes a zero index base for the output CSR matrix. Users can set the desired index base
 *  in the output CSR matrix by setting it in the \ref hipsparseMatDescr_t. See \ref hipsparseSetMatIndexBase().
 *
 *  For a full code example on how to use this routine, see hipsparseSpruneDense2csr().
 *
 *  \note
-*  The routine does support asynchronous execution if the pointer mode is set to device.
+*  The routine supports asynchronous execution if the pointer mode is set to device.
 *
 *  @param[in]
-*  handle             handle to the hipsparse library context queue.
+*  handle             handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m                  number of rows of the dense matrix \p A.
 *  @param[in]
 *  n                  number of columns of the dense matrix \p A.
 *  @param[in]
-*  A                  array of dimensions (\p lda, \p n)
+*  A                  array of dimensions (\p lda, \p n).
 *  @param[in]
-*  lda                leading dimension of dense array \p A.
+*  lda                leading dimension of the dense array \p A.
 *  @param[in]
-*  threshold          pointer to the pruning non-negative threshold which can exist in either host or device memory.
+*  threshold          pointer to the pruning non-negative threshold, which can exist in either host or device memory.
 *  @param[in]
 *  descr              the descriptor of the dense matrix \p A.
 *  @param[out]
 *  csrRowPtr          integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
 *  @param[out]
-*  nnzTotalDevHostPtr total number of nonzero elements in device or host memory.
+*  nnzTotalDevHostPtr total number of non-zero elements in device or host memory.
 *  @param[out]
 *  buffer             buffer allocated by the user whose size is determined by calling
 *                     \ref hipsparseSpruneDense2csr_bufferSize "hipsparseXpruneDense2csr_bufferSize()" or
 *                     \ref hipsparseSpruneDense2csr_bufferSizeExt "hipsparseXpruneDense2csr_bufferSizeExt()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p A, \p threshold, \p descr, \p csrRowPtr
-*              \p nnzTotalDevHostPtr or \p buffer pointer is invalid.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p A, \p threshold, \p descr, \p csrRowPtr,
+*              \p nnzTotalDevHostPtr, or \p buffer pointer is invalid.
 */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
@@ -261,26 +261,26 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnz(hipsparseHandle_t         handle,
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup conv_module
 *  \brief
-*  \p hipsparseXpruneDense2csr converts the matrix A in dense format into a sparse matrix in CSR format
+*  \p hipsparseXpruneDense2csr converts the matrix \p A in dense format into a sparse matrix in CSR format,
 *  while pruning values that are less than the (non-negative) threshold. All the parameters are assumed
 *  to have been pre-allocated by the user.
 *
 *  \details
-*  Specifically given an input dense column ordered matrix A, with leading dimension \p lda where \p lda>=m,
+*  Given an input dense column ordered matrix \p A, with leading dimension \p lda, where \p lda>=m,
 *  the resulting pruned sparse CSR matrix C is computed using:
 *  \f[
 *   |C(i,j)| = A(i, j) \text{  if |A(i, j)| > threshold}
 *  \f]
 *
 *  The user first calls \ref hipsparseSpruneDense2csr_bufferSize "hipsparseXpruneDense2csr_bufferSize()" to
-*  determine the size of the required user allocate temporary storage buffer. The user then allocates this
+*  determine the size of the required user-allocated temporary storage buffer. The user then allocates this
 *  buffer. Next, the user allocates \p csrRowPtr to have \p m+1 elements and then calls
-*  \ref hipsparseSpruneDense2csrNnz "hipsparseXpruneDense2csrNnz()" which fills in the \p csrRowPtr array
+*  \ref hipsparseSpruneDense2csrNnz "hipsparseXpruneDense2csrNnz()", which fills in the \p csrRowPtr array
 *  and stores the number of elements that are larger than the pruning \p threshold in \p nnzTotalDevHostPtr.
 *  The user then allocates \p csrColInd and \p csrVal to have size \p nnzTotalDevHostPtr and completes the
 *  conversion by calling \p hipsparseXpruneDense2csr().
 *
-*  For example, performing these steps with the dense input matrix A:
+*  For example, performing these steps with the dense input matrix \p A :
 *  \f[
 *    \begin{bmatrix}
 *    6 & 2 & 3 & 7 \\
@@ -310,39 +310,39 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnz(hipsparseHandle_t         handle,
 *  \f]
 *
 *  \note
-*  The routine \p hipsparseXpruneDense2csr() is executed asynchronously with respect to the host and may
+*  The routine \p hipsparseXpruneDense2csr() is executed asynchronously with respect to the host and can
 *  return control to the application on the host before the entire result is ready.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m           number of rows of the dense matrix \p A.
 *  @param[in]
 *  n           number of columns of the dense matrix \p A.
 *  @param[in]
-*  A           array of dimensions (\p lda, \p n)
+*  A           array of dimensions (\p lda, \p n).
 *  @param[in]
 *  lda         leading dimension of dense array \p A.
 *  @param[in]
-*  threshold   pointer to the non-negative pruning threshold which can exist in either host or device memory.
+*  threshold   pointer to the non-negative pruning threshold, which can exist in either host or device memory.
 *  @param[in]
-*  descr       the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL
-*              and also any valid value of the \ref hipsparseIndexBase_t.
+*  descr       the descriptor of the dense matrix \p A. The supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL
+*              and any valid value of the \ref hipsparseIndexBase_t.
 *  @param[out]
-*  csrVal      array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) nonzero elements of matrix \p A.
+*  csrVal      array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) non-zero elements of matrix \p A.
 *  @param[in]
 *  csrRowPtr  integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
 *  @param[out]
 *  csrColInd  integer array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) column indices of the non-zero elements of matrix \p A.
 *
 *  @param[in]
-*  buffer     temporary storage buffer allocated by the user, size is returned by
+*  buffer     temporary storage buffer allocated by the user. The size is returned by
 *             \ref hipsparseSpruneDense2csr_bufferSize "hipsparseXpruneDense2csr_bufferSize()" or
 *             \ref hipsparseSpruneDense2csr_bufferSizeExt "hipsparseXpruneDense2csr_bufferSizeExt()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p A, \p descr, \p threshold, \p csrVal
-*              \p csrRowPtr, \p csrColInd, \p buffer pointer is invalid.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p A, \p descr, \p threshold, \p csrVal,
+*              \p csrRowPtr, \p csrColInd, or \p buffer pointer is invalid.
 */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
