@@ -1,14 +1,18 @@
+{% from "macros.j2" import vector_const_name %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <algorithm>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/{{ op.frontend.node_class }}.hpp>
+#include <hipdnn_test_sdk/constants/{{ op.effective_constants_include }}.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -16,6 +20,7 @@
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
 namespace
@@ -35,18 +40,8 @@ public:
     }
 };
 
-// -- Test constants --
-{% for tf in op.tensor_fields %}
-{% set uid = op.test_data.tensor_uids.get(tf.name, loop.index) %}
-constexpr int64_t K_TEST_{{ tf.name | upper }}_UID = {{ uid }};
-{% endfor %}
 {% set first_tensor = op.tensor_fields[0] %}
 {% set first_tc = op.test_data.tensor_configs.get(first_tensor.name) %}
-{% if first_tc %}
-
-constexpr std::array<int64_t, {{ first_tc.dims | length }}> K_TEST_DIMS = {{ '{' }}{{ first_tc.dims | join(', ') }}{{ '}' }};
-constexpr std::array<int64_t, {{ first_tc.strides | length }}> K_TEST_STRIDES = {{ '{' }}{{ first_tc.strides | join(', ') }}{{ '}' }};
-{% endif %}
 
 {% set non_sentinel = [] %}
 {% if op.mode_fields %}
@@ -95,12 +90,13 @@ protected:
 {% set rmap = op.frontend_to_tensor_field_map %}
 {% for param in op.frontend.graph_method_params %}
 {% set tf_name = rmap.get(param.tensor_name, param.tensor_name) %}
+{% set tc = op.test_data.tensor_configs.get(tf_name) %}
         auto {{ param.name }} = std::make_shared<TensorAttributes>();
-        {{ param.name }}->set_uid(K_TEST_{{ tf_name | upper }}_UID)
+        {{ param.name }}->set_uid(K_TENSOR_{{ tf_name | upper }}_UID)
             .set_name("{{ param.tensor_name }}")
             .set_data_type(DataType::FLOAT);
-{% if first_tc %}
-        {{ param.name }}->set_dim(toVec(K_TEST_DIMS)).set_stride(toVec(K_TEST_STRIDES));
+{% if tc %}
+        {{ param.name }}->set_dim(toVec(K_TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec(K_TENSOR_{{ tf_name | upper }}_STRIDES));
 {% endif %}
 
 {% endfor %}
@@ -114,30 +110,33 @@ protected:
 {% endif %}
 {% for df in op.data_fields if df.is_vector and df.required %}
 {% if df.name in op.test_data.field_values %}
-        attrs.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values[df.name] | join(', ') }}{{ '}' }});
+{% set const_name = vector_const_name(df, op) %}
+        attrs.{{ df.frontend_setter_name }}(toVec({{ const_name }}));
 {% endif %}
 {% endfor %}
 
 {% if op.frontend.graph_return_type == 'single' %}
 {% set out_name = op.frontend.graph_return_outputs[0] %}
 {% set out_tf_name = rmap.get(out_name, out_name) %}
+{% set out_tc = op.test_data.tensor_configs.get(out_tf_name) %}
         auto {{ out_name }} = graph->{{ op.frontend.graph_method_name }}(
 {% for param in op.frontend.graph_method_params %}
             {{ param.name }},
 {% endfor %}
             attrs);
-        {{ out_name }}->set_uid(K_TEST_{{ out_tf_name | upper }}_UID)
+        {{ out_name }}->set_uid(K_TENSOR_{{ out_tf_name | upper }}_UID)
             .set_output(true)
             .set_name("{{ out_name }}");
 {% elif op.frontend.graph_return_type == 'array' %}
 {% set out_name = op.frontend.graph_return_outputs[0] %}
 {% set out_tf_name = rmap.get(out_name, out_name) %}
+{% set out_tc = op.test_data.tensor_configs.get(out_tf_name) %}
         auto results = graph->{{ op.frontend.graph_method_name }}(
 {% for param in op.frontend.graph_method_params %}
             {{ param.name }},
 {% endfor %}
             attrs);
-        results[0]->set_uid(K_TEST_{{ out_tf_name | upper }}_UID)
+        results[0]->set_uid(K_TENSOR_{{ out_tf_name | upper }}_UID)
             .set_output(true)
             .set_name("{{ out_name }}");
 {% endif %}
@@ -175,18 +174,19 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, Basic{{ op.name }}RoundTrip)
 
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_GE(tensorMap.size(), {{ op.required_tensor_fields | length }}u);
+    ASSERT_EQ(tensorMap.size(), {{ op.required_tensor_fields | length }}u);
 
 {% for tf in op.required_tensor_fields %}
 {% set tf_upper = tf.name | upper %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
     // Verify {{ tf.name }} tensor
-    ASSERT_NE(tensorMap.count(K_TEST_{{ tf_upper }}_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TEST_{{ tf_upper }}_UID]->get_uid(), K_TEST_{{ tf_upper }}_UID);
-{% if first_tc %}
-    EXPECT_EQ(tensorMap[K_TEST_{{ tf_upper }}_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_{{ tf_upper }}_UID]->get_stride(), toVec(K_TEST_STRIDES));
+    ASSERT_NE(tensorMap.count(K_TENSOR_{{ tf_upper }}_UID), 0u);
+    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->get_uid(), K_TENSOR_{{ tf_upper }}_UID);
+{% if tc %}
+    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->get_dim(), toVec(K_TENSOR_{{ tf_upper }}_DIMS));
+    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->get_stride(), toVec(K_TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
-    EXPECT_EQ(tensorMap[K_TEST_{{ tf_upper }}_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->get_data_type(), DataType::FLOAT);
 
 {% endfor %}
     // Verify sub-node count and type
@@ -206,8 +206,9 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, Basic{{ op.name }}RoundTrip)
 
 {% for df in op.data_fields if df.is_vector and df.required %}
 {% if df.name in op.test_data.field_values %}
+{% set const_name = vector_const_name(df, op) %}
     // Verify {{ df.name }}
-    EXPECT_EQ(opNode->attributes.{{ df.frontend_getter }}, std::vector<int64_t>({{ '{' }}{{ op.test_data.field_values[df.name] | join(', ') }}{{ '}' }}));
+    EXPECT_EQ(opNode->attributes.{{ df.frontend_getter }}, toVec({{ const_name }}));
 {% endif %}
 {% endfor %}
 
@@ -247,8 +248,8 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}TensorSharingPres
 {% set ft = tf_map.get(tf.name) %}
 {% if ft %}
     // Verify {{ tf.name }} tensor sharing
-    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_uid(), K_TEST_{{ tf.name | upper }}_UID);
-    EXPECT_EQ(tensorMap[K_TEST_{{ tf.name | upper }}_UID].get(),
+    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_uid(), K_TENSOR_{{ tf.name | upper }}_UID);
+    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf.name | upper }}_UID].get(),
               opNode->attributes.{{ ft.effective_getter_name }}().get());
 {% endif %}
 {% endfor %}
@@ -299,8 +300,9 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinali
 
 {% for df in op.data_fields if df.is_vector and df.required %}
 {% if df.name in op.test_data.field_values %}
+{% set const_name = vector_const_name(df, op) %}
     // Verify {{ df.name }}
-    EXPECT_EQ(opNode->attributes.{{ df.frontend_getter }}, std::vector<int64_t>({{ '{' }}{{ op.test_data.field_values[df.name] | join(', ') }}{{ '}' }}));
+    EXPECT_EQ(opNode->attributes.{{ df.frontend_getter }}, toVec({{ const_name }}));
 {% endif %}
 {% endfor %}
 
@@ -309,14 +311,15 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinali
 
     // Verify tensor dims and strides
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_GE(tensorMap.size(), {{ op.required_tensor_fields | length }}u);
+    ASSERT_EQ(tensorMap.size(), {{ op.required_tensor_fields | length }}u);
 
 {% for tf in op.required_tensor_fields %}
 {% set tf_upper = tf.name | upper %}
-    ASSERT_NE(tensorMap.count(K_TEST_{{ tf_upper }}_UID), 0u);
-{% if first_tc %}
-    EXPECT_EQ(tensorMap[K_TEST_{{ tf_upper }}_UID]->get_dim(), toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_{{ tf_upper }}_UID]->get_stride(), toVec(K_TEST_STRIDES));
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+    ASSERT_NE(tensorMap.count(K_TENSOR_{{ tf_upper }}_UID), 0u);
+{% if tc %}
+    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->get_dim(), toVec(K_TENSOR_{{ tf_upper }}_DIMS));
+    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->get_stride(), toVec(K_TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
 {% endfor %}
 }
@@ -343,12 +346,13 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedI
 {% set rmap = op.frontend_to_tensor_field_map %}
 {% for param in op.frontend.graph_method_params %}
 {% set tf_name = rmap.get(param.tensor_name, param.tensor_name) %}
+{% set tc = op.test_data.tensor_configs.get(tf_name) %}
     auto {{ param.name }} = std::make_shared<TensorAttributes>();
-    {{ param.name }}->set_uid(K_TEST_{{ tf_name | upper }}_UID)
+    {{ param.name }}->set_uid(K_TENSOR_{{ tf_name | upper }}_UID)
         .set_name("{{ param.tensor_name }}")
         .set_data_type(DataType::FLOAT);
-{% if first_tc %}
-    {{ param.name }}->set_dim(toVec(K_TEST_DIMS)).set_stride(toVec(K_TEST_STRIDES));
+{% if tc %}
+    {{ param.name }}->set_dim(toVec(K_TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec(K_TENSOR_{{ tf_name | upper }}_STRIDES));
 {% endif %}
 
 {% endfor %}
@@ -362,7 +366,8 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedI
 {% endif %}
 {% for vf in op.data_fields if vf.is_vector and vf.required %}
 {% if vf.name in op.test_data.field_values %}
-    attrs.{{ vf.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values[vf.name] | join(', ') }}{{ '}' }});
+{% set const_name = vector_const_name(vf, op) %}
+    attrs.{{ vf.frontend_setter_name }}(toVec({{ const_name }}));
 {% endif %}
 {% endfor %}
     attrs.{{ df.frontend_setter_name }}({{ test_val }});
@@ -370,23 +375,25 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedI
 {% if op.frontend.graph_return_type == 'single' %}
 {% set out_name = op.frontend.graph_return_outputs[0] %}
 {% set out_tf_name = rmap.get(out_name, out_name) %}
+{% set out_tc = op.test_data.tensor_configs.get(out_tf_name) %}
     auto {{ out_name }} = graph->{{ op.frontend.graph_method_name }}(
 {% for param in op.frontend.graph_method_params %}
         {{ param.name }},
 {% endfor %}
         attrs);
-    {{ out_name }}->set_uid(K_TEST_{{ out_tf_name | upper }}_UID)
+    {{ out_name }}->set_uid(K_TENSOR_{{ out_tf_name | upper }}_UID)
         .set_output(true)
         .set_name("{{ out_name }}");
 {% elif op.frontend.graph_return_type == 'array' %}
 {% set out_name = op.frontend.graph_return_outputs[0] %}
 {% set out_tf_name = rmap.get(out_name, out_name) %}
+{% set out_tc = op.test_data.tensor_configs.get(out_tf_name) %}
     auto results = graph->{{ op.frontend.graph_method_name }}(
 {% for param in op.frontend.graph_method_params %}
         {{ param.name }},
 {% endfor %}
         attrs);
-    results[0]->set_uid(K_TEST_{{ out_tf_name | upper }}_UID)
+    results[0]->set_uid(K_TENSOR_{{ out_tf_name | upper }}_UID)
         .set_output(true)
         .set_name("{{ out_name }}");
 {% endif %}
@@ -419,4 +426,121 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedI
 }
 
 {% endfor %}
+// Builds a {{ op.name }} graph without calling set_uid() on any tensor,
+// lowers to backend, lifts, and verifies all auto-assigned UIDs are
+// distinct and survive the round-trip.
+TEST_F(Integration{{ op.name }}DescriptorLifting, AutoAssignedUidsPreservedInLiftingRoundTrip)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("{{ op.name }}AutoUidLiftTest")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+{% set rmap = op.frontend_to_tensor_field_map %}
+{% for param in op.frontend.graph_method_params %}
+{% set tf_name = rmap.get(param.tensor_name, param.tensor_name) %}
+{% set tc = op.test_data.tensor_configs.get(tf_name) %}
+    auto {{ param.name }} = std::make_shared<TensorAttributes>();
+    {{ param.name }}->set_name("{{ param.tensor_name }}")
+        .set_data_type(DataType::FLOAT);
+{% if tc %}
+    {{ param.name }}->set_dim(toVec(K_TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec(K_TENSOR_{{ tf_name | upper }}_STRIDES));
+{% endif %}
+
+{% endfor %}
+    {{ op.frontend.attributes_class }} attrs;
+    attrs.set_name("test_auto_uid");
+{% if op.mode_fields %}
+{% set mf = op.mode_fields[0] %}
+{% if non_sentinel %}
+    attrs.{{ mf.frontend_setter_name }}({{ mf.effective_frontend_type }}::{{ non_sentinel[0].effective_frontend_name }});
+{% endif %}
+{% endif %}
+{% for vf in op.data_fields if vf.is_vector and vf.required %}
+{% if vf.name in op.test_data.field_values %}
+{% set const_name = vector_const_name(vf, op) %}
+    attrs.{{ vf.frontend_setter_name }}(toVec({{ const_name }}));
+{% endif %}
+{% endfor %}
+
+{% if op.frontend.graph_return_type == 'single' %}
+{% set out_name = op.frontend.graph_return_outputs[0] %}
+    auto {{ out_name }} = graph->{{ op.frontend.graph_method_name }}(
+{% for param in op.frontend.graph_method_params %}
+        {{ param.name }},
+{% endfor %}
+        attrs);
+    {{ out_name }}->set_output(true)
+        .set_name("{{ out_name }}");
+{% elif op.frontend.graph_return_type == 'array' %}
+{% set out_name = op.frontend.graph_return_outputs[0] %}
+    auto results = graph->{{ op.frontend.graph_method_name }}(
+{% for param in op.frontend.graph_method_params %}
+        {{ param.name }},
+{% endfor %}
+        attrs);
+    results[0]->set_output(true)
+        .set_name("{{ out_name }}");
+{% endif %}
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify the tensor map has the expected number of tensors
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), {{ op.required_tensor_fields | length }}u);
+
+    // Verify all UIDs are positive and distinct
+    std::vector<int64_t> uids;
+    uids.reserve(tensorMap.size());
+    for(const auto& [uid, tensor] : tensorMap)
+    {
+        EXPECT_GT(uid, 0) << "Auto-assigned UID should be positive";
+        uids.push_back(uid);
+    }
+    std::sort(uids.begin(), uids.end());
+    ASSERT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
+        << "Found duplicate auto-assigned UIDs";
+
+    // Verify sub-node tensor UIDs are distinct via the node attributes
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* opNode = dynamic_cast<{{ op.frontend.node_class }}*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr);
+
+    std::set<int64_t> nodeUids;
+{% set tf_map = op.tensor_field_frontend_map %}
+{% for tf in op.required_tensor_fields %}
+{% set ft = tf_map.get(tf.name) %}
+{% if ft %}
+    ASSERT_NE(opNode->attributes.{{ ft.effective_getter_name }}(), nullptr);
+    nodeUids.insert(opNode->attributes.{{ ft.effective_getter_name }}()->get_uid());
+{% endif %}
+{% endfor %}
+    ASSERT_EQ(nodeUids.size(), {{ op.required_tensor_fields | length }}u)
+        << "Node tensor UIDs are not all distinct";
+
+    // Verify tensor dims survived the round trip
+{% for tf in op.required_tensor_fields %}
+{% set ft = tf_map.get(tf.name) %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if ft and tc %}
+    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_dim(), toVec(K_TENSOR_{{ tf.name | upper }}_DIMS));
+    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_stride(), toVec(K_TENSOR_{{ tf.name | upper }}_STRIDES));
+{% endif %}
+{% endfor %}
+}
+
 } // namespace

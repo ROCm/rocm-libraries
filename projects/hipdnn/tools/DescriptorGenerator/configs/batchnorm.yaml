@@ -139,6 +139,7 @@ operation:
   operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM"
 
   test_data:
+    constants_include: "BatchnormConstants"
     tensor_uids: { x: 50, scale: 51, bias: 52, epsilon: 53, y: 54, prev_running_mean: 6, prev_running_variance: 7, momentum: 8, mean: 9, inv_variance: 10, next_running_mean: 11, next_running_variance: 12 }
     tensor_configs:
       x: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }

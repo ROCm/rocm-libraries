@@ -855,3 +855,15 @@ class OperationConfig:
         if self.frontend.graph_method_name:
             return self.frontend.graph_method_name
         return _to_snake_case(self.name)
+
+    @property
+    def effective_constants_include(self) -> str:
+        """Constants header name for test files.
+
+        Returns constants_include from test_data if set (for operations with
+        pre-existing constants headers), otherwise derives the name from the
+        operation name (e.g., 'BatchnormInference' -> 'BatchnormInferenceConstants').
+        """
+        if self.test_data.constants_include:
+            return self.test_data.constants_include
+        return f"{self.name}Constants"
