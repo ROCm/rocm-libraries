@@ -284,6 +284,8 @@ def writeBenchmarkFiles(
 
             newLibraryDir = ensurePath(libraryDir(sourcePath, cmdLineArchs))
             newLibraryFile = os.path.join(newLibraryDir, "TensileLibrary")
+            libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
+            newLibraryFileFull = newLibraryFile + libraryExt
 
         with timing_context("python_benchpost_lib_construction"):
             newLibrary = SolutionLibrary.MasterSolutionLibrary.BenchmarkingLibrary(
@@ -327,11 +329,13 @@ def writeBenchmarkFiles(
                 idealProblemSizes = ProblemSizes(problemType, idealSizes)
                 writeClientConfig(True, solutions, idealProblemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
-                                  newLibrary, codeObjectFiles, True, deviceId, gfxName, probSolMap=probSolMap)
+                                  newLibrary, codeObjectFiles, True, deviceId, gfxName, \
+                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap)
             else:
                 writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
-                                  newLibrary, codeObjectFiles, False, deviceId, gfxName, probSolMap=probSolMap)
+                                  newLibrary, codeObjectFiles, False, deviceId, gfxName, \
+                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap)
 
     if len(solutions) == 0:
         printExit("write solutions and kernels results 0 valid soultion.")
