@@ -389,6 +389,12 @@ TEST_F(TestGraphDescriptorBatchnormBackward, OperationNameRoundTripThroughLiftin
     EXPECT_EQ(attrs->dx_tensor_uid, 63);
     EXPECT_EQ(attrs->dscale_tensor_uid, 64);
     EXPECT_EQ(attrs->dbias_tensor_uid, 65);
+
+    // Verify optional tensor UIDs survived
+    ASSERT_TRUE(attrs->mean_tensor_uid.has_value());
+    EXPECT_EQ(attrs->mean_tensor_uid.value(), 7);
+    ASSERT_TRUE(attrs->inv_variance_tensor_uid.has_value());
+    EXPECT_EQ(attrs->inv_variance_tensor_uid.value(), 8);
 }
 
 } // namespace

@@ -541,4 +541,86 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardPeerStats
     EXPECT_EQ(liftedPeerStats[1].get(), liftedPeerStat1.get());
 }
 
+// Builds a batchnorm backward graph without explicit set_uid() calls, performs a round-trip,
+// and verifies all auto-assigned UIDs are distinct and tensor dims survive.
+TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardAutoAssignedUidsPreserved)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("AutoUidBnBwdLiftTest")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    // Build tensors with distinct dims but NO set_uid() calls
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_name("DY").set_data_type(DataType::FLOAT);
+    dy->set_dim(toVec(K_BN_BWD_AUTO_DATA_DIMS)).set_stride(toVec(K_BN_BWD_AUTO_DATA_STRIDES));
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_name("X").set_data_type(DataType::FLOAT);
+    x->set_dim(toVec(K_BN_BWD_AUTO_DATA_DIMS)).set_stride(toVec(K_BN_BWD_AUTO_DATA_STRIDES));
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_name("Scale").set_data_type(DataType::FLOAT);
+    scale->set_dim(toVec(K_BN_BWD_AUTO_PARAM_DIMS)).set_stride(toVec(K_BN_BWD_AUTO_PARAM_STRIDES));
+
+    BatchnormBackwardAttributes bnBwdAttrs;
+    bnBwdAttrs.set_name("auto_uid_bn_bwd_op");
+
+    auto [dxOut, dscaleOut, dbiasOut] = graph->batchnorm_backward(dy, x, scale, bnBwdAttrs);
+    dxOut->set_output(true).set_name("DX");
+    dscaleOut->set_output(true).set_name("DScale");
+    dbiasOut->set_output(true).set_name("DBias");
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    // dy, x, scale, dx, dscale, dbias = 6 tensors (no optional mean/invVariance)
+    ASSERT_EQ(tensorMap.size(), 6u) << "Expected 6 tensors (dy, x, scale, dx, dscale, dbias)";
+
+    // Collect all UIDs and verify they are distinct
+    std::vector<int64_t> uids;
+    uids.reserve(tensorMap.size());
+    for(const auto& [uid, tensor] : tensorMap)
+    {
+        uids.push_back(uid);
+    }
+    std::sort(uids.begin(), uids.end());
+    EXPECT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
+        << "All auto-assigned UIDs must be distinct";
+
+    // Verify the node references tensors with auto-assigned UIDs
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* bnBwdNode = dynamic_cast<BatchnormBackwardNode*>(subNodes[0].get());
+    ASSERT_NE(bnBwdNode, nullptr);
+
+    // Verify tensor dims survived the round trip by identifying tensors via dims
+    auto dyUid = bnBwdNode->attributes.get_dy()->get_uid();
+    auto scaleUid = bnBwdNode->attributes.get_scale()->get_uid();
+    auto dxUid = bnBwdNode->attributes.get_dx()->get_uid();
+
+    EXPECT_NE(dyUid, scaleUid);
+    EXPECT_NE(dyUid, dxUid);
+
+    EXPECT_EQ(tensorMap[dyUid]->get_dim(), toVec(K_BN_BWD_AUTO_DATA_DIMS));
+    EXPECT_EQ(tensorMap[dyUid]->get_stride(), toVec(K_BN_BWD_AUTO_DATA_STRIDES));
+    EXPECT_EQ(tensorMap[scaleUid]->get_dim(), toVec(K_BN_BWD_AUTO_PARAM_DIMS));
+    EXPECT_EQ(tensorMap[scaleUid]->get_stride(), toVec(K_BN_BWD_AUTO_PARAM_STRIDES));
+    EXPECT_EQ(tensorMap[dxUid]->get_dim(), toVec(K_BN_BWD_AUTO_DATA_DIMS));
+    EXPECT_EQ(tensorMap[dxUid]->get_stride(), toVec(K_BN_BWD_AUTO_DATA_STRIDES));
+}
+
 } // namespace

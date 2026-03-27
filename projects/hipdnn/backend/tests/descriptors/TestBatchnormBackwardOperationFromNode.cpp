@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/BatchnormBackwardConstants.hpp>
@@ -577,6 +578,47 @@ TEST_F(TestBatchnormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
                                            HIPDNN_DATA_FLOAT,
                                            toVec(K_BN_BWD_TENSOR_INV_VARIANCE_DIMS),
                                            toVec(K_BN_BWD_TENSOR_INV_VARIANCE_STRIDES));
+
+    // --- Peer stats tensor array ---
+
+    // Query count first
+    int64_t peerStatsCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       0,
+                       &peerStatsCount,
+                       nullptr);
+    ASSERT_EQ(peerStatsCount, 2);
+
+    // Retrieve both peer_stats descriptors
+    hipdnn_backend::ScopedDescriptor peerStats0Scoped;
+    hipdnn_backend::ScopedDescriptor peerStats1Scoped;
+    std::array<hipdnnBackendDescriptor_t, 2> peerStatsArray = {};
+    int64_t peerStatsRetrievedCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       2,
+                       &peerStatsRetrievedCount,
+                       static_cast<void*>(peerStatsArray.data()));
+    ASSERT_EQ(peerStatsRetrievedCount, 2);
+    // Transfer ownership to ScopedDescriptors
+    peerStats0Scoped = hipdnn_backend::ScopedDescriptor(peerStatsArray[0]);
+    peerStats1Scoped = hipdnn_backend::ScopedDescriptor(peerStatsArray[1]);
+    ASSERT_NE(peerStats0Scoped.get(), nullptr);
+    ASSERT_NE(peerStats1Scoped.get(), nullptr);
+
+    test_utilities::verifyTensorDescriptor(
+        peerStats0Scoped.get(),
+        K_BN_BWD_TENSOR_PEER_STAT_0_UID,
+        HIPDNN_DATA_FLOAT,
+        {K_BN_BWD_TENSOR_PEER_STAT_DIMS.begin(), K_BN_BWD_TENSOR_PEER_STAT_DIMS.end()},
+        {K_BN_BWD_TENSOR_PEER_STAT_STRIDES.begin(), K_BN_BWD_TENSOR_PEER_STAT_STRIDES.end()});
+    test_utilities::verifyTensorDescriptor(
+        peerStats1Scoped.get(),
+        K_BN_BWD_TENSOR_PEER_STAT_1_UID,
+        HIPDNN_DATA_FLOAT,
+        {K_BN_BWD_TENSOR_PEER_STAT_DIMS.begin(), K_BN_BWD_TENSOR_PEER_STAT_DIMS.end()},
+        {K_BN_BWD_TENSOR_PEER_STAT_STRIDES.begin(), K_BN_BWD_TENSOR_PEER_STAT_STRIDES.end()});
 }
 
 TEST_F(TestBatchnormBackwardOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
@@ -597,4 +639,23 @@ TEST_F(TestBatchnormBackwardOperationFromNode, GetTensorDescriptorsReturnsAllTen
     EXPECT_EQ(tensors[7]->getData().uid, K_BN_BWD_TENSOR_INV_VARIANCE_UID);
     EXPECT_EQ(tensors[8]->getData().uid, K_BN_BWD_TENSOR_PEER_STAT_0_UID);
     EXPECT_EQ(tensors[9]->getData().uid, K_BN_BWD_TENSOR_PEER_STAT_1_UID);
+}
+
+TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithWrongAttributesType)
+{
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(ConvolutionFwdAttributesT{});
+
+    ASSERT_THROW_HIPDNN_STATUS(BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_INTERNAL_ERROR);
+}
+
+TEST_F(TestBatchnormBackwardOperationFromNode, FailsWithMissingPeerStatsTensor)
+{
+    _tensorMap.erase(K_BN_BWD_TENSOR_PEER_STAT_0_UID);
+    auto node = createStandardNode();
+
+    ASSERT_THROW_HIPDNN_STATUS(BatchnormBackwardOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_INTERNAL_ERROR);
 }
