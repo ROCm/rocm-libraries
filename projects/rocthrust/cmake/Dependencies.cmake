@@ -399,6 +399,18 @@ if(BUILD_BENCHMARK)
       GIT_TAG        v${BENCHMARK_VERSION}
     )
     FetchContent_MakeAvailable(googlebench)
+	# Clang on Windows with -pedantic-errors treats __COUNTER__ in Google  
+	# Benchmark as a C2y extension and fails. Also --offload-compress is unused  
+	# for host-only code. Suppress for the benchmark targets.  
+    # https://github.com/google/benchmark/issues/2057
+	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)  
+	  if(TARGET benchmark)  
+	    target_compile_options(benchmark PRIVATE -Wno-c2y-extensions -Wno-unused-command-line-argument)  
+	  endif()  
+	  if(TARGET benchmark_main)  
+	    target_compile_options(benchmark_main PRIVATE -Wno-c2y-extensions -Wno-unused-command-line-argument)	
+	  endif()
+	endif()    
     if(NOT TARGET benchmark::benchmark)
       add_library(benchmark::benchmark ALIAS benchmark)
     endif()
