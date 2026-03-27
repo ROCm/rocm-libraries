@@ -67,6 +67,7 @@ auto GetConvTestCasesFloat()
 
     return std::vector{
         // clang-format off
+
         TestCase{{1, 20, 20, 20}, {20, 20, 3, 3}, {1, 1}, {1, 1}, {1, 1}, miopenFloat},
         // clang-format on
     };
@@ -220,6 +221,12 @@ auto GetConvTestCasesNHWC(miopenDataType_t datatype)
             {datatype, miopenTensorNHWC, {20, 20, 3, 3}},
             datatype,
             {{1, 1}, {1, 1}, {1, 1}, 2}
+        },
+        TestCase{
+            {datatype, miopenTensorNHWC, {1, 40, 20, 20}},
+            {datatype, miopenTensorNHWC, {20, 40, 3, 3}},
+            datatype,
+            {{1, 1}, {1, 1}, {1, 1}, 1}
         },
         // clang-format on
     };
