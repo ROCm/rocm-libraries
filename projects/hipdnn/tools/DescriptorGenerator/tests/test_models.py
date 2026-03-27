@@ -23,6 +23,7 @@ from tests.helpers import (
     make_frontend_tensor_config,
     make_minimal_config,
     make_tensor_field,
+    make_test_data,
 )
 
 
@@ -1433,3 +1434,21 @@ class TestOperationConfigEdgeCases:
             cfg.test_integration_lifting_filename
             == "IntegrationBatchNormFwdDescriptorLifting.cpp"
         )
+
+
+class TestEffectiveConstantsInclude:
+    """Tests for effective_constants_include and constants_namespace properties."""
+
+    def test_returns_constants_include_when_set(self):
+        td = make_test_data(constants_include="ConvFpropConstants")
+        cfg = make_minimal_config(test_data=td)
+        assert cfg.effective_constants_include == "ConvFpropConstants"
+
+    def test_derives_from_name_when_not_set(self):
+        td = make_test_data(constants_include="")
+        cfg = make_minimal_config(name="BatchnormInference", test_data=td)
+        assert cfg.effective_constants_include == "BatchnormInferenceConstants"
+
+    def test_derives_from_name_when_default(self):
+        cfg = make_minimal_config(name="ConvolutionBwd")
+        assert cfg.effective_constants_include == "ConvolutionBwdConstants"
