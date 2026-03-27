@@ -367,7 +367,7 @@ endif()
 
 # Benchmark dependencies
 if(BUILD_BENCHMARK)
-  set(BENCHMARK_VERSION 1.9.4)
+  set(BENCHMARK_VERSION 1.9.5)
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     # Google Benchmark (https://github.com/google/benchmark.git)
     find_package(benchmark ${BENCHMARK_VERSION} QUIET)
@@ -402,18 +402,17 @@ if(BUILD_BENCHMARK)
 	# Clang on Windows with -pedantic-errors treats __COUNTER__ in Google  
 	# Benchmark as a C2y extension and fails. Also --offload-compress is unused  
 	# for host-only code. Suppress for the benchmark targets.  
-    # https://github.com/google/benchmark/issues/2057
 	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)  
 	  if(TARGET benchmark)  
-	    target_compile_options(benchmark PRIVATE -Wno-c2y-extensions -Wno-unused-command-line-argument)  
+	    target_compile_options(benchmark PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)  
 	  endif()  
 	  if(TARGET benchmark_main)  
-	    target_compile_options(benchmark_main PRIVATE -Wno-c2y-extensions -Wno-unused-command-line-argument)	
+	    target_compile_options(benchmark_main PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)	
 	  endif()
-	endif()    
-    if(NOT TARGET benchmark::benchmark)
-      add_library(benchmark::benchmark ALIAS benchmark)
-    endif()
+      if(NOT TARGET benchmark::benchmark)
+        add_library(benchmark::benchmark ALIAS benchmark)
+      endif()
+	endif()
   endif()
 
   # rocRAND (https://github.com/ROCm/rocm-libraries)
