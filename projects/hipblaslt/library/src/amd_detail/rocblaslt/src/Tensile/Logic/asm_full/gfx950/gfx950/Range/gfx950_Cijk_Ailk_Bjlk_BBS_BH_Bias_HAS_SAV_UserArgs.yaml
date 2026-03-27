@@ -100,7 +100,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: true
+    DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
     DirectToVgprA: false
@@ -109,10 +109,10 @@
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -132,7 +132,7 @@
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_HAS_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA4096_LBSPPB4096_LBSPPM0_LPA0_LPB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_NTn1_NTA1_NTB2_NTC6_NTD1_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SPO1_SRVW0_SSO4_SVW8_SK3_SKXCCM6_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1
-    LDSTrInst: 0
+    LDSTrInst: false
     LSCA: 256
     LSCB: 256
     LSPA: 8
@@ -171,7 +171,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -238,11 +238,11 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 0
     SolutionNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_HAS_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA4096_LBSPPB4096_LBSPPM0_LPA0_LPB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_NTn1_NTA1_NTB2_NTC6_NTD1_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SU8_SUM1_SUS128_SPO1_SRVW0_SSO4_SVW8_SK3_SKXCCM6_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC16_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     StaggerU: 8
     StaggerUMapping: 1
     StaggerUStride: 128
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 4
@@ -255,26 +255,26 @@
     SubGroupA: 8
     SubGroupB: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     ThreadTile: [1, 1]
     ThreadTile0: 32
     ThreadTile1: 8
     ThreadTileA: 32
     ThreadTileB: 8
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 1
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UsePLRPack: true
+    UsePLRPack: 1
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
@@ -331,7 +331,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: true
+    DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
     DirectToVgprA: false
@@ -340,10 +340,10 @@
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -363,7 +363,7 @@
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_HAS_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA4096_LBSPPB4096_LBSPPM0_LPA0_LPB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_NTn1_NTA7_NTB1_NTC6_NTD1_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW8_SK3_SKXCCM8_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1
-    LDSTrInst: 0
+    LDSTrInst: false
     LSCA: 256
     LSCB: 256
     LSPA: 8
@@ -402,7 +402,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -469,11 +469,11 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 1
     SolutionNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_HAS_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA4096_LBSPPB4096_LBSPPM0_LPA0_LPB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_NTn1_NTA7_NTB1_NTC6_NTD1_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SU0_SUM1_SUS128_SPO1_SRVW0_SSO0_SVW8_SK3_SKXCCM8_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM16_WGMXCC16_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 1
     StaggerUStride: 0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -486,26 +486,26 @@
     SubGroupA: 8
     SubGroupB: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     ThreadTile: [1, 1]
     ThreadTile0: 32
     ThreadTile1: 8
     ThreadTileA: 32
     ThreadTileB: 8
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 1
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UsePLRPack: true
+    UsePLRPack: 1
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1

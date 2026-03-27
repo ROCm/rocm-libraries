@@ -109,10 +109,10 @@
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: true
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -132,7 +132,7 @@
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bjlk_S_MX_B_BiasS_HA_S_SAV_UserArgs_MT48x64x32_MI16x16x1_SN_LDSB1_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA128_LBSPPB1024_LBSPPM0_LPA8_LPB0_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_2_MO40_NTn1_NTA0_NTB4_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR0_PKA1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG16_8_1
-    LDSTrInst: 0
+    LDSTrInst: false
     LSCA: 32
     LSCB: 64
     LSPA: 16
@@ -171,7 +171,7 @@
     LoopIters: 1
     LoopUnroll: 32
     MFMA_BF16_1K: false
-    MIArchVgpr: 1
+    MIArchVgpr: true
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -238,11 +238,11 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 0
     SolutionNameMin: Cijk_Alik_Bjlk_S_MX_B_BiasS_HA_S_SAV_UserArgs_MT48x64x32_MI16x16x1_SN_LDSB1_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA128_LBSPPB1024_LBSPPM0_LPA8_LPB0_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_2_MO40_NTn1_NTA0_NTB4_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR0_PKA1_SIA3_SS1_SU0_SUM1_SUS0_SPO0_SRVW0_SSO0_SVW1_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG16_8_1_WGM1_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 1
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -255,26 +255,26 @@
     SubGroupA: 4
     SubGroupB: 32
     SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
+    SwapGlobalReadOrder: 0
     ThreadTile: [1, 1]
     ThreadTile0: 12
     ThreadTile1: 2
     ThreadTileA: 12
     ThreadTileB: 2
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: true
     UseInstOffsetForGRO: 0
-    UsePLRPack: false
+    UsePLRPack: 0
     UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
