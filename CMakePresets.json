@@ -71,7 +71,7 @@
             "description": "Build hipdnn and miopen-provider",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;miopen-provider"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider"
             }
         },
         {

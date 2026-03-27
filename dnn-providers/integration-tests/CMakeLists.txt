@@ -2,10 +2,27 @@
 # SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.25.2)
+
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+    CACHE STRING "Toolchain file"
+)
+
 project(hipdnn-integration-tests LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE
+    CACHE BOOL "Add paths to linker search and installed rpath"
+)
+
+if(NOT WIN32)
+    # Only set if not already specified by user
+    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+    endif()
+    message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+endif()
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
@@ -67,9 +84,10 @@ find_package(hip REQUIRED)
 find_package(hipdnn_test_sdk REQUIRED)
 find_package(hipdnn_plugin_sdk REQUIRED)
 find_package(Threads REQUIRED)
-find_package(nlohmann_json REQUIRED)
 
 include(Dependencies)
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 add_executable(hipdnn_integration_tests
     src/main.cpp
@@ -87,7 +105,6 @@ target_link_libraries(hipdnn_integration_tests
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
-        nlohmann_json::nlohmann_json
 )
 
 target_compile_options(hipdnn_integration_tests PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
@@ -95,8 +112,60 @@ target_compile_options(hipdnn_integration_tests PRIVATE ${INTEGRATION_TESTS_WARN
 clang_tidy_check(hipdnn_integration_tests)
 
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+set(HIPDNN_INTEGRATION_TESTS_VERSION "0.1.0")
+
+set_target_properties(
+    hipdnn_integration_tests
+    PROPERTIES
+        INSTALL_RPATH
+        "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR};\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/hipdnn_plugins/engines"
+        INSTALL_RPATH_USE_LINK_PATH TRUE
+        BUILD_RPATH_USE_ORIGIN TRUE
+)
+
+# Install the executable with an export set
 install(TARGETS hipdnn_integration_tests
+    EXPORT hipdnn_integration_tests_targets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+# --- Package export infrastructure ---
+
+# Generate Config.cmake from template
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_integration_testsConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_integration_testsConfig.cmake"
+    INSTALL_DESTINATION lib/cmake/hipdnn_integration_tests
+)
+
+# Generate ConfigVersion.cmake
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_integration_testsConfigVersion.cmake"
+    VERSION ${HIPDNN_INTEGRATION_TESTS_VERSION}
+    COMPATIBILITY AnyNewerVersion
+)
+
+# Build-tree export so superbuild consumers can find the package without installing
+export(TARGETS hipdnn_integration_tests
+    FILE "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_integration_testsTargets.cmake"
+)
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipdnnIntegrationTestHelpers.cmake"
+    DESTINATION "${CMAKE_CURRENT_BINARY_DIR}"
+)
+
+# Install-tree exports
+install(EXPORT hipdnn_integration_tests_targets
+    FILE hipdnn_integration_testsTargets.cmake
+    DESTINATION lib/cmake/hipdnn_integration_tests
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_integration_testsConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_integration_testsConfigVersion.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipdnnIntegrationTestHelpers.cmake"
+    DESTINATION lib/cmake/hipdnn_integration_tests
 )
 
 enable_testing()
@@ -115,15 +184,4 @@ file(WRITE "${_INSTALLED_CTEST_FILE}"
     "add_test(hipdnn_integration_tests \"../hipdnn_integration_tests\")\n"
 )
 
-install(
-    FILES "${_INSTALLED_CTEST_FILE}"
-    DESTINATION "${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests_test_infra"
-    RENAME CTestTestfile.cmake
-)
-
 add_clang_tidy_custom_target()
-
-install(
-    FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_test_config.toml"
-    DESTINATION "${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests_test_infra"
-)
