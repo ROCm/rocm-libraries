@@ -7360,6 +7360,10 @@ class KernelWriterAssembly(KernelWriter):
       statesTc = self.states.mxsa
       numIterPerCoalescedRead = self.states.numIterPerCoalescedReadMXSA
       numReadsIterCoalesced = self.states.numReadsIterCoalescedMXSA
+    elif tc == "MXSB":
+      statesTc = self.states.mxsb
+      numIterPerCoalescedRead = self.states.numIterPerCoalescedReadMXSB
+      numReadsIterCoalesced = self.states.numReadsIterCoalescedMXSB
     elif tc == "B":
       statesTc = self.states.b
       numIterPerCoalescedRead = self.states.numIterPerCoalescedReadB
