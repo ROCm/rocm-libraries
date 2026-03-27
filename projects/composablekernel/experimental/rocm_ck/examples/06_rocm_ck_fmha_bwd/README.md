@@ -1,11 +1,14 @@
-# Example 06: FMHA BWD OGradDotO via kpack
+# Example 06: FMHA BWD via rocm_ck
 
-Demonstrates shipping the CK Tile FMHA backward `OGradDotO` kernel family
-(`D = rowSum(dO * O) * p_undrop`) as device-only code objects via kpack archives.
+Demonstrates shipping the full CK Tile FMHA backward pipeline as device-only
+code objects via kpack archives. Three kernel families cover the complete
+backward pass:
 
-This is the simplest FMHA backward kernel — it computes a per-token scalar from
-the output gradient and output tensors. It validates the kpack pattern for
-multi-parameter CK Tile kernels with both batch and group (variable-length) modes.
+1. **OGradDotO** — `D = rowSum(dO * O) * p_undrop` (per-token scalar)
+2. **DqDkDv** — main backward (5 GEMMs: dQ, dK, dV gradients)
+3. **ConvertDQ** — split-K dQ accumulation reduce + type conversion (deterministic mode)
+
+The pipeline runs: OGradDotO -> DqDkDv -> (ConvertDQ if deterministic).
 
 ## Dependencies
 
@@ -31,49 +34,100 @@ ninja -C build
 ./build/kpack_rocm_ck_fmha_bwd build/kernels.kpack
 ```
 
-## Variant Surface
+## Variant Surface (12 kernels)
 
-| Variant | dtype | hdim_v | mode  | pad_s | pad_dv | Notes |
-|---------|-------|--------|-------|-------|--------|-------|
-| `fp16_d128_batch`      | FP16 | 128 | batch | yes | yes | Most common config |
-| `bf16_d128_batch`      | BF16 | 128 | batch | yes | yes | BF16 dtype axis |
-| `fp16_d64_batch`       | FP16 | 64  | batch | yes | yes | Smaller hdim axis |
-| `fp16_d128_group`      | FP16 | 128 | group | yes | yes | Group mode axis |
-| `fp16_d128_batch_npad` | FP16 | 128 | batch | no  | no  | No-padding axis |
+### OGradDotO (5 variants)
+
+| Variant | dtype | hdim_v | mode  | padding | Notes |
+|---------|-------|--------|-------|---------|-------|
+| `fp16_d128_batch`      | FP16 | 128 | batch | padded  | Most common config |
+| `bf16_d128_batch`      | BF16 | 128 | batch | padded  | BF16 dtype axis |
+| `fp16_d64_batch`       | FP16 | 64  | batch | padded  | Smaller hdim axis |
+| `fp16_d128_group`      | FP16 | 128 | group | padded  | Group mode axis |
+| `fp16_d128_batch_npad` | FP16 | 128 | batch | none    | No-padding axis |
+
+### DqDkDv (5 variants)
+
+| Variant | dtype | hdim | mode  | features | Notes |
+|---------|-------|------|-------|----------|-------|
+| `fp16_d128_batch`       | FP16 | 128 | batch | plain        | Baseline (numerically verified) |
+| `bf16_d128_batch`       | BF16 | 128 | batch | plain        | dtype axis (numerically verified) |
+| `fp16_d128_batch_cmask` | FP16 | 128 | batch | causal mask  | Compilation proof |
+| `fp16_d128_batch_det`   | FP16 | 128 | batch | deterministic| Compilation proof |
+| `fp16_d128_group`       | FP16 | 128 | group | plain        | Group mode (bridge incomplete) |
+
+### ConvertDQ (2 variants)
+
+| Variant | dtype | hdim | mode  | Notes |
+|---------|-------|------|-------|-------|
+| `fp16_d128_batch_det` | FP16 | 128 | batch | Paired with det DqDkDv |
+| `fp16_d128_group_det` | FP16 | 128 | group | Paired with det DqDkDv |
 
 ## Design
 
 ### Signature / Algorithm Split
 
-- **Signature** (`FmhaBwdOGradDotOSignature`): WHAT — dtype, hdim_v, mode
-- **Algorithm** (`FmhaBwdOGradDotOAlgorithm`): HOW — padding flags, occupancy hint, block size
+- **Signature** = problem shape: dtype, head dimensions, batch/group mode
+- **Algorithm** = feature flags + tuning: bias, mask, dropout, deterministic,
+  padding mode, occupancy hint
 - **Config** = Signature + Algorithm (user-facing)
 - **Kernel** = validated descriptor (structural type, NTTP-safe)
 
-### CK Tile Template Chain
+Each kernel family has its own Signature/Algorithm/Config/Kernel structs.
+`make_kernel()` is overloaded per Config type (unambiguous).
 
+### Generic Args with Named Slot Constants
+
+All kernel families use the same `rocm_ck::Args` struct (1408 bytes). Tensor
+pointers, dimensions, and strides are packed into `Args::tensors[]` slots.
+Problem-level scalars (scale, num_head_q, etc.) use `Args::scalars[]` slots.
+
+Named slot constants (e.g., `fmha_bwd_dqdkdv_slots::Q = 0`,
+`::K = 1`, `::V = 2`, ...) prevent off-by-one errors in the 50-parameter
+DqDkDv kernel argument mapping.
+
+### CK Tile Template Chains
+
+**OGradDotO:**
 ```
 FmhaBwdOGradDotOKernel<Pipeline>
   -> BlockFmhaBwdOGradDotO<PipelineProblem>
-    -> BlockFmhaBwdOGradDotOPipelineProblem<OType, dOType, DType, bm0, hdim_v, is_group, Traits>
-      -> TileFmhaBwdOGradDotOTraits<spad, dvpad, block_per_cu>
+    -> TileFmhaBwdOGradDotOTraits<spad, dvpad, block_per_cu>
 ```
 
-### Two Args Structs
+**DqDkDv:**
+```
+FmhaBwdDQDKDVKernel<Pipeline, KGradEpi, VGradEpi, QGradEpi>
+  -> BlockFmhaBwdDQDKDVPipeline<PipelineProblem>
+    -> BlockFmhaBwdPipelineProblem<15 data types, Shape, Mask, Dropout, Traits>
+      -> TileFmhaBwdTraits<padQ, padV, BiasEnum, hasBiasGrad, blockPerCu>
+      -> TileFmhaBwdShape<BlockTile, 5x(BlockWarps, WarpTile), maxSeqLenQ>
+```
 
-Batch and group modes use separate flat argument structs
-(`FmhaBwdOGradDotOBatchArgs` / `FmhaBwdOGradDotOGroupArgs`) that match CK Tile's
-internal Kargs layout exactly. ABI is verified by `static_assert` on sizeof/alignof
-in the device header.
+**ConvertDQ:**
+```
+FmhaBwdConvertQGradKernel<Pipeline>
+  -> BlockFmhaBwdConvertQGrad<PipelineProblem>
+    -> TileFmhaBwdConvertQGradTraits<spad, dpad, block_per_cu>
+```
 
 ## File Structure
 
 ```
-rocm_fmha_bwd_api.hpp         — Host+device API (NO CK Tile dependency)
-rocm_fmha_bwd_dev.hpp         — Device-side: config NTTP -> CK Tile template chain
-rocm_fmha_bwd_registry.hpp    — Variant table + findVariant()
-fmha_bwd_ograd_dot_o_*.hip    — Per-variant kernel instantiations (~15 lines each)
-main.cpp                       — Host loader + verification
-CMakeLists.txt                 — Build: compile .hip -> .hsaco, pack, build host exe
-pack.py                        — Pack .hsaco files into kpack archive
+rocm_fmha_bwd_common.hpp              — Shared types: FmhaMode, FmhaBiasType, padding docs
+rocm_fmha_bwd_ograd_dot_o_api.hpp     — OGradDotO: Signature/Algorithm/slots/make_kernel
+rocm_fmha_bwd_dqdkdv_api.hpp          — DqDkDv: Signature/Algorithm/slots/make_kernel
+rocm_fmha_bwd_convert_dq_api.hpp      — ConvertDQ: Signature/Algorithm/slots/make_kernel
+rocm_fmha_bwd_api.hpp                 — Unified include-all (no own code)
+rocm_fmha_bwd_ograd_dot_o_dev.hpp     — OGradDotO device bridge (CK Tile dependency)
+rocm_fmha_bwd_dqdkdv_dev.hpp          — DqDkDv device bridge (CK Tile dependency)
+rocm_fmha_bwd_convert_dq_dev.hpp      — ConvertDQ device bridge (CK Tile dependency)
+rocm_fmha_bwd_registry.hpp            — 3 variant arrays + 3 findVariant() overloads
+fmha_bwd_ograd_dot_o_*.hip            — 5 OGradDotO variant instantiations
+fmha_bwd_dqdkdv_*.hip                 — 5 DqDkDv variant instantiations
+fmha_bwd_convert_dq_*.hip             — 2 ConvertDQ variant instantiations
+main.cpp                              — 3-kernel pipeline runner + CPU reference
+CMakeLists.txt                         — Build: compile .hip -> .hsaco, pack, build host exe
+pack.py                                — Pack .hsaco files into kpack archive
+INSIGHTS.md                            — Design decisions and lessons learned
 ```
