@@ -332,11 +332,19 @@ globalParameters["StinkyTofuDebugLevel"] = 0
 globalParameters["StinkyTofuPrintBeforePass"] = ""
 globalParameters["StinkyTofuPrintAfterPass"] = ""
 
-# StinkyTofu internal pass debug logging (global — applies to all PMs)
-# Comma-separated pass names to enable PASS_DEBUG output (case-sensitive)
+# StinkyTofu internal pass debug logging & instruction-order snapshot (global — applies to all PMs)
+# Comma-separated pass names (case-sensitive) to:
+#   1. Enable PASS_DEBUG output for the listed passes
+#   2. Record before/after instruction order JSON when StinkyTofuPassOrderSnapshotJson is set
 # e.g. "StinkyDAGSchedulerPass"
 # Unmatched pass names are silently ignored
 globalParameters["StinkyTofuDebugPass"] = ""
+
+# Before/after instruction-order JSON for tools/stinkytofu-analysis (empty = disabled).
+# When set, PassManager records snapshots for passes listed in StinkyTofuDebugPass
+# (defaults to StinkyDAGSchedulerPass only when StinkyTofuDebugPass is empty).
+# Note: multiple kernels may overwrite the same file unless you use a unique path per build.
+globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...

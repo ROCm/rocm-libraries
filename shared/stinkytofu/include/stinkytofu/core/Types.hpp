@@ -24,6 +24,8 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace stinkytofu
 {
@@ -69,15 +71,28 @@ namespace stinkytofu
             bool unrollGemm = false; ///< Whether GEMM loops are unrolled
         };
 
-        /// DAG scheduler feature switches
-        /// These are OPTIONAL FEATURES that can be enabled/disabled
+        /// DAG scheduler switches.
         struct DagFeatures
         {
             bool distributeGlobalRead = false; ///< Enable global read distribution optimization
         };
 
-        BarrierConfig barrierConfig;
-        LoopConfig    loopConfig;
-        DagFeatures   dagFeatures;
+        /// Generic before/after instruction-order snapshot written by PassManager.
+        struct PassOrderSnapshotConfig
+        {
+            /// Output path; if non-empty, PassManager records snapshots into JSON
+            /// for tools/stinkytofu-analysis (schema stinkytofu-dag-schedule-v1).
+            std::string jsonPath;
+            /// Prepended to each region title (e.g. Tensile pipeline group: loopWithPrefetch).
+            std::string titlePrefix;
+            /// `Pass::getName()` strings; after each listed pass, emit one region.
+            /// If empty and jsonPath is set, defaults to StinkyDAGSchedulerPass only.
+            std::vector<std::string> dumpAfterPasses;
+        };
+
+        BarrierConfig           barrierConfig;
+        LoopConfig              loopConfig;
+        DagFeatures             dagFeatures;
+        PassOrderSnapshotConfig passOrderSnapshot;
     };
 }

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 target_sources(stinkytofu PRIVATE
+    PassOrderSnapshotJson.cpp
     PhiPlacement.cpp
     BuildDefUseChain.cpp
     CFGBuilderPass.cpp

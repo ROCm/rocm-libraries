@@ -25,6 +25,8 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 
+#include <cctype>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -132,10 +134,77 @@ namespace
             std::string arg = argv[i];
             if(arg.substr(0, 2) == "--")
             {
+                static constexpr char kSnapJson[]  = "--pass-order-snapshot-json=";
+                static constexpr char kSnapAfter[] = "--pass-order-snapshot-after-passes=";
+                if(arg.rfind(kSnapJson, 0) == 0 || arg.rfind(kSnapAfter, 0) == 0)
+                    continue;
                 passNames.push_back(arg.substr(2)); // Remove "--" prefix
             }
         }
         return passNames;
+    }
+
+    std::string extractPassOrderSnapshotJsonPath(int argc, char** argv)
+    {
+        static constexpr char kPrefix[] = "--pass-order-snapshot-json=";
+        for(int i = 1; i < argc; ++i)
+        {
+            std::string a = argv[i];
+            if(a.rfind(kPrefix, 0) == 0)
+                return a.substr(std::strlen(kPrefix));
+        }
+        return {};
+    }
+
+    static void trimWhitespace(std::string& s)
+    {
+        while(!s.empty() && std::isspace(static_cast<unsigned char>(s.front())))
+        {
+            s.erase(0, 1);
+        }
+        while(!s.empty() && std::isspace(static_cast<unsigned char>(s.back())))
+        {
+            s.pop_back();
+        }
+    }
+
+    static std::vector<std::string> splitCommaPassNames(const char* prefix, const std::string& a)
+    {
+        if(a.rfind(prefix, 0) != 0)
+            return {};
+        std::string              rest = a.substr(std::strlen(prefix));
+        std::vector<std::string> out;
+        size_t                   start = 0;
+        while(start < rest.size())
+        {
+            size_t comma = rest.find(',', start);
+            std::string token
+                = rest.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+            trimWhitespace(token);
+            if(!token.empty())
+            {
+                out.push_back(std::move(token));
+            }
+            if(comma == std::string::npos)
+            {
+                break;
+            }
+            start = comma + 1;
+        }
+        return out;
+    }
+
+    /// Comma-separated `Pass::getName()` strings; if omitted, default is StinkyDAGSchedulerPass only.
+    std::vector<std::string> extractPassOrderSnapshotAfterPasses(int argc, char** argv)
+    {
+        static constexpr char kPrefix[] = "--pass-order-snapshot-after-passes=";
+        for(int i = 1; i < argc; ++i)
+        {
+            std::vector<std::string> v = splitCommaPassNames(kPrefix, argv[i]);
+            if(!v.empty())
+                return v;
+        }
+        return {};
     }
 }
 
@@ -146,6 +215,8 @@ int main(int argc, char** argv)
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
         std::cerr << "Options:\n";
         std::cerr << "  --arch <arch>    Target architecture (gfx942, gfx950, gfx1250)\n";
+        std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON (stinkytofu-analysis)\n";
+        std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list (optional; default: scheduler only)\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --help           Show this help message\n\n";
         std::cerr << "Example:\n";
@@ -166,6 +237,8 @@ int main(int argc, char** argv)
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
         std::cerr << "Options:\n";
         std::cerr << "  --arch <arch>    Target architecture (gfx942, gfx950, gfx1250)\n";
+        std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON (stinkytofu-analysis)\n";
+        std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list (optional; default: scheduler only)\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --help           Show this help message\n\n";
         printAvailablePasses();
@@ -215,6 +288,9 @@ int main(int argc, char** argv)
 
     auto                          debugConfig       = getPassManagerDebugConfig();
     stinkytofu::PassFeatureConfig passFeatureConfig = getPassFeatureConfig();
+    passFeatureConfig.passOrderSnapshot.jsonPath = extractPassOrderSnapshotJsonPath(argc, argv);
+    passFeatureConfig.passOrderSnapshot.dumpAfterPasses
+        = extractPassOrderSnapshotAfterPasses(argc, argv);
 
     stinkytofu::PassManager passManager;
 

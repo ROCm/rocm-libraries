@@ -234,6 +234,8 @@ namespace stinkytofu
         static void clearDebugOnly();
     };
 
+    class DAGScheduleJsonCollector;
+
     // PassManager manages a list of passes to run on a module.
     //
     // Note: The module is using physical registers, so it is no longer in SSA form.
@@ -281,6 +283,15 @@ namespace stinkytofu
         // Set pass feature configuration
         void setPassFeatureConfig(const PassFeatureConfig& config);
 
+        /// Use an external JSON collector shared across multiple PassManager::run() calls
+        /// (e.g. Backend running loopWithPrefetch + noLoadLoopBody). The caller owns the
+        /// collector and must keep it alive until all runs are done. When set, PassManager
+        /// will not create its own collector internally.
+        void setExternalOrderJsonCollector(DAGScheduleJsonCollector* collector)
+        {
+            externalOrderJsonCollector_ = collector;
+        }
+
         void setBasicBlockFilter(BasicBlockFilter filter)
         {
             passCtx.setBasicBlockFilter(filter);
@@ -307,5 +318,7 @@ namespace stinkytofu
         std::vector<std::unique_ptr<Pass>> passes;
 
         std::unique_ptr<PassManagerDebugConfig> dbgCfg;
+
+        DAGScheduleJsonCollector* externalOrderJsonCollector_ = nullptr;
     };
 }

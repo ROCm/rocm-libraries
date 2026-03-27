@@ -6,4 +6,5 @@ target_sources(stinkytofu PRIVATE
     BasicBlock.cpp
     Function.cpp
     PassManager.cpp
+    DAGScheduleJsonWriter.cpp
 )
