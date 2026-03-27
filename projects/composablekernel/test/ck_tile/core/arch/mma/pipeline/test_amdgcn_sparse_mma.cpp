@@ -237,11 +237,16 @@ __global__ void test_sparse_transform(void* a, void* idx)
     *reinterpret_cast<int32_t*>(idx)              = i;
 }
 
-// 1. Basic correctness: valid divisible sizes
+// Generalized helper: runs the sparse transform kernel and verifies compressed output and index.
 template <int NUM, int RATIO, typename Type>
-void sparse_transform_test_case()
+void sparse_transform_verify(const std::vector<Type>& input,
+                             const std::vector<Type>& expected_output,
+                             int32_t expected_idx)
 {
     static_assert(RATIO == 2, "Extend functionality if other ratio is used.");
+    ASSERT_EQ(static_cast<int>(input.size()), NUM);
+    ASSERT_EQ(static_cast<int>(expected_output.size()), NUM / RATIO);
+
     int devCount;
     hipDevice_t dev;
     HIP_CHECK_ERROR(hipGetDevice(&dev));
@@ -259,12 +264,6 @@ void sparse_transform_test_case()
         GTEST_SKIP() << "No HIP device found. Skipping test.";
     }
 
-    std::vector<Type> v(NUM);
-    for(int i = 0; i < NUM; ++i)
-    {
-        v[i] = i % 2 == 0 ? i + 1 : 0;
-    }
-
     float* d_v;
     int32_t* d_idx;
 
@@ -273,7 +272,7 @@ void sparse_transform_test_case()
     HIP_CHECK_ERROR(hipMalloc(&d_idx, sizeof(int32_t)));
 
     // Copy inputs to device
-    HIP_CHECK_ERROR(hipMemcpy(d_v, v.data(), Size, hipMemcpyHostToDevice));
+    HIP_CHECK_ERROR(hipMemcpy(d_v, input.data(), Size, hipMemcpyHostToDevice));
 
     test_sparse_transform<RATIO, ext_vector_t<Type, NUM>><<<1, 32>>>(d_v, d_idx);
     HIP_CHECK_ERROR(hipDeviceSynchronize());
@@ -283,22 +282,80 @@ void sparse_transform_test_case()
     int32_t h_idx;
     HIP_CHECK_ERROR(hipMemcpy(&h_idx, d_idx, sizeof(int32_t), hipMemcpyDeviceToHost));
 
-    EXPECT_NE(h_idx, -1) << "idx should have been written";
-    if constexpr(NUM == 8)
-    {
-        EXPECT_EQ(h_idx, 0b10001000);
-    }
-    else if constexpr(NUM == 16)
-    {
-        EXPECT_EQ(h_idx, 0b1000100010001000);
-    }
+    EXPECT_EQ(h_idx, expected_idx) << "Index mask mismatch";
     for(int i = 0; i < NUM / RATIO; ++i)
     {
-        EXPECT_EQ(h_out[i], v[i * 2]);
+        EXPECT_EQ(h_out[i], expected_output[i]) << "Output mismatch at position " << i;
+    }
+
+    // Semantic index validation: each 2-bit field in h_idx encodes the original
+    // slot (0–3) within the group of 4 that the corresponding compressed element
+    // came from. Verify that the index is consistent with input and output.
+    //
+    // Note: when a group has fewer than 2 non-zeros, unused output slots contain
+    // initialization values (from nonzero_elems init) that don't correspond to the
+    // default index (slot 2). We only validate entries where the index was explicitly
+    // set, i.e. where input[slot] is non-zero.
+    constexpr int CompressedSize = NUM / RATIO;
+    for(int i = 0; i < CompressedSize; ++i)
+    {
+        int slot           = (h_idx >> (2 * i)) & 0b11;
+        int group          = i / 2;
+        Type input_at_slot = input[group * 4 + slot];
+        // Only check when input at the indexed slot is non-zero (explicitly assigned)
+        // or when both are zero (consistent default for all-zero groups).
+        if(static_cast<float>(input_at_slot) != 0.0f || static_cast<float>(h_out[i]) == 0.0f)
+        {
+            EXPECT_EQ(h_out[i], input_at_slot)
+                << "Index field " << i << " points to slot " << slot << " in group " << group
+                << " but output[" << i << "] != input[" << (group * 4 + slot) << "]";
+        }
     }
 
     HIP_CHECK_ERROR(hipFree(d_v));
     HIP_CHECK_ERROR(hipFree(d_idx));
+}
+
+// Helper: build expected index from a per-group 4-bit pattern, repeated for all groups.
+// Each group of 4 input elements contributes 2 compressed elements → 2 x 2-bit index fields = 4
+// bits.
+static int32_t build_repeated_group_idx(int num_groups, int32_t group_bits_4)
+{
+    int32_t idx = 0;
+    for(int g = 0; g < num_groups; ++g)
+        idx |= (group_bits_4 << (4 * g));
+    return idx;
+}
+
+// Helper: build expected index from alternating even/odd 4-bit group patterns.
+static int32_t build_alternating_group_idx(int num_groups, int32_t even_bits_4, int32_t odd_bits_4)
+{
+    int32_t idx = 0;
+    for(int g = 0; g < num_groups; ++g)
+        idx |= ((g % 2 == 0 ? even_bits_4 : odd_bits_4) << (4 * g));
+    return idx;
+}
+
+// 1. Basic correctness: valid divisible sizes
+// Input pattern: {1, 0, 3, 0, 5, 0, 7, 0, ...} → non-zeros at slots 0,2
+// Group idx pattern: field0=0b00 (slot 0), field1=0b10 (slot 2) → 0b1000
+template <int NUM, int RATIO, typename Type>
+void sparse_transform_test_case()
+{
+    std::vector<Type> v(NUM);
+    for(int i = 0; i < NUM; ++i)
+    {
+        v[i] = i % 2 == 0 ? i + 1 : 0;
+    }
+
+    std::vector<Type> expected_out(NUM / RATIO);
+    for(int i = 0; i < NUM / RATIO; ++i)
+    {
+        expected_out[i] = v[i * 2];
+    }
+
+    int32_t expected_idx = build_repeated_group_idx(NUM / 4, 0b1000);
+    sparse_transform_verify<NUM, RATIO, Type>(v, expected_out, expected_idx);
 }
 
 TEST(SparseTransformsTest, ValidCompressionRatio)
@@ -307,4 +364,160 @@ TEST(SparseTransformsTest, ValidCompressionRatio)
     // introduced and use different type combinations
     sparse_transform_test_case<8, 2, fp16_t>();
     sparse_transform_test_case<16, 2, fp16_t>();
+    sparse_transform_test_case<32, 2, fp16_t>();
+}
+
+// All-zero input: no non-zeros in any group of 4.
+// Each output pair defaults to {a_vec[slot2], a_vec[slot3]} = {0, 0},
+// and the index uses default slot-2 encoding (0b10) for every 2-bit field.
+// Group idx pattern: 0b1010
+template <int NUM>
+void sparse_transform_all_zero()
+{
+    using T = fp16_t;
+    std::vector<T> input(NUM, static_cast<T>(0));
+    std::vector<T> expected_output(NUM / 2, static_cast<T>(0));
+    int32_t expected_idx = build_repeated_group_idx(NUM / 4, 0b1010);
+    sparse_transform_verify<NUM, 2, T>(input, expected_output, expected_idx);
+}
+
+TEST(SparseTransformsTest, AllZeroInput)
+{
+    sparse_transform_all_zero<8>();
+    sparse_transform_all_zero<16>();
+    sparse_transform_all_zero<32>();
+}
+
+// Single non-zero per group of 4 (at slot 3).
+// nonzero_elems initializes to {a_vec[slot2]=0, a_vec[slot3]=V}.
+// Only j=3 triggers: nonzero_elems[0]=V, field0=0b11, pos becomes 1.
+// nonzero_elems[1] keeps its init V. Output: {V, V}.
+// Group idx pattern: field0=0b11, field1=0b10 (default) → 0b1011
+template <int NUM>
+void sparse_transform_single_nonzero()
+{
+    using T = fp16_t;
+    std::vector<T> input(NUM, static_cast<T>(0));
+    std::vector<T> expected_output(NUM / 2);
+
+    for(int g = 0; g < NUM / 4; ++g)
+    {
+        T val                      = static_cast<T>(g + 5);
+        input[g * 4 + 3]           = val;
+        expected_output[g * 2]     = val;
+        expected_output[g * 2 + 1] = val;
+    }
+
+    int32_t expected_idx = build_repeated_group_idx(NUM / 4, 0b1011);
+    sparse_transform_verify<NUM, 2, T>(input, expected_output, expected_idx);
+}
+
+TEST(SparseTransformsTest, SingleNonZeroPerGroup)
+{
+    sparse_transform_single_nonzero<8>();
+    sparse_transform_single_nonzero<16>();
+    sparse_transform_single_nonzero<32>();
+}
+
+// Non-zeros at slots 1 and 3 in each group.
+// Input: {0, a, 0, b, ...}. Output: {a, b, ...}.
+// Group idx pattern: field0=0b01 (slot 1), field1=0b11 (slot 3) → 0b1101
+template <int NUM>
+void sparse_transform_slots_1_and_3()
+{
+    using T = fp16_t;
+    std::vector<T> input(NUM, static_cast<T>(0));
+    std::vector<T> expected_output(NUM / 2);
+
+    for(int g = 0; g < NUM / 4; ++g)
+    {
+        T a                        = static_cast<T>(g * 2 + 3);
+        T b                        = static_cast<T>(g * 2 + 4);
+        input[g * 4 + 1]           = a;
+        input[g * 4 + 3]           = b;
+        expected_output[g * 2]     = a;
+        expected_output[g * 2 + 1] = b;
+    }
+
+    int32_t expected_idx = build_repeated_group_idx(NUM / 4, 0b1101);
+    sparse_transform_verify<NUM, 2, T>(input, expected_output, expected_idx);
+}
+
+TEST(SparseTransformsTest, NonZerosAtSlots1And3)
+{
+    sparse_transform_slots_1_and_3<8>();
+    sparse_transform_slots_1_and_3<16>();
+    sparse_transform_slots_1_and_3<32>();
+}
+
+// Non-zeros at slots 0 and 3 in each group (non-adjacent).
+// Input: {a, 0, 0, b, ...}. Output: {a, b, ...}.
+// Group idx pattern: field0=0b00 (slot 0), field1=0b11 (slot 3) → 0b1100
+template <int NUM>
+void sparse_transform_slots_0_and_3()
+{
+    using T = fp16_t;
+    std::vector<T> input(NUM, static_cast<T>(0));
+    std::vector<T> expected_output(NUM / 2);
+
+    for(int g = 0; g < NUM / 4; ++g)
+    {
+        T a                        = static_cast<T>(g * 2 + 2);
+        T b                        = static_cast<T>(g * 2 + 3);
+        input[g * 4]               = a;
+        input[g * 4 + 3]           = b;
+        expected_output[g * 2]     = a;
+        expected_output[g * 2 + 1] = b;
+    }
+
+    int32_t expected_idx = build_repeated_group_idx(NUM / 4, 0b1100);
+    sparse_transform_verify<NUM, 2, T>(input, expected_output, expected_idx);
+}
+
+TEST(SparseTransformsTest, NonZerosAtSlots0And3)
+{
+    sparse_transform_slots_0_and_3<8>();
+    sparse_transform_slots_0_and_3<16>();
+    sparse_transform_slots_0_and_3<32>();
+}
+
+// Mixed sparsity pattern: even groups have non-zeros at slots 0,2; odd groups at slots 1,3.
+// Even group idx: field0=0b00, field1=0b10 → 0b1000
+// Odd  group idx: field0=0b01, field1=0b11 → 0b1101
+template <int NUM>
+void sparse_transform_mixed()
+{
+    using T = fp16_t;
+    std::vector<T> input(NUM, static_cast<T>(0));
+    std::vector<T> expected_output(NUM / 2);
+
+    for(int g = 0; g < NUM / 4; ++g)
+    {
+        T a = static_cast<T>(g * 2 + 1);
+        T b = static_cast<T>(g * 2 + 2);
+        if(g % 2 == 0)
+        {
+            // Slots 0, 2
+            input[g * 4]     = a;
+            input[g * 4 + 2] = b;
+        }
+        else
+        {
+            // Slots 1, 3
+            input[g * 4 + 1] = a;
+            input[g * 4 + 3] = b;
+        }
+        expected_output[g * 2]     = a;
+        expected_output[g * 2 + 1] = b;
+    }
+
+    int32_t expected_idx = build_alternating_group_idx(NUM / 4, 0b1000, 0b1101);
+    sparse_transform_verify<NUM, 2, T>(input, expected_output, expected_idx);
+}
+
+TEST(SparseTransformsTest, MixedSparsityPattern)
+{
+    sparse_transform_mixed<8>();
+    sparse_transform_mixed<16>();
+    sparse_transform_mixed<32>();
 }
