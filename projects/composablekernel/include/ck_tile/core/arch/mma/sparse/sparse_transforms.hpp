@@ -34,7 +34,7 @@ static CK_TILE_DEVICE int32_t compress_a_impl(AVec& a_vec)
     // in a 4‑element group – the unused output is treated as coming from slot 2.
     // The loop below will clear and set each field as real non‑zeros are seen.
     int32_t idx = 0;
-    static_for<0, CompressedSize, 1>{}([&](auto k) { idx |= (2 << (2 * k)); });
+    static_for<0, CompressedSize, 1>{}([&](auto k) { idx |= (2u << (2u * k)); });
 
     static_for<0, CompressedSize / 2, 1>{}([&](auto i) {
         ADataType nonzero_elems[2] = {a_vec[i * 4 + 2], a_vec[i * 4 + 3]};
@@ -45,8 +45,8 @@ static CK_TILE_DEVICE int32_t compress_a_impl(AVec& a_vec)
             {
                 nonzero_elems[non_zero_pos] = a_vec[i * 4 + j];
                 // clear the two‑bit field for this output and insert j
-                idx &= ~(0b11 << 2 * (i * 2 + non_zero_pos));
-                idx |= j << 2 * (i * 2 + non_zero_pos);
+                idx &= ~(0b11u << (2u * (i * 2 + non_zero_pos)));
+                idx |= static_cast<uint32_t>(j) << (2u * (i * 2 + non_zero_pos));
                 ++non_zero_pos;
             }
         });
