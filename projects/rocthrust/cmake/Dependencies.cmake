@@ -399,9 +399,8 @@ if(BUILD_BENCHMARK)
       GIT_TAG        v${BENCHMARK_VERSION}
     )
     FetchContent_MakeAvailable(googlebench)
-	# Clang on Windows with -pedantic-errors treats __COUNTER__ in Google  
-	# Benchmark as a C2y extension and fails. Also --offload-compress is unused  
-	# for host-only code. Suppress for the benchmark targets.  
+	# Clang on Windows throws the following warnings with Googlebenchmark v1.9.5 (along with Werror):
+    # googlebench-src/src/string_util.cc:158:34: error: format string is not a string literal [-Werror,-Wformat-nonliteral]
 	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)  
 	  if(TARGET benchmark)  
 	    target_compile_options(benchmark PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)  
