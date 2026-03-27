@@ -11,17 +11,17 @@
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 // Uncomment when unpack_from_descriptor() is implemented in the lifting PR:
 // #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
-// #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
 // #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 // #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
-// #include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
 // #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 // #include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
-// #include <hipdnn_frontend/node/MatmulNode.hpp>
+#include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
@@ -77,10 +77,10 @@ namespace hipdnn_frontend::detail
     //     return {std::make_shared<graph::BatchnormBackwardNode>(
     //                 graph::BatchnormBackwardAttributes{}, graphAttrs),
     //             {}};
-    // case HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE:
-    //     return {std::make_shared<graph::BatchnormInferenceNode>(
-    //                 graph::BatchnormInferenceAttributes{}, graphAttrs),
-    //             {}};
+    case HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE:
+        return {std::make_shared<graph::BatchnormInferenceNode>(
+                    graph::BatchnormInferenceAttributes{}, graphAttrs),
+                {}};
     // case HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE:
     //     return {std::make_shared<graph::BatchnormInferenceNodeVarianceExt>(
     //                 graph::BatchnormInferenceAttributesVarianceExt{}, graphAttrs),
@@ -89,10 +89,10 @@ namespace hipdnn_frontend::detail
     //     return {std::make_shared<graph::BlockScaleDequantizeNode>(
     //                 graph::BlockScaleDequantizeAttributes{}, graphAttrs),
     //             {}};
-    // case HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE:
-    //     return {std::make_shared<graph::BlockScaleQuantizeNode>(
-    //                 graph::BlockScaleQuantizeAttributes{}, graphAttrs),
-    //             {}};
+    case HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE:
+        return {std::make_shared<graph::BlockScaleQuantizeNode>(
+                    graph::BlockScaleQuantizeAttributes{}, graphAttrs),
+                {}};
     // case HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_DATA:
     //     return {std::make_shared<graph::ConvolutionDgradNode>(graph::ConvDgradAttributes{},
     //                                                           graphAttrs),
@@ -111,8 +111,8 @@ namespace hipdnn_frontend::detail
     case HIPDNN_OPERATION_TYPE_LAYERNORM:
         return {std::make_shared<graph::LayerNormNode>(graph::LayernormAttributes{}, graphAttrs),
                 {}};
-    // case HIPDNN_OPERATION_TYPE_MATMUL:
-    //     return {std::make_shared<graph::MatmulNode>(graph::MatmulAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_MATMUL:
+        return {std::make_shared<graph::MatmulNode>(graph::MatmulAttributes{}, graphAttrs), {}};
     case HIPDNN_OPERATION_TYPE_POINTWISE:
         return {std::make_shared<graph::PointwiseNode>(graph::PointwiseAttributes{}, graphAttrs),
                 {}};
