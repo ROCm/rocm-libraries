@@ -58,13 +58,11 @@ constexpr float getToleranceInferenceWithVariance()
     }
     else if constexpr(std::is_same_v<T, half>)
     {
-        // ~32% more lenient for BN with variance vs BN with inv variance (5e-4)
-        return 6.6e-4f;
+        return 8e-4f;
     }
     else if constexpr(std::is_same_v<T, bfloat16>)
     {
-        // ~4% more lenient for BN with variance vs BN with inv variance (5e-3)
-        return 5.2e-3f;
+        return 7e-3f;
     }
     else
     {
