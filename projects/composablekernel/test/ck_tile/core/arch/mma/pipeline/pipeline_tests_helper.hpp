@@ -12,6 +12,7 @@
 #include "ck_tile/core/arch/arch.hpp"
 #include <hip/hip_runtime.h>
 #include "ck_tile/host/hip_check_error.hpp"
+#include "ck_tile/core/numeric/type_convert.hpp"
 
 #include "../get_wave_size_helper.hpp"
 
@@ -72,10 +73,10 @@ struct MmaPipelineTest
         uint32_t CSize = CElements * sizeof(CType);
 
         // Initialize A and B to all 1's, C to all 0's
-        std::vector<AType> h_a(AElements, static_cast<AType>(1));
-        std::vector<BType> h_b(BElements, static_cast<BType>(1));
-        std::vector<CType> h_c(CElements, static_cast<CType>(0));
-        std::vector<CType> h_out(CElements, static_cast<CType>(0));
+        std::vector<AType> h_a(AElements, type_convert<AType>(1));
+        std::vector<BType> h_b(BElements, type_convert<BType>(1));
+        std::vector<CType> h_c(CElements, type_convert<CType>(0));
+        std::vector<CType> h_out(CElements, type_convert<CType>(0));
 
         AType* d_a;
         BType* d_b;
