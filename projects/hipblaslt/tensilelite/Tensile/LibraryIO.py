@@ -560,8 +560,7 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
     # schedule name
     data.append(schedulePrefix)  # change from Tensile to vega10
     # schedule architecture name and get CU count
-    # CUCount=getCUCount()
-    CUCount=None
+    CUCount=getCUCount()
     data.append({"Architecture": architectureName, "CUCount": CUCount} if architectureName=="gfx942" and CUCount and CUCount!=304 else architectureName)
     # schedule device names
     data.append(deviceNames)
