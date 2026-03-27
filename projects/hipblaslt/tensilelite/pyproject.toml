@@ -1,0 +1,58 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[tool.coverage.run]
+branch = true
+concurrency = ["multiprocessing"]
+omit = [
+    "*/Tests/*",
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/build_tmp/*",
+    "*/build/*",
+    "*/.tox/*",
+    "*/site-packages/*",
+    "*/conftest.py",
+    "*/setup.py",
+    "*/.eggs/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+skip_empty = true
+sort = "Cover"
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "def __str__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstract",
+    "@abstractmethod",
+    "pass",
+    "\\.\\.\\.",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+title = "TensileLite Code Coverage Report"
+show_contexts = true
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.coverage.json]
+output = "coverage.json"
+show_contexts = true
+
+[tool.pytest.ini_options]
+# You can also move pytest config here if desired
+testpaths = ["Tensile/Tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
