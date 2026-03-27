@@ -8,6 +8,8 @@
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/grouped_convolution.hpp"
+#include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
+#include "ck_tile/builder/versions.hpp"
 #include "ck_tile/builder/conv_signature_concepts.hpp"
 #include "ck_tile/builder/conv_algorithm_concepts.hpp"
 #include "ck_tile/builder/conv_algorithm_limits.hpp"
@@ -63,10 +65,12 @@ struct ConvTileFactory
         ck_tile::sequence<BLOCK_GEMM.warps.m, BLOCK_GEMM.warps.n, BLOCK_GEMM.warps.k>,
         ck_tile::sequence<BLOCK_GEMM.warp_tile.m, BLOCK_GEMM.warp_tile.n, BLOCK_GEMM.warp_tile.k>>;
 
-    using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<
-        GemmShape,
-        GroupedConvTraitsType::FixedGemmParams::TilePartitionerGroupNum,
-        GroupedConvTraitsType::FixedGemmParams::TilePartitionerM01>;
+    using TilePartitioner =
+        typename internal::TilePartitionerType<ALGORITHM, GemmShape, GroupedConvTraitsType>::type;
+
+    using ConvOutDataType = std::conditional_t<OPTIMIZATIONS.two_stage,
+                                               typename Types::AccDataType,
+                                               typename Types::EDataType>;
 
     using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<
         GroupedConvTraitsType::FixedGemmParams::kPadM,
@@ -103,7 +107,7 @@ struct ConvTileFactory
                                          typename Types::BDataType,
                                          typename Types::DsDataTypes,
                                          typename Types::AccDataType,
-                                         typename Types::EDataType,
+                                         ConvOutDataType,
                                          typename GroupedConvTraitsType::ImplicitGemmDsLayout,
                                          typename GroupedConvTraitsType::FixedGemmParams::ELayout,
                                          typename Ops::CDEElementwiseOp,
@@ -124,6 +128,35 @@ struct ConvTileFactory
                                                                      TilePartitioner,
                                                                      GemmPipeline,
                                                                      ConvEpilogue>::Instance;
+};
+
+template <ConvSignatureDescriptor auto SIGNATURE,
+          ConvAlgorithmDescriptor auto ALGORITHM,
+          StringLiteral VERSION = LATEST_API_VERSION>
+struct ElementwiseOpTileFactory
+{
+    static constexpr auto BLOCK      = internal::SetTileThreadBlockInfo<ALGORITHM>();
+    static constexpr auto BLOCK_GEMM = internal::SetTileBlockGemm<ALGORITHM>();
+
+    using Types                 = internal::TileConvTensorTypes<SIGNATURE.data_type>;
+    using XDataType             = Types::AccDataType;
+    using WorkspaceDataType     = Types::AccDataType;
+    using XElementwiseOperation = ck_tile::element_wise::UnaryConvert;
+    using YDataType             = Types::EDataType;
+    using BlockTile             = ck_tile::sequence<BLOCK.per_block.m * BLOCK.per_block.n>;
+    using BlockWarps            = ck_tile::sequence<BLOCK_GEMM.warps.m * BLOCK_GEMM.warps.n>;
+    using WarpTile = ck_tile::sequence<BLOCK_GEMM.warp_tile.m * BLOCK_GEMM.warp_tile.n>;
+    using ElementwiseShape =
+        ck_tile::ElementWiseShape<BlockWarps, BlockTile, WarpTile, WorkspaceDataType>;
+
+    // Conversion from X -> Y.
+    using Problem = ck_tile::ElementWisePipelineProblem<XDataType,
+                                                        WorkspaceDataType,
+                                                        YDataType,
+                                                        ElementwiseShape,
+                                                        XElementwiseOperation>;
+
+    using Instance = ck_tile::ElementWiseKernel<Problem, ck_tile::ElementWiseDefaultPolicy>;
 };
 
 } // namespace ck_tile::builder::factory

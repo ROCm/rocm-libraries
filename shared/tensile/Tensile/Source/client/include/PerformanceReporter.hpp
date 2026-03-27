@@ -35,15 +35,13 @@
 #include <limits>
 #include <string>
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 #include <hip/hip_runtime.h>
 
 namespace Tensile
 {
     namespace Client
     {
-        namespace po = boost::program_options;
-
         class PerformanceReporter : public ResultReporter
         {
         public:

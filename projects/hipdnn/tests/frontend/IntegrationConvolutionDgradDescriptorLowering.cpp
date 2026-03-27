@@ -278,7 +278,7 @@ TEST_F(IntegrationConvolutionDgradDescriptorLowering, AutoAssignedUidsPreservedI
         << "DX tensor UID " << convBwd->dx_tensor_uid << " not found in graph tensors";
 
     // All three tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> nodeUids
+    const std::unordered_set<int64_t> nodeUids
         = {convBwd->dy_tensor_uid, convBwd->w_tensor_uid, convBwd->dx_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 3u) << "Conv bwd node tensor UIDs are not distinct";
 }

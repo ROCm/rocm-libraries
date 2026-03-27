@@ -88,7 +88,7 @@ public:
      * @param scalar The scalar value to store in the tensor
      */
     template <typename T>
-    TensorAttributes(T const& scalar)
+    TensorAttributes(const T& scalar)
     {
         set_value(scalar);
     }
@@ -407,37 +407,39 @@ public:
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr(std::is_same_v<T, float>)
                 {
-                    hipdnn_data_sdk::data_objects::Float32Value floatVal(arg);
+                    const hipdnn_data_sdk::data_objects::Float32Value floatVal(arg);
                     return {hipdnn_data_sdk::data_objects::TensorValue::Float32Value,
                             builder.CreateStruct(floatVal).Union()};
                 }
                 else if constexpr(std::is_same_v<T, double>)
                 {
-                    hipdnn_data_sdk::data_objects::Float64Value doubleVal(arg);
+                    const hipdnn_data_sdk::data_objects::Float64Value doubleVal(arg);
                     return {hipdnn_data_sdk::data_objects::TensorValue::Float64Value,
                             builder.CreateStruct(doubleVal).Union()};
                 }
                 else if constexpr(std::is_same_v<T, half>)
                 {
-                    hipdnn_data_sdk::data_objects::Float16Value halfVal(static_cast<float>(arg));
+                    const hipdnn_data_sdk::data_objects::Float16Value halfVal(
+                        static_cast<float>(arg));
                     return {hipdnn_data_sdk::data_objects::TensorValue::Float16Value,
                             builder.CreateStruct(halfVal).Union()};
                 }
                 else if constexpr(std::is_same_v<T, bfloat16>)
                 {
-                    hipdnn_data_sdk::data_objects::BFloat16Value bfVal(static_cast<float>(arg));
+                    const hipdnn_data_sdk::data_objects::BFloat16Value bfVal(
+                        static_cast<float>(arg));
                     return {hipdnn_data_sdk::data_objects::TensorValue::BFloat16Value,
                             builder.CreateStruct(bfVal).Union()};
                 }
                 else if constexpr(std::is_same_v<T, uint8_t>)
                 {
-                    hipdnn_data_sdk::data_objects::Float8Value uint8Val(arg);
+                    const hipdnn_data_sdk::data_objects::Float8Value uint8Val(arg);
                     return {hipdnn_data_sdk::data_objects::TensorValue::Float8Value,
                             builder.CreateStruct(uint8Val).Union()};
                 }
                 else if constexpr(std::is_same_v<T, int32_t>)
                 {
-                    hipdnn_data_sdk::data_objects::Int32Value int32Val(arg);
+                    const hipdnn_data_sdk::data_objects::Int32Value int32Val(arg);
                     return {hipdnn_data_sdk::data_objects::TensorValue::Int32Value,
                             builder.CreateStruct(int32Val).Union()};
                 }
@@ -481,13 +483,13 @@ public:
 
         if(fb->dims() != nullptr)
         {
-            std::vector<int64_t> dims(fb->dims()->begin(), fb->dims()->end());
+            const std::vector<int64_t> dims(fb->dims()->begin(), fb->dims()->end());
             tensor->set_dim(dims);
         }
 
         if(fb->strides() != nullptr)
         {
-            std::vector<int64_t> strides(fb->strides()->begin(), fb->strides()->end());
+            const std::vector<int64_t> strides(fb->strides()->begin(), fb->strides()->end());
             tensor->set_stride(strides);
         }
 

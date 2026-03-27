@@ -155,6 +155,9 @@ private:
         std::mutex       get_mutex;
         sqlite3_stmt_ptr store_stmt;
         std::mutex       store_mutex;
+
+        static const bool cache_read_disabled;
+        static const bool cache_write_disabled;
     };
 
     // Database handles to system- and user-level caches.  System
@@ -164,15 +167,6 @@ private:
     // opened.
     std::map<std::string, db_file> db_sys;
     db_file                        db_user;
-
-    // query handles, with mutexes to prevent concurrent queries that
-    // might stomp on one another's bound values
-    sqlite3_stmt_ptr get_stmt_sys;
-    std::mutex       get_mutex_sys;
-    sqlite3_stmt_ptr get_stmt_user;
-    std::mutex       get_mutex_user;
-    sqlite3_stmt_ptr store_stmt_user;
-    std::mutex       store_mutex_user;
 
     // lock around deserialization, since that attaches a fixed-name
     // schema to the db and we don't want a collision

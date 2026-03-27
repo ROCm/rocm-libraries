@@ -41,6 +41,8 @@ exclude: |
     # ==========================================================================
     # Permanent exclusions
     # ==========================================================================
+    # Auto-generated GitHub Agentic Workflow lock files
+    \.github/workflows/.*\.lock\.yml$|
     # Binary files
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers
@@ -63,7 +65,8 @@ repos:
           ^projects/hipdnn/\.clang-format$|
           ^dnn-providers/miopen-provider/\.clang-format$|
           ^dnn-providers/hipblaslt-provider/\.clang-format$|
-          ^dnn-providers/hip-kernel-provider/\.clang-format$
+          ^dnn-providers/hip-kernel-provider/\.clang-format$|
+          ^dnn-providers/integration-tests/\.clang-format$
       - id: check-added-large-files
 
   - repo: https://github.com/psf/black

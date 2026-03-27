@@ -28,7 +28,7 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
     ROCSPARSE_DEVICE_ILF void csrsm_device(rocsparse_operation transB,
                                            J                   m,
                                            J                   nrhs,
@@ -91,15 +91,17 @@ namespace rocsparse
             // This happens only once for each chunk of BLOCKSIZE elements
             if(k == 0)
             {
+                __syncthreads();
+
                 scsr_col_ind[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
                                                    ? csr_col_ind[hipThreadIdx_x + j] - idx_base
                                                    : -1;
                 scsr_val[hipThreadIdx_x]
                     = (hipThreadIdx_x < row_end - j) ? csr_val[hipThreadIdx_x + j] : -1;
-            }
 
-            // Wait for preload to finish
-            __syncthreads();
+                // Wait for preload to finish
+                __syncthreads();
+            }
 
             // Current column this lane operates on
             const J local_col = scsr_col_ind[k];

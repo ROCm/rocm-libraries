@@ -14,7 +14,15 @@ target_link_libraries(
     PRIVATE
         Threads::Threads
         hipdnn_backend
+        hipdnn_data_sdk
 )
+
+target_compile_definitions(
+    hipdnn_backend_logging_shutdown_tests
+    PRIVATE TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
+)
+
+add_dependencies(hipdnn_backend_logging_shutdown_tests test_good_default_plugin)
 
 clang_tidy_check(hipdnn_backend_logging_shutdown_tests)
 add_integration_test_target(hipdnn_backend_logging_shutdown_tests ${CMAKE_CURRENT_BINARY_DIR})

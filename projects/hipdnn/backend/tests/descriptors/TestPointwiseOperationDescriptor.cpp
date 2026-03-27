@@ -362,13 +362,14 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeTensorDescriptor)
     makeFinalized();
     auto desc = getDescriptor();
 
-    HipdnnBackendDescriptor* retrievedIn0 = nullptr;
+    HipdnnBackendDescriptor* rawIn0 = nullptr;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedIn0));
+                                       static_cast<void*>(&rawIn0)));
+    const std::unique_ptr<HipdnnBackendDescriptor> retrievedIn0(rawIn0);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedIn0, nullptr);
@@ -579,7 +580,7 @@ TEST_F(TestPointwiseOperationDescriptor, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("PointwiseOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("in_0_uid=40"), std::string::npos);
     ASSERT_NE(str.find("out_0_uid=41"), std::string::npos);
@@ -671,7 +672,7 @@ TEST_F(TestPointwiseOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -683,7 +684,7 @@ TEST_F(TestPointwiseOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 TEST_F(TestPointwiseOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _in0Desc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _in0Desc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 
@@ -875,7 +876,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeIn1ReturnsZeroCountForUnary
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrieved));
+                                       static_cast<void*>(&retrieved)));
     ASSERT_EQ(elementCount, 0);
     ASSERT_EQ(retrieved, nullptr);
 }
@@ -891,7 +892,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeIn2ReturnsZeroCountForUnary
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrieved));
+                                       static_cast<void*>(&retrieved)));
     ASSERT_EQ(elementCount, 0);
     ASSERT_EQ(retrieved, nullptr);
 }

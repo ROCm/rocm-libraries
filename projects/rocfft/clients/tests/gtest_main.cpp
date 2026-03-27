@@ -145,7 +145,7 @@ void init_gtest_flags()
     std::swap(temp_list_tests, testing::GTEST_FLAG(list_tests));
 
     // move stdout to devnull
-#ifdef WIN32
+#ifdef _WIN32
     int stdout_fd   = _fileno(stdout);
     int devnull     = _open("NUL", _O_WRONLY);
     int stdout_copy = _dup(stdout_fd);
@@ -160,7 +160,7 @@ void init_gtest_flags()
     (void)RUN_ALL_TESTS();
 
     // put stdout back
-#ifdef WIN32
+#ifdef _WIN32
     _dup2(stdout_copy, stdout_fd);
     _close(stdout_copy);
     _close(devnull);

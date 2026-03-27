@@ -557,8 +557,8 @@ struct mlo_construct_norm : mlo_construct_activ_lrn_pooling_common
     void mloConstruct();
 
 protected:
-    int mloConstructFwd();
-    int mloConstructBwd();
+    void mloConstructFwd();
+    void mloConstructBwd();
     int _norm_region  = 0;
     int _norm_area    = 0;
     double _normAlpha = 0.0;
