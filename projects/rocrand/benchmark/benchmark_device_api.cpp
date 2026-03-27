@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,39 +18,76 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "benchmark_rocrand_utils.hpp"
+#include "benchmark_utils.hpp"
 
-#include <hip/hip_runtime.h>
-
-#include <rocrand/rocrand.h>
-#include <rocrand/rocrand_kernel.h>
+#ifdef __HIP__
 #include <rocrand/rocrand_mtgp32_11213.h>
+#else // __HIP__
+#include <curand_mtgp32_host.h>
+#endif // __HIP__
 
 #include <optional>
 
-enum distribution
-{
-    DISTRIBUTION_UNIFORM,
-    DISTRIBUTION_NORMAL,
-    DISTRIBUTION_LOG_NORMAL,
-    DISTRIBUTION_POISSON,
-    DISTRIBUTION_DISCRETE_POISSON,
-    DISTRIBUTION_DISCRETE_CUSTOM,
-};
+/// The default maximum number of threads per block.
+#define RAND_DEFAULT_MAX_BLOCK_SIZE 256
 
-constexpr const char* distribution_name(distribution d)
-{
-    switch(d)
-    {
-        case DISTRIBUTION_UNIFORM: return "uniform";
-        case DISTRIBUTION_NORMAL: return "normal";
-        case DISTRIBUTION_LOG_NORMAL: return "log_normal";
-        case DISTRIBUTION_POISSON: return "poisson";
-        case DISTRIBUTION_DISCRETE_POISSON: return "discrete_poisson";
-        case DISTRIBUTION_DISCRETE_CUSTOM: return "discrete_custom";
-    }
-    return "unknown";
-}
+#ifdef __HIP__
+constexpr memcpy_kind_t MEMCPY_HOST_TO_DEVICE = hipMemcpyHostToDevice;
+#else // __HIP__
+constexpr memcpy_kind_t MEMCPY_HOST_TO_DEVICE = cudaMemcpyHostToDevice;
+#endif // __HIP__
+
+#ifdef __HIP__
+constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A = ROCRAND_RNG_PSEUDO_MRG32K3A;
+constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW = ROCRAND_RNG_PSEUDO_XORWOW;
+constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10 = ROCRAND_RNG_PSEUDO_PHILOX4_32_10;
+constexpr rng_type_t RAND_RNG_PSEUDO_MTGP32 = ROCRAND_RNG_PSEUDO_MTGP32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL32 = ROCRAND_RNG_QUASI_SOBOL32;
+constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL32 = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL64 = ROCRAND_RNG_QUASI_SOBOL64;
+constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL64 = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64;
+#else // __HIP__
+constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A = CURAND_RNG_PSEUDO_MRG32K3A;
+constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW = CURAND_RNG_PSEUDO_XORWOW;
+constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10 = CURAND_RNG_PSEUDO_PHILOX4_32_10;
+constexpr rng_type_t RAND_RNG_PSEUDO_MTGP32 = CURAND_RNG_PSEUDO_MTGP32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL32 = CURAND_RNG_QUASI_SOBOL32;
+constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL32 = CURAND_RNG_QUASI_SCRAMBLED_SOBOL32;
+constexpr rng_type_t RAND_RNG_QUASI_SOBOL64 = CURAND_RNG_QUASI_SOBOL64;
+constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL64 = CURAND_RNG_QUASI_SCRAMBLED_SOBOL64;
+#endif // __HIP__
+
+#ifdef __HIP__
+using rand_state_mrg32k3a_t = rocrand_state_mrg32k3a;
+using rand_state_philox4x32_10_t = rocrand_state_philox4x32_10;
+using rand_state_xorwow_t = rocrand_state_xorwow;
+using rand_state_mtgp32_t = rocrand_state_mtgp32;
+using rand_state_sobol32_t = rocrand_state_sobol32;
+using rand_state_scrambled_sobol32_t = rocrand_state_scrambled_sobol32;
+using rand_state_sobol64_t = rocrand_state_sobol64;
+using rand_state_scrambled_sobol64_t = rocrand_state_scrambled_sobol64;
+#else // __HIP__
+using rand_state_mrg32k3a_t = curandStateMRG32k3a_t;
+using rand_state_philox4x32_10_t = curandStatePhilox4_32_10_t;
+using rand_state_xorwow_t = curandStateXORWOW_t;
+using rand_state_mtgp32_t = curandStateMtgp32_t;
+using rand_state_sobol32_t = curandStateSobol32_t;
+using rand_state_scrambled_sobol32_t = curandStateScrambledSobol32_t;
+using rand_state_sobol64_t = curandStateSobol64_t;
+using rand_state_scrambled_sobol64_t = curandStateScrambledSobol64_t;
+#endif // __HIP__
+
+#ifdef __HIP__
+constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_32_JOEKUO6 = ROCRAND_DIRECTION_VECTORS_32_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6 = ROCRAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_64_JOEKUO6 = ROCRAND_DIRECTION_VECTORS_64_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6 = ROCRAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6;
+#else // __HIP__
+constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_32_JOEKUO6 = CURAND_DIRECTION_VECTORS_32_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6 = CURAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_64_JOEKUO6 = CURAND_DIRECTION_VECTORS_64_JOEKUO6;
+constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6 = CURAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6;
+#endif // __HIP__
 
 constexpr size_t next_power2(size_t x)
 {
@@ -61,20 +98,20 @@ constexpr size_t next_power2(size_t x)
 }
 
 template<typename EngineState>
-__global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
+__global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void init_kernel(EngineState*             states,
                  const unsigned long long seed,
                  const unsigned long long offset)
 {
     const unsigned int state_id = blockIdx.x * blockDim.x + threadIdx.x;
     EngineState        state;
-    rocrand_init(seed, state_id, offset, &state);
+    rand_init(seed, state_id, offset, &state);
     states[state_id] = state;
 }
 
 template<typename EngineState, typename T, typename Generator>
 __global__
-__launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
+__launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void generate_kernel(EngineState* states, T* data, const size_t size, Generator generator)
 {
     const unsigned int state_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -102,23 +139,23 @@ struct runner
            const unsigned long long offset)
     {
         const size_t states_size = blocks * threads;
-        HIP_CHECK(hipMalloc(&states, states_size * sizeof(EngineState)));
+        PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(EngineState)));
 
         init_kernel<<<dim3(blocks), dim3(threads)>>>(states, seed, offset);
 
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        PRIMBENCH_CHECK(gpu_get_last_error());
+        PRIMBENCH_CHECK(gpu_device_synchronize());
     }
 
     ~runner()
     {
-        HIP_CHECK(hipFree(states));
+        PRIMBENCH_CHECK(gpu_free(states));
     }
 
     template<typename T, typename Generator>
     void generate(const size_t     blocks,
                   const size_t     threads,
-                  hipStream_t      stream,
+                  stream_t      stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
@@ -128,16 +165,24 @@ struct runner
 };
 
 template<typename T, typename Generator>
-__global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
-void generate_kernel(rocrand_state_mtgp32* states, T* data, const size_t size, Generator generator)
+__global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
+void generate_kernel(rand_state_mtgp32_t* states, T* data, const size_t size, Generator generator)
 {
     const unsigned int state_id = blockIdx.x;
-    unsigned int       index    = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned int thread_id = threadIdx.x;
+    unsigned int       index    = blockIdx.x * blockDim.x + thread_id;
     unsigned int       stride   = gridDim.x * blockDim.x;
 
     __shared__
-    rocrand_state_mtgp32 state;
+    rand_state_mtgp32_t state;
+
+#ifdef __HIP__
     rocrand_mtgp32_block_copy(&states[state_id], &state);
+#else
+    if(thread_id == 0)
+        state = states[state_id];
+    __syncthreads();
+#endif
 
     const size_t r                 = size % blockDim.x;
     const size_t size_rounded_down = size - r;
@@ -155,13 +200,23 @@ void generate_kernel(rocrand_state_mtgp32* states, T* data, const size_t size, G
         index += stride;
     }
 
+#ifdef __HIP__
     rocrand_mtgp32_block_copy(&state, &states[state_id]);
+#else
+    __syncthreads();
+    if(thread_id == 0)
+        states[state_id] = state;
+#endif
 }
 
 template<>
-struct runner<rocrand_state_mtgp32>
+struct runner<rand_state_mtgp32_t>
 {
-    rocrand_state_mtgp32* states;
+    rand_state_mtgp32_t* states;
+
+#ifndef __HIP__
+    mtgp32_kernel_params_t* d_param;
+#endif
 
     runner(const size_t /* dimensions */,
            const size_t blocks,
@@ -170,21 +225,34 @@ struct runner<rocrand_state_mtgp32>
            const unsigned long long /* offset */)
     {
         const size_t states_size = std::min((size_t)200, blocks);
-        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_mtgp32)));
+        PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_mtgp32_t)));
 
-        ROCRAND_CHECK(
-            rocrand_make_state_mtgp32(states, mtgp32dc_params_fast_11213, states_size, seed));
+#ifdef __HIP__
+        RAND_CHECK(rocrand_make_state_mtgp32(states, mtgp32dc_params_fast_11213, states_size, seed));
+#else
+        PRIMBENCH_CHECK(gpu_malloc(&d_param, sizeof(mtgp32_kernel_params)));
+        RAND_CHECK(curandMakeMTGP32Constants(mtgp32dc_params_fast_11213, d_param));
+        RAND_CHECK(curandMakeMTGP32KernelState(states,
+                                                mtgp32dc_params_fast_11213,
+                                                d_param,
+                                                states_size,
+                                                seed));
+#endif
     }
 
     ~runner()
     {
-        HIP_CHECK(hipFree(states));
+        PRIMBENCH_CHECK(gpu_free(states));
+
+#ifndef __HIP__
+        PRIMBENCH_CHECK(gpu_free(d_param));
+#endif
     }
 
     template<typename T, typename Generator>
     void generate(const size_t blocks,
                   const size_t /* threads */,
-                  hipStream_t      stream,
+                  stream_t      stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
@@ -196,12 +264,13 @@ struct runner<rocrand_state_mtgp32>
     }
 };
 
-__global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
+#ifdef __HIP__
+__global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void init_kernel(rocrand_state_lfsr113* states, const uint4 seed)
 {
     const unsigned int    state_id = blockIdx.x * blockDim.x + threadIdx.x;
     rocrand_state_lfsr113 state;
-    rocrand_init(seed, state_id, &state);
+    rand_init(seed, state_id, &state);
     states[state_id] = state;
 }
 
@@ -217,61 +286,53 @@ struct runner<rocrand_state_lfsr113>
            const unsigned long long /* offset */)
     {
         const size_t states_size = blocks * threads;
-        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_lfsr113)));
+        PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rocrand_state_lfsr113)));
 
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(init_kernel),
-                           dim3(blocks),
-                           dim3(threads),
-                           0,
-                           0,
-                           states,
+        init_kernel<<<dim3(blocks), dim3(threads), 0, 0>>>(states,
                            uint4{ROCRAND_LFSR113_DEFAULT_SEED_X,
                                  ROCRAND_LFSR113_DEFAULT_SEED_Y,
                                  ROCRAND_LFSR113_DEFAULT_SEED_Z,
                                  ROCRAND_LFSR113_DEFAULT_SEED_W});
 
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        PRIMBENCH_CHECK(gpu_get_last_error());
+        PRIMBENCH_CHECK(gpu_device_synchronize());
     }
 
     ~runner()
     {
-        HIP_CHECK(hipFree(states));
+        PRIMBENCH_CHECK(gpu_free(states));
     }
 
     template<typename T, typename Generator>
     void generate(const size_t     blocks,
                   const size_t     threads,
-                  hipStream_t      stream,
+                  stream_t      stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
     {
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(generate_kernel),
-                           dim3(blocks),
-                           dim3(threads),
-                           0,
-                           stream,
+        generate_kernel<<<dim3(blocks), dim3(threads), 0, stream>>>(
                            states,
                            data,
                            size,
                            generator);
     }
 };
+#endif // __HIP__
 
 template<typename EngineState, typename SobolType>
-__global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
+__global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void init_sobol_kernel(EngineState* states, SobolType* directions, SobolType offset)
 {
     const unsigned int dimension = blockIdx.y;
     const unsigned int state_id  = blockIdx.x * blockDim.x + threadIdx.x;
     EngineState        state;
-    rocrand_init(&directions[dimension * sizeof(SobolType) * 8], offset + state_id, &state);
+    rand_init(&directions[dimension * sizeof(SobolType) * 8], offset + state_id, &state);
     states[gridDim.x * blockDim.x * dimension + state_id] = state;
 }
 
 template<typename EngineState, typename SobolType>
-__global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
+__global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void init_scrambled_sobol_kernel(EngineState* states,
                                  SobolType*   directions,
                                  SobolType*   scramble_constants,
@@ -280,7 +341,7 @@ void init_scrambled_sobol_kernel(EngineState* states,
     const unsigned int dimension = blockIdx.y;
     const unsigned int state_id  = blockIdx.x * blockDim.x + threadIdx.x;
     EngineState        state;
-    rocrand_init(&directions[dimension * sizeof(SobolType) * 8],
+    rand_init(&directions[dimension * sizeof(SobolType) * 8],
                  scramble_constants[dimension],
                  offset + state_id,
                  &state);
@@ -289,7 +350,7 @@ void init_scrambled_sobol_kernel(EngineState* states,
 
 // generate_kernel for the normal and scrambled sobol generators
 template<typename EngineState, typename T, typename Generator>
-__global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
+__global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
 void generate_sobol_kernel(EngineState* states, T* data, const size_t size, Generator generator)
 {
     const unsigned int dimension = blockIdx.y;
@@ -311,9 +372,9 @@ void generate_sobol_kernel(EngineState* states, T* data, const size_t size, Gene
 }
 
 template<>
-struct runner<rocrand_state_sobol32>
+struct runner<rand_state_sobol32_t>
 {
-    rocrand_state_sobol32* states;
+    rand_state_sobol32_t* states;
     size_t                 dimensions;
 
     runner(const size_t dimensions,
@@ -324,17 +385,16 @@ struct runner<rocrand_state_sobol32>
     {
         this->dimensions = dimensions;
 
-        const unsigned int* h_directions;
-        ROCRAND_CHECK(
-            rocrand_get_direction_vectors32(&h_directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
+        direction_vectors32_t* h_directions;
+        RAND_CHECK(rand_get_direction_vectors32(&h_directions, RAND_DIRECTION_VECTORS_32_JOEKUO6));
 
         const size_t states_size = blocks * threads * dimensions;
-        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_sobol32)));
+        PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_sobol32_t)));
 
         unsigned int* directions;
         const size_t  size = dimensions * 32 * sizeof(unsigned int);
-        HIP_CHECK(hipMalloc(&directions, size));
-        HIP_CHECK(hipMemcpy(directions, h_directions, size, hipMemcpyHostToDevice));
+        PRIMBENCH_CHECK(gpu_malloc(&directions, size));
+        PRIMBENCH_CHECK(gpu_memcpy(directions, h_directions, size, MEMCPY_HOST_TO_DEVICE));
 
         const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(
@@ -342,21 +402,21 @@ struct runner<rocrand_state_sobol32>
             directions,
             static_cast<unsigned int>(offset));
 
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        PRIMBENCH_CHECK(gpu_get_last_error());
+        PRIMBENCH_CHECK(gpu_device_synchronize());
 
-        HIP_CHECK(hipFree(directions));
+        PRIMBENCH_CHECK(gpu_free(directions));
     }
 
     ~runner()
     {
-        HIP_CHECK(hipFree(states));
+        PRIMBENCH_CHECK(gpu_free(states));
     }
 
     template<typename T, typename Generator>
     void generate(const size_t     blocks,
                   const size_t     threads,
-                  hipStream_t      stream,
+                  stream_t      stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
@@ -371,9 +431,9 @@ struct runner<rocrand_state_sobol32>
 };
 
 template<>
-struct runner<rocrand_state_scrambled_sobol32>
+struct runner<rand_state_scrambled_sobol32_t>
 {
-    rocrand_state_scrambled_sobol32* states;
+    rand_state_scrambled_sobol32_t* states;
     size_t                           dimensions;
 
     runner(const size_t dimensions,
@@ -384,27 +444,26 @@ struct runner<rocrand_state_scrambled_sobol32>
     {
         this->dimensions = dimensions;
 
-        const unsigned int* h_directions;
-        const unsigned int* h_constants;
+        direction_vectors32_t* h_directions;
+        RAND_CHECK(rand_get_direction_vectors32(&h_directions,
+                                            RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6));
 
-        ROCRAND_CHECK(
-            rocrand_get_direction_vectors32(&h_directions,
-                                            ROCRAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6));
-        ROCRAND_CHECK(rocrand_get_scramble_constants32(&h_constants));
+        const unsigned int*    h_constants;
+        RAND_CHECK(rand_get_scramble_constants32(&h_constants));
 
         const size_t states_size = blocks * threads * dimensions;
-        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_scrambled_sobol32)));
+        PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_scrambled_sobol32_t)));
 
         unsigned int* directions;
         const size_t  directions_size = dimensions * 32 * sizeof(unsigned int);
-        HIP_CHECK(hipMalloc(&directions, directions_size));
-        HIP_CHECK(hipMemcpy(directions, h_directions, directions_size, hipMemcpyHostToDevice));
+        PRIMBENCH_CHECK(gpu_malloc(&directions, directions_size));
+        PRIMBENCH_CHECK(gpu_memcpy(directions, h_directions, directions_size, MEMCPY_HOST_TO_DEVICE));
 
         unsigned int* scramble_constants;
         const size_t  constants_size = dimensions * sizeof(unsigned int);
-        HIP_CHECK(hipMalloc(&scramble_constants, constants_size));
-        HIP_CHECK(
-            hipMemcpy(scramble_constants, h_constants, constants_size, hipMemcpyHostToDevice));
+        PRIMBENCH_CHECK(gpu_malloc(&scramble_constants, constants_size));
+        PRIMBENCH_CHECK(
+            gpu_memcpy(scramble_constants, h_constants, constants_size, MEMCPY_HOST_TO_DEVICE));
 
         const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_scrambled_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(
@@ -413,22 +472,22 @@ struct runner<rocrand_state_scrambled_sobol32>
             scramble_constants,
             static_cast<unsigned int>(offset));
 
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        PRIMBENCH_CHECK(gpu_get_last_error());
+        PRIMBENCH_CHECK(gpu_device_synchronize());
 
-        HIP_CHECK(hipFree(directions));
-        HIP_CHECK(hipFree(scramble_constants));
+        PRIMBENCH_CHECK(gpu_free(directions));
+        PRIMBENCH_CHECK(gpu_free(scramble_constants));
     }
 
     ~runner()
     {
-        HIP_CHECK(hipFree(states));
+        PRIMBENCH_CHECK(gpu_free(states));
     }
 
     template<typename T, typename Generator>
     void generate(const size_t     blocks,
                   const size_t     threads,
-                  hipStream_t      stream,
+                  stream_t      stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
@@ -443,9 +502,9 @@ struct runner<rocrand_state_scrambled_sobol32>
 };
 
 template<>
-struct runner<rocrand_state_sobol64>
+struct runner<rand_state_sobol64_t>
 {
-    rocrand_state_sobol64* states;
+    rand_state_sobol64_t* states;
     size_t                 dimensions;
 
     runner(const size_t dimensions,
@@ -456,38 +515,37 @@ struct runner<rocrand_state_sobol64>
     {
         this->dimensions = dimensions;
 
-        const unsigned long long* h_directions;
-        ROCRAND_CHECK(
-            rocrand_get_direction_vectors64(&h_directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
+        direction_vectors64_t* h_directions;
+        RAND_CHECK(rand_get_direction_vectors64(&h_directions, RAND_DIRECTION_VECTORS_64_JOEKUO6));
 
         const size_t states_size = blocks * threads * dimensions;
-        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_sobol64)));
+        PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_sobol64_t)));
 
         unsigned long long int* directions;
         const size_t            size = dimensions * 64 * sizeof(unsigned long long int);
-        HIP_CHECK(hipMalloc(&directions, size));
-        HIP_CHECK(hipMemcpy(directions, h_directions, size, hipMemcpyHostToDevice));
+        PRIMBENCH_CHECK(gpu_malloc(&directions, size));
+        PRIMBENCH_CHECK(gpu_memcpy(directions, h_directions, size, MEMCPY_HOST_TO_DEVICE));
 
         const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(states,
                                                                          directions,
                                                                          offset);
 
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        PRIMBENCH_CHECK(gpu_get_last_error());
+        PRIMBENCH_CHECK(gpu_device_synchronize());
 
-        HIP_CHECK(hipFree(directions));
+        PRIMBENCH_CHECK(gpu_free(directions));
     }
 
     ~runner()
     {
-        HIP_CHECK(hipFree(states));
+        PRIMBENCH_CHECK(gpu_free(states));
     }
 
     template<typename T, typename Generator>
     void generate(const size_t     blocks,
                   const size_t     threads,
-                  hipStream_t      stream,
+                  stream_t      stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
@@ -502,9 +560,9 @@ struct runner<rocrand_state_sobol64>
 };
 
 template<>
-struct runner<rocrand_state_scrambled_sobol64>
+struct runner<rand_state_scrambled_sobol64_t>
 {
-    rocrand_state_scrambled_sobol64* states;
+    rand_state_scrambled_sobol64_t* states;
     size_t                           dimensions;
 
     runner(const size_t dimensions,
@@ -515,27 +573,26 @@ struct runner<rocrand_state_scrambled_sobol64>
     {
         this->dimensions = dimensions;
 
-        const unsigned long long* h_directions;
-        const unsigned long long* h_constants;
+        direction_vectors64_t*    h_directions;
+        RAND_CHECK(rand_get_direction_vectors64(&h_directions,
+                                            RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6));
 
-        ROCRAND_CHECK(
-            rocrand_get_direction_vectors64(&h_directions,
-                                            ROCRAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6));
-        ROCRAND_CHECK(rocrand_get_scramble_constants64(&h_constants));
+        const unsigned long long* h_constants;
+        RAND_CHECK(rand_get_scramble_constants64(&h_constants));
 
         const size_t states_size = blocks * threads * dimensions;
-        HIP_CHECK(hipMalloc(&states, states_size * sizeof(rocrand_state_scrambled_sobol64)));
+        PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_scrambled_sobol64_t)));
 
         unsigned long long int* directions;
         const size_t            directions_size = dimensions * 64 * sizeof(unsigned long long int);
-        HIP_CHECK(hipMalloc(&directions, directions_size));
-        HIP_CHECK(hipMemcpy(directions, h_directions, directions_size, hipMemcpyHostToDevice));
+        PRIMBENCH_CHECK(gpu_malloc(&directions, directions_size));
+        PRIMBENCH_CHECK(gpu_memcpy(directions, h_directions, directions_size, MEMCPY_HOST_TO_DEVICE));
 
         unsigned long long int* scramble_constants;
         const size_t            constants_size = dimensions * sizeof(unsigned long long int);
-        HIP_CHECK(hipMalloc(&scramble_constants, constants_size));
-        HIP_CHECK(
-            hipMemcpy(scramble_constants, h_constants, constants_size, hipMemcpyHostToDevice));
+        PRIMBENCH_CHECK(gpu_malloc(&scramble_constants, constants_size));
+        PRIMBENCH_CHECK(
+            gpu_memcpy(scramble_constants, h_constants, constants_size, MEMCPY_HOST_TO_DEVICE));
 
         const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_scrambled_sobol_kernel<<<dim3(blocks_x, dimensions), dim3(threads)>>>(
@@ -544,22 +601,22 @@ struct runner<rocrand_state_scrambled_sobol64>
             scramble_constants,
             offset);
 
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        PRIMBENCH_CHECK(gpu_get_last_error());
+        PRIMBENCH_CHECK(gpu_device_synchronize());
 
-        HIP_CHECK(hipFree(directions));
-        HIP_CHECK(hipFree(scramble_constants));
+        PRIMBENCH_CHECK(gpu_free(directions));
+        PRIMBENCH_CHECK(gpu_free(scramble_constants));
     }
 
     ~runner()
     {
-        HIP_CHECK(hipFree(states));
+        PRIMBENCH_CHECK(gpu_free(states));
     }
 
     template<typename T, typename Generator>
     void generate(const size_t     blocks,
                   const size_t     threads,
-                  hipStream_t      stream,
+                  stream_t      stream,
                   T*               data,
                   const size_t     size,
                   const Generator& generator)
@@ -589,7 +646,7 @@ struct generator_uint : public generator_type
     __device__
     data_type operator()(Engine* state) const
     {
-        return rocrand(state);
+        return gpu_rand(state);
     }
 };
 
@@ -601,7 +658,7 @@ struct generator_ullong : public generator_type
     __device__
     data_type operator()(Engine* state) const
     {
-        return rocrand(state);
+        return gpu_rand(state);
     }
 };
 
@@ -613,7 +670,7 @@ struct generator_uniform : public generator_type
     __device__
     data_type operator()(Engine* state) const
     {
-        return rocrand_uniform(state);
+        return gpu_rand_uniform(state);
     }
 };
 
@@ -625,7 +682,7 @@ struct generator_uniform_double : public generator_type
     __device__
     data_type operator()(Engine* state) const
     {
-        return rocrand_uniform_double(state);
+        return gpu_rand_uniform_double(state);
     }
 };
 
@@ -637,7 +694,7 @@ struct generator_normal : public generator_type
     __device__
     data_type operator()(Engine* state) const
     {
-        return rocrand_normal(state);
+        return gpu_rand_normal(state);
     }
 };
 
@@ -649,7 +706,7 @@ struct generator_normal_double : public generator_type
     __device__
     data_type operator()(Engine* state) const
     {
-        return rocrand_normal_double(state);
+        return gpu_rand_normal_double(state);
     }
 };
 
@@ -661,7 +718,7 @@ struct generator_log_normal : public generator_type
     __device__
     data_type operator()(Engine* state) const
     {
-        return rocrand_log_normal(state, 0.f, 1.f);
+        return gpu_rand_log_normal(state, 0.f, 1.f);
     }
 };
 
@@ -673,7 +730,7 @@ struct generator_log_normal_double : public generator_type
     __device__
     data_type operator()(Engine* state) const
     {
-        return rocrand_log_normal_double(state, 0., 1.);
+        return gpu_rand_log_normal_double(state, 0., 1.);
     }
 };
 
@@ -687,7 +744,7 @@ struct generator_poisson : public generator_type
     __device__
     data_type operator()(Engine* state) const
     {
-        return rocrand_poisson(state, lambda);
+        return gpu_rand_poisson(state, lambda);
     }
 
     double lambda;
@@ -702,24 +759,25 @@ struct generator_discrete_poisson : public generator_type
 
     void create()
     {
-        ROCRAND_CHECK(rocrand_create_poisson_distribution(lambda, &discrete_distribution));
+        RAND_CHECK(rand_create_poisson_distribution(lambda, &discrete_distribution));
     }
 
     void destroy()
     {
-        ROCRAND_CHECK(rocrand_destroy_discrete_distribution(discrete_distribution));
+        RAND_CHECK(rand_destroy_discrete_distribution(discrete_distribution));
     }
 
     __device__
     data_type operator()(Engine* state) const
     {
-        return rocrand_discrete(state, discrete_distribution);
+        return rand_discrete(state, discrete_distribution);
     }
 
-    rocrand_discrete_distribution discrete_distribution;
+    rand_discrete_distribution_t discrete_distribution;
     double                        lambda;
 };
 
+#ifdef __HIP__
 template<typename Engine>
 struct generator_discrete_custom : public generator_type
 {
@@ -735,7 +793,7 @@ struct generator_discrete_custom : public generator_type
                        probabilities.end(),
                        probabilities.begin(),
                        [=](double p) { return p / sum; });
-        ROCRAND_CHECK(rocrand_create_discrete_distribution(probabilities.data(),
+        RAND_CHECK(rocrand_create_discrete_distribution(probabilities.data(),
                                                            probabilities.size(),
                                                            offset,
                                                            &discrete_distribution));
@@ -743,23 +801,24 @@ struct generator_discrete_custom : public generator_type
 
     void destroy()
     {
-        ROCRAND_CHECK(rocrand_destroy_discrete_distribution(discrete_distribution));
+        RAND_CHECK(rand_destroy_discrete_distribution(discrete_distribution));
     }
 
     __device__
     data_type operator()(Engine* state) const
     {
-        return rocrand_discrete(state, discrete_distribution);
+        return rand_discrete(state, discrete_distribution);
     }
 
-    rocrand_discrete_distribution discrete_distribution;
+    rand_discrete_distribution_t discrete_distribution;
 };
+#endif // __HIP__
 
 template<typename Generator, typename State, typename T, distribution Distribution>
-struct rocrand_device_api_benchmark : public primbench::benchmark_interface
+struct device_api_benchmark : public primbench::benchmark_interface
 {
-    rocrand_device_api_benchmark(Generator             generator,
-                                 rocrand_rng_type      engine,
+    device_api_benchmark(Generator             generator,
+                                 rng_type_t      engine,
                                  size_t                blocks,
                                  size_t                threads,
                                  size_t                dimensions,
@@ -778,7 +837,7 @@ struct rocrand_device_api_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         auto json = primbench::json{}
-                        .add("algo", "rocrand_device_api")
+                        .add("algo", "device_api")
                         .add("engine", engine_name(m_engine))
                         .add("type", primbench::name<T>())
                         .add("distribution", distribution_name(Distribution))
@@ -805,7 +864,7 @@ struct rocrand_device_api_benchmark : public primbench::benchmark_interface
 
         primbench::log("Allocating data");
         T* data;
-        HIP_CHECK(hipMalloc(&data, items * sizeof(T)));
+        PRIMBENCH_CHECK(gpu_malloc(&data, items * sizeof(T)));
 
         primbench::log("Creating runner");
         runner<State> r(m_dimensions, m_blocks, m_threads, state.seed, m_offset);
@@ -817,12 +876,12 @@ struct rocrand_device_api_benchmark : public primbench::benchmark_interface
 
         m_generator.destroy();
 
-        HIP_CHECK(hipFree(data));
+        PRIMBENCH_CHECK(gpu_free(data));
     }
 
 private:
     Generator             m_generator;
-    rocrand_rng_type      m_engine;
+    rng_type_t      m_engine;
     size_t                m_blocks;
     size_t                m_threads;
     size_t                m_dimensions;
@@ -831,7 +890,7 @@ private:
 };
 
 #define QUEUE(generator, T, State, engine, Distribution, ...)                        \
-    executor.queue<rocrand_device_api_benchmark<generator, State, T, Distribution>>( \
+    executor.queue<device_api_benchmark<generator, State, T, Distribution>>( \
         generator(__VA_ARGS__),                                                      \
         engine,                                                                      \
         blocks,                                                                      \
@@ -840,11 +899,12 @@ private:
         offset,                                                                      \
         ##__VA_ARGS__)
 
+#ifdef __HIP__
 #define QUEUE_DISTRIBUTIONS(State, engine)                                                         \
     do                                                                                             \
     {                                                                                              \
-        if constexpr(std::is_same_v<State, rocrand_state_sobol64>                                  \
-                     || std::is_same_v<State, rocrand_state_scrambled_sobol64>                     \
+        if constexpr(std::is_same_v<State, rand_state_sobol64_t>                                  \
+                     || std::is_same_v<State, rand_state_scrambled_sobol64_t>                     \
                      || std::is_same_v<State, rocrand_state_threefry2x64_20>                       \
                      || std::is_same_v<State, rocrand_state_threefry4x64_20>)                      \
         {                                                                                          \
@@ -889,6 +949,49 @@ private:
               DISTRIBUTION_DISCRETE_CUSTOM);                                                       \
     }                                                                                              \
     while(0)
+#else // __HIP__
+#define QUEUE_DISTRIBUTIONS(State, engine)                                                         \
+    do                                                                                             \
+    {                                                                                              \
+        if constexpr(std::is_same_v<State, rand_state_sobol64_t>                                  \
+                     || std::is_same_v<State, rand_state_scrambled_sobol64_t>)                    \
+        {                                                                                          \
+            QUEUE(generator_ullong<State>,                                                         \
+                  unsigned long long,                                                              \
+                  State,                                                                           \
+                  engine,                                                                          \
+                  DISTRIBUTION_UNIFORM);                                                           \
+        }                                                                                          \
+        else                                                                                       \
+        {                                                                                          \
+            QUEUE(generator_uint<State>, uint32_t, State, engine, DISTRIBUTION_UNIFORM);           \
+        }                                                                                          \
+                                                                                                   \
+        QUEUE(generator_uniform<State>, float, State, engine, DISTRIBUTION_UNIFORM);               \
+        QUEUE(generator_uniform_double<State>, double, State, engine, DISTRIBUTION_UNIFORM);       \
+        QUEUE(generator_normal<State>, float, State, engine, DISTRIBUTION_NORMAL);                 \
+        QUEUE(generator_normal_double<State>, double, State, engine, DISTRIBUTION_NORMAL);         \
+        QUEUE(generator_log_normal<State>, float, State, engine, DISTRIBUTION_LOG_NORMAL);         \
+        QUEUE(generator_log_normal_double<State>, double, State, engine, DISTRIBUTION_LOG_NORMAL); \
+                                                                                                   \
+        for(double lambda : poisson_lambdas)                                                       \
+        {                                                                                          \
+            QUEUE(generator_poisson<State>,                                                        \
+                  uint32_t,                                                                        \
+                  State,                                                                           \
+                  engine,                                                                          \
+                  DISTRIBUTION_POISSON,                                                            \
+                  lambda);                                                                         \
+            QUEUE(generator_discrete_poisson<State>,                                               \
+                  uint32_t,                                                                        \
+                  State,                                                                           \
+                  engine,                                                                          \
+                  DISTRIBUTION_DISCRETE_POISSON,                                                   \
+                  lambda);                                                                         \
+        }                                                                                          \
+    }                                                                                              \
+    while(0)
+#endif // __HIP__
 
 int main(int argc, char* argv[])
 {
@@ -907,20 +1010,23 @@ int main(int argc, char* argv[])
                                             {10.0},
                                             "Space-separated list of Poisson lambdas");
 
+    QUEUE_DISTRIBUTIONS(rand_state_mrg32k3a_t, RAND_RNG_PSEUDO_MRG32K3A);
+    QUEUE_DISTRIBUTIONS(rand_state_philox4x32_10_t, RAND_RNG_PSEUDO_PHILOX4_32_10);
+    QUEUE_DISTRIBUTIONS(rand_state_xorwow_t, RAND_RNG_PSEUDO_XORWOW);
+    QUEUE_DISTRIBUTIONS(rand_state_mtgp32_t, RAND_RNG_PSEUDO_MTGP32);
+    QUEUE_DISTRIBUTIONS(rand_state_sobol32_t, RAND_RNG_QUASI_SOBOL32);
+    QUEUE_DISTRIBUTIONS(rand_state_scrambled_sobol32_t, RAND_RNG_QUASI_SCRAMBLED_SOBOL32);
+    QUEUE_DISTRIBUTIONS(rand_state_sobol64_t, RAND_RNG_QUASI_SOBOL64);
+    QUEUE_DISTRIBUTIONS(rand_state_scrambled_sobol64_t, RAND_RNG_QUASI_SCRAMBLED_SOBOL64);
+
+#ifdef __HIP__
     QUEUE_DISTRIBUTIONS(rocrand_state_lfsr113, ROCRAND_RNG_PSEUDO_LFSR113);
     QUEUE_DISTRIBUTIONS(rocrand_state_mrg31k3p, ROCRAND_RNG_PSEUDO_MRG31K3P);
-    QUEUE_DISTRIBUTIONS(rocrand_state_mrg32k3a, ROCRAND_RNG_PSEUDO_MRG32K3A);
-    QUEUE_DISTRIBUTIONS(rocrand_state_philox4x32_10, ROCRAND_RNG_PSEUDO_PHILOX4_32_10);
     QUEUE_DISTRIBUTIONS(rocrand_state_threefry2x32_20, ROCRAND_RNG_PSEUDO_THREEFRY2_32_20);
     QUEUE_DISTRIBUTIONS(rocrand_state_threefry4x32_20, ROCRAND_RNG_PSEUDO_THREEFRY4_32_20);
     QUEUE_DISTRIBUTIONS(rocrand_state_threefry2x64_20, ROCRAND_RNG_PSEUDO_THREEFRY2_64_20);
     QUEUE_DISTRIBUTIONS(rocrand_state_threefry4x64_20, ROCRAND_RNG_PSEUDO_THREEFRY4_64_20);
-    QUEUE_DISTRIBUTIONS(rocrand_state_xorwow, ROCRAND_RNG_PSEUDO_XORWOW);
-    QUEUE_DISTRIBUTIONS(rocrand_state_mtgp32, ROCRAND_RNG_PSEUDO_MTGP32);
-    QUEUE_DISTRIBUTIONS(rocrand_state_sobol32, ROCRAND_RNG_QUASI_SOBOL32);
-    QUEUE_DISTRIBUTIONS(rocrand_state_scrambled_sobol32, ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32);
-    QUEUE_DISTRIBUTIONS(rocrand_state_sobol64, ROCRAND_RNG_QUASI_SOBOL64);
-    QUEUE_DISTRIBUTIONS(rocrand_state_scrambled_sobol64, ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64);
+#endif // __HIP__
 
     executor.run();
 }

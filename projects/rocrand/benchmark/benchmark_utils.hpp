@@ -29,7 +29,7 @@
 #endif // __HIP__
 
 #ifdef __HIP__
-    #define CHECK(condition)                                                               \
+    #define RAND_CHECK(condition)                                                               \
         do                                                                                         \
         {                                                                                          \
             rocrand_status status_ = condition;                                                    \
@@ -42,7 +42,7 @@
         }                                                                                          \
         while(0)
 #else // __HIP__
-    #define CHECK(condition)                                                                \
+    #define RAND_CHECK(condition)                                                                \
         do                                                                                        \
         {                                                                                         \
             curandStatus_t status_ = condition;                                                   \
@@ -57,17 +57,25 @@
 #endif // __HIP__
 
 #ifdef __HIP__
-using gpu_error_t = hipError_t;
 using stream_t = hipStream_t;
 using rng_type_t = rocrand_rng_type;
 using ordering_t = rocrand_ordering;
 using generator_t = rocrand_generator;
+using memcpy_kind_t = hipMemcpyKind;
+using rand_discrete_distribution_t = rocrand_discrete_distribution;
+using rand_direction_vector_set_t = rocrand_direction_vector_set;
+using direction_vectors32_t = const unsigned int;
+using direction_vectors64_t = const unsigned long long;
 #else // __HIP__
-using gpu_error_t = cudaError_t;
 using stream_t = cudaStream_t;
 using rng_type_t = curandRngType;
 using ordering_t = curandOrdering;
 using generator_t = curandGenerator_t;
+using memcpy_kind_t = cudaMemcpyKind;
+using rand_discrete_distribution_t = curandDiscreteDistribution_t;
+using rand_direction_vector_set_t = curandDirectionVectorSet_t;
+using direction_vectors32_t = curandDirectionVectors32_t;
+using direction_vectors64_t = curandDirectionVectors64_t;
 #endif // __HIP__
 
 inline std::string engine_name(const rng_type_t rng_type)
@@ -162,13 +170,127 @@ inline auto destroy_generator(generator_t generator) {
     return DISPATCH(rocrand_destroy_generator, curandDestroyGenerator)(generator);
 }
 
+inline auto gpu_device_synchronize() {
+    return DISPATCH(hipDeviceSynchronize, cudaDeviceSynchronize)();
+}
+
 inline auto gpu_free(void* device) {
     return DISPATCH(hipFree, cudaFree)(device);
+}
+
+inline auto gpu_get_last_error() {
+    return DISPATCH(hipGetLastError, cudaGetLastError)();
 }
 
 template <typename T>
 inline auto gpu_malloc(T** device, size_t size) {
     return DISPATCH(hipMalloc, cudaMalloc)(device, size);
+}
+
+inline auto gpu_memcpy(void *dst, const void *src, size_t count, memcpy_kind_t kind) {
+    return DISPATCH(hipMemcpy, cudaMemcpy)(dst, src, count, kind);
+}
+
+template <typename Engine>
+__forceinline__ __device__ __host__
+auto gpu_rand(Engine* state) {
+    return DISPATCH(rocrand, curand)(state);
+}
+
+template <typename Engine>
+__forceinline__ __device__ __host__
+auto gpu_rand_log_normal(Engine* state, float mean, float stddev)
+{
+    return DISPATCH(rocrand_log_normal, curand_log_normal)(state, mean, stddev);
+}
+
+template <typename Engine>
+__forceinline__ __device__ __host__
+auto gpu_rand_log_normal_double(Engine* state, double mean, double stddev)
+{
+    return DISPATCH(rocrand_log_normal_double, curand_log_normal_double)(state, mean, stddev);
+}
+
+template <typename Engine>
+__forceinline__ __device__ __host__
+auto gpu_rand_normal(Engine* state)
+{
+    return DISPATCH(rocrand_normal, curand_normal)(state);
+}
+
+template <typename Engine>
+__forceinline__ __device__ __host__
+auto gpu_rand_normal_double(Engine* state)
+{
+    return DISPATCH(rocrand_normal_double, curand_normal_double)(state);
+}
+
+template <typename Engine>
+__forceinline__ __device__ __host__
+auto gpu_rand_poisson(Engine* state, double lambda)
+{
+    return DISPATCH(rocrand_poisson, curand_poisson)(state, lambda);
+}
+
+template <typename Engine>
+__forceinline__ __device__ __host__
+auto gpu_rand_uniform(Engine* state)
+{
+    return DISPATCH(rocrand_uniform, curand_uniform)(state);
+}
+
+template <typename Engine>
+__forceinline__ __device__ __host__
+auto gpu_rand_uniform_double(Engine* state)
+{
+    return DISPATCH(rocrand_uniform_double, curand_uniform_double)(state);
+}
+
+inline auto rand_create_poisson_distribution(double lambda, rand_discrete_distribution_t * discrete_distribution) {
+    return DISPATCH(rocrand_create_poisson_distribution, curandCreatePoissonDistribution)(lambda, discrete_distribution);
+}
+
+inline auto rand_destroy_discrete_distribution(rand_discrete_distribution_t discrete_distribution) {
+    return DISPATCH(rocrand_destroy_discrete_distribution, curandDestroyDistribution)(discrete_distribution);
+}
+
+template <typename Engine>
+__forceinline__ __device__ __host__
+auto rand_discrete(Engine* state, const rand_discrete_distribution_t discrete_distribution)
+{
+    return DISPATCH(rocrand_discrete, curand_discrete)(state, discrete_distribution);
+}
+
+inline auto rand_get_direction_vectors32(direction_vectors32_t** vectors, rand_direction_vector_set_t set) {
+    return DISPATCH(rocrand_get_direction_vectors32, curandGetDirectionVectors32)(vectors, set);
+}
+
+inline auto rand_get_direction_vectors64(direction_vectors64_t** vectors, rand_direction_vector_set_t set) {
+    return DISPATCH(rocrand_get_direction_vectors64, curandGetDirectionVectors64)(vectors, set);
+}
+
+inline auto rand_get_scramble_constants32(const unsigned int** constants) {
+#ifdef __HIP__
+    return rocrand_get_scramble_constants32(constants);
+#else
+    return curandGetScrambleConstants32(const_cast<unsigned int**>(constants));
+#endif
+}
+
+inline auto rand_get_scramble_constants64(const unsigned long long** constants) {
+#ifdef __HIP__
+    return rocrand_get_scramble_constants64(constants);
+#else
+    return curandGetScrambleConstants64(const_cast<unsigned long long**>(constants));
+#endif
+}
+
+// Perfect forwarding with variadic templates
+// handles overloads of rocrand_init() and curand_init().
+template <typename... Args>
+__forceinline__ __device__ __host__
+void rand_init(Args&&... args) {
+    DISPATCH(rocrand_init, curand_init)(std::forward<Args>(args)...);
 }
 
 inline auto set_offset(generator_t generator, unsigned long long offset) {

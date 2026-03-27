@@ -103,33 +103,33 @@ struct host_api_benchmark : public primbench::benchmark_interface
         {
             primbench::log("Creating host generator");
             data = new T[items];
-            CHECK(create_generator_host(&generator, m_engine));
+            RAND_CHECK(create_generator_host(&generator, m_engine));
         }
         else
         {
             primbench::log("Creating device generator");
             PRIMBENCH_CHECK(gpu_malloc(&data, items * sizeof(T)));
-            CHECK(create_generator(&generator, m_engine));
+            RAND_CHECK(create_generator(&generator, m_engine));
         }
 
         primbench::log("Setting ordering");
-        CHECK(set_ordering(generator, m_ordering));
+        RAND_CHECK(set_ordering(generator, m_ordering));
 
         primbench::log("Setting dimensions");
         auto status = set_quasi_random_generator_dimensions(generator, m_dimensions);
         if(status != RAND_STATUS_TYPE_ERROR) // If the RNG is not quasi-random
         {
-            CHECK(status);
+            RAND_CHECK(status);
         }
 
         primbench::log("Setting stream");
-        CHECK(set_stream(generator, stream));
+        RAND_CHECK(set_stream(generator, stream));
 
         primbench::log("Setting offset");
         status = set_offset(generator, m_offset);
         if(status != RAND_STATUS_TYPE_ERROR) // If the RNG is not pseudo-random
         {
-            CHECK(status);
+            RAND_CHECK(status);
         }
 
         // cuRAND doesn't have generators for:
@@ -207,9 +207,9 @@ struct host_api_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<T>(items);
 
-        state.run([&] { CHECK(launch()); });
+        state.run([&] { RAND_CHECK(launch()); });
 
-        CHECK(destroy_generator(generator));
+        RAND_CHECK(destroy_generator(generator));
 
         if(m_benchmark_host)
         {
