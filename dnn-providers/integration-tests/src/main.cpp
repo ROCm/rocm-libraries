@@ -140,7 +140,8 @@ int main(int argc, char** argv) noexcept
         }
 
         // Set engine plugin path to the plugin file (not the directory)
-        const char* pluginPath = articlePathObj.c_str();
+        const std::string articlePathStr = articlePathObj.string();
+        const char* pluginPath = articlePathStr.c_str();
         if(hipdnnSetEnginePluginPaths_ext(1, &pluginPath, HIPDNN_PLUGIN_LOADING_ABSOLUTE)
            != HIPDNN_STATUS_SUCCESS)
         {
