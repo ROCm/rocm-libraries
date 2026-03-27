@@ -217,7 +217,13 @@ TEST(SparseMMATrait, MmaSelector_Sparse_F16_F16_F32_16x16x32_Real)
                                  MmaPipelineTest<>::WaveTileN,
                                  MmaPipelineTest<>::WaveTileK><<<1, waveSize>>>(a, b, c, out);
     };
-    test.test_pipeline(should_skip, kernel, validator);
+    // Initialize A with 2:4 structured sparsity pattern: {1, 0, 1, 0, ...}
+    // This ensures the sparse compression transform is actually exercised —
+    // a no-op or broken compression would pass zeros through, causing incorrect results.
+    const std::function<fp16_t(size_t)> sparseAInit = [](size_t i) -> fp16_t {
+        return (i % 2 == 0) ? type_convert<fp16_t>(1) : type_convert<fp16_t>(0);
+    };
+    test.test_pipeline(should_skip, kernel, validator, sparseAInit);
 }
 
 template <uint32_t CompressionRatio, typename Vec>
@@ -275,7 +281,7 @@ void sparse_transform_test_case()
     std::vector<Type> h_out(NUM / RATIO, static_cast<Type>(0));
     HIP_CHECK_ERROR(hipMemcpy(h_out.data(), d_v, Size / RATIO, hipMemcpyDeviceToHost));
     int32_t h_idx;
-    HIP_CHECK_ERROR(hipMemcpy(&h_idx, d_idx, sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK_ERROR(hipMemcpy(&h_idx, d_idx, sizeof(int32_t), hipMemcpyDeviceToHost));
 
     EXPECT_NE(h_idx, -1) << "idx should have been written";
     if constexpr(NUM == 8)
