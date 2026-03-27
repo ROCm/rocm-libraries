@@ -488,6 +488,10 @@ Definitions:
   - &c_scan_value_2
     - [-998]
 
+  # scan extension applied by Arguments class
+  - &c_gemm_test_all_solutions_returned
+    - [-3] # match definitions.hpp
+
   # int64 API testing constants
   - &c_pos_overflow_int32
     - [4294967296]
@@ -503,7 +507,7 @@ Definitions:
     - [67108865] # (67108865 - 1) x 32 will overflow to sign bit
 
   - &c_grid_yz_require_passes
-    - [65539] # force looping over y/z chunks 65536.  TODO track constant c_i64_grid_YZ_chunk in int64_helpers.hpp
+    - [65539] # force looping over y/z chunks near grid limit.  TODO track constant c_i64_grid_YZ_chunk in int64_helpers.hpp
 
   - &c_grid_x_require_passes
     - [268435459] # force looping over x chunks 268435456.  TODO track constant c_i64_grid_X_chunk in int64_helpers.hpp

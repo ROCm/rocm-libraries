@@ -226,4 +226,56 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT = 24,
 
+    /**
+     * @brief Layer normalization operation descriptor
+     *
+     * Represents a layer normalization operation with input (X),
+     * scale, bias, epsilon tensors, output (Y), and optional
+     * mean and inverse variance outputs plus a compute data type.
+     */
+    HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT = 25,
+
+    /**
+     * @brief Block scale quantize operation descriptor
+     *
+     * Represents a block scale quantize operation with input (X),
+     * output (Y), and scale tensors plus block_size, axis, and transpose parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT = 26,
+
+    /**
+     * @brief Batchnorm training forward operation descriptor (extension)
+     *
+     * Represents a batch normalization training forward operation with
+     * input (X), scale, bias, epsilon, output (Y), optional mean and
+     * inverse variance outputs, optional running statistics, and peer stats.
+     */
+    HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT = 27,
+
+    /**
+     * @brief Block scale dequantize operation descriptor
+     *
+     * Represents a block scale dequantize operation with input (X),
+     * scale, and output (Y) tensors plus block size parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT = 28,
+
+    /**
+     * @brief Custom operation descriptor
+     *
+     * Represents an opaque custom (plugin-provided) operation with
+     * variable-length input/output tensor arrays, a plugin identifier
+     * string, and an opaque byte payload interpreted by the plugin.
+     */
+    HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT = 29,
+
+    /**
+     * @brief SDPA backward propagation operation descriptor (extension)
+     *
+     * Represents a scaled dot-product attention backward operation with
+     * query (Q), key (K), value (V), output (O), gradient output (dO),
+     * and stats tensors as inputs, producing gradients dQ, dK, dV.
+     */
+    HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT = 30,
+
 } hipdnnBackendDescriptorType_t;

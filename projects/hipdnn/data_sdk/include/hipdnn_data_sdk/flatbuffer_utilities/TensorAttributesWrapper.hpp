@@ -20,7 +20,6 @@ public:
     virtual int64_t uid() const = 0;
     virtual std::string name() const = 0;
     virtual hipdnn_data_sdk::data_objects::DataType dataType() const = 0;
-    virtual const std::type_info& dataClassType() const = 0;
     virtual std::vector<int64_t> strides() const = 0;
     virtual std::vector<int64_t> dims() const = 0;
     virtual bool isVirtual() const = 0;
@@ -30,7 +29,7 @@ public:
     template <typename T>
     const T& valueAs() const
     {
-        if(dataClassType() != typeid(T))
+        if(valueType() != hipdnn_data_sdk::data_objects::TensorValueTraits<T>::enum_value)
         {
             throw std::invalid_argument("Value of tensor attributes is not of the expected type");
         }
@@ -124,28 +123,6 @@ public:
     {
         throwIfNotValid();
         return _shallowTensor->value();
-    }
-
-    const std::type_info& dataClassType() const override
-    {
-        throwIfNotValid();
-        switch(valueType())
-        {
-        case hipdnn_data_sdk::data_objects::TensorValue::Float32Value:
-            return typeid(hipdnn_data_sdk::data_objects::Float32Value);
-        case hipdnn_data_sdk::data_objects::TensorValue::Float16Value:
-            return typeid(hipdnn_data_sdk::data_objects::Float16Value);
-        case hipdnn_data_sdk::data_objects::TensorValue::BFloat16Value:
-            return typeid(hipdnn_data_sdk::data_objects::BFloat16Value);
-        case hipdnn_data_sdk::data_objects::TensorValue::Float8Value:
-            return typeid(hipdnn_data_sdk::data_objects::Float8Value);
-        case hipdnn_data_sdk::data_objects::TensorValue::Int32Value:
-            return typeid(hipdnn_data_sdk::data_objects::Int32Value);
-        case hipdnn_data_sdk::data_objects::TensorValue::Float64Value:
-            return typeid(hipdnn_data_sdk::data_objects::Float64Value);
-        default:
-            throw std::invalid_argument("Value type in tensor attributes is not recognized");
-        }
     }
 
 private:

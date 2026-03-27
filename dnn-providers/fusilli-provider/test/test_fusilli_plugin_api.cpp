@@ -288,6 +288,53 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIds) {
   ASSERT_EQ(numEngines, 0);
 }
 
+TEST(TestFusilliPluginApi, GetApplicableEngineIdsConvDGrad) {
+  // Create plugin handle.
+  hipdnnEnginePluginHandle_t handle = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(handle, nullptr);
+
+  std::array<int64_t, 5> engineIDs;
+  uint32_t numEngines = 0;
+
+  // Create a serialized hipDNN conv_bwd (dgrad) graph with symmetric padding.
+  auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+  hipdnnPluginConstData_t opGraph;
+  opGraph.ptr = builder.GetBufferPointer();
+  opGraph.size = builder.GetSize();
+
+  // Fusilli plugin should offer to compile and execute single node conv_dgrad.
+  ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
+                /*handle=*/handle, /*op_graph=*/&opGraph,
+                /*engine_ids=*/engineIDs.data(), /*max_engines=*/5,
+                /*num_engines=*/&numEngines),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_EQ(numEngines, 1);
+  ASSERT_EQ(engineIDs[0], hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID);
+
+  // Create a serialized hipDNN conv_bwd (dgrad) graph with asymmetric padding.
+  builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph(
+      /*dxDims=*/{4, 4, 4, 4}, /*dxStrides=*/{64, 16, 4, 1},
+      /*wDims=*/{4, 4, 1, 1}, /*wStrides=*/{4, 1, 1, 1},
+      /*dyDims=*/{4, 4, 4, 4}, /*dyStrides=*/{64, 16, 4, 1},
+      /*convPrePadding=*/{1, 0},  // asymmetric: pre doesn't match post
+      /*convPostPadding=*/{2, 1}, // asymmetric: pre doesn't match post
+      /*convStrides=*/{1, 1}, /*convDilation=*/{1, 1});
+  opGraph.ptr = builder.GetBufferPointer();
+  opGraph.size = builder.GetSize();
+
+  // Fusilli plugin should not offer to compile and execute conv_dgrad with
+  // asymmetric padding.
+  ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
+                /*handle=*/handle, /*op_graph=*/&opGraph,
+                /*engine_ids=*/engineIDs.data(), /*max_engines=*/5,
+                /*num_engines=*/&numEngines),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_EQ(numEngines, 0);
+
+  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
 TEST(TestFusilliPluginApi, GetApplicableEngineIdsConvPointwise) {
   // Create plugin handle.
   hipdnnEnginePluginHandle_t handle = nullptr;
@@ -533,4 +580,60 @@ TEST(TestFusilliPluginApi, SetStreamNullHandle) {
 
   // Clean up.
   EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
+}
+
+TEST(TestFusilliPluginApi, GetApplicableEngineIdsSdpa) {
+  hipdnnEnginePluginHandle_t handle = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(handle, nullptr);
+
+  std::array<int64_t, 5> engineIDs;
+  uint32_t numEngines = 0;
+
+  const std::vector<int64_t> qkvDims = {2, 8, 16, 64};
+  const std::vector<int64_t> qkvStrides = {qkvDims[1] * qkvDims[2] * qkvDims[3],
+                                           qkvDims[2] * qkvDims[3], qkvDims[3],
+                                           1};
+
+  // Basic SDPA (Q, K, V -> O) should be supported.
+  auto builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph(
+      qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims,
+      qkvStrides);
+  hipdnnPluginConstData_t opGraph;
+  opGraph.ptr = builder.GetBufferPointer();
+  opGraph.size = builder.GetSize();
+
+  ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
+                handle, &opGraph, engineIDs.data(), 5, &numEngines),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_EQ(numEngines, 1);
+  ASSERT_EQ(engineIDs[0], hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID);
+
+  // SDPA with attn_mask should be supported.
+  builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph(
+      qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims,
+      qkvStrides, hipdnn_data_sdk::data_objects::DataType::HALF,
+      /*withAttnMask=*/true);
+  opGraph.ptr = builder.GetBufferPointer();
+  opGraph.size = builder.GetSize();
+
+  ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
+                handle, &opGraph, engineIDs.data(), 5, &numEngines),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_EQ(numEngines, 1);
+
+  // SDPA with stats output is NOT supported (yet).
+  builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph(
+      qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims,
+      qkvStrides, hipdnn_data_sdk::data_objects::DataType::HALF,
+      /*withAttnMask=*/false, /*withScale=*/false, /*withStats=*/true);
+  opGraph.ptr = builder.GetBufferPointer();
+  opGraph.size = builder.GetSize();
+
+  ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
+                handle, &opGraph, engineIDs.data(), 5, &numEngines),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_EQ(numEngines, 0);
+
+  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }

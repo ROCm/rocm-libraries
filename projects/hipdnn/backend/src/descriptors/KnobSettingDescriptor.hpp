@@ -52,25 +52,6 @@ public:
 private:
     std::string _knobId;
     hipdnn_data_sdk::data_objects::KnobValueUnion _value;
-    bool _valueSet = false;
-
-    void setKnobId(hipdnnBackendAttributeType_t attributeType,
-                   int64_t elementCount,
-                   const void* arrayOfElements);
-
-    void getKnobId(hipdnnBackendAttributeType_t attributeType,
-                   int64_t requestedElementCount,
-                   int64_t* elementCount,
-                   void* arrayOfElements) const;
-
-    void setKnobValue(hipdnnBackendAttributeType_t attributeType,
-                      int64_t elementCount,
-                      const void* arrayOfElements);
-
-    void getKnobValue(hipdnnBackendAttributeType_t attributeType,
-                      int64_t requestedElementCount,
-                      int64_t* elementCount,
-                      void* arrayOfElements) const;
 };
 
 } // namespace hipdnn_backend
