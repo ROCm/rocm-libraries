@@ -56,6 +56,7 @@
     X(PrintBeforePass, std::string) \
     X(PrintAfterPass, std::string)  \
     X(DebugPass, std::string)       \
+    X(PassOrderSnapshotJson, std::string) \
     X(EnableWaitCntInsertion, bool)
 
 namespace stinkytofu

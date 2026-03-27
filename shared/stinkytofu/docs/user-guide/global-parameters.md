@@ -10,7 +10,8 @@ Control StinkyTofu behavior through Tensile's `GlobalParameters` system -- eithe
 | `StinkyTofuDebugLevel` | `0`, `1`, `2` | `0` | Diagnostic output verbosity |
 | `StinkyTofuPrintBeforePass` | comma-separated pass names | `""` | Print IR before specific passes |
 | `StinkyTofuPrintAfterPass` | comma-separated pass names | `""` | Print IR after specific passes |
-| `StinkyTofuDebugPass` | comma-separated pass names | `""` | Enable internal PASS_DEBUG logging |
+| `StinkyTofuDebugPass` | comma-separated pass names | `""` | PASS_DEBUG logging + instruction-order snapshot allow-list |
+| `StinkyTofuPassOrderSnapshotJson` | file path | `""` | Before/after instruction-order JSON for stinkytofu-analysis |
 
 ---
 
@@ -68,7 +69,20 @@ Pass names target the actual pass (e.g. `CFGBuilderPass`, `StinkyDAGSchedulerPas
 
 ## `StinkyTofuDebugPass`
 
-Comma-separated list of pass names (case-sensitive) to enable internal `PASS_DEBUG` logging to stderr. This prints pass-internal debug information (e.g. DAG graphs, scheduling decisions) for the specified passes. Unmatched pass names are silently ignored.
+Comma-separated list of pass names (case-sensitive). Serves two purposes:
+
+1. **PASS_DEBUG logging** -- prints pass-internal debug information (e.g. DAG graphs, scheduling decisions) to stderr.
+2. **Instruction-order snapshot allow-list** -- when `StinkyTofuPassOrderSnapshotJson` is also set, records before/after instruction order for the listed passes. If this parameter is empty and a snapshot path is set, only `StinkyDAGSchedulerPass` is recorded by default.
+
+Unmatched pass names are silently ignored.
+
+---
+
+## `StinkyTofuPassOrderSnapshotJson`
+
+File path for before/after instruction-order JSON consumed by `tools/stinkytofu-analysis`. When empty (default), no snapshot is written. The passes recorded are controlled by `StinkyTofuDebugPass`.
+
+Note: multiple kernels may overwrite the same file unless you use a unique path per build.
 
 **Global scope**: `DebugPass` is a global setting that applies to all PMs regardless of nesting. No per-PM configuration needed.
 
@@ -83,7 +97,7 @@ String values require both outer single quotes and inner double quotes (`'Key="v
 ```bash
 Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 StinkyTofuDebugLevel=2
 Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 'StinkyTofuPrintAfterPass="CFG Builder, StinkyDAGSchedulerPass"'
-Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 'StinkyTofuDebugPass="StinkyDAGSchedulerPass"'
+Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 'StinkyTofuDebugPass="StinkyDAGSchedulerPass"' 'StinkyTofuPassOrderSnapshotJson="dag.json"'
 ```
 
 ### Via YAML
@@ -94,6 +108,7 @@ GlobalParameters:
   StinkyTofuDebugLevel: 2
   StinkyTofuPrintAfterPass: "CFG Builder, StinkyDAGSchedulerPass"
   StinkyTofuDebugPass: "StinkyDAGSchedulerPass"
+  StinkyTofuPassOrderSnapshotJson: "dag.json"
 ```
 
 ---

@@ -22,10 +22,17 @@
 
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/support/PassOrderSnapshotJson.hpp"
+#include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
+
+#include <unordered_map>
+#include <vector>
 
 namespace stinkytofu
 {
+    class StinkyInstruction;
+
     void PassContext::setGemmTileConfig(const GemmTileConfig& config)
     {
         gemmConfig = config;
@@ -188,29 +195,48 @@ namespace stinkytofu
         // set function GemmTileConfig to pass context GemmTileConfig
         F.setGemmTileConfig(passCtx.getGemmTileConfig());
 
+        const std::string& orderSnapPath = passCtx.getPassFeatureConfig().passOrderSnapshot.jsonPath;
+        std::unique_ptr<DAGScheduleJsonCollector> ownedCollector;
+        DAGScheduleJsonCollector* orderJsonCollector = externalOrderJsonCollector_;
+        if(!orderJsonCollector && !orderSnapPath.empty())
+        {
+            ownedCollector     = std::make_unique<DAGScheduleJsonCollector>(orderSnapPath, F.getName());
+            orderJsonCollector = ownedCollector.get();
+        }
+
         for(const auto& pass : passes)
         {
-            if(dbgCfg && dbgCfg->printPassNames)
+            const std::string passName = pass->getName();
+
+            std::vector<StinkyInstruction*> orderSnapBefore;
+            const bool wantOrderJson
+                = orderJsonCollector
+                  && shouldEmitPassOrderSnapshotAfterPass(passCtx.getPassFeatureConfig(), passName);
+            if(wantOrderJson)
             {
-                std::cout << "  Running: " << pass->getName() << std::endl;
+                snapshotProgramOrderStinkyLinear(F, passCtx, orderSnapBefore);
             }
 
-            if(dbgCfg && dbgCfg->shouldPrintBefore(pass->getName()))
+            if(dbgCfg && dbgCfg->shouldPrintBefore(passName))
             {
-                dbgCfg->getOutputStreamInBefore()
-                    << "\n*** Before Pass: " << pass->getName() << " ***\n";
+                dbgCfg->getOutputStreamInBefore() << "\n*** Before Pass: " << passName << " ***\n";
                 F.dump(dbgCfg->getOutputStreamInBefore());
                 dbgCfg->getOutputStreamInBefore().flush();
             }
 
             pass->run(F, passCtx);
 
-            if(dbgCfg && dbgCfg->shouldPrintAfter(pass->getName()))
+            if(dbgCfg && dbgCfg->shouldPrintAfter(passName))
             {
-                dbgCfg->getOutputStreamInAfter()
-                    << "\n*** After Pass: " << pass->getName() << " ***\n";
+                dbgCfg->getOutputStreamInAfter() << "\n*** After Pass: " << passName << " ***\n";
                 F.dump(dbgCfg->getOutputStreamInAfter());
                 dbgCfg->getOutputStreamInAfter().flush();
+            }
+
+            if(wantOrderJson)
+            {
+                appendPassOrderSnapshotJsonAfterPass(
+                    F, orderSnapBefore, passCtx, passName, *orderJsonCollector);
             }
         }
     }
