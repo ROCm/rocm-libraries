@@ -9,8 +9,7 @@
 #include <string>
 
 #include <hipdnn_frontend/detail/OperationUnpacker.hpp>
-// Uncomment when unpack_from_descriptor() is implemented in the lifting PR:
-// #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
+#include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
 // #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
@@ -262,7 +261,6 @@ TEST_F(TestUnpackOperation, FailsImmediatelyOnUnpackError)
 // createNodeForType tests
 // ---------------------------------------------------------------------------
 
-// Uncomment when unpack_from_descriptor() is implemented in the lifting PR:
 TEST(TestCreateNodeForType, CreatesBatchnormNode)
 {
     const GraphAttributes graphAttrs;
@@ -273,15 +271,15 @@ TEST(TestCreateNodeForType, CreatesBatchnormNode)
     EXPECT_NE(typedNode, nullptr);
 }
 
-// TEST(TestCreateNodeForType, CreatesBatchnormBackwardNode)
-// {
-//     const GraphAttributes graphAttrs;
-//     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD, graphAttrs);
-//     EXPECT_EQ(err.code, ErrorCode::OK);
-//     ASSERT_NE(node, nullptr);
-//     auto typedNode = std::dynamic_pointer_cast<BatchnormBackwardNode>(node);
-//     EXPECT_NE(typedNode, nullptr);
-// }
+TEST(TestCreateNodeForType, CreatesBatchnormBackwardNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<BatchnormBackwardNode>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
 
 TEST(TestCreateNodeForType, CreatesBatchnormInferenceNode)
 {

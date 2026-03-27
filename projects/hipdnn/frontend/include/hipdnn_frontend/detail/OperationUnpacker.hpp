@@ -9,8 +9,7 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
-// Uncomment when unpack_from_descriptor() is implemented in the lifting PR:
-// #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
+#include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
 // #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
@@ -72,11 +71,10 @@ namespace hipdnn_frontend::detail
     case HIPDNN_OPERATION_TYPE_BATCHNORM:
         return {std::make_shared<graph::BatchnormNode>(graph::BatchnormAttributes{}, graphAttrs),
                 {}};
-    // Uncomment when unpack_from_descriptor() is implemented in the lifting PR:
-    // case HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD:
-    //     return {std::make_shared<graph::BatchnormBackwardNode>(
-    //                 graph::BatchnormBackwardAttributes{}, graphAttrs),
-    //             {}};
+    case HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD:
+        return {std::make_shared<graph::BatchnormBackwardNode>(graph::BatchnormBackwardAttributes{},
+                                                               graphAttrs),
+                {}};
     case HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE:
         return {std::make_shared<graph::BatchnormInferenceNode>(
                     graph::BatchnormInferenceAttributes{}, graphAttrs),
