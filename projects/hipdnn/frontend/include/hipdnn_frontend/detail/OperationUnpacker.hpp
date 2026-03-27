@@ -21,7 +21,7 @@
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 // #include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
-// #include <hipdnn_frontend/node/MatmulNode.hpp>
+#include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
@@ -111,8 +111,8 @@ namespace hipdnn_frontend::detail
     case HIPDNN_OPERATION_TYPE_LAYERNORM:
         return {std::make_shared<graph::LayerNormNode>(graph::LayernormAttributes{}, graphAttrs),
                 {}};
-    // case HIPDNN_OPERATION_TYPE_MATMUL:
-    //     return {std::make_shared<graph::MatmulNode>(graph::MatmulAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_MATMUL:
+        return {std::make_shared<graph::MatmulNode>(graph::MatmulAttributes{}, graphAttrs), {}};
     case HIPDNN_OPERATION_TYPE_POINTWISE:
         return {std::make_shared<graph::PointwiseNode>(graph::PointwiseAttributes{}, graphAttrs),
                 {}};

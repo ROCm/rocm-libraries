@@ -46,6 +46,14 @@ inline Error
                                                  attributes.compute_data_type,
                                                  "matmul compute data type"));
 
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(
+            opDesc.get(), HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "matmul operation name"));
+    }
+
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "matmul operation descriptor"));
 
