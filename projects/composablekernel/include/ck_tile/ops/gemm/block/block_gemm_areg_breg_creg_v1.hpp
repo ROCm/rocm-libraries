@@ -338,9 +338,9 @@ struct BlockGemmARegBRegCRegV1
                 const int32_t b_scale_packed = bit_cast<int32_t>(scale_b_slice[number<0>{}]);
 
                 // Inner loops: issue MFMAs within the pack group using OpSel
-                static_ford<sequence<KXdlPack, MXdlPack>>{}([&](auto ii) {
-                    constexpr auto ikxdl = number<ii[number<0>{}]>{};
-                    constexpr auto imxdl = number<ii[number<1>{}]>{};
+                static_ford<sequence<KXdlPack, MXdlPack>>{}([&](auto jj) {
+                    constexpr auto ikxdl = number<jj[number<0>{}]>{};
+                    constexpr auto imxdl = number<jj[number<1>{}]>{};
                     constexpr auto kIter = ikpack * KXdlPack + ikxdl;
                     constexpr auto mIter = impack * MXdlPack + imxdl;
 
