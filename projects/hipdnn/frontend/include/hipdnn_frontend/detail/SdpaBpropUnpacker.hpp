@@ -9,26 +9,8 @@
 #include <memory>
 #include <unordered_map>
 
-#include "HipdnnDiagonalAlignment.h"
-
 namespace hipdnn_frontend::detail
 {
-
-/// Converts a backend hipdnnDiagonalAlignment_t to a frontend DiagonalAlignment.
-[[nodiscard]] inline std::pair<DiagonalAlignment, Error>
-    fromBackendDiagonalAlignment(hipdnnDiagonalAlignment_t backendType)
-{
-    switch(backendType)
-    {
-    case HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT:
-        return {DiagonalAlignment::TOP_LEFT, {}};
-    case HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT:
-        return {DiagonalAlignment::BOTTOM_RIGHT, {}};
-    default:
-        return {DiagonalAlignment::TOP_LEFT,
-                {ErrorCode::INVALID_VALUE, "Unknown diagonal alignment value"}};
-    }
-}
 
 /// Unpacks an SDPA backward operation descriptor and populates
 /// SdpaBackwardAttributes with tensors (using tensorMap for sharing)
@@ -273,7 +255,7 @@ namespace hipdnn_frontend::detail
                                                HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
                                                diagAlign,
                                                "SDPA bprop diagonal_alignment"));
-    auto [alignVal, alignErr] = fromBackendDiagonalAlignment(diagAlign);
+    auto [alignVal, alignErr] = fromHipdnnDiagonalAlignment(diagAlign);
     if(alignErr.is_bad())
     {
         return alignErr;
