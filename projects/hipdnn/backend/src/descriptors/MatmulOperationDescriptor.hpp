@@ -7,6 +7,7 @@
 #include "IGraphOperation.hpp"
 #include "TensorDescriptor.hpp"
 #include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
+#include <unordered_map>
 
 namespace hipdnn_backend
 {
@@ -58,12 +59,20 @@ public:
     std::vector<std::shared_ptr<TensorDescriptor>> getTensorDescriptors() const override;
     std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT> buildNode() const override;
 
+    // Creates a finalized MatmulOperationDescriptor directly from a FlatBuffer NodeT.
+    // Casts nodeT.attributes to MatmulAttributesT internally, then directly assigns
+    // the data struct, looks up tensor descriptors from the tensor map, and calls finalize().
+    static std::shared_ptr<MatmulOperationDescriptor>
+        fromNode(const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+                 const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap);
+
     static hipdnnBackendDescriptorType_t getStaticType();
 
     std::string toString() const override;
 
 private:
     hipdnn_data_sdk::data_objects::MatmulAttributesT _data;
+    std::string _name;
 
     // Store tensor descriptor references for validation and graph building
     std::shared_ptr<TensorDescriptor> _aDesc;

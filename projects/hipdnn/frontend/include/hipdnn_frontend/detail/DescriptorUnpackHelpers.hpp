@@ -38,15 +38,19 @@ namespace hipdnn_frontend::detail
     return {};
 }
 
-/// Gets a vector-valued int64 attribute (queries count first, then allocates and queries values).
+/// Gets a vector-valued attribute (queries count first, then allocates and queries values).
+template <typename T>
 [[nodiscard]] inline Error getDescriptorAttrVec(hipdnnBackendDescriptor_t desc,
                                                 hipdnnBackendAttributeName_t attrName,
-                                                std::vector<int64_t>& values,
+                                                hipdnnBackendAttributeType_t attrType,
+                                                std::vector<T>& values,
                                                 const std::string& errorContext)
 {
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "getDescriptorAttrVec requires a trivially copyable type");
+
     int64_t count = 0;
-    HIPDNN_CHECK_ERROR(
-        getDescriptorAttrCount(desc, attrName, HIPDNN_TYPE_INT64, count, errorContext));
+    HIPDNN_CHECK_ERROR(getDescriptorAttrCount(desc, attrName, attrType, count, errorContext));
 
     if(count <= 0)
     {
@@ -58,7 +62,7 @@ namespace hipdnn_frontend::detail
     int64_t actualCount = 0;
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendGetAttribute(
-            desc, attrName, HIPDNN_TYPE_INT64, count, &actualCount, values.data()),
+            desc, attrName, attrType, count, &actualCount, values.data()),
         "Failed to get " + errorContext);
     if(actualCount != count)
     {
@@ -67,6 +71,15 @@ namespace hipdnn_frontend::detail
                     + " but got " + std::to_string(actualCount)};
     }
     return {};
+}
+
+/// Gets a vector-valued int64 attribute (queries count first, then allocates and queries values).
+[[nodiscard]] inline Error getDescriptorAttrVec(hipdnnBackendDescriptor_t desc,
+                                                hipdnnBackendAttributeName_t attrName,
+                                                std::vector<int64_t>& values,
+                                                const std::string& errorContext)
+{
+    return getDescriptorAttrVec<int64_t>(desc, attrName, HIPDNN_TYPE_INT64, values, errorContext);
 }
 
 /// Gets a scalar attribute of a given type.
