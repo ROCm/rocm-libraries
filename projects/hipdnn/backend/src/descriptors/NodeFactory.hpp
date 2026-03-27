@@ -8,7 +8,7 @@
 #include "BatchnormInferenceOperationDescriptor.hpp"
 // #include "BatchnormInferenceVarianceExtOperationDescriptor.hpp"
 #include "BatchnormOperationDescriptor.hpp"
-// #include "BlockScaleDequantizeOperationDescriptor.hpp"
+#include "BlockScaleDequantizeOperationDescriptor.hpp"
 #include "BlockScaleQuantizeOperationDescriptor.hpp"
 // #include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
