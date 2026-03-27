@@ -112,9 +112,9 @@ TEST_F(TestHipKernelCompileOptions, VerifyAddCustomOptions)
 
     HipKernelCompileOptions options(_inputTensorAttrs, _deviceProps);
 
-    options.addOption("HIP_PLUGIN_TEST_INT", 42);
-    options.addOption("HIP_PLUGIN_TEST_STRING", std::string("hello"));
-    options.addOption("HIP_PLUGIN_TEST_BOOL", true);
+    options.add("HIP_PLUGIN_TEST_INT", 42);
+    options.add("HIP_PLUGIN_TEST_STRING", std::string("hello"));
+    options.add("HIP_PLUGIN_TEST_BOOL", true);
 
     // Verify expected options
     EXPECT_TRUE(hasOption(options, "-I/opt/rocm/include"));

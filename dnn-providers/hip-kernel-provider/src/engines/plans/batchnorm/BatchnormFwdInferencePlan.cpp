@@ -227,16 +227,16 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Prepare compilation options
     HipKernelCompileOptions options(_inferenceParams.x(), deviceProperties, activationMode);
-    options.addOption("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
-    options.addOption("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
-    options.addOption("HIP_PLUGIN_BN_GRP0", xlocalsize);
-    options.addOption("HIP_PLUGIN_BN_GRP1", ylocalsize);
-    options.addOption("HIP_PLUGIN_BN_GRP2", zlocalsize);
-    options.addOption("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
-    options.addOption("HIP_PLUGIN_BN_GFX103X", isGfx103x);
-    options.addOption("HIP_PLUGIN_BN_GFX110X", isGfx110x);
-    options.addOption("HIP_PLUGIN_BN_GFX120X", isGfx120x);
-    options.addOption("HIP_PLUGIN_BN_GFX115X", isGfx115x);
+    options.add("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
+    options.add("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
+    options.add("HIP_PLUGIN_BN_GRP0", xlocalsize);
+    options.add("HIP_PLUGIN_BN_GRP1", ylocalsize);
+    options.add("HIP_PLUGIN_BN_GRP2", zlocalsize);
+    options.add("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
+    options.add("HIP_PLUGIN_BN_GFX103X", isGfx103x);
+    options.add("HIP_PLUGIN_BN_GFX110X", isGfx110x);
+    options.add("HIP_PLUGIN_BN_GFX120X", isGfx120x);
+    options.add("HIP_PLUGIN_BN_GFX115X", isGfx115x);
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", options);

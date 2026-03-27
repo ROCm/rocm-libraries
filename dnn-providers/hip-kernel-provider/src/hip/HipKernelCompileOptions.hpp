@@ -61,17 +61,17 @@ public:
 
     template <typename T,
               typename = std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>>>
-    void addOption(const std::string& name, T value)
+    void add(const std::string& name, T value)
     {
         _compileOptions.emplace_back("-D" + name + "=" + std::to_string(value));
     }
 
-    void addOption(const std::string& name, const std::string& value)
+    void add(const std::string& name, const std::string& value)
     {
         _compileOptions.emplace_back("-D" + name + "=" + value);
     }
 
-    void addOption(const std::string& name, bool value)
+    void add(const std::string& name, bool value)
     {
         _compileOptions.emplace_back("-D" + name + "=" + (value ? "1" : "0"));
     }
