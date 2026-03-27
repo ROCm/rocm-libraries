@@ -259,8 +259,6 @@ rocblas_geam_transpose_tiled_device(rocblas_operation transA,
         for(int j = 0; j < TILE_SIZE; j += TY_SIZE)
         {
             auto a_val = (ty + j >= cols || tx >= rows) ? T(0) : A[tx + (ty + j) * lda];
-            //auto a_val
-            //= (ty + j >= cols || tx >= rows || alpha == T(0)) ? T(0) : A[tx + (ty + j) * lda];
 
             if(transA == rocblas_operation_conjugate_transpose)
                 a_val = conj(a_val);
@@ -549,8 +547,8 @@ rocblas_status rocblas_geam_launcher(rocblas_handle    handle,
 
         if(pointer_mode == rocblas_pointer_mode_host && !*alpha && transB != rocblas_operation_none)
         {
-            // beta == 0
-            // Pure transpose C = alpha * op(B).
+            // alpha == 0
+            // Pure transpose C = beta * op(B).
             static constexpr int TILE_SIZE = 32;
             static constexpr int TY_SIZE   = 8; // 4 iterations per tile
 
@@ -642,7 +640,7 @@ rocblas_status rocblas_geam_launcher(rocblas_handle    handle,
         if(pointer_mode == rocblas_pointer_mode_host && !*beta && transA != rocblas_operation_none)
         {
             // beta == 0
-            // Pure transpose C = alpha * op(B).
+            // Pure transpose C = alpha * op(A).
             static constexpr int TILE_SIZE = 32;
             static constexpr int TY_SIZE   = 8; // 4 iterations per tile
 
@@ -845,7 +843,7 @@ rocblas_status rocblas_geam_launcher(rocblas_handle    handle,
         }
         else if(transB != rocblas_operation_none)
         {
-            // beta == 0
+            // alpha == 0
             // Pure transpose C = beta * op(B).
             static constexpr int TILE_SIZE = 32;
             static constexpr int TY_SIZE   = 8; // 4 iterations per tile
