@@ -714,15 +714,19 @@ struct GroupedConvolutionBackwardDataKernel
             c_ptr, kargs.c_grid_descs_m_n[group_id]);
 
         // For bf16_t and atomic_add global_atomic_add is used instead of buffer_atomic_add
-        // Add padding for not continous dim due to the lack of OOB check
-        constexpr bool pad_not_continous_dim =
+        // Add padding for not contiguous dim due to the lack of OOB check
+        // Not needed from gfx950.
+#if defined(__gfx950__)
+        constexpr bool pad_not_contiguous_dim = false;
+#else
+        constexpr bool pad_not_contiguous_dim =
             std::is_same_v<InDataType, bf16_t> && DstInMemOp == memory_operation_enum::atomic_add;
-
+#endif
         // Step 2: Create padded view
         const auto& c_pad_view = pad_tensor_view(
             c_tensor_view,
             make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
-            sequence<pad_not_continous_dim, true>{});
+            sequence<pad_not_contiguous_dim, true>{});
 
         // Step 3: Create tile window
         auto c_block_window = make_tile_window(
@@ -865,93 +869,6 @@ struct GroupedConvolutionBackwardDataKernel
         }
 
         return true;
-    }
-
-    template <memory_operation_enum DstInMemOp = memory_operation_enum::set>
-    CK_TILE_DEVICE static auto
-    MakeGemmTensorViews(const OutDataType* a_ptr,
-                        const WeiDataType* b_ptr,
-                        const std::array<const void*, NumDTensor>& ds_ptr,
-                        InDataType* c_ptr,
-                        const GroupedConvBwdDataKernelArgsSpecialized& kargs,
-                        const index_t group_id)
-    {
-        static_assert(!GemmPipeline::BlockGemmShape::PermuteA, "Not implemented!");
-        static_assert(!GemmPipeline::BlockGemmShape::PermuteB, "Not implemented!");
-        const auto& a_tensor_view = [&]() {
-            return make_tensor_view<address_space_enum::global>(
-                a_ptr,
-                kargs.a_grid_descs_m_k[group_id]); // A: out
-        }();
-
-        const auto& b_tensor_view = [&]() {
-            return make_tensor_view<address_space_enum::global>(
-                b_ptr,
-                kargs.b_grid_descs_n_k[group_id]); // B: weight
-        }();
-
-        const auto& c_tensor_view = [&]() {
-            return make_tensor_view<address_space_enum::global, DstInMemOp>(
-                c_ptr, kargs.c_grid_descs_m_n[group_id]);
-        }();
-
-        const auto& ds_tensor_view = generate_tuple(
-            [&](auto i) {
-                static_assert(std::is_same_v<std::tuple_element_t<i, DsLayout>, OutLayout>,
-                              "Not supported!");
-                static_assert(std::is_same_v<GemmCLayout, tensor_layout::gemm::RowMajor>,
-                              "Not supported!");
-                static_assert(std::is_same_v<std::tuple_element_t<i, DsDataType>, InDataType>,
-                              "Not supported!");
-
-                return make_tensor_view<address_space_enum::global>(
-                    static_cast<InDataType*>(ds_ptr[i]), kargs.c_grid_descs_m_n[group_id]);
-            },
-            number<NumDTensor>{});
-
-        return make_tuple(a_tensor_view, b_tensor_view, ds_tensor_view, c_tensor_view);
-    }
-
-    template <typename PadView>
-    CK_TILE_DEVICE static auto MakeGemmTileWindows(const PadView& views,
-                                                   const index_t i_m,
-                                                   const index_t i_n,
-                                                   const index_t i_k)
-    {
-        const auto& a_pad_view  = views.at(I0);
-        const auto& b_pad_view  = views.at(I1);
-        const auto& ds_pad_view = views.at(I2);
-        const auto& c_pad_view  = views.at(I3);
-
-        const auto& a_block_window = [&]() {
-            return make_tile_window(a_pad_view,
-                                    make_tuple(number<TilePartitioner::MPerBlock>{},
-                                               number<TilePartitioner::KPerBlock>{}),
-                                    {i_m, i_k});
-        }();
-
-        const auto& b_block_window = [&]() {
-            return make_tile_window(b_pad_view,
-                                    make_tuple(number<TilePartitioner::KPerBlock>{},
-                                               number<TilePartitioner::NPerBlock>{}),
-                                    {i_k, i_n});
-        }();
-
-        const auto ds_block_window = generate_tuple(
-            [&](auto i) {
-                return make_tile_window(ds_pad_view[i],
-                                        make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                   number<TilePartitioner::NPerBlock>{}),
-                                        {i_m, i_n});
-            },
-            number<NumDTensor>{});
-
-        auto c_block_window = make_tile_window(
-            c_pad_view,
-            make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
-            {i_m, i_n});
-
-        return make_tuple(a_block_window, b_block_window, ds_block_window, c_block_window);
     }
 
     /**

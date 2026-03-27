@@ -758,14 +758,18 @@ struct GroupedConvolutionBackwardWeightKernel
             make_tensor_view<address_space_enum::global, DstInMemOp>(c_ptr, kargs.c_grid_desc_m_n);
 
         // For bf16_t and atomic_add global_atomic_add is used instead of buffer_atomic_add
-        // Add padding for not continous dim due to the lack of OOB check
-        constexpr bool pad_not_continous_dim =
+        // Add padding for not contiguous dim due to the lack of OOB check
+        // Not needed from gfx950.
+#if defined(__gfx950__)
+        constexpr bool pad_not_contiguous_dim = false;
+#else
+        constexpr bool pad_not_contiguous_dim =
             std::is_same_v<WeiDataType, bf16_t> && DstInMemOp == memory_operation_enum::atomic_add;
-
+#endif
         const auto& c_pad_view = pad_tensor_view(
             c_tensor_view,
             make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
-            sequence<pad_not_continous_dim, true>{});
+            sequence<pad_not_contiguous_dim, true>{});
 
         return make_tile_window(
             c_pad_view,

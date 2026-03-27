@@ -2168,6 +2168,10 @@ CK_TILE_DEVICE void amd_global_atomic_add_impl(const thread_buffer<T, N>& src_th
         });
     }
 #endif
+    else
+    {
+        static_assert(false, "Not supported!");
+    }
 }
 
 template <typename T, index_t N>
@@ -2178,7 +2182,11 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
 {
     static_assert((std::is_same<T, float>::value && (N == 1 || N == 2 || N == 4)) ||
                       (std::is_same<T, fp16_t>::value && (N == 2 || N == 4 || N == 8)) ||
-                      (std::is_same<T, int32_t>::value && (N == 1 || N == 2 || N == 4)),
+                      (std::is_same<T, int32_t>::value && (N == 1 || N == 2 || N == 4))
+#if defined(__gfx950__)
+                      || (std::is_same<T, bf16_t>::value && (N == 2 || N == 4 || N == 8))
+#endif
+                      ,
                   "wrong! not implemented");
 
     if constexpr(std::is_same<T, float>::value)
@@ -2785,6 +2793,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add(const thread_buffer<T, N>& src_thread_
                                           const bool dst_thread_element_valid,
                                           const index_t dst_element_space_size)
 {
+#if defined(__gfx942__)
     if constexpr(std::is_same<T, bf16_t>::value)
     {
         if(dst_thread_element_valid)
@@ -2795,6 +2804,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add(const thread_buffer<T, N>& src_thread_
     }
     else
     {
+#endif
         const int32x4_t dst_wave_buffer_resource =
             make_wave_buffer_resource(p_dst_wave, dst_element_space_size * sizeof(T));
 
@@ -2806,13 +2816,15 @@ CK_TILE_DEVICE void amd_buffer_atomic_add(const thread_buffer<T, N>& src_thread_
         amd_buffer_atomic_add_impl<T, N>(
             src_thread_data, dst_wave_buffer_resource, dst_addr_shift + dst_thread_addr_offset, 0);
 #else
-        if(dst_thread_element_valid)
-        {
-            amd_buffer_atomic_add_impl<T, N>(
-                src_thread_data, dst_wave_buffer_resource, dst_thread_addr_offset, 0);
-        }
-#endif
+    if(dst_thread_element_valid)
+    {
+        amd_buffer_atomic_add_impl<T, N>(
+            src_thread_data, dst_wave_buffer_resource, dst_thread_addr_offset, 0);
     }
+#endif
+#if defined(__gfx942__)
+    }
+#endif
 }
 
 template <typename T,
