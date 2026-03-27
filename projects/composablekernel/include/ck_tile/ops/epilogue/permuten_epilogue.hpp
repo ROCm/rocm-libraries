@@ -116,6 +116,14 @@ struct PermuteNEpilogue
 
     CDElementwise elfunc_;
 
+    // PermuteN epilogue does not support D tensors or non-passthrough elementwise operations.
+    // If D tensor support is needed, use CShuffleEpilogue instead.
+    static_assert(NumDTensor == 0,
+                  "PermuteNEpilogue does not support D tensors. Use CShuffleEpilogue instead.");
+    static_assert(std::is_same_v<CDElementwise, element_wise::PassThrough>,
+                  "PermuteNEpilogue only supports PassThrough elementwise. "
+                  "Use CShuffleEpilogue for custom elementwise operations.");
+
     CK_TILE_DEVICE PermuteNEpilogue(CDElementwise elfunc = CDElementwise{}) : elfunc_(elfunc) {};
 
     static_assert(NumDTensor == DsLayout::size(),
