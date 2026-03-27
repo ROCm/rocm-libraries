@@ -389,6 +389,13 @@ template <typename T>
             tensor->set_value(val);
             break;
         }
+        case DataType::INT64:
+        {
+            int64_t val = 0;
+            std::memcpy(&val, valueBytes.data(), sizeof(int64_t));
+            tensor->set_value(val);
+            break;
+        }
         case DataType::UINT8:
         case DataType::INT8:
         case DataType::FP8_E4M3:
