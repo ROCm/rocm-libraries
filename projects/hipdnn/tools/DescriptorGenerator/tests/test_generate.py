@@ -209,8 +209,8 @@ class TestPreviewFilesLiftOnly:
 
     def test_lift_only_file_count(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_LIFT_ONLY)
-        # 3 files + 7 fragments = 10
-        assert len(files) == 10
+        # 3 files + 8 fragments = 11
+        assert len(files) == 11
 
     def test_lift_only_contains_unpacker(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_LIFT_ONLY)
@@ -234,6 +234,7 @@ class TestPreviewFilesLiftOnly:
             "fragments/node_unpack_override.txt",
             "fragments/descriptor_lifting_additions.txt",
             "fragments/packer_name_addition.txt",
+            "fragments/packer_name_test.txt",
         ]
         for fragment in expected_fragments:
             assert fragment in files, f"Missing fragment: {fragment}"

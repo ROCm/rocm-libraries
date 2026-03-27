@@ -283,9 +283,9 @@ class TestDescriptorLiftingAdditions:
         assert "finalizeDescriptor()" in output
 
     def test_graph_descriptor_test_reminder(self, convolution_fwd_config, generator):
-        """Output contains graph descriptor test update reminder."""
+        """Output contains graph descriptor name tests note."""
         output = generator._render_descriptor_lifting_additions(convolution_fwd_config)
-        assert "Graph Descriptor Test Update Required" in output
+        assert "Graph Descriptor Name Tests" in output
         assert "OperationNamePreservedInSerialization" in output
         assert "OperationNameRoundTripThroughLifting" in output
 
@@ -910,12 +910,12 @@ class TestDirectRenderMethods:
         assert len(result) == 19
 
     def test_render_lift_only_file_count(self, matmul_config, generator, tmp_path):
-        """render_lift_only produces exactly 10 outputs (3 files + 6 fragments + 1 additions)."""
+        """render_lift_only produces exactly 11 outputs (3 files + 7 fragments + 1 additions)."""
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = generator.render_lift_only(matmul_config, output_dir)
-        # 3 lift templates + 6 lift fragments + 1 descriptor_lifting_additions = 10
-        assert len(result) == 10
+        # 3 lift templates + 7 lift fragments + 1 descriptor_lifting_additions = 11
+        assert len(result) == 11
 
     def test_render_frontend_file_count(
         self, convolution_fwd_config, generator, tmp_path

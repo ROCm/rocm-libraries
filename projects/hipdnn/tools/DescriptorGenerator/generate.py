@@ -199,6 +199,7 @@ def _preview_files(config, mode: str) -> list[str]:
         "fragments/node_unpack_override.txt",
         "fragments/descriptor_lifting_additions.txt",
         "fragments/packer_name_addition.txt",
+        "fragments/packer_name_test.txt",
     ]
 
     if mode == MODE_BACKEND:
