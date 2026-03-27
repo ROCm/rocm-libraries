@@ -33,7 +33,8 @@ struct MmaPipelineTest
 
     void test_pipeline(std::function<bool(ck_tile::core::arch::amdgcn_target_id)> shouldSkip,
                        std::function<void(uint32_t, void*, void*, void*, void*)> kernel,
-                       std::function<CType(uint32_t)> getExpected)
+                       std::function<CType(uint32_t)> getExpected,
+                       std::function<AType(size_t)> aInitializer = nullptr)
     {
         using namespace ck_tile;
         using namespace ck_tile::core::arch;
@@ -72,8 +73,17 @@ struct MmaPipelineTest
         uint32_t BSize = BElements * sizeof(BType);
         uint32_t CSize = CElements * sizeof(CType);
 
-        // Initialize A and B to all 1's, C to all 0's
-        std::vector<AType> h_a(AElements, type_convert<AType>(1));
+        // Initialize A (use custom initializer or default all 1's), B to all 1's, C to all 0's
+        std::vector<AType> h_a(AElements);
+        if(aInitializer)
+        {
+            for(size_t i = 0; i < AElements; ++i)
+                h_a[i] = aInitializer(i);
+        }
+        else
+        {
+            std::fill(h_a.begin(), h_a.end(), type_convert<AType>(1));
+        }
         std::vector<BType> h_b(BElements, type_convert<BType>(1));
         std::vector<CType> h_c(CElements, type_convert<CType>(0));
         std::vector<CType> h_out(CElements, type_convert<CType>(0));
@@ -99,7 +109,7 @@ struct MmaPipelineTest
 
         HIP_CHECK_ERROR(hipMemcpy(h_out.data(), d_out, CSize, hipMemcpyDeviceToHost));
 
-        // Output should be FragK for all elements, because the inputs are all 1's
+        // Verify output against expected value for all elements
         for(size_t i = 0; i < CElements; ++i)
         {
             EXPECT_NEAR(h_out[i], getExpected(FragK), 1e-3);
