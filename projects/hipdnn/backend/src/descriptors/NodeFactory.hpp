@@ -5,7 +5,7 @@
 
 // Uncomment when fromNode() is implemented in the lifting PR:
 // #include "BatchnormBackwardOperationDescriptor.hpp"
-// #include "BatchnormInferenceOperationDescriptor.hpp"
+#include "BatchnormInferenceOperationDescriptor.hpp"
 // #include "BatchnormInferenceVarianceExtOperationDescriptor.hpp"
 #include "BatchnormOperationDescriptor.hpp"
 // #include "BlockScaleDequantizeOperationDescriptor.hpp"
