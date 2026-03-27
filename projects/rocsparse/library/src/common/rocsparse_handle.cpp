@@ -156,11 +156,7 @@ _rocsparse_handle::_rocsparse_handle()
         PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
         PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));
         PRINT_IF_HIP_ERROR(rocsparse_hipFree(done));
-        rocsparse_status status = rocsparse::blas_destroy_handle(blas_handle);
-        if(status != rocsparse_status_success)
-        {
-            ROCSPARSE_ERROR_MESSAGE(status, "handle error");
-        }
+        PRINT_IF_ROCSPARSE_ERROR(rocsparse::blas_destroy_handle(blas_handle), "handle error");
         throw;
     }
 }
@@ -186,11 +182,7 @@ _rocsparse_handle::~_rocsparse_handle()
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
 
     // destroy blas handle
-    rocsparse_status status = rocsparse::blas_destroy_handle(this->blas_handle);
-    if(status != rocsparse_status_success)
-    {
-        ROCSPARSE_ERROR_MESSAGE(status, "handle error");
-    }
+    PRINT_IF_ROCSPARSE_ERROR(rocsparse::blas_destroy_handle(this->blas_handle), "handle error");
 
     // Close log files
     if(log_trace_ofs.is_open())
