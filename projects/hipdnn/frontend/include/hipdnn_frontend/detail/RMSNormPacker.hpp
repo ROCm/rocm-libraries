@@ -82,6 +82,14 @@ inline Error
                                                  attributes.compute_data_type,
                                                  "rmsnorm compute data type"));
 
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(
+            opDesc.get(), HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "rmsnorm operation name"));
+    }
+
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "rmsnorm operation descriptor"));
 

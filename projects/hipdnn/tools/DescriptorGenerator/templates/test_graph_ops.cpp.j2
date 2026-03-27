@@ -1,0 +1,548 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include "DescriptorTestUtils.hpp"
+#include "HipdnnException.hpp"
+#include "TensorDescriptorTestUtils.hpp"
+#include "TestMacros.hpp"
+#include "descriptors/{{ op.class_name }}.hpp"
+#include "descriptors/GraphDescriptor.hpp"
+#include "descriptors/TensorDescriptor.hpp"
+#include "hipdnn_backend.h"
+#include "mocks/MockHandle.hpp"
+
+#include <flatbuffers/flatbuffers.h>
+#include <gtest/gtest.h>
+#include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+{% if op.test_data.constants_include %}
+#include <hipdnn_test_sdk/constants/{{ op.test_data.constants_include }}.hpp>
+{% endif %}
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
+
+#include <array>
+#include <memory>
+#include <set>
+#include <vector>
+
+using namespace hipdnn_backend;
+using namespace hipdnn_backend::test_utilities;
+using namespace hipdnn_data_sdk::data_objects;
+{% if op.test_data.constants_include %}
+using namespace hipdnn_tests::constants;
+{% endif %}
+using hipdnn_tests::toVec;
+
+namespace
+{
+
+// Helper: create a finalized {{ op.class_name }} from tensor descriptors
+inline std::unique_ptr<HipdnnBackendDescriptor>
+    createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}HipdnnBackendDescriptor* {{ tf.local_desc_name }}{% if not loop.last %},
+                          {% endif %}{% endfor %}{% if op.has_tensor_array_fields %},
+{% for taf in op.tensor_array_fields %}
+                          std::vector<HipdnnBackendDescriptor*> {{ taf.name }}Descs = {}{% if not loop.last %},{% endif %}
+{% endfor %}{% endif %},
+                          hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
+{
+    auto wrapper = createDescriptor<{{ op.class_name }}>();
+    auto desc = wrapper->asDescriptor<{{ op.class_name }}>();
+
+{% for tf in op.tensor_fields %}
+    desc->setAttribute(
+        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &{{ tf.local_desc_name }});
+{% endfor %}
+{% for df in op.required_data_fields %}
+{% if df.is_vector %}
+{% if op.test_data.constants_include %}
+{% set const_name = df.test_constant_name if df.test_constant_name else ("K_CONV_" ~ (df.name | upper) if "conv" in op.effective_error_label else "K_" ~ (df.name | upper)) %}
+
+    auto {{ df.camel_name }} = toVec({{ const_name }});
+    desc->setAttribute({{ df.attr_name }}, {{ df.backend_type }}, static_cast<int64_t>({{ df.camel_name }}.size()), {{ df.camel_name }}.data());
+{% else %}
+
+    std::vector<int64_t> {{ df.camel_name }} = {{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }};
+    desc->setAttribute({{ df.attr_name }}, {{ df.backend_type }}, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
+{% endif %}
+{% elif df.is_mode %}
+
+    auto {{ df.camel_name }} = {{ df.test_backend_value }};
+    desc->setAttribute({{ df.attr_name }}, {{ df.backend_type }}, 1, &{{ df.camel_name }});
+{% elif df.is_enum %}
+
+    auto {{ df.camel_name }} = static_cast<int64_t>({{ df.enum_short_type }}::{{ df.test_enum_value }});
+    desc->setAttribute({{ df.attr_name }}, HIPDNN_TYPE_INT64, 1, &{{ df.camel_name }});
+{% endif %}
+{% endfor %}
+{% if op.has_compute_data_type %}
+    desc->setAttribute({{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+{% endif %}
+{% for taf in op.tensor_array_fields %}
+
+    if(!{{ taf.name }}Descs.empty())
+    {
+        desc->setAttribute(
+            {{ taf.attr_name }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+            static_cast<int64_t>({{ taf.name }}Descs.size()), {{ taf.name }}Descs.data());
+    }
+{% endfor %}
+
+    desc->finalize();
+    return wrapper;
+}
+
+class TestGraphDescriptor{{ op.name }} : public ::testing::Test
+{
+public:
+    std::shared_ptr<GraphDescriptor> getDescriptor() const
+    {
+        return _wrapper->asDescriptor<GraphDescriptor>();
+    }
+
+    void setHandle() const
+    {
+        auto desc = getDescriptor();
+        hipdnnHandle_t handle = &_mockHandle;
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    }
+
+    static const TensorAttributesT* findTensorByUid(const GraphT& graphT, int64_t uid)
+    {
+        for(const auto& tensor : graphT.tensors)
+        {
+            if(tensor->uid == uid)
+            {
+                return tensor.get();
+            }
+        }
+        return nullptr;
+    }
+
+    static void verifyTensor(const TensorAttributesT* tensor,
+                             int64_t expectedUid,
+                             const std::vector<int64_t>& expectedDims,
+                             const std::vector<int64_t>& expectedStrides,
+                             DataType expectedDataType,
+                             bool expectedVirtual = false)
+    {
+        ASSERT_NE(tensor, nullptr) << "Tensor with UID " << expectedUid << " not found";
+        EXPECT_EQ(tensor->uid, expectedUid);
+        EXPECT_EQ(tensor->dims, expectedDims);
+        EXPECT_EQ(tensor->strides, expectedStrides);
+        EXPECT_EQ(tensor->data_type, expectedDataType);
+        EXPECT_EQ(tensor->virtual_, expectedVirtual);
+    }
+
+{% if op.graph_verifiable_data_fields %}
+    static void verify{{ op.name }}Node(const NodeT& node,
+{% if op.has_compute_data_type %}
+                                  DataType expectedComputeType,
+{% endif %}
+{% for tf in op.tensor_fields %}
+                                  int64_t expected{{ tf.pascal_name }}Uid{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
+
+{% endfor %}
+{% for df in op.graph_verifiable_data_fields %}
+{% if df.is_vector %}
+                                  const std::vector<int64_t>& expected{{ df.name | replace('_', ' ') | title | replace(' ', '') }}{% if not loop.last %},{% endif %}
+
+{% elif df.is_mode %}
+                                  {{ df.enum_short_type }} expected{{ df.enum_short_type }}{% if not loop.last %},{% endif %}
+
+{% elif df.is_enum %}
+                                  {{ df.enum_short_type }} expected{{ df.enum_short_type }}{% if not loop.last %},{% endif %}
+
+{% endif %}
+{% endfor %}
+)
+    {
+{% if op.has_compute_data_type %}
+        EXPECT_EQ(node.compute_data_type, expectedComputeType);
+{% endif %}
+        ASSERT_EQ(node.attributes.type, NodeAttributes::{{ op.node_attributes_union_member }});
+
+        auto* attrs = node.attributes.As{{ op.fbs_table }}();
+        ASSERT_NE(attrs, nullptr);
+
+{% for tf in op.tensor_fields %}
+        EXPECT_EQ(attrs->{{ tf.uid_field }}, expected{{ tf.pascal_name }}Uid);
+{% endfor %}
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+        EXPECT_EQ(attrs->{{ df.fbs_field }}, expected{{ df.name | replace('_', ' ') | title | replace(' ', '') }});
+{% elif df.is_mode %}
+        EXPECT_EQ(attrs->{{ df.fbs_field }}, expected{{ df.enum_short_type }});
+{% elif df.is_enum %}
+        EXPECT_EQ(attrs->{{ df.fbs_field }}, expected{{ df.enum_short_type }});
+{% endif %}
+{% endfor %}
+    }
+{% endif %}
+
+protected:
+    std::unique_ptr<HipdnnBackendDescriptor> _wrapper = nullptr;
+    mutable MockHandle _mockHandle;
+
+    void SetUp() override
+    {
+        _wrapper = createDescriptor<GraphDescriptor>();
+    }
+
+    void TearDown() override
+    {
+        _wrapper.reset();
+    }
+};
+
+TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
+{
+{% for tf in op.tensor_fields %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if tc %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
+{% else %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+{% endif %}
+{% else %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% endif %}
+{% endfor %}
+    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %});
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->finalize());
+
+    // Verify the built graph
+    auto serialized = desc->getSerializedGraph();
+    ASSERT_NE(serialized.ptr, nullptr);
+    ASSERT_GT(serialized.size, 0UL);
+
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+    ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
+
+    auto graphT = UnPackGraph(serialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1);
+    ASSERT_EQ(graphT->tensors.size(), {{ op.tensor_fields | length }});
+
+    // Verify tensor attributes
+{% for tf in op.tensor_fields %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if tc %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+    verifyTensor(findTensorByUid(*graphT, {{ uid_const }}),
+                 {{ uid_const }},
+                 toVec({{ dims_const }}),
+                 toVec({{ strides_const }}),
+                 DataType::FLOAT);
+{% else %}
+    verifyTensor(findTensorByUid(*graphT, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}),
+                 {{ op.test_data.tensor_uids.get(tf.name, loop.index) }},
+                 {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }},
+                 {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }},
+                 DataType::FLOAT);
+{% endif %}
+{% endif %}
+{% endfor %}
+
+    // Verify node attributes
+{% if op.graph_verifiable_data_fields %}
+    verify{{ op.name }}Node(*graphT->nodes[0],
+{% if op.has_compute_data_type %}
+                      DataType::FLOAT,
+{% endif %}
+{% for tf in op.tensor_fields %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+                      {{ uid_const }}{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
+
+{% else %}
+                      {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
+
+{% endif %}
+{% endfor %}
+{% for df in op.graph_verifiable_data_fields %}
+{% if df.is_vector %}
+{% if op.test_data.constants_include %}
+{% set const_name = df.test_constant_name if df.test_constant_name else ("K_CONV_" ~ (df.name | upper) if "conv" in op.effective_error_label else "K_" ~ (df.name | upper)) %}
+                      toVec({{ const_name }}){% if not loop.last %},{% endif %}
+
+{% else %}
+                      std::vector<int64_t>{{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }}{% if not loop.last %},{% endif %}
+
+{% endif %}
+{% elif df.is_mode %}
+                      {{ df.enum_short_type }}::{{ df.test_enum_value }}{% if not loop.last %},{% endif %}
+
+{% elif df.is_enum %}
+                      {{ df.enum_short_type }}::{{ df.test_enum_value }}{% if not loop.last %},{% endif %}
+
+{% endif %}
+{% endfor %}
+);
+{% else %}
+    ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::{{ op.node_attributes_union_member }});
+
+    auto* attrs = graphT->nodes[0]->attributes.As{{ op.fbs_table }}();
+    ASSERT_NE(attrs, nullptr);
+{% if op.has_compute_data_type %}
+    EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::FLOAT);
+{% endif %}
+
+    // Verify tensor UID references
+{% for tf in op.tensor_fields %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    EXPECT_EQ(attrs->{{ tf.uid_field }}, {{ uid_const }});
+{% else %}
+    EXPECT_EQ(attrs->{{ tf.uid_field }}, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% endif %}
+{% endfor %}
+{% endif %}
+{% for taf in op.tensor_array_fields %}
+
+    // Verify {{ taf.name }} tensor array is empty (not set in basic test)
+    EXPECT_EQ(graphT->nodes[0]->attributes.As{{ op.fbs_table }}()->{{ taf.fbs_field }}.size(), 0u);
+{% endfor %}
+
+    // Verify default node name is empty
+    EXPECT_TRUE(graphT->nodes[0]->name.empty());
+}
+{% if op.has_compute_data_type %}
+
+TEST_F(TestGraphDescriptor{{ op.name }}, ComputeDataTypePreserved)
+{
+{% for tf in op.tensor_fields %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if tc %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
+{% else %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+{% endif %}
+{% else %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% endif %}
+{% endfor %}
+    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %}, HIPDNN_DATA_HALF);
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+    desc->finalize();
+
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1);
+    EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
+}
+{% endif %}
+{% for taf in op.tensor_array_fields %}
+{% if taf.test_uids %}
+
+TEST_F(TestGraphDescriptor{{ op.name }}, BuildWith{{ taf.test_label or taf.name | replace('_', ' ') | title | replace(' ', '') }}TensorArray)
+{
+{% for tf in op.tensor_fields %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if tc %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
+{% else %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+{% endif %}
+{% else %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% endif %}
+{% endfor %}
+{% for uid in taf.test_uids %}
+    auto {{ taf.name }}Desc{{ loop.index0 }} = createFinalizedTensor({{ uid }});
+{% endfor %}
+
+    std::vector<HipdnnBackendDescriptor*> {{ taf.name }}Descs = {{ '{' }}{% for uid in taf.test_uids %}{{ taf.name }}Desc{{ loop.index0 }}.get(){% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
+    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %}, {{ taf.name }}Descs);
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->finalize());
+
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1);
+
+    auto* attrs = graphT->nodes[0]->attributes.As{{ op.fbs_table }}();
+    ASSERT_NE(attrs, nullptr);
+
+    // Verify {{ taf.name }} tensor array UIDs
+    ASSERT_EQ(attrs->{{ taf.fbs_field }}.size(), {{ taf.test_uids | length }}u);
+{% for uid in taf.test_uids %}
+    EXPECT_EQ(attrs->{{ taf.fbs_field }}[{{ loop.index0 }}], {{ uid }});
+{% endfor %}
+}
+{% endif %}
+{% endfor %}
+{% if op.data_fields %}
+
+TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
+{
+{% for tf in op.tensor_fields %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if tc %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
+{% else %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+{% endif %}
+{% else %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }});
+{% else %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% endif %}
+{% endif %}
+{% endfor %}
+
+    // Create op with non-default parameters to test graph roundtrip
+    auto wrapper = createDescriptor<{{ op.class_name }}>();
+    auto opDesc = wrapper->asDescriptor<{{ op.class_name }}>();
+
+{% for tf in op.tensor_fields %}
+    HipdnnBackendDescriptor* {{ tf.name }}Ptr = {{ tf.local_desc_name }}.get();
+    opDesc->setAttribute(
+        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &{{ tf.name }}Ptr);
+{% endfor %}
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+{% set tv = df.test_value if df.test_value else op.test_data.field_values.get(df.name, [2, 3]) %}
+
+    const std::vector<int64_t> kCustom{{ df.name | replace('_', ' ') | title | replace(' ', '') }} = {{ '{' }}{{ tv | join(', ') }}{{ '}' }};
+    opDesc->setAttribute(
+        {{ df.attr_name }}, {{ df.backend_type }}, {{ tv | length }}, kCustom{{ df.name | replace('_', ' ') | title | replace(' ', '') }}.data());
+{% elif df.is_mode %}
+
+    auto {{ df.camel_name }} = {{ df.test_backend_value }};
+    opDesc->setAttribute({{ df.attr_name }}, {{ df.backend_type }}, 1, &{{ df.camel_name }});
+{% elif df.is_enum %}
+
+    auto {{ df.camel_name }} = static_cast<int64_t>({{ df.enum_short_type }}::{{ df.test_enum_value }});
+    opDesc->setAttribute({{ df.attr_name }}, HIPDNN_TYPE_INT64, 1, &{{ df.camel_name }});
+{% endif %}
+{% endfor %}
+{% if op.has_compute_data_type %}
+
+    auto computeType = HIPDNN_DATA_FLOAT;
+    opDesc->setAttribute({{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+{% endif %}
+
+    // Set operation name
+    std::string opName = "test_{{ op.name | lower }}";
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                         HIPDNN_TYPE_CHAR,
+                         static_cast<int64_t>(opName.size()),
+                         opName.c_str());
+    opDesc->finalize();
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {wrapper.get()};
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+    desc->finalize();
+
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1);
+    ASSERT_EQ(graphT->tensors.size(), {{ op.tensor_fields | length }});
+
+    // Verify tensors
+{% for tf in op.tensor_fields %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if tc %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+    verifyTensor(findTensorByUid(*graphT, {{ uid_const }}),
+                 {{ uid_const }},
+                 toVec({{ dims_const }}),
+                 toVec({{ strides_const }}),
+                 DataType::FLOAT);
+{% else %}
+    verifyTensor(findTensorByUid(*graphT, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}),
+                 {{ op.test_data.tensor_uids.get(tf.name, loop.index) }},
+                 {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }},
+                 {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }},
+                 DataType::FLOAT);
+{% endif %}
+{% endif %}
+{% endfor %}
+
+    // Verify node with non-default attribute values
+    verify{{ op.name }}Node(*graphT->nodes[0],
+{% if op.has_compute_data_type %}
+                      DataType::FLOAT,
+{% endif %}
+{% for tf in op.tensor_fields %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+                      {{ uid_const }}{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
+
+{% else %}
+                      {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
+
+{% endif %}
+{% endfor %}
+{% for df in op.graph_verifiable_data_fields %}
+{% if df.is_vector %}
+{% set tv = df.test_value if df.test_value else op.test_data.field_values.get(df.name, [2, 3]) %}
+                      kCustom{{ df.name | replace('_', ' ') | title | replace(' ', '') }}{% if not loop.last %},{% endif %}
+
+{% elif df.is_mode %}
+                      {{ df.enum_short_type }}::{{ df.test_enum_value }}{% if not loop.last %},{% endif %}
+
+{% elif df.is_enum %}
+                      {{ df.enum_short_type }}::{{ df.test_enum_value }}{% if not loop.last %},{% endif %}
+
+{% endif %}
+{% endfor %}
+);
+
+    // Verify operation name
+    EXPECT_EQ(graphT->nodes[0]->name, "test_{{ op.name | lower }}");
+}
+{% endif %}
+
+} // namespace

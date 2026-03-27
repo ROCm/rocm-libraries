@@ -14,10 +14,8 @@ add_library(
     ${KERNEL_GENERATED_SOURCES}
     engines/plans/BatchnormPlanBuilder.cpp
     engines/plans/BatchnormFwdInferencePlan.cpp
+    engines/plans/BatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/BatchnormApplicabilityChecks.cpp
-)
-target_compile_definitions(
-    hip_kernel_provider_impl PRIVATE COMPONENT_NAME="hip_kernel_provider"
 )
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -36,13 +34,11 @@ add_clang_tidy_custom_target()
 
 # Static library for unit tests to link against (provides access to internal implementation)
 add_library(hip_kernel_provider_private STATIC $<TARGET_OBJECTS:hip_kernel_provider_impl>)
-target_compile_definitions(hip_kernel_provider_private PRIVATE COMPONENT_NAME="hip_kernel_provider")
 target_include_directories(hip_kernel_provider_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hip_kernel_provider_private PUBLIC hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
 
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
-target_compile_definitions(hip_kernel_provider PRIVATE COMPONENT_NAME="hip_kernel_provider")
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
 
 if(NOT WIN32)

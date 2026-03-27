@@ -71,6 +71,19 @@ void getString(const std::string& source,
                void* arrayOfElements,
                const char* errorPrefix);
 
+void setByteArray(std::vector<uint8_t>& target,
+                  hipdnnBackendAttributeType_t attributeType,
+                  int64_t elementCount,
+                  const void* arrayOfElements,
+                  const char* errorPrefix);
+
+void getByteArray(const std::vector<uint8_t>& source,
+                  hipdnnBackendAttributeType_t attributeType,
+                  int64_t requestedElementCount,
+                  int64_t* elementCount,
+                  void* arrayOfElements,
+                  const char* errorPrefix);
+
 template <typename T>
 void setScalarVector(std::vector<T>& target,
                      hipdnnBackendAttributeType_t expectedType,
@@ -376,6 +389,49 @@ void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
                                 int64_t* elementCount,
                                 void* arrayOfElements,
                                 const char* errorPrefix);
+
+/// Conditionally adds a non-null tensor descriptor to a vector.
+/// Used by getTensorDescriptors() to collect optional tensors.
+inline void addIfSet(std::vector<std::shared_ptr<TensorDescriptor>>& tensors,
+                     const std::shared_ptr<TensorDescriptor>& desc)
+{
+    if(desc)
+    {
+        tensors.push_back(desc);
+    }
+}
+
+/// Looks up an optional tensor UID in a tensor map.
+/// Returns nullptr if the UID has no value or is not found in the map.
+inline std::shared_ptr<TensorDescriptor> findOptionalTensor(
+    const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap,
+    const flatbuffers::Optional<int64_t>& uid)
+{
+    if(!uid.has_value())
+    {
+        return nullptr;
+    }
+    auto it = tensorMap.find(uid.value());
+    return (it != tensorMap.end()) ? it->second : nullptr;
+}
+
+/// Converts a flatbuffers::Optional<T> to a string for toString() output.
+/// Returns "null" if the optional has no value.
+template <typename T>
+std::string optionalToString(const flatbuffers::Optional<T>& opt)
+{
+    return opt.has_value() ? std::to_string(*opt) : "null";
+}
+
+/// Specialization for Optional<bool> that produces "true"/"false"/"null".
+inline std::string optionalBoolToString(const flatbuffers::Optional<bool>& opt)
+{
+    if(!opt.has_value())
+    {
+        return "null";
+    }
+    return *opt ? "true" : "false";
+}
 
 /// Deep-copy a KnobValueUnion into another KnobValueUnion.
 /// Used by both KnobDescriptor::toKnobT() and KnobSettingDescriptor::toKnobSettingT().

@@ -18,8 +18,8 @@
 class TestForwardingFunctions : public ::testing::Test
 {
 protected:
-    static constexpr float K_TOLERANCE_F = 0.0001f; // NOLINT(readability-identifier-naming)
-    static constexpr double K_TOLERANCE_D = 0.0001; // NOLINT(readability-identifier-naming)
+    static constexpr float K_TOLERANCE_F = 0.0001f;
+    static constexpr double K_TOLERANCE_D = 0.0001;
 
     static bool nearEqual(float a, float b, float tol = K_TOLERANCE_F)
     {
