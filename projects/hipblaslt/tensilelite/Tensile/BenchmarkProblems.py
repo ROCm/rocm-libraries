@@ -47,7 +47,7 @@ from .BenchmarkStructs import BenchmarkProcess, constructForkPermutations
 from .Contractions import ProblemType as ContractionsProblemType
 from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni, getClientExecutablePath
 from .KernelWriterAssembly import KernelWriterAssembly
-from .TensileCreateLibrary import copyStaticFiles, writeSolutionsAndKernels
+from .TensileCreateLibrary import copyStaticFiles, libraryDir, writeSolutionsAndKernels
 from .CustomKernels import getCustomKernelConfig
 from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
@@ -282,7 +282,7 @@ def writeBenchmarkFiles(
                 s["SolutionNameMin"] = getSolutionNameMin(solution, debugConfig.splitGSU)
                 s["KernelNameMin"]   = getKernelNameMin(solution, debugConfig.splitGSU)
 
-            newLibraryDir = ensurePath(sourcePath / 'library')
+            newLibraryDir = ensurePath(libraryDir(sourcePath, cmdLineArchs))
             newLibraryFile = os.path.join(newLibraryDir, "TensileLibrary")
 
         with timing_context("python_benchpost_lib_construction"):
