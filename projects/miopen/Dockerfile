@@ -339,7 +339,6 @@ COPY --from=miopen_deps /usr/local /usr/local
 
 # Install explicit version of tools that are supported for miopen development
 # (clang-format, clang-tidy)
-# Note: rocprofv3 is already built by TheRock (THEROCK_ENABLE_ROCPROFV3=ON)
 RUN apt-get update && apt-get install -y \
     clang-format-18 \
     clang-tidy-20 \
