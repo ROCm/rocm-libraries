@@ -13,7 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <iostream>
+#include <string>
 #include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -41,19 +41,43 @@ void compareTensors(TensorBase<T>& expected, TensorBase<T>& actual, float tolera
     }
 }
 
-// Returns a default layout matching the tensor dimensionality.
-// 3D (1D conv) and 4D (2D conv) → NCHW-order, 5D (3D conv) → NCDHW-order.
-inline const TensorLayout& defaultLayout(size_t nDims)
+// Core helper: fills tensors, runs GPU and CPU convolution, compares results.
+// Separate template params support mixed input/weight types (WDataType != XDataType).
+template <typename XDataType, typename WDataType, typename YDataType, typename ComputeDataType>
+void compareGpuVsCpuConvFwd(Tensor<XDataType>& xTensor,
+                            Tensor<WDataType>& wTensor,
+                            Tensor<YDataType>& yCpu,
+                            Tensor<YDataType>& yGpu,
+                            const std::vector<int64_t>& strides,
+                            const std::vector<int64_t>& dilations,
+                            const std::vector<int64_t>& prePadding,
+                            const std::vector<int64_t>& postPadding,
+                            float tolerance,
+                            float fillRange)
 {
-    return nDims == 5 ? TensorLayout::NCDHW : TensorLayout::NCHW;
+    const unsigned int seed = 42;
+    xTensor.fillWithRandomValues(
+        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed);
+    wTensor.fillWithRandomValues(
+        static_cast<WDataType>(-fillRange), static_cast<WDataType>(fillRange), seed + 1);
+
+    CpuFpReferenceConvolution::fprop<XDataType, WDataType, YDataType, ComputeDataType>(
+        xTensor, wTensor, yCpu, strides, dilations, prePadding, postPadding);
+
+    GpuFpReferenceConvolution::fprop<XDataType, WDataType, YDataType, ComputeDataType>(
+        xTensor, wTensor, yGpu, strides, dilations, prePadding, postPadding);
+
+    compareTensors(yCpu, yGpu, tolerance);
 }
 
-// --- Forward convolution helper ---
+// --- Forward convolution helper overloads ---
 // fillRange controls the magnitude of random fill values [-fillRange, +fillRange].
 // For small output types (e.g. fp8), reduce fillRange to prevent overflow:
 // each output element accumulates cPerGroup * Kh * Kw products, so
 // max output ≈ numMACs * fillRange². Keep numMACs * fillRange² < type max.
-template <typename DataType, typename AccType = double>
+
+// Asymmetric padding with explicit layout
+template <typename DataType, typename ComputeDataType = double>
 void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         const std::vector<int64_t>& wDims,
                         const std::vector<int64_t>& yDims,
@@ -67,27 +91,16 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         float fillRange = 1.0f)
 {
     Tensor<DataType> xTensor(xDims, xLayout);
-    Tensor<DataType> wTensor(wDims); // weights always NCHW-like layout
+    Tensor<DataType> wTensor(wDims);
     Tensor<DataType> yCpu(yDims, yLayout);
     Tensor<DataType> yGpu(yDims, yLayout);
 
-    const unsigned int seed = 42;
-    xTensor.fillWithRandomValues(
-        static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
-    wTensor.fillWithRandomValues(
-        static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed + 1);
-
-    CpuFpReferenceConvolution::fprop<DataType, DataType, DataType, AccType>(
-        xTensor, wTensor, yCpu, strides, dilations, prePadding, postPadding);
-
-    GpuFpReferenceConvolution::fprop<DataType, DataType, DataType, AccType>(
-        xTensor, wTensor, yGpu, strides, dilations, prePadding, postPadding);
-
-    compareTensors(yCpu, yGpu, tolerance);
+    compareGpuVsCpuConvFwd<DataType, DataType, DataType, ComputeDataType>(
+        xTensor, wTensor, yCpu, yGpu, strides, dilations, prePadding, postPadding, tolerance, fillRange);
 }
 
-// Overload for asymmetric padding with default packed layout
-template <typename DataType, typename AccType = double>
+// Asymmetric padding with packed strides (works for any dimensionality including 1D)
+template <typename DataType, typename ComputeDataType = double>
 void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         const std::vector<int64_t>& wDims,
                         const std::vector<int64_t>& yDims,
@@ -98,22 +111,17 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         float tolerance,
                         float fillRange = 1.0f)
 {
-    const auto& layout = defaultLayout(xDims.size());
-    runGpuVsCpuConvFwd<DataType, AccType>(xDims,
-                                          wDims,
-                                          yDims,
-                                          strides,
-                                          dilations,
-                                          prePadding,
-                                          postPadding,
-                                          tolerance,
-                                          layout,
-                                          layout,
-                                          fillRange);
+    Tensor<DataType> xTensor(xDims);
+    Tensor<DataType> wTensor(wDims);
+    Tensor<DataType> yCpu(yDims);
+    Tensor<DataType> yGpu(yDims);
+
+    compareGpuVsCpuConvFwd<DataType, DataType, DataType, ComputeDataType>(
+        xTensor, wTensor, yCpu, yGpu, strides, dilations, prePadding, postPadding, tolerance, fillRange);
 }
 
-// Overload for uniform padding with explicit layout
-template <typename DataType, typename AccType = double>
+// Uniform padding with explicit layout
+template <typename DataType, typename ComputeDataType = double>
 void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         const std::vector<int64_t>& wDims,
                         const std::vector<int64_t>& yDims,
@@ -125,7 +133,7 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         const TensorLayout& yLayout,
                         float fillRange = 1.0f)
 {
-    runGpuVsCpuConvFwd<DataType, AccType>(xDims,
+    runGpuVsCpuConvFwd<DataType, ComputeDataType>(xDims,
                                           wDims,
                                           yDims,
                                           strides,
@@ -138,8 +146,8 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                                           fillRange);
 }
 
-// Overload for uniform padding with default packed layout
-template <typename DataType, typename AccType = double>
+// Uniform padding with packed strides (works for any dimensionality including 1D)
+template <typename DataType, typename ComputeDataType = double>
 void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         const std::vector<int64_t>& wDims,
                         const std::vector<int64_t>& yDims,
@@ -149,8 +157,7 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         float tolerance,
                         float fillRange = 1.0f)
 {
-    const auto& layout = defaultLayout(xDims.size());
-    runGpuVsCpuConvFwd<DataType, AccType>(xDims,
+    runGpuVsCpuConvFwd<DataType, ComputeDataType>(xDims,
                                           wDims,
                                           yDims,
                                           strides,
@@ -158,8 +165,6 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                                           padding,
                                           padding,
                                           tolerance,
-                                          layout,
-                                          layout,
                                           fillRange);
 }
 
@@ -756,6 +761,36 @@ TEST(GpuTestConvFwdRefTf32, DiffersFromNonTf32)
 }
 
 // ============================================================================
+// GpuTestConvFwdRefMixedType — separate WEI_TYPE tests
+// ============================================================================
+
+TEST(GpuTestConvFwdRefMixedType, Fp32InputFp16Weight)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> xTensor({1, 1, 4, 4});
+    Tensor<half> wTensor({1, 1, 3, 3});
+    Tensor<float> yCpu({1, 1, 2, 2});
+    Tensor<float> yGpu({1, 1, 2, 2});
+
+    compareGpuVsCpuConvFwd<float, half, float, double>(
+        xTensor, wTensor, yCpu, yGpu, {1, 1}, {1, 1}, {0, 0}, {0, 0}, 5e-2f, 1.0f);
+}
+
+TEST(GpuTestConvFwdRefMixedType, Fp16InputFp32Weight)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<half> xTensor({1, 1, 4, 4});
+    Tensor<float> wTensor({1, 1, 3, 3});
+    Tensor<half> yCpu({1, 1, 2, 2});
+    Tensor<half> yGpu({1, 1, 2, 2});
+
+    compareGpuVsCpuConvFwd<half, float, half, double>(
+        xTensor, wTensor, yCpu, yGpu, {1, 1}, {1, 1}, {0, 0}, {0, 0}, 5e-2f, 1.0f);
+}
+
+// ============================================================================
 // GpuTestConvFwdRef1dFp32 — 1D convolution tests (NCW format)
 // ============================================================================
 
@@ -866,7 +901,8 @@ TEST(GpuTestConvFwdRefPerformance, MediumTensorTimingComparison)
     static_cast<void>(hipEventDestroy(gpuStart));
     static_cast<void>(hipEventDestroy(gpuStop));
 
-    std::cout << "[MediumTensor] CPU: " << cpuMs << " ms, GPU: " << gpuMs << " ms\n";
+    RecordProperty("cpu_ms", std::to_string(cpuMs));
+    RecordProperty("gpu_ms", std::to_string(static_cast<double>(gpuMs)));
 
     compareTensors(yCpu, yGpu, 1e-3f);
 }
@@ -921,7 +957,8 @@ TEST(GpuTestConvFwdRefPerformance, LargeTensorTimingComparison)
     static_cast<void>(hipEventDestroy(gpuStart));
     static_cast<void>(hipEventDestroy(gpuStop));
 
-    std::cout << "[LargeTensor] CPU: " << cpuMs << " ms, GPU: " << gpuMs << " ms\n";
+    RecordProperty("cpu_ms", std::to_string(cpuMs));
+    RecordProperty("gpu_ms", std::to_string(static_cast<double>(gpuMs)));
 
     compareTensors(yCpu, yGpu, 1e-2f);
 }

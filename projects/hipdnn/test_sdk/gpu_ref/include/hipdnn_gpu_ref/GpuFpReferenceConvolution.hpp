@@ -6,6 +6,7 @@
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
 
 #include <array>
@@ -85,22 +86,14 @@ struct Strides5
 
 // --- Helpers ---
 
-inline void throwOnHipError(hipError_t err, const char* msg)
-{
-    if(err != hipSuccess)
-    {
-        throw std::runtime_error(std::string(msg) + ": " + hipGetErrorString(err));
-    }
-}
-
-template <typename SrcType, typename WeiType, typename DstType, typename AccType>
+template <typename XDataType, typename WDataType, typename YDataType, typename ComputeDataType>
 inline std::vector<std::string> buildConvDefines(bool useTf32 = false)
 {
     std::vector<std::string> defines;
-    defines.emplace_back(std::string("-DSRC_TYPE=") + HipRtcTypeName<SrcType>::VALUE);
-    defines.emplace_back(std::string("-DWEI_TYPE=") + HipRtcTypeName<WeiType>::VALUE);
-    defines.emplace_back(std::string("-DDST_TYPE=") + HipRtcTypeName<DstType>::VALUE);
-    defines.emplace_back(std::string("-DACC_TYPE=") + HipRtcTypeName<AccType>::VALUE);
+    defines.emplace_back(std::string("-DX_TYPE=") + HipRtcTypeName<XDataType>::VALUE);
+    defines.emplace_back(std::string("-DW_TYPE=") + HipRtcTypeName<WDataType>::VALUE);
+    defines.emplace_back(std::string("-DY_TYPE=") + HipRtcTypeName<YDataType>::VALUE);
+    defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + HipRtcTypeName<ComputeDataType>::VALUE);
     if(useTf32)
     {
         defines.emplace_back("-DUSE_TF32");
@@ -173,15 +166,17 @@ class GpuFpReferenceConvolution
 {
 public:
     // --- Forward convolution (fprop) ---
+    // x and w are non-const because MigratableMemory::deviceData() triggers
+    // lazy host-to-device synchronization, which mutates internal state.
 
     // Overload for uniform padding
-    template <class SrcType,
-              class WeiType = SrcType,
-              class DstType = SrcType,
-              class AccType = double>
-    static void fprop(hipdnn_data_sdk::utilities::TensorBase<SrcType>& x,
-                      hipdnn_data_sdk::utilities::TensorBase<WeiType>& w,
-                      hipdnn_data_sdk::utilities::TensorBase<DstType>& y,
+    template <class XDataType,
+              class WDataType = XDataType,
+              class YDataType = XDataType,
+              class ComputeDataType = double>
+    static void fprop(hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+                      hipdnn_data_sdk::utilities::TensorBase<WDataType>& w,
+                      hipdnn_data_sdk::utilities::TensorBase<YDataType>& y,
                       const std::vector<int64_t>& convStrides,
                       const std::vector<int64_t>& dilations,
                       const std::vector<int64_t>& padding,
@@ -189,17 +184,17 @@ public:
                       double beta = 0.0,
                       bool useTf32 = false)
     {
-        fprop<SrcType, WeiType, DstType, AccType>(
+        fprop<XDataType, WDataType, YDataType, ComputeDataType>(
             x, w, y, convStrides, dilations, padding, padding, alpha, beta, useTf32);
     }
 
-    template <class SrcType,
-              class WeiType = SrcType,
-              class DstType = SrcType,
-              class AccType = double>
-    static void fprop(hipdnn_data_sdk::utilities::TensorBase<SrcType>& x,
-                      hipdnn_data_sdk::utilities::TensorBase<WeiType>& w,
-                      hipdnn_data_sdk::utilities::TensorBase<DstType>& y,
+    template <class XDataType,
+              class WDataType = XDataType,
+              class YDataType = XDataType,
+              class ComputeDataType = double>
+    static void fprop(hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+                      hipdnn_data_sdk::utilities::TensorBase<WDataType>& w,
+                      hipdnn_data_sdk::utilities::TensorBase<YDataType>& y,
                       const std::vector<int64_t>& convStrides,
                       const std::vector<int64_t>& dilations,
                       const std::vector<int64_t>& prePadding,
@@ -211,12 +206,14 @@ public:
         validateInput(x, w, y, convStrides, dilations, prePadding, postPadding);
 
         const auto nDims = x.dims().size();
-        auto defines = detail::buildConvDefines<SrcType, WeiType, DstType, AccType>(useTf32);
+        auto defines = detail::buildConvDefines<XDataType, WDataType, YDataType, ComputeDataType>(useTf32);
 
         auto* xPtr = x.memory().deviceData();
         auto* wPtr = w.memory().deviceData();
         auto* yPtr = y.memory().deviceData();
 
+        // Only prePadding is passed to the kernel. Post-padding is implicitly
+        // handled by the output tensor dimensions and the kernel's bounds checks.
         if(nDims == 3)
         {
             launchFprop1d(xPtr,
@@ -253,7 +250,7 @@ public:
                           alpha,
                           beta);
         }
-        else
+        else if(nDims == 5)
         {
             launchFprop3d(xPtr,
                           wPtr,
@@ -270,6 +267,11 @@ public:
                           defines,
                           alpha,
                           beta);
+        }
+        else
+        {
+            throw std::invalid_argument("Unsupported number of dimensions: "
+                                        + std::to_string(nDims));
         }
 
         y.memory().markDeviceModified();

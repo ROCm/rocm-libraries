@@ -5,6 +5,7 @@
 
 #include "GpuRefKernelSources.hpp"
 #include <hip/hiprtc.h>
+#include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
 #include <stdexcept>
 #include <string>
 
@@ -13,14 +14,6 @@ namespace hipdnn_gpu_ref::detail
 
 namespace
 {
-
-void throwOnHipError(hipError_t err, const char* call)
-{
-    if(err != hipSuccess)
-    {
-        throw std::runtime_error(std::string(call) + " failed: " + hipGetErrorString(err));
-    }
-}
 
 void throwOnRtcError(hiprtcResult err, const char* call)
 {
@@ -33,7 +26,7 @@ void throwOnRtcError(hiprtcResult err, const char* call)
 } // namespace
 
 // NOLINTBEGIN(cppcoreguidelines-macro-usage)
-#define GPU_REF_HIP_CHECK(call) throwOnHipError((call), #call)
+#define GPU_REF_HIP_CHECK(call) ::hipdnn_gpu_ref::detail::throwOnHipError((call), #call)
 #define GPU_REF_RTC_CHECK(call) throwOnRtcError((call), #call)
 // NOLINTEND(cppcoreguidelines-macro-usage)
 

@@ -2,14 +2,14 @@
 // SPDX-License-Identifier:  MIT
 
 // GPU reference convolution forward kernels.
-// Compiled via HipRTC with -DSRC_TYPE=<type> -DWEI_TYPE=<type> -DDST_TYPE=<type> -DACC_TYPE=<type>.
+// Compiled via HipRTC with -DX_TYPE=<type> -DW_TYPE=<type> -DY_TYPE=<type> -DCOMPUTE_TYPE=<type>.
 // One thread per output element. Uses stride-based indexing to handle any layout.
 
 #include "GpuRefTypes.h"
 
-extern "C" __global__ void convFwdRef1d(const SRC_TYPE* __restrict__ x,
-                                        const WEI_TYPE* __restrict__ w,
-                                        DST_TYPE* __restrict__ y,
+extern "C" __global__ void convFwdRef1d(const X_TYPE* __restrict__ x,
+                                        const W_TYPE* __restrict__ w,
+                                        Y_TYPE* __restrict__ y,
                                         Strides3 xStr,
                                         Strides3 wStr,
                                         Strides3 yStr,
@@ -42,11 +42,10 @@ extern "C" __global__ void convFwdRef1d(const SRC_TYPE* __restrict__ x,
 
     // Group parameters
     long long cPerGroup = C / groups;
-    long long kPerGroup = K / groups;
-    long long g = k / kPerGroup;
+    long long g = k * groups / K;
     long long baseInputChannel = g * cPerGroup;
 
-    ACC_TYPE acc = static_cast<ACC_TYPE>(0);
+    COMPUTE_TYPE acc = static_cast<COMPUTE_TYPE>(0);
 
     for(long long c = 0; c < cPerGroup; ++c)
     {
@@ -66,7 +65,7 @@ extern "C" __global__ void convFwdRef1d(const SRC_TYPE* __restrict__ x,
 #ifdef USE_TF32
             float xf = truncateToTf32(static_cast<float>(toAccum(x[xIdx])));
             float wf = truncateToTf32(static_cast<float>(toAccum(w[wIdx])));
-            acc += static_cast<ACC_TYPE>(xf) * static_cast<ACC_TYPE>(wf);
+            acc += static_cast<COMPUTE_TYPE>(xf) * static_cast<COMPUTE_TYPE>(wf);
 #else
             acc += toAccum(x[xIdx]) * toAccum(w[wIdx]);
 #endif
@@ -74,7 +73,7 @@ extern "C" __global__ void convFwdRef1d(const SRC_TYPE* __restrict__ x,
     }
 
     long long yIdx = n * yStr.s[0] + k * yStr.s[1] + wo * yStr.s[2];
-    DST_TYPE* tag = nullptr;
+    Y_TYPE* tag = nullptr;
 
     if(beta == 0.0)
     {
@@ -86,9 +85,9 @@ extern "C" __global__ void convFwdRef1d(const SRC_TYPE* __restrict__ x,
     }
 }
 
-extern "C" __global__ void convFwdRef2d(const SRC_TYPE* __restrict__ x,
-                                        const WEI_TYPE* __restrict__ w,
-                                        DST_TYPE* __restrict__ y,
+extern "C" __global__ void convFwdRef2d(const X_TYPE* __restrict__ x,
+                                        const W_TYPE* __restrict__ w,
+                                        Y_TYPE* __restrict__ y,
                                         Strides4 xStr,
                                         Strides4 wStr,
                                         Strides4 yStr,
@@ -129,11 +128,10 @@ extern "C" __global__ void convFwdRef2d(const SRC_TYPE* __restrict__ x,
 
     // Group parameters
     long long cPerGroup = C / groups;
-    long long kPerGroup = K / groups;
-    long long g = k / kPerGroup;
+    long long g = k * groups / K;
     long long baseInputChannel = g * cPerGroup;
 
-    ACC_TYPE acc = static_cast<ACC_TYPE>(0);
+    COMPUTE_TYPE acc = static_cast<COMPUTE_TYPE>(0);
 
     for(long long c = 0; c < cPerGroup; ++c)
     {
@@ -162,7 +160,7 @@ extern "C" __global__ void convFwdRef2d(const SRC_TYPE* __restrict__ x,
 #ifdef USE_TF32
                 float xf = truncateToTf32(static_cast<float>(toAccum(x[xIdx])));
                 float wf = truncateToTf32(static_cast<float>(toAccum(w[wIdx])));
-                acc += static_cast<ACC_TYPE>(xf) * static_cast<ACC_TYPE>(wf);
+                acc += static_cast<COMPUTE_TYPE>(xf) * static_cast<COMPUTE_TYPE>(wf);
 #else
                 acc += toAccum(x[xIdx]) * toAccum(w[wIdx]);
 #endif
@@ -171,7 +169,7 @@ extern "C" __global__ void convFwdRef2d(const SRC_TYPE* __restrict__ x,
     }
 
     long long yIdx = n * yStr.s[0] + k * yStr.s[1] + ho * yStr.s[2] + wo * yStr.s[3];
-    DST_TYPE* tag = nullptr;
+    Y_TYPE* tag = nullptr;
 
     if(beta == 0.0)
     {
@@ -183,9 +181,9 @@ extern "C" __global__ void convFwdRef2d(const SRC_TYPE* __restrict__ x,
     }
 }
 
-extern "C" __global__ void convFwdRef3d(const SRC_TYPE* __restrict__ x,
-                                        const WEI_TYPE* __restrict__ w,
-                                        DST_TYPE* __restrict__ y,
+extern "C" __global__ void convFwdRef3d(const X_TYPE* __restrict__ x,
+                                        const W_TYPE* __restrict__ w,
+                                        Y_TYPE* __restrict__ y,
                                         Strides5 xStr,
                                         Strides5 wStr,
                                         Strides5 yStr,
@@ -234,11 +232,10 @@ extern "C" __global__ void convFwdRef3d(const SRC_TYPE* __restrict__ x,
 
     // Group parameters
     long long cPerGroup = C / groups;
-    long long kPerGroup = K / groups;
-    long long g = k / kPerGroup;
+    long long g = k * groups / K;
     long long baseInputChannel = g * cPerGroup;
 
-    ACC_TYPE acc = static_cast<ACC_TYPE>(0);
+    COMPUTE_TYPE acc = static_cast<COMPUTE_TYPE>(0);
 
     for(long long c = 0; c < cPerGroup; ++c)
     {
@@ -276,7 +273,7 @@ extern "C" __global__ void convFwdRef3d(const SRC_TYPE* __restrict__ x,
 #ifdef USE_TF32
                     float xf = truncateToTf32(static_cast<float>(toAccum(x[xIdx])));
                     float wf = truncateToTf32(static_cast<float>(toAccum(w[wIdx])));
-                    acc += static_cast<ACC_TYPE>(xf) * static_cast<ACC_TYPE>(wf);
+                    acc += static_cast<COMPUTE_TYPE>(xf) * static_cast<COMPUTE_TYPE>(wf);
 #else
                     acc += toAccum(x[xIdx]) * toAccum(w[wIdx]);
 #endif
@@ -287,7 +284,7 @@ extern "C" __global__ void convFwdRef3d(const SRC_TYPE* __restrict__ x,
 
     long long yIdx
         = n * yStr.s[0] + k * yStr.s[1] + do_ * yStr.s[2] + ho * yStr.s[3] + wo * yStr.s[4];
-    DST_TYPE* tag = nullptr;
+    Y_TYPE* tag = nullptr;
 
     if(beta == 0.0)
     {
