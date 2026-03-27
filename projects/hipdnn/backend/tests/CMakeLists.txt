@@ -48,6 +48,7 @@ add_executable(
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
     descriptors/TestGraphDescriptorBlockScaleQuantize.cpp
     descriptors/TestMatmulOperationDescriptor.cpp
+    descriptors/TestMatmulOperationFromNode.cpp
     descriptors/TestGraphDescriptorMatmul.cpp
     descriptors/TestGraphDescriptorBatchnormBackward.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp

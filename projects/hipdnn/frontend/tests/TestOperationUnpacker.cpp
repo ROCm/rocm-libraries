@@ -21,7 +21,7 @@
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 // #include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
-// #include <hipdnn_frontend/node/MatmulNode.hpp>
+#include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
@@ -388,15 +388,15 @@ TEST(TestCreateNodeForType, CreatesLayerNormNode)
     EXPECT_NE(typedNode, nullptr);
 }
 
-// TEST(TestCreateNodeForType, CreatesMatmulNode)
-// {
-//     const GraphAttributes graphAttrs;
-//     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_MATMUL, graphAttrs);
-//     EXPECT_EQ(err.code, ErrorCode::OK);
-//     ASSERT_NE(node, nullptr);
-//     auto typedNode = std::dynamic_pointer_cast<MatmulNode>(node);
-//     EXPECT_NE(typedNode, nullptr);
-// }
+TEST(TestCreateNodeForType, CreatesMatmulNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_MATMUL, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<MatmulNode>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
 
 TEST(TestCreateNodeForType, CreatesPointwiseNode)
 {
