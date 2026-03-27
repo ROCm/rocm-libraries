@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "RMSnormFwdPlan.hpp"
-#include "RMSnormApplicabilityChecks.hpp"
+#include "../PlanUtils.hpp"
 
 #include "HipKernelUtils.hpp"
 #include "hip/IKernelCompiler.hpp"
@@ -80,30 +80,6 @@ size_t RMSnormFwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& 
 void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
                              const hipDeviceProp_t& deviceProperties)
 {
-    // Determine input/output data type configuration
-    auto ioDataType = _params.x()->data_type();
-    const bool useFp16 = ioDataType == hipdnn_data_sdk::data_objects::DataType::HALF;
-    const bool useBfp16 = ioDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16;
-    const bool useFp32 = !useFp16 && !useBfp16;
-    std::string ioTypeString;
-    switch(ioDataType)
-    {
-    case hipdnn_data_sdk::data_objects::DataType::HALF:
-        ioTypeString = "half";
-        break;
-    case hipdnn_data_sdk::data_objects::DataType::BFLOAT16:
-        ioTypeString = "ushort";
-        break;
-    case hipdnn_data_sdk::data_objects::DataType::FLOAT:
-        ioTypeString = "float";
-        break;
-    default:
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            std::string("Unsupported data type: ")
-                + hipdnn_data_sdk::data_objects::EnumNameDataType(ioDataType));
-    }
-
     // Extract dimensions from x tensor
     const auto* xDims = _params.x()->dims();
     if(const auto xRank = xDims->size(); xRank < 4 || xRank > 5)
@@ -143,6 +119,13 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
         HIPDNN_PLUGIN_LOG_INFO(
             "RMSnormFwdPlan: HIPRTC compile ROCm include path: " << rocmIncludeArg);
     }
+
+    // Determine input/output data type configuration
+    auto ioDataType = _params.x()->data_type();
+    const bool useFp16 = ioDataType == hipdnn_data_sdk::data_objects::DataType::HALF;
+    const bool useBfp16 = ioDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16;
+    const bool useFp32 = !useFp16 && !useBfp16;
+    std::string ioTypeString = getKernelParamTypeString(ioDataType);
 
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP16=") + (useFp16 ? "1" : "0"));
