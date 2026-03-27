@@ -19,9 +19,8 @@
 #include <hipdnn_test_sdk/utilities/MockNode.hpp>
 
 using hipdnn_test_sdk::utilities::MockEngineConfig;
-
-namespace hip_kernel_provider::rmsnorm::test
-{
+using namespace hip_kernel_provider;
+using namespace hip_kernel_provider::rmsnorm;
 
 class TestRMSnormPlanBuilder : public ::testing::Test
 {
@@ -124,5 +123,3 @@ TEST_F(TestRMSnormPlanBuilder, GetCustomKnobsReturnsEmpty)
     auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }
-
-} // namespace hip_kernel_provider::rmsnorm::test

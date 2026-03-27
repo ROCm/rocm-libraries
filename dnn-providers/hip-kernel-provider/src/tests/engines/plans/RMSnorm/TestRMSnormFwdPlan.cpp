@@ -15,8 +15,8 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
-namespace hip_kernel_provider::rmsnorm::test
-{
+using namespace hip_kernel_provider;
+using namespace hip_kernel_provider::rmsnorm;
 
 // ============================================================================
 // RMSnormFwdParams - construction from valid graph data
@@ -344,5 +344,3 @@ TEST(TestRMSnormFwdPlan, CompileWithUnsupportedWorkgroupsThrows)
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
-
-} // namespace hip_kernel_provider::rmsnorm::test

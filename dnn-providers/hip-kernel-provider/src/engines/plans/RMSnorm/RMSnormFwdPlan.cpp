@@ -31,7 +31,7 @@ RMSnormFwdParams::RMSnormFwdParams(
     , _invRMS(attributes.inv_rms_tensor_uid().has_value()
                   ? tensorMap.at(attributes.inv_rms_tensor_uid().value())
                   : nullptr)
-    , _epsilon((tensorMap.at(attributes.epsilon_tensor_uid())))
+    , _epsilon(tensorMap.at(attributes.epsilon_tensor_uid()))
 
 {
 }
@@ -124,6 +124,14 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                                            + std::to_string(numWorkgroups));
     }
 
+    // Calculate block and grid dimensions
+    const unsigned int xlocalsize = 256;
+    const auto xgridsize = static_cast<unsigned int>(nSize * cStride);
+    const unsigned int ylocalsize = 1;
+    const unsigned int ygridsize = 1;
+    const unsigned int zlocalsize = 1;
+    const unsigned int zgridsize = 1;
+
     // Prepare compilation options
     std::vector<std::string> options;
     auto rocmPath
@@ -144,20 +152,13 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_C_SIZE=") + std::to_string(cSize));
     options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_IO_TYPE=") + ioTypeString);
     options.emplace_back(std::string("-DHIP_PLUGIN_RMSNORM_LOCAL_SIZE=")
-                         + std::to_string(LOCAL_SIZE));
+                         + std::to_string(xlocalsize));
     options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("RMSNormFwd.cpp", options);
     _runnableKernel = _compiledProgram->getKernel("RMSnormFwd");
 
-    // Calculate block and grid dimensions
-    const unsigned int xlocalsize = LOCAL_SIZE;
-    const auto xgridsize = static_cast<unsigned int>(nSize * cStride);
-    const unsigned int ylocalsize = 1;
-    const unsigned int ygridsize = 1;
-    const unsigned int zlocalsize = 1;
-    const unsigned int zgridsize = 1;
     _runnableKernel->setBlockSize(xlocalsize, ylocalsize, zlocalsize);
     _runnableKernel->setGridSize(xgridsize, ygridsize, zgridsize);
 }
