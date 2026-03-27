@@ -11,7 +11,7 @@
 
 #include "profiler/profile_batched_gemm_reduce_impl.hpp"
 
-static ck::index_t param_mask     = 0xffff;
+static ck::index_t param_mask = 0xffff;
 struct GemmParams
 {
     ck::index_t M;
@@ -106,7 +106,7 @@ int main(int argc, char** argv)
     if(argc == 1) {}
     else if(argc == 2)
     {
-        param_mask     = strtol(argv[1], nullptr, 0);
+        param_mask = strtol(argv[1], nullptr, 0);
     }
     else
     {
