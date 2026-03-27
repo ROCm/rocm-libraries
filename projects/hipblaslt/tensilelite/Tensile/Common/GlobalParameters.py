@@ -315,20 +315,24 @@ globalParameters["RocProfCounter"] = None # No rocprof counter
 # 2: Full optimization
 globalParameters["StinkyTofuOptLevel"] = 0
 
-# StinkyTofu debug level
+# StinkyTofu debug level (applies per-PM: outer PM + each ScopeAdaptor inner PM)
 # 0: Silent (default)
-# 1: Pipeline phase labels and pass names to stdout
-# 2: Initial IR + IR after each pass to file
+# 1: Pass names to stdout (continuous list in execution order)
+# 2: Initial IR + IR after each pass to per-PM files:
+#    kernel-OuterPM-{before,after}_passes.txt     (outer PM)
+#    <groupName>-{before,after}_passes.txt        (single-region adapter)
+#    <group1>+<group2>-{before,after}_passes.txt  (multi-region adapter)
+#    wholeKernel-{before,after}_passes.txt        (whole-kernel adapter)
 globalParameters["StinkyTofuDebugLevel"] = 0
 
-# StinkyTofu selective pass IR dump
+# StinkyTofu selective pass IR dump (applies per-PM, same file naming as DebugLevel 2)
 # Comma-separated pass names to print IR before/after (case-sensitive)
 # e.g. "CFG Builder" or "RedundantMovEliminationPass, StinkyDAGSchedulerPass"
 # Unmatched pass names are silently ignored
 globalParameters["StinkyTofuPrintBeforePass"] = ""
 globalParameters["StinkyTofuPrintAfterPass"] = ""
 
-# StinkyTofu internal pass debug logging
+# StinkyTofu internal pass debug logging (global — applies to all PMs)
 # Comma-separated pass names to enable PASS_DEBUG output (case-sensitive)
 # e.g. "StinkyDAGSchedulerPass"
 # Unmatched pass names are silently ignored

@@ -48,13 +48,12 @@ Learn how to use the Operation Registry system to build, cache, and optimize reu
 - Complete examples for activation functions and custom operations
 
 ### [Custom Pass Extension](custom-pass-extension.md)
-Learn how to inject custom passes into OptimizationPipeline without modifying StinkyTofu. This guide covers:
-- Adding passes before/after the built-in pipeline
-- MLIR-inspired explicit sequential ordering
-- Integrating external analysis/transformation passes (e.g., Rocisa)
+Learn how to add custom passes to the optimization pipeline. This guide covers:
+- Adding passes to a PipelineBuilder using ScopeAdaptor
+- Scoped execution: whole-kernel, single-region, and multi-region modes
+- Integrating external analysis/transformation passes
 - Pass ownership and execution order
 - Complete examples and best practices
-- Future enhancements (pass registry, dynamic plugins)
 
 ## Contributing
 

@@ -24,250 +24,57 @@
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
-#include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
-#include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 
 namespace stinkytofu
 {
-    struct Backend::Impl
-    {
-        // Pipeline specs for the member module's architecture (run in order)
-        std::vector<BackendRegistry::PipelineSpec> pipelineSpecs;
-
-        // optimized range begin and end
-        IntrusiveListIterator<IRBase> optimizedRangeBegin;
-        IntrusiveListIterator<IRBase> optimizedRangeEnd;
-    };
-
     Backend::Backend(StinkyAsmModule& module)
-        : pImpl(std::make_unique<Impl>())
-        , module(module)
+        : module(module)
     {
-        auto populator = BackendRegistry::getArchPopulator(module.getArch());
-        if(populator)
-        {
-            populator(module, pImpl->pipelineSpecs);
-        }
     }
-
-    Backend::~Backend() = default;
-
-    Backend::Backend(Backend&&) noexcept = default;
 
     std::array<int, 3> Backend::getArch() const
     {
         return module.getArch();
     }
 
-    bool Backend::hasPipelines() const
-    {
-        return !pImpl->pipelineSpecs.empty();
-    }
-
-    size_t Backend::getPipelineCount() const
-    {
-        return pImpl->pipelineSpecs.size();
-    }
-
-    void Backend::clearPipelines()
-    {
-        pImpl->pipelineSpecs.clear();
-    }
-
-    void Backend::setPipelines(std::vector<PipelineConfig> configs)
-    {
-        pImpl->pipelineSpecs.clear();
-        pImpl->pipelineSpecs.reserve(configs.size());
-        for(auto& c : configs)
-        {
-            pImpl->pipelineSpecs.push_back({std::move(c), ""});
-        }
-    }
-
-    const std::vector<BackendRegistry::PipelineSpec>& Backend::getPipelines() const
-    {
-        return pImpl->pipelineSpecs;
-    }
-
     bool Backend::runOptimization()
     {
-        bool success = runPipelineSequence();
-
-        // if range is not empty, reinsert waitcnts in the range
-        if(module.getModuleOptions().EnableWaitCntInsertion
-           && pImpl->optimizedRangeBegin != IntrusiveListIterator<IRBase>()
-           && pImpl->optimizedRangeEnd != IntrusiveListIterator<IRBase>())
-        {
-            success = reinsertWaitCntsInOptimizedRange();
-        }
-
-        return success;
-    }
-
-    // FIXME: This is a temporary workaround for running arch-specific required
-    // passes (e.g. InsertVgprMsb). A cleaner mechanism is being designed.
-    bool Backend::runRequiredPasses()
-    {
-        auto populator = BackendRegistry::getArchRequiredPassesPopulator(module.getArch());
-        if(!populator)
+        auto* pipeline = BackendRegistry::getArchPipeline(module.getArch());
+        if(!pipeline || !pipeline->builder)
             return true;
 
-        std::vector<std::unique_ptr<Pass>> passes;
-        populator(module, passes);
-
-        if(passes.empty())
+        PassManager pm;
+        if(!pipeline->builder(pm, module))
             return true;
 
-        PassManager    passManager;
+        configurePassManager(pm);
+        pm.run(module.getFunction());
+        return true;
+    }
+
+    void Backend::configurePassManager(PassManager& pm)
+    {
+        const auto& opts = module.getModuleOptions();
+
         GemmTileConfig gemmTileConfig;
-        gemmTileConfig.arch = module.getArch();
-        passManager.setGemmTileConfig(gemmTileConfig);
+        gemmTileConfig.arch     = module.getArch();
+        gemmTileConfig.TileA0   = opts.TileA0;
+        gemmTileConfig.TileB0   = opts.TileB0;
+        gemmTileConfig.TileM0   = opts.TileM0;
+        gemmTileConfig.NumGRA   = opts.NumGRA;
+        gemmTileConfig.NumGRB   = opts.NumGRB;
+        gemmTileConfig.NumGRM   = opts.NumGRM;
+        gemmTileConfig.NumWaves = opts.WaveGroup0 * opts.WaveGroup1;
+        pm.setGemmTileConfig(gemmTileConfig);
 
-        for(auto& pass : passes)
-        {
-            passManager.addPass(std::move(pass));
-        }
+        PassFeatureConfig passFeatureConfig;
+        passFeatureConfig.barrierConfig.unrollMovableBarrier = true;
+        passFeatureConfig.loopConfig.unrollGemm              = true;
+        passFeatureConfig.dagFeatures.distributeGlobalRead   = true;
+        pm.setPassFeatureConfig(passFeatureConfig);
 
-        passManager.run(module.getFunction());
-        return true;
-    }
-
-    bool Backend::runOptimizationWithConfig(const PipelineConfig& config,
-                                            const std::string&    groupName)
-    {
-        if(config.profile == PipelineProfile::NoOptimization)
-        {
-            return false;
-        }
-
-        // Create a temporary Function to hold the IR
-        Function    tempFunc("temp");
-        BasicBlock* bb = tempFunc.createBasicBlock("entry");
-
-        bool doOptimization = true;
-        if(groupName.empty())
-        {
-            // Run the optimization pipeline for the whole module
-            OptimizationPipeline::run(module.getFunction(), config);
-        }
-        else if(auto groupRange = module.findGroupRange(groupName))
-        {
-            auto [begin, end]  = groupRange.value();
-            BasicBlock* origBB = begin->getParent();
-            // Move StinkyInstructions from module to temporary function
-            for(auto it = begin; it != end;)
-            {
-                IRBase* ir = it.getNodePtr();
-                it++;
-                if(dyn_cast<StinkyInstruction>(ir))
-                {
-                    bb->appendIR(ir);
-                }
-                else
-                {
-                    // erase non-StinkyInstruction IRs
-                    ir->erase();
-                }
-            }
-
-            // Run the optimization pipeline
-            OptimizationPipeline::run(tempFunc, config);
-
-            // Move IR from temporary function back to module
-            assert(module.getFunction().size() == 1
-                   && "Current module should have only one basic block.");
-
-            IRBase* firstInserted = nullptr;
-            IRBase* lastInserted  = nullptr;
-            for(auto bbIt = tempFunc.begin(); bbIt != tempFunc.end(); bbIt++)
-            {
-                for(auto it = bbIt->begin(); it != bbIt->end();)
-                {
-                    IRBase* ir = it.getNodePtr();
-                    it++;
-                    // FIXME: currently we insert IR to the range end, which
-                    // assumes the Module has only one basic block.
-                    origBB->insertIR(end, ir);
-                    if(!firstInserted)
-                        firstInserted = ir;
-                    lastInserted = ir;
-                }
-            }
-
-            assert(firstInserted && lastInserted && "No IR inserted for group");
-
-            module.setGroupRange(groupName,
-                                 IntrusiveListIterator<IRBase>(firstInserted),
-                                 IntrusiveListIterator<IRBase>(lastInserted));
-
-            if(pImpl->optimizedRangeBegin == IntrusiveListIterator<IRBase>())
-            {
-                pImpl->optimizedRangeBegin = IntrusiveListIterator<IRBase>(firstInserted);
-            }
-            pImpl->optimizedRangeEnd = IntrusiveListIterator<IRBase>(lastInserted) + 1;
-        }
-
-        return doOptimization;
-    }
-
-    /* private methods */
-    bool Backend::runPipelineSequence()
-    {
-        for(const auto& spec : pImpl->pipelineSpecs)
-        {
-            if(!runOptimizationWithConfig(spec.config, spec.groupName))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    bool Backend::reinsertWaitCntsInOptimizedRange()
-    {
-        BasicBlock* origBB    = pImpl->optimizedRangeBegin->getParent();
-        auto        insertEnd = pImpl->optimizedRangeEnd;
-
-        // Create a temporary Function to hold the IR
-        Function    tempFunc("temp");
-        BasicBlock* bb = tempFunc.createBasicBlock("entry");
-        for(auto it = pImpl->optimizedRangeBegin; it != pImpl->optimizedRangeEnd;)
-        {
-            IRBase* ir = it.getNodePtr();
-            it++;
-            if(dyn_cast<StinkyInstruction>(ir))
-            {
-                bb->appendIR(ir);
-            }
-            else
-            {
-                ir->erase();
-            }
-        }
-
-        PassManager    passManager;
-        GemmTileConfig gemmTileConfig;
-        gemmTileConfig.arch = module.getArch();
-        passManager.setGemmTileConfig(gemmTileConfig);
-        passManager.addPass(createCFGBuilderPass());
-        passManager.addPass(createStinkyRemoveWaitCntPass());
-        passManager.addPass(createStinkyWaitCntInsertionPass(true));
-        passManager.run(tempFunc);
-
-        // Move IR from temporary function back to module
-        for(auto bbIt = tempFunc.begin(); bbIt != tempFunc.end(); bbIt++)
-        {
-            for(auto it = bbIt->begin(); it != bbIt->end();)
-            {
-                IRBase* ir = it.getNodePtr();
-                it++;
-                origBB->insertIR(insertEnd, ir);
-            }
-        }
-
-        return true;
+        configureDebugOutput(pm, opts, "kernel-OuterPM");
     }
 
 } // namespace stinkytofu

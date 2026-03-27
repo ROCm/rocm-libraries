@@ -41,6 +41,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/InsertPhiTest.cpp
     unit/asm/RedundantMovEliminationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
+    unit/asm/ScopeAdaptorTest.cpp
     unit/asm/PeepholeOptimizationPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
     unit/asm/VirtualRegisterTest.cpp

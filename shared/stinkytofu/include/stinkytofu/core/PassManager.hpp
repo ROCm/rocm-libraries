@@ -195,6 +195,7 @@ namespace stinkytofu
         unsigned printAfterAll : 1;
         unsigned printBeforeAll : 1;
         unsigned dumpInitialIR : 1;
+        unsigned printPassNames : 1;
 
         std::string dumpFileNameBefore;
         std::string dumpFileNameAfter;
@@ -212,6 +213,7 @@ namespace stinkytofu
         void setPrintAfterAll(bool v = true);
         void setPrintBeforeAll(bool v = true);
         void setDumpInitialIR(bool v = true);
+        void setPrintPassNames(bool v = true);
         void addOnlyPrintBefore(const std::string& passName);
         void addOnlyPrintAfter(const std::string& passName);
         void setDumpToFileInBefore(const std::string& filename);
@@ -256,6 +258,9 @@ namespace stinkytofu
 
         PassManager()  = default;
         ~PassManager() = default;
+
+        PassManager(PassManager&&) noexcept            = default;
+        PassManager& operator=(PassManager&&) noexcept = default;
 
     public:
         void setDebugConfig(std::unique_ptr<PassManagerDebugConfig> cfg);

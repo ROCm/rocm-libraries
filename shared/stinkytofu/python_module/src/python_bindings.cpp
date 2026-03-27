@@ -58,10 +58,7 @@ NB_MODULE(_stinkytofu, m)
              "Emit the assembly code for all instructions in this module")
         .def("runOptimizationPipeline",
              &StinkyAsmModule::runOptimizationPipeline,
-             "Run the optimization pipeline on this module")
-        .def("runRequiredPasses",
-             &StinkyAsmModule::runRequiredPasses,
-             "Run architecture-specific required passes on this module");
+             "Run the optimization pipeline on this module");
 
     // ========================================================================
     // Register Types

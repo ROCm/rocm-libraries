@@ -5237,15 +5237,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       t1a_end = time.perf_counter()
       print(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
 
-      # Run optimizations on the instruction body
+      # Run pipeline — builder handles O0 internally (skips optimization,
+      # still runs required passes like InsertVgprMsb)
       t1b_start = time.perf_counter()
-      if stinky_opt_level > 0:
-        stModule.runOptimizationPipeline()
-
-      # Run architecture-specific required passes (always, regardless of opt level)
-      stModule.runRequiredPasses()
+      stModule.runOptimizationPipeline()
       t1b_end = time.perf_counter()
-      print(f"StinkyTofu (1b) pipeline + required passes: {t1b_end - t1b_start:.4f}s")
+      print(f"StinkyTofu (1b) pipeline: {t1b_end - t1b_start:.4f}s")
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")

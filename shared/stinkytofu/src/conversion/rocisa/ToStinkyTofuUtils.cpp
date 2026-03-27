@@ -927,10 +927,13 @@ namespace stinkytofu
 
         StinkyAsmModule stinkyAsmModule(moduleName, arch, moduleOptions);
 
-        Backend backend(stinkyAsmModule);
-        for(const auto& spec : backend.getPipelines())
+        // Add instruction groups registered by the target backend.
+        if(auto* pipeline = BackendRegistry::getArchPipeline(arch))
         {
-            stinkyAsmModule.addGroup(spec.groupName);
+            for(const auto& groupName : pipeline->groupNames)
+            {
+                stinkyAsmModule.addGroup(groupName);
+            }
         }
 
         // TODO: We can create BasicBlocks when visiting Labels.
@@ -1141,7 +1144,7 @@ void init_stinkytofu(nb::module_ m)
         "isSupportedByStinkyTofu",
         [](nb::object arch_obj) {
             std::array<int, 3> archArray = convertArch(arch_obj);
-            return BackendRegistry::hasPipelines(archArray);
+            return BackendRegistry::getArchPipeline(archArray) != nullptr;
         },
         nb::arg("arch"),
         "Check if the architecture is supported by StinkyTofu");
@@ -1164,11 +1167,6 @@ void init_stinkytofu(nb::module_ m)
         void runOptimizationPipeline()
         {
             module_->runOptimizationPipeline();
-        }
-
-        void runRequiredPasses()
-        {
-            module_->runRequiredPasses();
         }
 
         std::string getName() const
@@ -1198,7 +1196,6 @@ void init_stinkytofu(nb::module_ m)
     // Bind the wrapper class
     nb::class_<StinkyAsmModuleWithSignature>(m, "StinkyAsmModule")
         .def("runOptimizationPipeline", &StinkyAsmModuleWithSignature::runOptimizationPipeline)
-        .def("runRequiredPasses", &StinkyAsmModuleWithSignature::runRequiredPasses)
         .def("emitAssembly", &StinkyAsmModuleWithSignature::emitAssembly)
         .def("getName", &StinkyAsmModuleWithSignature::getName)
         .def("getModule", &StinkyAsmModuleWithSignature::getModule);

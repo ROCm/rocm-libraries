@@ -55,7 +55,7 @@ namespace stinkytofu
 
             IntrusiveListIterator<IRBase> end() const
             {
-                return IntrusiveListIterator<IRBase>(last.getNodePtr())++;
+                return ++IntrusiveListIterator<IRBase>(last.getNodePtr());
             }
         };
 
@@ -135,15 +135,8 @@ namespace stinkytofu
 
     void StinkyAsmModule::runOptimizationPipeline()
     {
-        // Run optimization pipeline using the backend
         Backend backend(*this);
         backend.runOptimization();
-    }
-
-    void StinkyAsmModule::runRequiredPasses()
-    {
-        Backend backend(*this);
-        backend.runRequiredPasses();
     }
 
     void StinkyAsmModule::addGroup(const std::string& name)

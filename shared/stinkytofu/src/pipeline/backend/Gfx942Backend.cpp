@@ -23,11 +23,23 @@
 /// @file Gfx942Backend.cpp
 /// @brief Registers the gfx942 (CDNA3, arch 9.4.2) optimization pipeline with BackendRegistry.
 ///
-/// When this translation unit is linked, the gfx942 pipelines are registered globally
-/// so that Backend(module) automatically picks them up for modules with arch {9, 4, 2}.
+/// When this translation unit is linked, the gfx942 pipeline builder is registered globally
+/// so that Backend(module).runOptimization() automatically picks it up for modules with
+/// arch {9, 4, 2}.
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/pipeline/OptimizationPasses.hpp"
+#include "stinkytofu/pipeline/ScopeAdaptor.hpp"
+
+#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
+#include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
 #include <algorithm>
 
@@ -37,84 +49,77 @@ namespace stinkytofu
     {
         constexpr std::array<int, 3> GFX942_ARCH{9, 4, 2};
 
-        // Will enable after milestone 1
-        PipelineConfig createDefaultPipeline(const StinkyAsmModule& module,
-                                             BasicBlockFilter       bbFilter,
-                                             const std::string&     groupName,
-                                             OptLevel               optLevel)
+        /// Build the gfx942 per-region optimization passes into a PassManager.
+        void
+            addGfx942RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptLevel optLevel)
         {
-            // Create pipeline configuration with full scheduling and optimization
-            auto config = stinkytofu::PipelineConfig::fromProfile(
-                stinkytofu::PipelineProfile::FullPipeline, optLevel);
+            // ========== Phase 0: IR Verification ==========
+            pm.addPass(createStinkyIRVerifierPass());
 
-            // TODO: Disable waitcnt for now
-            config.enableWaitCnt = false;
+            // ========== Phase 1: CFG Building ==========
+            pm.addPass(createCFGBuilderPass());
 
-            // Configure GEMM-specific tile parameters
-            const auto& moduleOptions = module.getModuleOptions();
-            config.withGemmTileConfig(GFX942_ARCH,
-                                      moduleOptions.TileA0,
-                                      moduleOptions.TileB0,
-                                      moduleOptions.TileM0,
-                                      moduleOptions.NumGRA,
-                                      moduleOptions.NumGRB,
-                                      moduleOptions.NumGRM,
-                                      moduleOptions.WaveGroup0 * moduleOptions.WaveGroup1);
+            // ========== Phase 1.5: Remove WaitCnts ==========
+            pm.addPass(createStinkyRemoveWaitCntPass());
 
-            // Configure pass features (GEMM-specific optimizations)
-            config
-                .withBarrierSemantics(true) // unrollGemmMovableBarrier
-                .withLoopUnroll(true) // unrollGemm
-                .withDagFeatures(true); // distributeGlobalRead
+            // ========== Phase 2: Optimization ==========
+            addOptimizationPasses(pm, optLevel);
 
-            // Configure basic block filter
-            config.basicBlockFilter = bbFilter;
-
-            // Apply debug output from moduleOptions (set via GlobalParameters).
-            config.withDebugLevel(moduleOptions.DebugLevel, groupName)
-                .withPrintPasses(
-                    moduleOptions.PrintBeforePass, moduleOptions.PrintAfterPass, groupName)
-                .withDebugPass(moduleOptions.DebugPass);
-
-            return config;
+            // ========== Phase 3: Instruction Scheduling ==========
+            pm.addPass(createStinkyBuildImplicitDependencyPass());
+            pm.addPass(createStinkyDAGSchedulerPass());
+            pm.addPass(createScheduleLastLRsPass());
         }
 
-        /**
-         * @brief Populate the pipeline specifications for the GFX942 architecture.
-         * @param module The StinkyAsmModule to populate the pipeline specifications for.
-         * @param specs The vector of pipeline specifications to populate.
-         */
-        void pipelineSpecPopulator(const StinkyAsmModule&                      module,
-                                   std::vector<BackendRegistry::PipelineSpec>& specs)
+        /// Build the full gfx942 pipeline into \p pm using ScopeAdaptors.
+        bool buildGfx942Pipeline(PassManager& pm, StinkyAsmModule& module)
         {
-            const auto& moduleOptions = module.getModuleOptions();
-
-            // Use moduleOptions.OptLevel directly (set via GlobalParameters).
-            const OptLevel optLevel = static_cast<OptLevel>(
+            const auto&    moduleOptions = module.getModuleOptions();
+            const OptLevel optLevel      = static_cast<OptLevel>(
                 std::max(0, std::min(moduleOptions.OptLevel, static_cast<int>(OptLevel::O3))));
 
-            /* Add pipelines for O3 optimization level */
-            specs.emplace_back(
-                /* PipelineConfig */ createDefaultPipeline(
-                    module,
-                    stinkytofu::BasicBlockFilterBuilder::byLabelPrefix("label_LoopBegin"),
-                    "loopWithPrefetch",
-                    optLevel),
-                /* groupName */ "loopWithPrefetch");
+            if(optLevel != OptLevel::O0)
+            {
+                // Single-region adapter: loopWithPrefetch
+                {
+                    PassManager innerPM;
+                    innerPM.setBasicBlockFilter(
+                        BasicBlockFilterBuilder::byLabelPrefix("label_LoopBegin"));
+                    addGfx942RegionPasses(innerPM, module, optLevel);
+                    pm.addPass(createKernelToRegionPassAdaptor(
+                        module, "loopWithPrefetch", std::move(innerPM)));
+                }
 
-            specs.emplace_back(
-                /* PipelineConfig */ createDefaultPipeline(
-                    module, stinkytofu::BasicBlockFilterBuilder::all(), "noLoadLoopBody", optLevel),
-                /* groupName */ "noLoadLoopBody");
+                // Single-region adapter: noLoadLoopBody
+                {
+                    PassManager innerPM;
+                    addGfx942RegionPasses(innerPM, module, optLevel);
+                    pm.addPass(createKernelToRegionPassAdaptor(
+                        module, "noLoadLoopBody", std::move(innerPM)));
+                }
+
+                // Multi-region adapter for waitcnt reinsertion
+                {
+                    PassManager waitcntPM;
+                    waitcntPM.addPass(createCFGBuilderPass());
+                    waitcntPM.addPass(createStinkyRemoveWaitCntPass());
+                    waitcntPM.addPass(createStinkyWaitCntInsertionPass(true));
+                    pm.addPass(createKernelToRegionsPassAdaptor(
+                        module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(waitcntPM)));
+                }
+            }
+
+            return true;
         }
 
-        struct Gfx942BackendRegistrar
+        struct Gfx942Registrar
         {
-            Gfx942BackendRegistrar()
+            Gfx942Registrar()
             {
-                BackendRegistry::setArchPipeline(GFX942_ARCH, pipelineSpecPopulator);
+                BackendRegistry::setArchPipeline(
+                    GFX942_ARCH, {buildGfx942Pipeline, {"loopWithPrefetch", "noLoadLoopBody"}});
             }
         };
-        static Gfx942BackendRegistrar s_gfx942BackendRegistrar;
+        static Gfx942Registrar s_gfx942Registrar;
     } // namespace
 } // namespace stinkytofu

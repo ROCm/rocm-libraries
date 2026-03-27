@@ -22,11 +22,15 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
-#include "stinkytofu/pipeline/OptimizationPipeline.hpp"
-#include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+
+#include "stinkytofu/pipeline/OptimizationPasses.hpp"
+
+#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 
 #include <sstream>
 #include <string>
@@ -79,8 +83,8 @@ protected:
     GemmTileConfig gemmConfig;
 };
 
-// Test OptimizationOnly profile with O0
-TEST_F(OptimizationPipelineTest, OptimizationOnlyO0)
+// O0: no optimization passes, IR unchanged
+TEST_F(OptimizationPipelineTest, OptLevelO0)
 {
     std::string irString = R"(
 v[0] = "st.v_add_f32"(v[1], v[2])
@@ -92,11 +96,10 @@ v[0] = "st.v_add_f32"(v[1], v[2])
 
     int instCountBefore = countInstructions(*func);
 
-    // Run OptimizationOnly with O0
-    PipelineConfig config
-        = PipelineConfig::fromProfile(PipelineProfile::OptimizationOnly, OptLevel::O0);
-    config.gemmTileConfig = std::make_unique<GemmTileConfig>(gemmConfig);
-    OptimizationPipeline::run(*func, config);
+    PassManager pm;
+    pm.setGemmTileConfig(gemmConfig);
+    addOptimizationPasses(pm, OptLevel::O0);
+    pm.run(*func);
 
     int instCountAfter = countInstructions(*func);
 
@@ -106,8 +109,8 @@ v[0] = "st.v_add_f32"(v[1], v[2])
     converter.cleanup();
 }
 
-// Test custom config
-TEST_F(OptimizationPipelineTest, CustomConfig)
+// O1: peephole only, 1 iteration
+TEST_F(OptimizationPipelineTest, OptLevelO1)
 {
     std::string irString = R"(
 v[0] = "st.v_add_f32"(v[1], v[2])
@@ -117,72 +120,57 @@ v[0] = "st.v_add_f32"(v[1], v[2])
     Function*         func = parseIR(irString, converter);
     ASSERT_NE(func, nullptr);
 
-    // Custom config with verbose
-    PipelineConfig config
-        = PipelineConfig::fromProfile(PipelineProfile::OptimizationOnly, OptLevel::O2);
-    config.verbose                = false; // Don't spam test output
-    config.optimizationIterations = 10; // Custom iteration count
-    config.gemmTileConfig         = std::make_unique<GemmTileConfig>(gemmConfig);
+    PassManager pm;
+    pm.setGemmTileConfig(gemmConfig);
+    addOptimizationPasses(pm, OptLevel::O1);
 
     // Should not crash
-    OptimizationPipeline::run(*func, config);
-
-    // Basic sanity check
+    pm.run(*func);
     EXPECT_GT(countInstructions(*func), 0);
 
     converter.cleanup();
 }
 
-// Test pipeline profiles
-TEST_F(OptimizationPipelineTest, PipelineProfiles)
+// O2: peephole + DCE, 1 iteration
+TEST_F(OptimizationPipelineTest, OptLevelO2)
 {
-    // OptimizationOnly profile (general)
-    auto configOpt = PipelineConfig::fromProfile(PipelineProfile::OptimizationOnly);
-    EXPECT_EQ(configOpt.profile, PipelineProfile::OptimizationOnly);
-    EXPECT_TRUE(configOpt.enablePeephole); // O1+
-    EXPECT_TRUE(configOpt.enableDCE); // O2+
-    EXPECT_FALSE(configOpt.enableDuplicateElim); // O3 only
-    EXPECT_FALSE(configOpt.enableDAGScheduler);
-    EXPECT_FALSE(configOpt.enableWaitCnt);
+    std::string irString = R"(
+v[0] = "st.v_add_f32"(v[1], v[2])
+    )";
 
-    // FullPipeline profile (for production kernels)
-    auto configFull = PipelineConfig::forProductionKernel();
-    EXPECT_EQ(configFull.profile, PipelineProfile::FullPipeline);
-    EXPECT_TRUE(configFull.enablePeephole); // Need pattern fusion
-    EXPECT_TRUE(configFull.enableDCE);
-    EXPECT_TRUE(configFull.enableDAGScheduler);
-    EXPECT_TRUE(configFull.enableWaitCnt);
+    StinkyIRConverter converter;
+    Function*         func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    PassManager pm;
+    pm.setGemmTileConfig(gemmConfig);
+    addOptimizationPasses(pm, OptLevel::O2);
+
+    // Should not crash
+    pm.run(*func);
+    EXPECT_GT(countInstructions(*func), 0);
+
+    converter.cleanup();
 }
 
-// Test OptimizationOnly profile with different optimization levels
-TEST_F(OptimizationPipelineTest, OptimizationLevels)
+// O3: peephole + redundant mov elim + DCE, 3 iterations
+TEST_F(OptimizationPipelineTest, OptLevelO3)
 {
-    auto configO0 = PipelineConfig::fromProfile(PipelineProfile::OptimizationOnly, OptLevel::O0);
-    auto configO1 = PipelineConfig::fromProfile(PipelineProfile::OptimizationOnly, OptLevel::O1);
-    auto configO2 = PipelineConfig::fromProfile(PipelineProfile::OptimizationOnly, OptLevel::O2);
-    auto configO3 = PipelineConfig::fromProfile(PipelineProfile::OptimizationOnly, OptLevel::O3);
+    std::string irString = R"(
+v[0] = "st.v_add_f32"(v[1], v[2])
+    )";
 
-    // O0: no optimization passes, 1 iteration
-    EXPECT_FALSE(configO0.enablePeephole);
-    EXPECT_FALSE(configO0.enableDCE);
-    EXPECT_FALSE(configO0.enableDuplicateElim);
-    EXPECT_EQ(configO0.optimizationIterations, 1);
+    StinkyIRConverter converter;
+    Function*         func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
 
-    // O1: peephole only, 1 iteration
-    EXPECT_TRUE(configO1.enablePeephole);
-    EXPECT_FALSE(configO1.enableDCE);
-    EXPECT_FALSE(configO1.enableDuplicateElim);
-    EXPECT_EQ(configO1.optimizationIterations, 1);
+    PassManager pm;
+    pm.setGemmTileConfig(gemmConfig);
+    addOptimizationPasses(pm, OptLevel::O3);
 
-    // O2: peephole + DCE, 3 iterations
-    EXPECT_TRUE(configO2.enablePeephole);
-    EXPECT_TRUE(configO2.enableDCE);
-    EXPECT_FALSE(configO2.enableDuplicateElim);
-    EXPECT_EQ(configO2.optimizationIterations, 3);
+    // Should not crash
+    pm.run(*func);
+    EXPECT_GT(countInstructions(*func), 0);
 
-    // O3: all passes enabled, 5 iterations
-    EXPECT_TRUE(configO3.enablePeephole);
-    EXPECT_TRUE(configO3.enableDCE);
-    EXPECT_TRUE(configO3.enableDuplicateElim);
-    EXPECT_EQ(configO3.optimizationIterations, 5);
+    converter.cleanup();
 }

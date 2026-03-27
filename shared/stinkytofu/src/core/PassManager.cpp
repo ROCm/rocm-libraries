@@ -69,6 +69,7 @@ namespace stinkytofu
         : printAfterAll(false)
         , printBeforeAll(false)
         , dumpInitialIR(false)
+        , printPassNames(false)
     {
     }
 
@@ -98,6 +99,11 @@ namespace stinkytofu
     void PassManagerDebugConfig::setDumpInitialIR(bool v)
     {
         dumpInitialIR = v;
+    }
+
+    void PassManagerDebugConfig::setPrintPassNames(bool v)
+    {
+        printPassNames = v;
     }
 
     void PassManagerDebugConfig::addOnlyPrintBefore(const std::string& passName)
@@ -184,6 +190,11 @@ namespace stinkytofu
 
         for(const auto& pass : passes)
         {
+            if(dbgCfg && dbgCfg->printPassNames)
+            {
+                std::cout << "  Running: " << pass->getName() << std::endl;
+            }
+
             if(dbgCfg && dbgCfg->shouldPrintBefore(pass->getName()))
             {
                 dbgCfg->getOutputStreamInBefore()
