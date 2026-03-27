@@ -21,6 +21,7 @@ add_executable(
     descriptors/TestBackendDescriptor.cpp
     descriptors/TestBlockScaleDequantizeOperationDescriptor.cpp
     descriptors/TestBlockScaleQuantizeOperationDescriptor.cpp
+    descriptors/TestBlockScaleQuantizeOperationFromNode.cpp
     descriptors/TestDescriptorFactory.cpp
     descriptors/TestEngineConfigDescriptor.cpp
     descriptors/TestEngineDescriptor.cpp

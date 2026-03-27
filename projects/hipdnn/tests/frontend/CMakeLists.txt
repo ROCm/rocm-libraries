@@ -18,6 +18,7 @@ add_executable(
     IntegrationBlockScaleDequantize.cpp
     IntegrationBlockScaleDequantizeDescriptorLowering.cpp
     IntegrationBlockScaleQuantize.cpp
+    IntegrationBlockScaleQuantizeDescriptorLifting.cpp
     IntegrationBlockScaleQuantizeDescriptorLowering.cpp
     IntegrationConvForward.cpp
     IntegrationConvFpropDescriptorLifting.cpp

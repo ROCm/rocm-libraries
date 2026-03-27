@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/BlockScaleQuantizePacker.hpp>
+#include <hipdnn_frontend/detail/BlockScaleQuantizeUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
@@ -24,6 +25,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(blockScaleQuantizeAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        BlockScaleQuantizeAttributes bsqAttr;
+        HIPDNN_CHECK_ERROR(detail::unpackBlockScaleQuantizeOperation(opDesc, tensorMap, bsqAttr));
+        attributes = std::move(bsqAttr);
+        return {};
     }
 
     Error pre_validate_node() const override
