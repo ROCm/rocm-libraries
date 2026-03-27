@@ -84,6 +84,18 @@ protected:
     }
 };
 
+using IntegrationGpuBatchnormForwardInferenceNclFp32 = BatchnormForwardInference<float, float>;
+
+using IntegrationGpuBatchnormForwardInferenceNclBfp16 = BatchnormForwardInference<bfloat16, float>;
+
+using IntegrationGpuBatchnormForwardInferenceNclFp16 = BatchnormForwardInference<half, float>;
+
+using IntegrationGpuBatchnormForwardInferenceNlcFp32 = BatchnormForwardInference<float, float>;
+
+using IntegrationGpuBatchnormForwardInferenceNlcBfp16 = BatchnormForwardInference<bfloat16, float>;
+
+using IntegrationGpuBatchnormForwardInferenceNlcFp16 = BatchnormForwardInference<half, float>;
+
 using IntegrationGpuBatchnormForwardInferenceNchwFp32 = BatchnormForwardInference<float, float>;
 
 using IntegrationGpuBatchnormForwardInferenceNchwBfp16 = BatchnormForwardInference<bfloat16, float>;
@@ -111,6 +123,84 @@ using IntegrationGpuBatchnormForwardInferenceNdhwcBfp16
 using IntegrationGpuBatchnormForwardInferenceNdhwcFp16 = BatchnormForwardInference<half, float>;
 
 } // namespace
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceNclFp32, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInferenceNclFp32,
+                         testing::ValuesIn(getBnFwdInference1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInferenceNclFp32,
+                         testing::ValuesIn(getBnFwdInference1dFullTestCases()));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceNclBfp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInference<bfloat16>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInferenceNclBfp16,
+                         testing::ValuesIn(getBnFwdInference1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInferenceNclBfp16,
+                         testing::ValuesIn(getBnFwdInference1dFullTestCases()));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceNclFp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInferenceNclFp16,
+                         testing::ValuesIn(getBnFwdInference1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInferenceNclFp16,
+                         testing::ValuesIn(getBnFwdInference1dFullTestCases()));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceNlcFp32, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInferenceNlcFp32,
+                         testing::ValuesIn(getBnFwdInference1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInferenceNlcFp32,
+                         testing::ValuesIn(getBnFwdInference1dFullTestCases()));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceNlcBfp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInference<bfloat16>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInferenceNlcBfp16,
+                         testing::ValuesIn(getBnFwdInference1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInferenceNlcBfp16,
+                         testing::ValuesIn(getBnFwdInference1dFullTestCases()));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceNlcFp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInferenceNlcFp16,
+                         testing::ValuesIn(getBnFwdInference1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInferenceNlcFp16,
+                         testing::ValuesIn(getBnFwdInference1dFullTestCases()));
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNchwFp32, Correctness)
 {

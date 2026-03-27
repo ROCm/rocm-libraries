@@ -328,12 +328,13 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvali
 
 TEST_F(TestMiopenBatchnormPlanBuilder, BackwardIsApplicableReturnsFalseForInvalidLayout)
 {
-    // Create backward graph with 3D tensors (invalid)
+    // Create backward graph with 3D tensors in unsupported stride order (not NCL or NLC)
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> strides3D = {42, 14, 1};
+    // Invalid stride order: {0, 1, 2} which is neither NCL {2, 1, 0} nor NLC {2, 0, 1}
+    std::vector<int64_t> strides3D = {1, 14, 42};
     std::vector<int64_t> dims3D = {1, 3, 14};
     std::vector<int64_t> derivedStrides = {3, 1, 1};
     std::vector<int64_t> derivedDims = {1, 3, 1};
@@ -2047,4 +2048,146 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
                                                               builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// ============================================================================
+// 3D Tests
+// ============================================================================
+
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNclInference)
+{
+    std::vector<int64_t> dims3D = {1, 3, 14};
+    std::vector<int64_t> strides3D = {42, 14, 1};
+
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNlcBackward)
+{
+    std::vector<int64_t> dims3D = {2, 3, 14};
+    std::vector<int64_t> strides3D = {42, 1, 3};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNclVarianceInference)
+{
+    std::vector<int64_t> dims3D = {1, 3, 14};
+    std::vector<int64_t> strides3D = {42, 14, 1};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
+        strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNlcFusedTwoNodeGraph)
+{
+    std::vector<int64_t> dims3D = {1, 3, 14};
+    std::vector<int64_t> strides3D = {42, 1, 3};
+
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph(strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueFor3dNclFusedThreeNodeGraph)
+{
+    std::vector<int64_t> dims3D = {2, 3, 14};
+    std::vector<int64_t> strides3D = {42, 14, 1};
+
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph(strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNclInference)
+{
+    std::vector<int64_t> dims3D = {1, 3, 14};
+    std::vector<int64_t> strides3D = {42, 14, 1};
+
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+    HipdnnMiopenContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNlcBackward)
+{
+    std::vector<int64_t> dims3D = {2, 3, 14};
+    std::vector<int64_t> strides3D = {42, 1, 3};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+    HipdnnMiopenContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNclVarianceInference)
+{
+    std::vector<int64_t> dims3D = {1, 3, 14};
+    std::vector<int64_t> strides3D = {42, 14, 1};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
+        strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+    HipdnnMiopenContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNlcFusedTwoNodeGraph)
+{
+    std::vector<int64_t> dims3D = {1, 3, 14};
+    std::vector<int64_t> strides3D = {42, 1, 3};
+
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph(strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+    HipdnnMiopenContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNclFusedThreeNodeGraph)
+{
+    std::vector<int64_t> dims3D = {2, 3, 14};
+    std::vector<int64_t> strides3D = {42, 14, 1};
+
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph(strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+    HipdnnMiopenContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
 }

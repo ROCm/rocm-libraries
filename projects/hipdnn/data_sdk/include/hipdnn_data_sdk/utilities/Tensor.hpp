@@ -39,6 +39,8 @@ struct TensorLayout
     std::string name; ///< Human-readable layout name (e.g., "NCHW", "NHWC")
     std::vector<int64_t> strideOrder; ///< Stride priority per dimension (lower = tighter packing)
 
+    static const TensorLayout NCL; ///< 3D channel-first layout
+    static const TensorLayout NLC; ///< 3D channel-last layout
     static const TensorLayout NCHW; ///< 4D channel-first layout
     static const TensorLayout NHWC; ///< 4D channel-last layout
     static const TensorLayout NCDHW; ///< 5D channel-first layout
@@ -46,6 +48,8 @@ struct TensorLayout
 };
 
 // NOLINTBEGIN(bugprone-throwing-static-initialization) fixed-size layout constants
+inline const TensorLayout TensorLayout::NCL{"NCL", {2, 1, 0}};
+inline const TensorLayout TensorLayout::NLC{"NLC", strideOrderNhwc(3)};
 inline const TensorLayout TensorLayout::NCHW{"NCHW", {3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NHWC{"NHWC", strideOrderNhwc(4)};
 inline const TensorLayout TensorLayout::NCDHW{"NCDHW", {4, 3, 2, 1, 0}};
