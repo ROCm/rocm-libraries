@@ -450,6 +450,29 @@ namespace stinkytofu
         return inst.is(InstFlag::IF_Barrier);
     }
 
+    inline bool isBarrierSignal(const StinkyInstruction& inst)
+    {
+        return inst.getHwInstDesc()->unifiedOpcode == GFX::s_barrier_signal;
+    }
+
+    inline bool isBarrierWait(const StinkyInstruction& inst)
+    {
+        return inst.getHwInstDesc()->unifiedOpcode == GFX::s_barrier_wait;
+    }
+
+    /// Returns true if a split barrier (signal/wait) uses all-wave mode (-1).
+    /// Non-(-1) values indicate workgroup-sync mode where signal and wait may be
+    /// in different basic blocks (e.g. if wave==0: signal; all waves: wait).
+    inline bool isSplitBarrierAllWave(const StinkyInstruction& inst)
+    {
+        assert((isBarrierSignal(inst) || isBarrierWait(inst))
+               && "Expected s_barrier_signal or s_barrier_wait");
+        if(inst.getSrcRegs().empty())
+            return false;
+        const StinkyRegister& src = inst.getSrcRegs()[0];
+        return src.dataType == StinkyRegister::Type::LiteralInt && src.getLiteralInt() == -1;
+    }
+
     inline bool isBranch(const StinkyInstruction& inst)
     {
         return inst.is(InstFlag::IF_Branch);

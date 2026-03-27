@@ -30,7 +30,7 @@ from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue,
 from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, True16Modifiers, \
                       MUBUFModifiers, SMEMModifiers, EXEC, VCC, RegisterContainer, \
                       DPPModifiers, vgpr, sgpr, accvgpr, mgpr, ContinuousRegister, \
-                      HWRegContainer, GLOBALModifiers
+                      HWRegContainer, GLOBALModifiers, MemTokenData
 from rocisa.instruction import SGetPositivePCOffset, SLongBranchPositive, SCLongBranchScc0, SCLongBranchScc1, SCLongBranchVccnz, \
                         SMulInt64to32, VCvtBF16toFP32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
@@ -72,6 +72,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
 from .Component import Component, TensorDataMover
 from .Components.TensorDataMover import TensorDataMoverLoad
 from .KernelWriterModules import *
+from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -10000,7 +10001,9 @@ class KernelWriterAssembly(KernelWriter):
         # do not generate local read wait for PGR=2
         DtldsModule.addComment0("before DirectToLds load, ensure prior ds_reads have finished")
         DtldsModule.add(SWaitCnt(dscnt=0, comment=""))
-        DtldsModule.add(SBarrier())
+        _barrier = SBarrier()
+        _barrier.setMemToken(MemTokenData([self.states.memTokenLdsBufferMeta]))
+        DtldsModule.add(_barrier)
 
     return imod
 
@@ -10017,11 +10020,15 @@ class KernelWriterAssembly(KernelWriter):
 
     if tc == "A" and kernel["enableTDMA"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+      if "TensorLoadToLds" in self.states.setMemTokenInsts:
+        comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
       imod.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", None, None))
       return imod
 
     if tc == "MXSA" and kernel["enableTDMA"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+      if "TensorLoadToLds" in self.states.setMemTokenInsts:
+        comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
       if kernel["ProblemType"]["MXBlockA"]:
         imod.add(comp.issueLoad("tdmMXSAGroup0", "tdmMXSAGroup1", None, None))
       return imod
@@ -10030,6 +10037,8 @@ class KernelWriterAssembly(KernelWriter):
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if prod(kernel["MIWaveGroup"]) == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+        if "TensorLoadToLds" in self.states.setMemTokenInsts:
+          comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
         imod.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", None, None))
       return imod
 
@@ -10037,6 +10046,8 @@ class KernelWriterAssembly(KernelWriter):
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if prod(kernel["MIWaveGroup"]) == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+        if "TensorLoadToLds" in self.states.setMemTokenInsts:
+          comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
         imod.add(comp.issueLoad("tdmMXSBGroup0", "tdmMXSBGroup1", None, None))
       return imod
 
@@ -12651,23 +12662,9 @@ class KernelWriterAssembly(KernelWriter):
     offset = addrCalc.coordOffset0 * self.states.bpeCexternal
     ds     = DSModifiers(offset=offset)
 
-    if bps==1:
-      module.add(DSStoreB8(dstAddr=addr0, src=vgpr(srcVgpr, rpv*4), \
-                ds=ds, comment="storeRemap lw"))
-    elif bps==2:
-      module.add(DSStoreB16(dstAddr=addr0, src=vgpr(srcVgpr, rpv*2), \
-                ds=ds, comment="storeRemap lw"))
-    elif bps==4:
-      module.add(DSStoreB32(dstAddr=addr0, src=vgpr(srcVgpr, rpv), \
-                ds=ds, comment="storeRemap lw"))
-    elif bps==8:
-      module.add(DSStoreB64(dstAddr=addr0, src=vgpr(srcVgpr, rpv), \
-                ds=ds, comment="storeRemap lw"))
-    elif bps==16:
-      module.add(DSStoreB128(dstAddr=addr0, src=vgpr(srcVgpr, rpv), \
-                ds=ds, comment="storeRemap lw"))
-    else:
-      assert 0, "StoreRemap: bad bps!"
+    numRegs = int(max(1, rpv))
+    module.add(dsStore(bps, dstAddr=addr0, src=vgpr(srcVgpr, numRegs), \
+              ds=ds, comment="storeRemap lw"))
 
     return module
 
@@ -12702,14 +12699,7 @@ class KernelWriterAssembly(KernelWriter):
       offset = self.storeRemapLrOffset * bpe * (i//gwvw)
       ds  = DSModifiers(offset=offset)
       dst = vgpr(storeRegs[rIdx], rpv)
-      if bps==4:
-        module.add(DSLoadB32(dst=dst, src=src, ds=ds, comment="storeRemap lr"))
-      elif bps==8:
-        module.add(DSLoadB64(dst=dst, src=src, ds=ds, comment="storeRemap lr"))
-      elif bps==16:
-        module.add(DSLoadB128(dst=dst, src=src, ds=ds, comment="storeRemap lr"))
-      else:
-        assert 0, "StoreRemap: bad bps!"
+      module.add(dsLoad(bps, dst=dst, src=src, ds=ds, comment="storeRemap lr"))
 
     module.addSpaceLine()
 
@@ -14404,11 +14394,7 @@ class KernelWriterAssembly(KernelWriter):
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf, comment=comment))
           mubuf2 = MUBUFModifiers(offen=True, offset12=offset+16, glc=glc, slc=slc, nt=nt, lds=lds)
-          if isinstance(destVgpr, str):
-            dst2 = destVgpr + "+" + str(int(4))
-          elif isinstance(destVgpr, int):
-            dst2 = int(destVgpr + int(4))
-          dst = None if lds else vgpr(dst2, 2)
+          dst = None if lds else vgpr(_vgprOffset(destVgpr, 4), 2)
           rv.add(BufferLoadB64(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf2, comment=comment))
           return rv
@@ -14419,41 +14405,18 @@ class KernelWriterAssembly(KernelWriter):
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf, comment=comment))
           mubuf2 = MUBUFModifiers(offen=True, offset12=int(offset + bpl/2), glc=glc, slc=slc, nt=nt, lds=lds)
-          if isinstance(destVgpr, str):
-            dst2 = destVgpr + "+" + str(int(rpv//2))
-          elif isinstance(destVgpr, int):
-            dst2 = int(destVgpr + int(rpv//2))
-          dst = None if lds else vgpr(dst2, rpv//2)
+          dst = None if lds else vgpr(_vgprOffset(destVgpr, int(rpv//2)), rpv//2)
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf2, comment=comment))
           return rv
         elif bpl==64 and not lds:
           rv = Module("emulated _buffer_load_b512")
-          # +0.25
-          dst = vgpr(destVgpr, rpv//4)
-          rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
-                                soffset=soffset, mubuf=mubuf, comment=comment))
-
-          mubuf2 = MUBUFModifiers(offen=True, offset12=int(offset + bpl/4), glc=glc, slc=slc, nt=nt, lds=lds)
-          dst2 = destVgpr + "+" + str(int(rpv//4)) if isinstance(destVgpr, str) else int(destVgpr + int(rpv//4))
-
-          dst = vgpr(dst2, rpv//4)
-          rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
-                                soffset=soffset, mubuf=mubuf2, comment=comment))
-          #+0.5
-          mubuf3 = MUBUFModifiers(offen=True, offset12=int(offset + bpl/2), glc=glc, slc=slc, nt=nt, lds=lds)
-          dst3 = destVgpr + "+" + str(int(rpv//2)) if isinstance(destVgpr, str) else int(destVgpr + int(rpv//2))
-
-          dst = vgpr(dst3, rpv//4)
-          rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
-                                soffset=soffset, mubuf=mubuf3, comment=comment))
-          #+0.75
-          mubuf4 = MUBUFModifiers(offen=True, offset12= int(offset + 3*bpl/4), glc=glc, slc=slc, nt=nt, lds=lds)
-          dst4 = destVgpr + "+" + str(3*int(rpv//4)) if isinstance(destVgpr, str) else int(destVgpr + 3*int(rpv//4))
-
-          dst = vgpr(dst4, rpv//4)
-          rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
-                                soffset=soffset, mubuf=mubuf4, comment=comment))
+          quarter_rpv = int(rpv//4)
+          for i in range(4):
+            mubuf_n = MUBUFModifiers(offen=True, offset12=int(offset + i*bpl/4), glc=glc, slc=slc, nt=nt, lds=lds)
+            dst = vgpr(_vgprOffset(destVgpr, i*quarter_rpv), quarter_rpv)
+            rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
+                                  soffset=soffset, mubuf=mubuf_n, comment=comment))
         else:
           assert 0, "%s\nchooseGlobalRead: bad bpl %u"%(self.states.kernelName,bpl)
 
@@ -14547,7 +14510,7 @@ class KernelWriterAssembly(KernelWriter):
             module.add(SMovB32(dst=tmpSgpr, src=offset2, comment="large offset"))
             offset2 = 0
           mubuf2 = MUBUFModifiers(offen=True, offset12=offset2, glc=glc, slc=slc, dlc=dlc, scope=scope, nt=nt, isStore=True)
-          vgprOff = int(srcVgpr + shiftRpv * i) if isinstance(srcVgpr, int) else f"{srcVgpr}+{int(shiftRpv * i)}"
+          vgprOff = _vgprOffset(srcVgpr, int(shiftRpv * i))
           module.add(BufferStoreB128(src=vgpr(vgprOff, shiftRpv), vaddr=addr0, \
                 saddr=addr1, soffset=tmpSgpr, mubuf=mubuf2, comment=comment))
       else:
@@ -14597,17 +14560,12 @@ class KernelWriterAssembly(KernelWriter):
     bps = dataType.numBytes() * gwvw
 
     useBuffer = kernel["BufferLoad"]
-    if dataType.isHalf() or dataType.isBFloat16():
-      module.add(self.chooseGlobalRead(useBuffer, bps, vecVgpr, \
-                        addr0, addr1, soffset=0, offset=offset, hi16=0, comment=comment))
-    elif dataType.isInt32() or dataType.isSingle():
-      module.add(self.chooseGlobalRead(useBuffer, bps, vecVgpr, \
-                        addr0, addr1, soffset=0, offset=offset, comment=comment))
-    elif dataType.isDouble() or dataType.isSingleComplex() :
-      module.add(self.chooseGlobalRead(useBuffer, bps, vecVgpr, \
-                        addr0, addr1, soffset=0, offset=offset, comment=comment))
-    else:
+    if not (dataType.isHalf() or dataType.isBFloat16() or
+            dataType.isInt32() or dataType.isSingle() or
+            dataType.isDouble() or dataType.isSingleComplex()):
       printExit("Unsupported %s type %s."%(comment, str(dataType)))
+    module.add(self.chooseGlobalRead(useBuffer, bps, vecVgpr, \
+                      addr0, addr1, soffset=0, offset=offset, hi16=0, comment=comment))
     return module
 
   ##############################################################################
@@ -14628,46 +14586,40 @@ class KernelWriterAssembly(KernelWriter):
 
       useBuffer = kernel["BufferLoad"]
 
-      if kernel["ProblemType"]["ComputeDataType"].isHalf() or kernel["ProblemType"]["ComputeDataType"].isBFloat16():
-        module.add(self.chooseGlobalRead(useBuffer, bps, scaleVecVgpr, \
-                          addr0, addr1, soffset=0, offset=scaleVecOffset, hi16=0, comment="load scale%sVecH"%srdName))
-      elif kernel["ProblemType"]["ComputeDataType"].isInt32() or kernel["ProblemType"]["ComputeDataType"].isSingle():
-        module.add(self.chooseGlobalRead(useBuffer, bps, scaleVecVgpr, \
-                          addr0, addr1, soffset=0, offset=scaleVecOffset, comment="load scale%sVecI"%srdName))
-      elif kernel["ProblemType"]["ComputeDataType"].isDouble() or kernel["ProblemType"]["ComputeDataType"].isSingleComplex() :
-        module.add(self.chooseGlobalRead(useBuffer, bps, scaleVecVgpr, \
-                          addr0, addr1, soffset=0, offset=scaleVecOffset, comment="load scale%sVec"%srdName))
-      else:
-        printExit("Unsupported scale%sVec type %s."%(srdName, str(kernel["ProblemType"]["ComputeDataType"])))
+      computeDataType = kernel["ProblemType"]["ComputeDataType"]
+      if not (computeDataType.isHalf() or computeDataType.isBFloat16() or
+              computeDataType.isInt32() or computeDataType.isSingle() or
+              computeDataType.isDouble() or computeDataType.isSingleComplex()):
+        printExit("Unsupported scale%sVec type %s."%(srdName, str(computeDataType)))
+      module.add(self.chooseGlobalRead(useBuffer, bps, scaleVecVgpr, \
+                        addr0, addr1, soffset=0, offset=scaleVecOffset, hi16=0, comment="load scale%sVec"%srdName))
 
     return module
 
   def addLdsLoad(self, dataType, dstVgpr, srcAddrVgpr, dsOffset, gwvw, comment=""):
       module = Module(comment)
-      dst = vgpr(dstVgpr)
       src = vgpr(srcAddrVgpr)
       ds = DSModifiers(offset=dsOffset)
       bpl = dataType.numBytes() * gwvw
-      if bpl==2:
-        module.add(DSLoadU16(dst=dst, src=src, ds=ds, comment=comment))
-      elif bpl==4:
-        module.add(DSLoadB32(dst=dst, src=src, ds=ds, comment=comment))
-      elif bpl==8:
-        module.add(DSLoadB64(dst=vgpr(dstVgpr, 2), src=src, ds=ds, comment=comment))
-      elif bpl==16:
-        module.add(DSLoadB128(dst=vgpr(dstVgpr, 4), src=src, ds=ds, comment=comment))
+      memToken = MemTokenData([self.states.memTokenLdsBuffer0])
+      if bpl <= 16:
+        numRegs = max(1, bpl // 4)
+        dst = vgpr(dstVgpr, numRegs) if numRegs > 1 else vgpr(dstVgpr)
+        module.add(dsLoad(bpl, dst=dst, src=src, ds=ds, comment=comment, memToken=memToken))
       elif bpl==32:
-        module.add(DSLoadB128(dst=vgpr(dstVgpr, 4), src=src, ds=ds, comment=comment))
+        inst = DSLoadB128(dst=vgpr(dstVgpr, 4), src=src, ds=ds, comment=comment)
+        inst.setMemToken(memToken)
+        module.add(inst)
         ds = DSModifiers(offset=int(dsOffset+bpl/2))
-        module.add(DSLoadB128(dst=vgpr(dstVgpr+4, 4), src=src, ds=ds, comment=comment))
+        inst = DSLoadB128(dst=vgpr(dstVgpr+4, 4), src=src, ds=ds, comment=comment)
+        inst.setMemToken(memToken)
+        module.add(inst)
       elif bpl==64:
-        module.add(DSLoadB128(dst=vgpr(dstVgpr, 4), src=src, ds=ds, comment=comment))
-        ds = DSModifiers(offset=int(dsOffset+bpl/4))
-        module.add(DSLoadB128(dst=vgpr(dstVgpr+4, 4), src=src, ds=ds, comment=comment))
-        ds = DSModifiers(offset=int(dsOffset+2*bpl/4))
-        module.add(DSLoadB128(dst=vgpr(dstVgpr+8, 4), src=src, ds=ds, comment=comment))
-        ds = DSModifiers(offset=int(dsOffset+3*bpl/4))
-        module.add(DSLoadB128(dst=vgpr(dstVgpr+12, 4), src=src, ds=ds, comment=comment))
+        for chunk in range(4):
+          inst = DSLoadB128(dst=vgpr(dstVgpr + chunk*4, 4), src=src,
+                     ds=DSModifiers(offset=int(dsOffset + chunk*16)), comment=comment)
+          inst.setMemToken(memToken)
+          module.add(inst)
       else:
         assert 0, "bad bpl"
       return module
@@ -15049,14 +15001,8 @@ class KernelWriterAssembly(KernelWriter):
             src0=maskConst, \
             src2=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), \
             comment="1. mul 1 if 0"))
-      if bps==2:
-        module.add(DSStoreB16(dstAddr=dst, src=vgpr(tmpVgpr1 + i * gwvw), ds=ds, comment=comment))
-      elif bps==4:
-        module.add(DSStoreB32(dstAddr=dst, src=vgpr(tmpVgpr1 + i * gwvw), ds=ds, comment=comment))
-      elif bps==8:
-        module.add(DSStoreB64(dstAddr=dst, src=vgpr(tmpVgpr1 + i * gwvw * 2, 2), ds=ds, comment=comment))
-      else:
-        assert 0
+      numRegs = max(1, bps // 4)
+      module.add(dsStore(bps, dstAddr=dst, src=vgpr(tmpVgpr1 + i * gwvw * numRegs, numRegs), ds=ds, comment=comment))
     return module
 
   def getNumOfTempVgprs(self, vectorDataTypes: VectorDataTypes, kernel, gwvw, dim):
@@ -15268,36 +15214,21 @@ class KernelWriterAssembly(KernelWriter):
     srcAddr = vgpr(offsetVgpr)
     outVgprN = outVgpr
     if maxKId == 1:
-      gwvwK = 1
       bps = kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw
+      numRegs = max(1, bps // 4)
       ds  = DSModifiers(offset=0)
-      if bps==2:
-        module.add(DSLoadB16(dst=vgpr(outVgprN), src=srcAddr, ds=ds, comment="load bias"))
-      elif bps==4:
-        module.add(DSLoadB32(dst=vgpr(outVgprN), src=srcAddr, ds=ds, comment="load bias"))
-      elif bps==8:
-        gwvwK = 2
-        module.add(DSLoadB64(dst=vgpr(outVgprN, 2), src=srcAddr, ds=ds, comment="load bias"))
-      else:
-        assert 0
-      outVgprN += gwvwK
+      module.add(dsLoad(bps, dst=vgpr(outVgprN, numRegs), src=srcAddr, ds=ds, comment="load bias"))
+      outVgprN += numRegs
     else:
       dsOffset = 0
       for _ in range(0, gwvw):
-        gwvwK = 1
         idx = 0
         while idx < maxKId:
           gwvwK = 2 if (idx + 1 < maxKId * gwvw) else 1
           bps = kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvwK
+          numRegs = max(1, bps // 4)
           ds  = DSModifiers(offset=dsOffset)
-          if bps==2:
-            module.add(DSLoadB16(dst=vgpr(outVgprN), src=srcAddr, ds=ds, comment="load bias"))
-          elif bps==4:
-            module.add(DSLoadB32(dst=vgpr(outVgprN), src=srcAddr, ds=ds, comment="load bias"))
-          elif bps==8:
-            module.add(DSLoadB64(dst=vgpr(outVgprN, 2), src=srcAddr, ds=ds, comment="load bias"))
-          else:
-            assert 0
+          module.add(dsLoad(bps, dst=vgpr(outVgprN, numRegs), src=srcAddr, ds=ds, comment="load bias"))
           outVgprN += gwvwK
           idx += gwvwK
           dsOffset += bps

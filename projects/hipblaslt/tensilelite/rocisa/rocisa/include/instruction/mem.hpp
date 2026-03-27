@@ -3090,9 +3090,18 @@ namespace rocisa
             setInst("tensor_load_to_lds");
         }
 
+        TensorLoadToLds(const TensorLoadToLds& other)
+            : Instruction(other)
+            , group0(other.group0)
+            , group1(other.group1)
+            , group2(other.group2)
+            , group3(other.group3)
+        {
+        }
+
         std::shared_ptr<Item> clone() const override
         {
-            return std::make_shared<TensorLoadToLds>(group0, group1, group2, group3, comment);
+            return std::make_shared<TensorLoadToLds>(*this);
         }
 
         std::vector<InstructionInput> getParams() const override

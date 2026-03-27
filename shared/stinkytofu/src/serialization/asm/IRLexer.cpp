@@ -303,6 +303,20 @@ namespace stinkytofu
                          tokenColumn);
 
         case '-':
+            // Negative hex: -0x1234 (must not be tokenized as '-' + '0' + 'x...')
+            if(peekChar() == '0' && (peekAheadChar(1) == 'x' || peekAheadChar(1) == 'X'))
+            {
+                consumeChar(); // '0'
+                consumeChar(); // 'x' or 'X'
+                while(isHexDigit(peekChar()))
+                {
+                    consumeChar();
+                }
+                return Token(TokenKind::HexLiteral,
+                             std::string_view(tokenStart, curPtr - tokenStart),
+                             tokenLine,
+                             tokenColumn);
+            }
             // Could be negative number
             if(isDigit(peekChar()))
             {

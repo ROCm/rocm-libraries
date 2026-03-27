@@ -118,10 +118,11 @@ namespace rocisa
 
     struct Instruction : public Item
     {
-        InstType    instType;
-        std::string comment;
-        std::string instStr;
-        bool        outputInlineAsm;
+        InstType         instType;
+        std::string      comment;
+        std::string      instStr;
+        bool             outputInlineAsm;
+        std::shared_ptr<MemTokenData> m_memToken;
 
         Instruction(InstType instType, const std::string& comment = "")
             : instType(instType)
@@ -137,7 +138,20 @@ namespace rocisa
             , comment(other.comment)
             , instStr(other.instStr)
             , outputInlineAsm(other.outputInlineAsm)
+            , m_memToken(other.m_memToken
+                             ? std::make_shared<MemTokenData>(*other.m_memToken)
+                             : nullptr)
         {
+        }
+
+        void setMemToken(const std::shared_ptr<MemTokenData>& token)
+        {
+            m_memToken = token;
+        }
+
+        std::shared_ptr<MemTokenData> getMemToken() const
+        {
+            return m_memToken;
         }
 
         std::shared_ptr<Item> clone() const override

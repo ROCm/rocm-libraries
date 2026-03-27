@@ -712,7 +712,6 @@ namespace
         if(const rocisa::RegisterContainer* regCont
            = dynamic_cast<const rocisa::RegisterContainer*>(container))
         {
-            // Convert string regType to RegType enum
             RegType regType = stringToRegType(regCont->regType);
 
             int physicalIdx = regCont->regIdx;
@@ -1076,6 +1075,12 @@ namespace stinkytofu
 
             // Add modifiers (DS, FLAT, MUBUF, SMEM, WaitCnt, comments)
             addModifiersToInstruction(stinkyInst, inst, asmCaps);
+
+            if(auto memToken = inst->getMemToken())
+            {
+                stinkyInst->addModifier<MemTokenData>(
+                    MemTokenData{memToken->tokens});
+            }
 
             Legalized legalizedInsts = legalizeInstruction(
                 stinkyInst, inst, irBuilder, archId, asmCaps, archCaps, hasVgprMsb);

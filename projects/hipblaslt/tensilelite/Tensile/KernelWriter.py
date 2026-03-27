@@ -25,7 +25,7 @@
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, getMFMAs
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
-from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC
+from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC, MemTokenData
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
 from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, BufferLoadB64, BufferLoadB96, \
@@ -902,7 +902,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           barrier = Module()
           barrier.addComment0("1 LDS buffer: read-sync-write")
           barrier.add(SWaitCnt(dscnt=0, comment=""))
-          barrier.add(SBarrier())
+          _barrier = SBarrier()
+          _barrier.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
+          barrier.add(_barrier)
           iterCode.add(barrier)
 
       #move down write to be the last
@@ -1034,7 +1036,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         barrier = Module()
         barrier.addComment0("1 LDS buffer: read-sync-write")
         barrier.add(SWaitCnt(dscnt=0, comment=""))
-        barrier.add(SBarrier())
+        _barrier = SBarrier()
+        _barrier.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
+        barrier.add(_barrier)
         iterCode.add(barrier)
       iterCode.add(localWriteCode)
       iterCode.add(pointerLWCode)
@@ -1682,7 +1686,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           barrier = Module()
           barrier.addComment0("1 LDS buffer: read-sync-write")
           barrier.add(SWaitCnt(dscnt=0, comment=""))
-          barrier.add(SBarrier())
+          _barrier = SBarrier()
+          _barrier.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
+          barrier.add(_barrier)
           iterCode.add(barrier)
 
         if kernel["StorePriorityOpt"]:
@@ -2776,6 +2782,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # prefetch: unrolled loop prefix
     ####################################
     if kernel["PrefetchGlobalRead"]:
+      self.states.setMemTokenInsts = {"TensorLoadToLds": [self.states.ldsWriteTokenIdx]}
       # if DirectToVgpr is enabled and swapGlobalRead is true, swap the order of global read (B->A)
       tensorParameters1st = tensorParametersA
       tensorParameters2nd = tensorParametersB
@@ -2810,6 +2817,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["DirectToVgprB"]:
           tPB = None
       module.add(self.globalReadIncrementAB(kernel, tPA, tPB, self.states.unrollIdx, pfi))
+      self.states.setMemTokenInsts = {}
+      self.states.ldsWriteTokenIdx = \
+        self.states.memTokenLdsBuffer1 if self.states.ldsWriteTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
 
     module.addComment2("End setupNewTile")
 
@@ -2848,6 +2858,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(MacroInstruction(name="MAINLOOP", args=[0,0,0,0,0]))
       return module
     module = Module("noLoadLoopBody")
+    self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
     expand = kernel["ExpandPointerSwap"]
     lastuIdx = False
     pflr     = self.states.numItersPLR
@@ -3155,7 +3166,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                              isNLL=(not isNGLL), beforeBarrier=True))
             elif kernel["PrefetchGlobalRead"]>=2 and (kernel["DirectToLdsA"] and kernel["DirectToLdsB"]):
               waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, remainPgr-1, -1, -1, "wait for global reads with lds"))
-            syncCode.add(self._syncThreads(kernel))
+            syncCode.add(self._syncThreads(kernel, "noLoadLoop sync LDS0", memoryToken=self.states.memTokenLdsBuffer0))
 
           if isSwapAndResetLwoIter and not kernel["NoLdsWriteCode"]: # ResetLroIter
             # local write for next iter, used to have local writes here
@@ -3372,7 +3383,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, "10wait for global read"))
       if not kernel["NoLdsWriteCode"]:
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "4wait for local write"))
-      module.add(self._syncThreads(kernel))
+      module.add(self._syncThreads(kernel, "Wait GR->LW done, sync LDS0", memoryToken=self.states.memTokenLdsBuffer0))
 
     # generate no Load Loop Body code
     module.add(self.noLoadLoopBody(kernel, tensorParametersA, tensorParametersB, pack, packPre, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=NLLindex, \
@@ -3410,7 +3421,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, "11wait for global read"))
       if not kernel["NoLdsWriteCode"]:
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 1, 0, -1, "1wait for local write"))
-      module.add(self._syncThreads(kernel, "4sync for global read"))
+      module.add(self._syncThreads(kernel, "4sync for global read, PGR->LW needs sync LDS0", memoryToken=self.states.memTokenLdsBuffer0))
 
     module.addComment1("Begin Each Unroll: Check VGPR.checkin for INT8 LW")
 
@@ -3505,7 +3516,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if not kernel["PrefetchGlobalRead"]:
       # unrolled loop: local write A, B
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "5wait for global read"))
-      module.add(self._syncThreads(kernel, "PGR=0, prior iter done reading lds"))
+      module.add(self._syncThreads(kernel, "PGR=0, prior iter done reading lds, LW wait LR, sync LDS0", memoryToken=self.states.memTokenLdsBuffer0))
       if not kernel["NoLdsWriteCode"]:
         module.addComment1("local write a")
         tempLWCodeModA = self.localWriteDo(kernel, tensorParametersA)
@@ -3522,7 +3533,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         tempLWCodeModB = self.localWriteDo(kernel, tensorParametersB)
         module.add(tempLWCodeModB)
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "2prefetch wait for local write"))
-        module.add(self._syncThreads(kernel))
+        module.add(self._syncThreads(kernel, "After LW code, sync LDS0", memoryToken=self.states.memTokenLdsBuffer0))
       # debug Local state
       """
       module.add("    /* print Local state */" + self.endLine)
@@ -3740,6 +3751,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       doReadB = doReadB or (hasLiveLdsData and doNext)
       doReadM = doReadM or (hasLiveLdsData and doNext)
       doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
+      # Prefetch reads for next loop target LDS1; current iteration reads target LDS0
+      if hasLiveLdsData and doNext:
+        self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer1
+      else:
+        self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
       for iui in range(0,kernel["InnerUnroll"]):
         # use full prefetch only for next loop
         usePLRPackA = self.states.doFullPackCodePrefetch and (doNext or u == 0)
@@ -3881,14 +3897,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["DirectToVgprA"] or kernel["DirectToVgprB"] or kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
             # DTVA/B or DTLA/B case, skip generating force waitcnt0
             skipForceWaitcnt0 = True
-          syncCode.add(self._syncThreads(kernel, skipForceWaitcnt0=skipForceWaitcnt0))
+          syncCode.add(self._syncThreads(kernel, "PGR, and wait until LW done to sync LDS1", skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=self.states.memTokenLdsBuffer1))
 
         if isSwapAndResetLwoIter: # ResetLroIter
           if kernel["ExpertSchedulingMode"] > 0:
             pointerLWCode.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
           if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
-            pointerLWCode.add(SWaitCnt(dscnt=0, comment="Waiting curren LR finish for next GR(TDM)"))
-            pointerLWCode.add(SBarrier(comment="Waiting curren LR finish for next GR(TDM)"))
+            pointerLWCode.add(SWaitCnt(dscnt=0, comment="Waiting current LR finish for next GR(TDM)"))
+            _barrier = SBarrier(comment="Waiting current LR finish for next GR(TDM), sync LDS0")
+            _barrier.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
+            pointerLWCode.add(_barrier)
           # local write for next iter, used to have local writes here
           # Swap offsets A(MXSA)
           if kernel["enableTDMA"]:
@@ -4178,6 +4196,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # prefetch global read for PGR>=2
       if kernel["PrefetchGlobalRead"] >= 2:
+        self.states.setMemTokenInsts = {"TensorLoadToLds": [self.states.ldsWriteTokenIdx]}
         for idxPgr in range(1, kernel["PrefetchGlobalRead"]):
           pgr.add(self.openPrefetchGlobalRead2orMore(kernel, idxPgr))
           # For UnrollLoopSwapGlobalReadOrder, we also need to swap ds write A/B order.
@@ -4249,6 +4268,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
             pgr.addComment1("local write swap b")
             pgr.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB, prefetch=True))
 
+        self.states.setMemTokenInsts = {}
+        self.states.ldsWriteTokenIdx = \
+          self.states.memTokenLdsBuffer1 if self.states.ldsWriteTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+
         # generate exit code
         for idxPgr in range(0, kernel["PrefetchGlobalRead"] + 1):
           pgr.add(self.closePrefetchGlobalRead2orMore(kernel, tensorParametersA, tensorParametersB, idxPgr))
@@ -4265,7 +4288,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # not generate wait for local write if LDS write code is not generated
         if not kernel["NoLdsWriteCode"]:
           pgr.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "0prefetch wait for local write"))
-        pgr.add(self._syncThreads(kernel))
+        pgr.add(self._syncThreads(kernel, "LW to PLR, sync LDS0", memoryToken=self.states.memTokenLdsBuffer0))
 
         usePLRPack = self.states.doFullPackCodePrefetch or (kernel["UseCustomMainLoopSchedule"] and kernel["UsePLRPack"])
         # in some cases need an extra copy of the LDS read with appropriate double buffer offsets
@@ -4410,6 +4433,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     pgr.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False))
 
     loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop", "" )
+
+    self.states.setMemTokenInsts = {"TensorLoadToLds": [self.states.ldsWriteTokenIdx]}
     loop = Module("loopBody")
     if needSecondLoop and kernel["PrefetchGlobalRead"] >= 2:
       # force to generate 2 loop bodies (PGR2 only)
@@ -4441,6 +4466,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         finalLoop = lc == loopCopies - 1
         loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, lc, loopCopies, finalLoop, isDTVGRSecondBuf=isDTVGRSecondBuf ))
     pgr.add(loop)
+    self.states.setMemTokenInsts = {}
+
     module.add(pgr)
 
     if kernel["ExpertSchedulingMode"] > 0:
@@ -4875,7 +4902,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("Recalc local read offsets")
         module.add(self.recalcLocalReadAddressesAB(kernel, tensorParametersA, tensorParametersB))
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "5wait for local write"))
-      module.add(self._syncThreads(kernel))
+      module.add(self._syncThreads(kernel, "Tail loop LW->LR, sync LDS0", memoryToken=self.states.memTokenLdsBuffer0))
       #module.add(self.dumpLds(kernel, 0, 8))
 
       # tail: free G2L Vgpr
@@ -5093,7 +5120,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # generate wait code for early exit
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, " tailloopInNll: wait for global read"))
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, " tailloopInNll: wait for local read"))
-      module.add(self._syncThreads(kernel))
+      module.add(self._syncThreads(kernel, "tailloopInNll: wait until LR done, sync LDS0", memoryToken=self.states.memTokenLdsBuffer0))
 
     if self.states.lastValuMXSAB:
       self.vgprPool.add(0 , self.states.lastValuMXSAB, "ValuMXSAB")
@@ -5608,6 +5635,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.oneBufferScheduling = (kernel["1LDSBuffer"]) or \
                                       ((kernel["DirectToLdsA"] or kernel["DirectToLdsB"]) and \
                                        self.states.numLDSBlk == kernel["PrefetchGlobalRead"])
+    # set memory token by LDS buffer setting
+    self.states.memTokenLdsBufferMeta = 4
+    if kernel["1LDSBuffer"]:
+      self.states.memTokenLdsBuffer0 = 0
+      self.states.memTokenLdsBuffer1 = 0
+    else:
+      self.states.memTokenLdsBuffer0 = 0
+      self.states.memTokenLdsBuffer1 = 1
+    self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
+    self.states.ldsWriteTokenIdx = self.states.memTokenLdsBuffer0
 
     # NamedTuple is immutable
     class intermediateTPValues(NamedTuple):
@@ -8458,9 +8495,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   # SyncThreads
   ##############################################################################
-  def _syncThreads(self, kernel, comment="", skipForceWaitcnt0=False):
+  def _syncThreads(self, kernel, comment="", skipForceWaitcnt0=False, memoryToken=None):
     if self.do["Sync"]:
-      return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0)
+      return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken)
     return Module("SyncThreads (Empty)")
 
   ##############################################################################
