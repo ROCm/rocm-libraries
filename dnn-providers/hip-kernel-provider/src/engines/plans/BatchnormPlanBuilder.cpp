@@ -197,27 +197,19 @@ bool BatchnormPlanBuilder::isApplicable(
         {
             switch(node.attributes_type())
             {
-            case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-                switch(node.attributes_type())
-            {
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
                 checkBatchnormFwdTrainingTensorConfigSupported(
                     *node.attributes_as_BatchnormAttributes(), opGraph.getTensorMap());
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
                 checkBatchnormInferenceTensorConfigSupported(
-                        *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
+                    *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::
                 BatchnormInferenceAttributesVarianceExt:
                 checkBatchnormInferenceVarianceExtTensorConfigSupported(
                     *node.attributes_as_BatchnormInferenceAttributesVarianceExt(),
                     opGraph.getTensorMap());
-                break;
-            default:
-                throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                               "Unexpected node attribute type");
-            }
                 break;
             default:
                 throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -471,6 +463,15 @@ void BatchnormPlanBuilder::buildPlan(
 
     switch(nodeWrapper.attributesType())
     {
+    case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd training plan for node: " << nodeName);
+        buildPlanFwdTrainingSingleNode(handle,
+                                       opGraph,
+                                       nodeWrapper,
+                                       _kernelCompiler,
+                                       _devicePropertyProvider,
+                                       executionContext);
+        break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
         HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd inference plan for node: " << nodeName);
         buildPlanInferenceSingleNode(handle,
@@ -489,15 +490,6 @@ void BatchnormPlanBuilder::buildPlan(
                                                  _kernelCompiler,
                                                  _devicePropertyProvider,
                                                  executionContext);
-        break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd training plan for node: " << nodeName);
-        buildPlanFwdTrainingSingleNode(handle,
-                                       opGraph,
-                                       nodeWrapper,
-                                       _kernelCompiler,
-                                       _devicePropertyProvider,
-                                       executionContext);
         break;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
