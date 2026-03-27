@@ -329,14 +329,17 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeInputTensorArray)
                                        nullptr));
     ASSERT_EQ(elementCount, 2);
 
-    std::array<HipdnnBackendDescriptor*, 2> retrieved = {nullptr, nullptr};
+    std::array<HipdnnBackendDescriptor*, 2> rawRetrieved = {nullptr, nullptr};
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        2,
                                        &elementCount,
-                                       static_cast<void*>(retrieved.data())));
-    ASSERT_NE(retrieved[0], nullptr);
-    ASSERT_NE(retrieved[1], nullptr);
+                                       static_cast<void*>(rawRetrieved.data())));
+
+    auto retrieved0 = std::unique_ptr<HipdnnBackendDescriptor>(rawRetrieved[0]);
+    auto retrieved1 = std::unique_ptr<HipdnnBackendDescriptor>(rawRetrieved[1]);
+    ASSERT_NE(retrieved0, nullptr);
+    ASSERT_NE(retrieved1, nullptr);
 }
 
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeOutputTensorArray)
@@ -352,12 +355,14 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeOutputTensorArray)
                                        nullptr));
     ASSERT_EQ(elementCount, 1);
 
-    HipdnnBackendDescriptor* retrieved = nullptr;
+    HipdnnBackendDescriptor* rawRetrieved = nullptr;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       static_cast<void*>(&retrieved)));
+                                       static_cast<void*>(&rawRetrieved)));
+
+    auto retrieved = std::unique_ptr<HipdnnBackendDescriptor>(rawRetrieved);
     ASSERT_NE(retrieved, nullptr);
 }
 
