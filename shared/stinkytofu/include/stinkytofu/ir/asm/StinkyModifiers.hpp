@@ -70,6 +70,7 @@ namespace stinkytofu
             MFMA_DATA,
             COMMENT,
             MATRIX_FMT,
+            MEM_TOKEN,
         };
 
         Modifier(Type type)
@@ -871,6 +872,19 @@ namespace stinkytofu
 
         MatrixFmt a;
         MatrixFmt b;
+    };
+
+    struct MemTokenData : public TypedModifier<MemTokenData>
+    {
+        static constexpr Modifier::Type Type = Modifier::Type::MEM_TOKEN;
+
+        std::vector<int> tokens;
+
+        MemTokenData(const std::vector<int>& tokens = {})
+            : TypedModifier<MemTokenData>()
+            , tokens(tokens)
+        {
+        }
     };
 
 } // namespace stinkytofu

@@ -165,7 +165,10 @@ TEST_F(IRParserTest, ParsesInstructionWithHexImmediate)
     auto instructions = parseAssemblyString(input);
 
     ASSERT_EQ(instructions.size(), 1);
-    EXPECT_EQ(instructions[0].srcRegs.size(), 1);
+    ASSERT_EQ(instructions[0].srcRegs.size(), 1);
+    const auto& src0 = instructions[0].srcRegs[0];
+    EXPECT_EQ(src0.dataType, StinkyRegister::Type::LiteralString);
+    EXPECT_EQ(src0.getLiteralString(), "0x3f800000");
 }
 
 TEST_F(IRParserTest, ParsesInstructionWithComment)

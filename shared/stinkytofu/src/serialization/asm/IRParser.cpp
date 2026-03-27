@@ -26,8 +26,10 @@
 #include "IRLexer.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <iostream>
 #include <optional>
+#include <string_view>
 
 using namespace stinkytofu;
 
@@ -103,6 +105,20 @@ namespace
             return std::nullopt;
 
         return static_cast<int>(result);
+    }
+
+    inline bool isHexSuffixIdentifier(std::string_view id)
+    {
+        if(id.size() < 2)
+            return false;
+        if(id[0] != 'x' && id[0] != 'X')
+            return false;
+        for(size_t i = 1; i < id.size(); ++i)
+        {
+            if(!std::isxdigit(static_cast<unsigned char>(id[i])))
+                return false;
+        }
+        return true;
     }
 
     //----------------------------------------------------------------------
@@ -186,11 +202,11 @@ namespace
         /// Parse a modifier dict: { field = value, ... }. Returns nullopt on error.
         std::optional<std::unordered_map<std::string, std::string>> parseModifierDict();
 
-        /// Parse a single attribute value (int, float, quoted string, true, false).
+        /// Parse a single modifier field value (scalar, array, int, float, quoted string, bool).
         std::optional<std::string> parseAttributeValue();
 
         /// Parse a single register reference.
-        /// Formats: v[14:17], s[0], acc[0:15], BARRIER[0], SCC[0], DS_WRITE[0], 0x1, 42, 3.14
+        /// Formats: v[14:17], s[0], acc[0:15], BARRIER[0], SCC[0], DS_WRITE[0], 0x..., 42, 3.14
         std::optional<StinkyRegister> parseRegister();
 
         //------------------------------------------------------------------
@@ -961,7 +977,60 @@ namespace
                 return s;
             return s; // Allow other identifiers as string values
         }
-        emitError("Expected attribute value (integer, float, string, true, or false)");
+        if(peek().kind == TokenKind::LeftBracket)
+        {
+            consume();
+            std::string result = "[";
+            bool        first  = true;
+            while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
+            {
+                if(peek().kind == TokenKind::RightBracket)
+                {
+                    consume();
+                    result += "]";
+                    return result;
+                }
+                if(!first)
+                {
+                    if(peek().kind != TokenKind::Comma)
+                    {
+                        emitError("Expected ',' or ']' in attribute array value");
+                        return std::nullopt;
+                    }
+                    consume();
+                }
+                first = false;
+
+                TokenKind elemKind = peek().kind;
+                if(elemKind == TokenKind::IntegerLiteral || elemKind == TokenKind::HexLiteral
+                   || elemKind == TokenKind::FloatLiteral)
+                {
+                    result += std::string(consume().text);
+                }
+                else if(elemKind == TokenKind::KW_true)
+                {
+                    consume();
+                    result += "true";
+                }
+                else if(elemKind == TokenKind::KW_false)
+                {
+                    consume();
+                    result += "false";
+                }
+                else if(elemKind == TokenKind::Identifier)
+                {
+                    result += std::string(consume().text);
+                }
+                else
+                {
+                    emitError("Expected scalar literal in attribute array value");
+                    return std::nullopt;
+                }
+            }
+            emitError("Unterminated attribute array value");
+            return std::nullopt;
+        }
+        emitError("Expected attribute value (integer, float, string, true, false, or array)");
         return std::nullopt;
     }
 
@@ -969,7 +1038,7 @@ namespace
     {
         // Parse register references:
         // v[10], v[14:17], s[0], acc[0:15], BARRIER[0], SCC[0], DS_WRITE[0]
-        // Also literals: 0x1, 42, 3.14
+        // Literals: HexLiteral -> LiteralString (spelling preserved); decimal int / float -> numeric literals.
 
         TokenKind kind = peek().kind;
 
@@ -977,27 +1046,31 @@ namespace
         if(kind == TokenKind::IntegerLiteral)
         {
             const Token& tok = consume();
-            auto         val = safeStoi(std::string(tok.text));
+            std::string  num(tok.text);
+            // Recover "0xN" when lexed as IntegerLiteral "0" + Identifier "xN" (or NBSP/other gap).
+            if(num == "0" && peek().kind == TokenKind::Identifier)
+            {
+                std::string id(peek().text);
+                if(isHexSuffixIdentifier(id))
+                {
+                    consume();
+                    return StinkyRegister(std::string("0") + std::string(id));
+                }
+            }
+            auto val = safeStoi(num);
             if(!val)
             {
-                emitError("Integer literal out of range or invalid: " + std::string(tok.text));
+                emitError("Integer literal out of range or invalid: " + num);
                 return std::nullopt;
             }
             return StinkyRegister(*val);
         }
 
-        // Handle hex literals
+        // Hex immediates: preserve spelling as a literal string (e.g. 0xffff0000).
         if(kind == TokenKind::HexLiteral)
         {
             const Token& tok = consume();
-            std::string  text(tok.text);
-            auto         val = safeStoi(text, 16);
-            if(!val)
-            {
-                emitError("Hex literal out of range or invalid: " + text);
-                return std::nullopt;
-            }
-            return StinkyRegister(*val);
+            return StinkyRegister(std::string(tok.text));
         }
 
         // Handle float literals
@@ -1006,7 +1079,7 @@ namespace
             const Token& tok = consume();
             // For now, convert to integer (truncate)
             double val = std::stod(std::string(tok.text));
-            return StinkyRegister(static_cast<int>(val));
+            return StinkyRegister(static_cast<double>(val));
         }
 
         // Must be an identifier (register type like 'v', 's', 'acc', 'BARRIER', etc.)

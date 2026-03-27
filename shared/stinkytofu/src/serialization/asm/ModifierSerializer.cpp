@@ -79,6 +79,43 @@ namespace stinkytofu
             return it->second;
         }
 
+        /// Parse serialized int vector form `[0,1]` (matches IRParser / vectorToString).
+        std::vector<int> getIntVector(const std::unordered_map<std::string, std::string>& m,
+                                      const std::string&                                  key)
+        {
+            const std::string s = getStr(m, key);
+            std::vector<int>  result;
+            if(s.size() < 2 || s.front() != '[' || s.back() != ']')
+                return result;
+
+            const std::string inner = s.substr(1, s.size() - 2);
+            size_t            pos   = 0;
+            while(pos < inner.size())
+            {
+                while(pos < inner.size()
+                      && (inner[pos] == ' ' || inner[pos] == '\t' || inner[pos] == ','))
+                    ++pos;
+                if(pos >= inner.size())
+                    break;
+                const size_t start = pos;
+                while(pos < inner.size() && inner[pos] != ',')
+                    ++pos;
+                std::string token = inner.substr(start, pos - start);
+                while(!token.empty() && (token.back() == ' ' || token.back() == '\t'))
+                    token.pop_back();
+                if(token.empty())
+                    continue;
+                char* endPtr = nullptr;
+                long  val    = std::strtol(token.c_str(), &endPtr, 0);
+                if(endPtr != token.c_str() + token.size())
+                    return {};
+                if(val < INT_MIN || val > INT_MAX)
+                    return {};
+                result.push_back(static_cast<int>(val));
+            }
+            return result;
+        }
+
         const char* delayAluInstTypeStr(SDelayAluData::InstType t)
         {
             switch(t)
@@ -371,6 +408,13 @@ namespace stinkytofu
             return true;
         }
 
+        // MemTokenData
+        bool serializeVisit(const MemTokenData& mod, std::ostream& os)
+        {
+            os << ", mod.memtoken = { tokens = " << vectorToString(mod.tokens) << " }";
+            return true;
+        }
+
         template <typename ModifierType, typename... Rest, unsigned Dummy = 0>
         bool serializeVisit(const Modifier& mod, std::ostream& os)
         {
@@ -401,7 +445,8 @@ namespace stinkytofu
                               SWaitStoreCntData,
                               SDelayAluData,
                               SWaitAluData,
-                              MFMAModifiers>(mod, os);
+                              MFMAModifiers,
+                              MemTokenData>(mod, os);
     }
 
     /*
@@ -552,6 +597,13 @@ namespace stinkytofu
                                                getInt(fields, "vm_vsrc", -1),
                                                getInt(fields, "va_vcc", -1),
                                                getInt(fields, "sa_sdst", -1)));
+            }
+            else if(attrKey == "mod.memtoken")
+            {
+                if(fields.count("tokens"))
+                {
+                    inst->addModifier(MemTokenData(getIntVector(fields, "tokens")));
+                }
             }
             // mod.sdwa, mod.dpp, mod.vop3p, mod.true16: no deserialize support yet
         }
