@@ -28,6 +28,7 @@ add_executable(
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
     IntegrationConvolutionDgradDescriptorLowering.cpp
+    IntegrationConvolutionDgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp

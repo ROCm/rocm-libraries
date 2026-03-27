@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/ConvolutionDgradPacker.hpp>
+#include <hipdnn_frontend/detail/ConvolutionDgradUnpacker.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -21,6 +22,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(convAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        ConvDgradAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackConvBpropOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 
     Error pre_validate_node() const override

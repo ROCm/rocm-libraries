@@ -61,6 +61,7 @@ add_executable(
     descriptors/TestGraphDescriptorPointwise.cpp
     descriptors/TestGraphDescriptorRMSNorm.cpp
     descriptors/TestGraphDescriptorSdpaFprop.cpp
+    descriptors/TestConvolutionBwdOperationFromNode.cpp
     descriptors/TestLayernormOperationDescriptor.cpp
     descriptors/TestLayernormOperationFromNode.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
