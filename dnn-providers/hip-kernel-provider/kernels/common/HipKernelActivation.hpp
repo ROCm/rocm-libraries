@@ -5,7 +5,7 @@
 
 #include "HipKernelMath.hpp"
 
-namespace hip_kernel_plugin
+namespace hip_kernel_provider
 {
 
 /// Note: Values match hip_kernel_utils::ActivationMode in HipKernelUtils.hpp
@@ -90,4 +90,4 @@ __forceinline__ __device__ T
     }
 }
 
-} // namespace hip_kernel_plugin
+} // namespace hip_kernel_provider

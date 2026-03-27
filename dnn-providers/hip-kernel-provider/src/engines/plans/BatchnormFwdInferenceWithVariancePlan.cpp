@@ -1,21 +1,22 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "BatchnormFwdInferencePlan.hpp"
+#include "BatchnormFwdInferenceWithVariancePlan.hpp"
 #include "PlanUtils.hpp"
 
 #include "hip/IKernelCompiler.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider
 {
 
-BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& attributes,
+BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(tensorMap.at(attributes.x_tensor_uid()))
@@ -23,13 +24,18 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     , _scale(tensorMap.at(attributes.scale_tensor_uid()))
     , _bias(tensorMap.at(attributes.bias_tensor_uid()))
     , _estMean(tensorMap.at(attributes.mean_tensor_uid()))
-    , _invVariance(tensorMap.at(attributes.inv_variance_tensor_uid()))
+    , _estVariance(tensorMap.at(attributes.variance_tensor_uid()))
     , _activationOut(nullptr)
 {
+    // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
+    auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
+    _epsilonValue
+        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
 }
 
-BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
+BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+        inferenceAttributes,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
@@ -38,69 +44,84 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     , _scale(tensorMap.at(inferenceAttributes.scale_tensor_uid()))
     , _bias(tensorMap.at(inferenceAttributes.bias_tensor_uid()))
     , _estMean(tensorMap.at(inferenceAttributes.mean_tensor_uid()))
-    , _invVariance(tensorMap.at(inferenceAttributes.inv_variance_tensor_uid()))
+    , _estVariance(tensorMap.at(inferenceAttributes.variance_tensor_uid()))
     , _optActivation(hip_kernel_utils::parseActivation(pointwiseAttributes))
     , _activationOut(tensorMap.at(pointwiseAttributes.out_0_tensor_uid()))
 {
+    // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
+    auto epsilonTensorAttr = tensorMap.at(inferenceAttributes.epsilon_tensor_uid());
+    _epsilonValue
+        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdInferenceParams::x() const
+const hipdnn_data_sdk::data_objects::TensorAttributes*
+    BatchnormFwdInferenceWithVarianceParams::x() const
 {
     return _x;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdInferenceParams::y() const
+const hipdnn_data_sdk::data_objects::TensorAttributes*
+    BatchnormFwdInferenceWithVarianceParams::y() const
 {
     return _y;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdInferenceParams::scale() const
+const hipdnn_data_sdk::data_objects::TensorAttributes*
+    BatchnormFwdInferenceWithVarianceParams::scale() const
 {
     return _scale;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdInferenceParams::bias() const
+const hipdnn_data_sdk::data_objects::TensorAttributes*
+    BatchnormFwdInferenceWithVarianceParams::bias() const
 {
     return _bias;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdInferenceParams::estMean() const
+const hipdnn_data_sdk::data_objects::TensorAttributes*
+    BatchnormFwdInferenceWithVarianceParams::estMean() const
 {
     return _estMean;
 }
 
 const hipdnn_data_sdk::data_objects::TensorAttributes*
-    BatchnormFwdInferenceParams::invVariance() const
+    BatchnormFwdInferenceWithVarianceParams::estVariance() const
 {
-    return _invVariance;
+    return _estVariance;
+}
+
+double BatchnormFwdInferenceWithVarianceParams::epsilonValue() const
+{
+    return _epsilonValue;
 }
 
 const std::optional<hip_kernel_utils::ActivationParams>&
-    BatchnormFwdInferenceParams::optActivation() const
+    BatchnormFwdInferenceWithVarianceParams::optActivation() const
 {
     return _optActivation;
 }
 
 const hipdnn_data_sdk::data_objects::TensorAttributes*
-    BatchnormFwdInferenceParams::activationOut() const
+    BatchnormFwdInferenceWithVarianceParams::activationOut() const
 {
     return _activationOut;
 }
 
-BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams)
+BatchnormFwdInferenceWithVariancePlan::BatchnormFwdInferenceWithVariancePlan(
+    BatchnormFwdInferenceWithVarianceParams&& inferenceParams)
     : _inferenceParams(std::move(inferenceParams))
 {
 }
 
-size_t BatchnormFwdInferencePlan::getWorkspaceSize(
+size_t BatchnormFwdInferenceWithVariancePlan::getWorkspaceSize(
     [[maybe_unused]] const HipKernelHandle& handle) const
 {
-    // No workspace needed for batchnorm inference
+    // No workspace needed for batchnorm inference with variance
     return 0;
 }
 
-void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
-                                        const hipDeviceProp_t& deviceProperties)
+void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kernelCompiler,
+                                                    const hipDeviceProp_t& deviceProperties)
 {
     // Determine data type configuration
     auto xDataType = _inferenceParams.x()->data_type();
@@ -159,10 +180,11 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     auto inCstride = static_cast<unsigned int>(h * w);
 
-    bool isLayoutNhwc = hip_kernel_utils::isChannelLastLayout(_inferenceParams.x());
+    // Detect layout: NHWC has C dimension (index 1) with stride 1, NCHW has stride H*W
+    bool isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(_inferenceParams.x());
 
     // Calculate vector size based on layout
-    auto vectorsize = batchnorm::computeVectorSize(isLayoutNhwc, c, inCstride);
+    auto vectorsize = batchnorm::computeVectorSize(isLayoutNHWC, c, inCstride);
 
     // Calculate block and grid dimensions
     size_t xlocalsize = 0;
@@ -173,7 +195,7 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     size_t zgridsize = 0;
     size_t maxLocalsize = 256;
 
-    if(isLayoutNhwc)
+    if(isLayoutNHWC)
     {
         xlocalsize = std::min(static_cast<size_t>(c) / vectorsize, maxLocalsize);
         xgridsize
@@ -207,10 +229,10 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Detect GPU architecture
     std::string archName(deviceProperties.gcnArchName);
-    bool isGfx103x = (archName.find("gfx103") == 0);
-    bool isGfx110x = (archName.find("gfx110") == 0);
-    bool isGfx120x = (archName.find("gfx120") == 0);
-    bool isGfx115x = (archName.find("gfx115") == 0);
+    bool isGfx103X = (archName.find("gfx103") == 0);
+    bool isGfx110X = (archName.find("gfx110") == 0);
+    bool isGfx120X = (archName.find("gfx120") == 0);
+    bool isGfx115X = (archName.find("gfx115") == 0);
 
     // Get activation mode
     int nrnOpId = 0;
@@ -230,7 +252,8 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
         auto rocmIncludeArg = "-I" + rocmPath + "/include";
         options.emplace_back(rocmIncludeArg);
         HIPDNN_PLUGIN_LOG_INFO(
-            "BatchnormFwdInferencePlan: HIPRTC compile ROCm include path: " << rocmIncludeArg);
+            "BatchnormFwdInferenceWithVariancePlan: HIPRTC compile ROCm include path: "
+            << rocmIncludeArg);
     }
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP16=") + (useFp16Mix ? "1" : "0"));
@@ -242,17 +265,17 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP1=") + std::to_string(ylocalsize));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP2=") + std::to_string(zlocalsize));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_VEC_SIZE=") + std::to_string(vectorsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_LAYOUT_NHWC=") + (isLayoutNhwc ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX103X=") + (isGfx103x ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX110X=") + (isGfx110x ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX120X=") + (isGfx120x ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX115X=") + (isGfx115x ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_LAYOUT_NHWC=") + (isLayoutNHWC ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX103X=") + (isGfx103X ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX110X=") + (isGfx110X ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX120X=") + (isGfx120X ? "1" : "0"));
+    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX115X=") + (isGfx115X ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_NRN_OP_ID=") + std::to_string(nrnOpId));
     options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", options);
-    _runnableKernel = _compiledProgram->getKernel("BatchNormFwdInferSpatialEstInvVar");
+    _runnableKernel = _compiledProgram->getKernel("BatchNormFwdInferSpatialEst");
 
     _runnableKernel->setBlockSize(static_cast<unsigned int>(xlocalsize),
                                   static_cast<unsigned int>(ylocalsize),
@@ -270,16 +293,16 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     _batchStride = static_cast<unsigned int>(nStride);
 }
 
-void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
-                                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                        uint32_t numDeviceBuffers,
-                                        [[maybe_unused]] void* workspace) const
+void BatchnormFwdInferenceWithVariancePlan::execute(const HipKernelHandle& handle,
+                                                    const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                                    uint32_t numDeviceBuffers,
+                                                    [[maybe_unused]] void* workspace) const
 {
     if(!_runnableKernel)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "BatchnormFwdInferencePlan::execute() called before compile()");
+            "BatchnormFwdInferenceWithVariancePlan::execute() called before compile()");
     }
 
     // Get device buffer pointers
@@ -291,8 +314,11 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
         _inferenceParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
     auto estMeanBuffer = hip_kernel_utils::findDeviceBuffer(
         _inferenceParams.estMean()->uid(), deviceBuffers, numDeviceBuffers);
-    auto invVarianceBuffer = hip_kernel_utils::findDeviceBuffer(
-        _inferenceParams.invVariance()->uid(), deviceBuffers, numDeviceBuffers);
+    auto estVarianceBuffer = hip_kernel_utils::findDeviceBuffer(
+        _inferenceParams.estVariance()->uid(), deviceBuffers, numDeviceBuffers);
+
+    // Get epsilon
+    double epsilon = _inferenceParams.epsilonValue();
 
     float activationAlpha = 0.0f;
     float activationBeta = 0.0f;
@@ -312,9 +338,10 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
                                 xBuffer.ptr,
                                 activationOutBuffer.ptr,
                                 estMeanBuffer.ptr,
-                                invVarianceBuffer.ptr,
+                                estVarianceBuffer.ptr,
                                 scaleBuffer.ptr,
                                 biasBuffer.ptr,
+                                epsilon,
                                 _channels,
                                 _inCstride,
                                 _batchCount,
@@ -333,9 +360,10 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
                                 xBuffer.ptr,
                                 yBuffer.ptr,
                                 estMeanBuffer.ptr,
-                                invVarianceBuffer.ptr,
+                                estVarianceBuffer.ptr,
                                 scaleBuffer.ptr,
                                 biasBuffer.ptr,
+                                epsilon,
                                 _channels,
                                 _inCstride,
                                 _batchCount,
@@ -346,5 +374,4 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
                                 activationBeta);
     }
 }
-
 }

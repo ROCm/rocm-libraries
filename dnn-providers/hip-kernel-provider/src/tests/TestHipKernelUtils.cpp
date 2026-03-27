@@ -225,3 +225,167 @@ TEST(TestIsChannelLastLayout, ThrowsFor6DTensor)
 
     EXPECT_THROW(isChannelLastLayout(getTensor(graph)), hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+// ============================================================================
+// parseActivation
+// ============================================================================
+
+namespace
+{
+
+// Helper function to create PointwiseAttributes
+const hipdnn_data_sdk::data_objects::PointwiseAttributes*
+    createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode mode,
+                              flatbuffers::Optional<float> reluLowerClip = flatbuffers::nullopt,
+                              flatbuffers::Optional<float> reluUpperClip = flatbuffers::nullopt,
+                              flatbuffers::Optional<float> reluLowerClipSlope
+                              = flatbuffers::nullopt,
+                              flatbuffers::Optional<float> eluAlpha = flatbuffers::nullopt,
+                              flatbuffers::Optional<float> softplusBeta = flatbuffers::nullopt)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(builder,
+                                                                               mode,
+                                                                               reluLowerClip,
+                                                                               reluUpperClip,
+                                                                               reluLowerClipSlope,
+                                                                               flatbuffers::nullopt,
+                                                                               0,
+                                                                               flatbuffers::nullopt,
+                                                                               flatbuffers::nullopt,
+                                                                               1,
+                                                                               flatbuffers::nullopt,
+                                                                               eluAlpha,
+                                                                               softplusBeta);
+    builder.Finish(attrOffset);
+    return flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::PointwiseAttributes>(
+        builder.GetBufferPointer());
+}
+
+} // namespace
+
+TEST(TestParseActivation, ReluDefault)
+{
+    auto attrs = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD);
+
+    auto params = parseActivation(*attrs);
+
+    EXPECT_EQ(params.mode, ActivationMode::RELU);
+    EXPECT_DOUBLE_EQ(params.alpha, 0.0);
+}
+
+TEST(TestParseActivation, ReluClippedUpperOnly)
+{
+    auto attrs = createPointwiseAttributes(
+        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, flatbuffers::nullopt, 5.0f);
+
+    auto params = parseActivation(*attrs);
+
+    EXPECT_EQ(params.mode, ActivationMode::CLIPPED_RELU);
+    EXPECT_NEAR(params.alpha, 5.0f, 1e-10);
+}
+
+TEST(TestParseActivation, ReluClampLowerAndUpper)
+{
+    auto attrs = createPointwiseAttributes(
+        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, 0.5f, 10.0f);
+
+    auto params = parseActivation(*attrs);
+
+    EXPECT_EQ(params.mode, ActivationMode::CLAMP);
+    EXPECT_NEAR(params.alpha, 0.5f, 1e-10);
+    EXPECT_NEAR(params.beta, 10.0f, 1e-10);
+}
+
+TEST(TestParseActivation, ReluLeaky)
+{
+    auto attrs = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
+                                           flatbuffers::nullopt,
+                                           flatbuffers::nullopt,
+                                           0.01f);
+
+    auto params = parseActivation(*attrs);
+
+    EXPECT_EQ(params.mode, ActivationMode::LEAKY_RELU);
+    EXPECT_NEAR(params.alpha, 0.01f, 1e-10);
+}
+
+TEST(TestParseActivation, ThrowsOnReluUnsupportedLowerClipOnly)
+{
+    // lower clip without upper clip is not supported
+    auto attrs = createPointwiseAttributes(
+        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, 0.5f, flatbuffers::nullopt);
+
+    EXPECT_THROW(parseActivation(*attrs), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestParseActivation, EluCustomAlpha)
+{
+    auto attrs = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::ELU_FWD,
+                                           flatbuffers::nullopt,
+                                           flatbuffers::nullopt,
+                                           flatbuffers::nullopt,
+                                           1.50f);
+
+    auto params = parseActivation(*attrs);
+
+    EXPECT_EQ(params.mode, ActivationMode::ELU);
+    EXPECT_NEAR(params.alpha, 1.50f, 1e-10);
+}
+
+TEST(TestParseActivation, SoftplusValidBeta)
+{
+    auto attrs
+        = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
+                                    flatbuffers::nullopt,
+                                    flatbuffers::nullopt,
+                                    flatbuffers::nullopt,
+                                    flatbuffers::nullopt,
+                                    1.0f);
+
+    auto params = parseActivation(*attrs);
+
+    EXPECT_EQ(params.mode, ActivationMode::SOFTRELU);
+}
+
+TEST(TestParseActivation, SoftplusInvalidBeta)
+{
+    auto attrs
+        = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
+                                    flatbuffers::nullopt,
+                                    flatbuffers::nullopt,
+                                    flatbuffers::nullopt,
+                                    flatbuffers::nullopt,
+                                    2.0f);
+
+    EXPECT_THROW(parseActivation(*attrs), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestParseActivation, Sigmoid)
+{
+    auto attrs
+        = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_FWD);
+
+    auto params = parseActivation(*attrs);
+    EXPECT_EQ(params.mode, ActivationMode::LOGISTIC);
+}
+
+TEST(TestParseActivation, TanhWithDefaults)
+{
+    auto attrs = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::TANH_BWD);
+
+    auto params = parseActivation(*attrs);
+
+    EXPECT_EQ(params.mode, ActivationMode::TANH);
+    EXPECT_DOUBLE_EQ(params.alpha, 1.0);
+    EXPECT_DOUBLE_EQ(params.beta, 1.0);
+}
+
+TEST(TestParseActivation, Passthru)
+{
+    auto attrs = createPointwiseAttributes(hipdnn_data_sdk::data_objects::PointwiseMode::IDENTITY);
+
+    auto params = parseActivation(*attrs);
+
+    EXPECT_EQ(params.mode, ActivationMode::PASTHRU);
+}

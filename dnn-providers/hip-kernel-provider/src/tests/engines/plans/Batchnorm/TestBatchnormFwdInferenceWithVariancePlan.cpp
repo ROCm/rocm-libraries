@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <gtest/gtest.h>
 
-#include "engines/plans/BatchnormFwdInferencePlan.hpp"
+#include "engines/plans/BatchnormFwdInferenceWithVariancePlan.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
@@ -17,169 +17,175 @@
 using namespace hip_kernel_provider;
 
 // ============================================================================
-// BatchnormFwdInferenceParams - construction from valid graph data
+// BatchnormFwdInferenceWithVarianceParams - construction from valid graph data
 // ============================================================================
 
-TEST(TestBatchnormFwdInferenceParams, ConstructsFromSingleNodeGraph)
+TEST(TestBatchnormFwdInferenceWithVarianceParams, ConstructsFromSingleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
     const auto& node = graph.getNode(0);
-    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
 
-    EXPECT_NO_THROW(BatchnormFwdInferenceParams params(attr, graph.getTensorMap()));
+    EXPECT_NO_THROW(BatchnormFwdInferenceWithVarianceParams params(attr, graph.getTensorMap()));
 }
 
-TEST(TestBatchnormFwdInferenceParams, HasCorrectTensorPointersForSingleNode)
+TEST(TestBatchnormFwdInferenceWithVarianceParams, HasCorrectTensorPointersForSingleNode)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
     const auto& node = graph.getNode(0);
-    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
 
-    BatchnormFwdInferenceParams params(attr, graph.getTensorMap());
+    BatchnormFwdInferenceWithVarianceParams params(attr, graph.getTensorMap());
 
     EXPECT_NE(params.x(), nullptr);
     EXPECT_NE(params.y(), nullptr);
     EXPECT_NE(params.scale(), nullptr);
     EXPECT_NE(params.bias(), nullptr);
     EXPECT_NE(params.estMean(), nullptr);
-    EXPECT_NE(params.invVariance(), nullptr);
+    EXPECT_NE(params.estVariance(), nullptr);
+    EXPECT_NEAR(params.epsilonValue(), 1e-5, 1e-10);
 
     // No activation in this graph, so these should be nullopt / nullptr
     EXPECT_EQ(params.optActivation(), std::nullopt);
     EXPECT_EQ(params.activationOut(), nullptr);
 }
 
-TEST(TestBatchnormFwdInferenceParams, TensorPointersMatchExpectedUids)
+TEST(TestBatchnormFwdInferenceWithVarianceParams, TensorPointersMatchExpectedUids)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
     const auto& node = graph.getNode(0);
-    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
 
-    BatchnormFwdInferenceParams params(attr, graph.getTensorMap());
+    BatchnormFwdInferenceWithVarianceParams params(attr, graph.getTensorMap());
 
     EXPECT_EQ(params.x()->uid(), attr.x_tensor_uid());
     EXPECT_EQ(params.y()->uid(), attr.y_tensor_uid());
     EXPECT_EQ(params.scale()->uid(), attr.scale_tensor_uid());
     EXPECT_EQ(params.bias()->uid(), attr.bias_tensor_uid());
     EXPECT_EQ(params.estMean()->uid(), attr.mean_tensor_uid());
-    EXPECT_EQ(params.invVariance()->uid(), attr.inv_variance_tensor_uid());
+    EXPECT_EQ(params.estVariance()->uid(), attr.variance_tensor_uid());
 }
 
-TEST(TestBatchnormFwdInferenceParams, IsMoveConstructible)
+TEST(TestBatchnormFwdInferenceWithVarianceParams, IsMoveConstructible)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
     const auto& node = graph.getNode(0);
-    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
 
-    BatchnormFwdInferenceParams params(attr, graph.getTensorMap());
-    BatchnormFwdInferenceParams moved(std::move(params));
+    BatchnormFwdInferenceWithVarianceParams params(attr, graph.getTensorMap());
+    BatchnormFwdInferenceWithVarianceParams moved(std::move(params));
 
     EXPECT_NE(moved.x(), nullptr);
     EXPECT_NE(moved.y(), nullptr);
 }
 
-TEST(TestBatchnormFwdInferenceParams, ConstructGraphWithActivation)
+TEST(TestBatchnormFwdInferenceWithVarianceParams, IsNotCopyConstructible)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
-
-    const auto& node = graph.getNode(0);
-    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
-
-    const auto& activNode = graph.getNode(1);
-    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
-
-    EXPECT_NO_THROW(BatchnormFwdInferenceParams params(attr, activAttrs, graph.getTensorMap()));
+    EXPECT_FALSE(std::is_copy_constructible_v<BatchnormFwdInferenceWithVarianceParams>);
 }
 
-TEST(TestBatchnormFwdInferenceParams, HasCorrectTensorPointersForGraphWithActivation)
+TEST(TestBatchnormFwdInferenceWithVarianceParams, ConstructGraphWithActivation)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
     const auto& node = graph.getNode(0);
-    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
 
     const auto& activNode = graph.getNode(1);
     const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
 
-    BatchnormFwdInferenceParams params(attr, activAttrs, graph.getTensorMap());
+    EXPECT_NO_THROW(
+        BatchnormFwdInferenceWithVarianceParams params(attr, activAttrs, graph.getTensorMap()));
+}
+
+TEST(TestBatchnormFwdInferenceWithVarianceParams, HasCorrectTensorPointersForGraphWithActivation)
+{
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormFwdInferenceWithVarianceParams params(attr, activAttrs, graph.getTensorMap());
 
     EXPECT_NE(params.x(), nullptr);
     EXPECT_NE(params.y(), nullptr);
     EXPECT_NE(params.scale(), nullptr);
     EXPECT_NE(params.bias(), nullptr);
     EXPECT_NE(params.estMean(), nullptr);
-    EXPECT_NE(params.invVariance(), nullptr);
+    EXPECT_NE(params.estVariance(), nullptr);
     EXPECT_NE(params.optActivation(), std::nullopt);
     EXPECT_NE(params.activationOut(), nullptr);
 }
 
-TEST(TestBatchnormFwdInferenceParams, TensorPointersMatchExpectedUidsForGraphWithActivation)
+TEST(TestBatchnormFwdInferenceWithVarianceParams,
+     TensorPointersMatchExpectedUidsForGraphWithActivation)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
     const auto& node = graph.getNode(0);
-    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
 
     const auto& activNode = graph.getNode(1);
     const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
 
-    BatchnormFwdInferenceParams params(attr, activAttrs, graph.getTensorMap());
+    BatchnormFwdInferenceWithVarianceParams params(attr, activAttrs, graph.getTensorMap());
 
     EXPECT_EQ(params.x()->uid(), attr.x_tensor_uid());
     EXPECT_EQ(params.y()->uid(), attr.y_tensor_uid());
     EXPECT_EQ(params.scale()->uid(), attr.scale_tensor_uid());
     EXPECT_EQ(params.bias()->uid(), attr.bias_tensor_uid());
     EXPECT_EQ(params.estMean()->uid(), attr.mean_tensor_uid());
-    EXPECT_EQ(params.invVariance()->uid(), attr.inv_variance_tensor_uid());
+    EXPECT_EQ(params.estVariance()->uid(), attr.variance_tensor_uid());
     EXPECT_EQ(params.activationOut()->uid(), activAttrs.out_0_tensor_uid());
 }
 
-TEST(TestBatchnormFwdInferenceParams, IsNotCopyConstructible)
-{
-    EXPECT_FALSE(std::is_copy_constructible_v<BatchnormFwdInferenceParams>);
-}
-
 // ============================================================================
-// BatchnormFwdInferencePlan - helpers
+// BatchnormFwdInferenceWithVariancePlan - helpers
 // ============================================================================
 
 namespace
 {
 
-BatchnormFwdInferencePlan createPlanFromGraph(const std::vector<int64_t>& strides
-                                              = {150528, 50176, 224, 1},
-                                              const std::vector<int64_t>& dims = {1, 3, 224, 224},
-                                              hipdnn_data_sdk::data_objects::DataType inputDataType
-                                              = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+BatchnormFwdInferenceWithVariancePlan
+    createPlanFromGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
+                        const std::vector<int64_t>& dims = {1, 3, 224, 224},
+                        hipdnn_data_sdk::data_objects::DataType inputDataType
+                        = hipdnn_data_sdk::data_objects::DataType::FLOAT)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
         strides, dims, inputDataType);
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
     const auto& node = graph.getNode(0);
-    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
 
-    BatchnormFwdInferenceParams params(attr, graph.getTensorMap());
-    return BatchnormFwdInferencePlan{std::move(params)};
+    BatchnormFwdInferenceWithVarianceParams params(attr, graph.getTensorMap());
+    return BatchnormFwdInferenceWithVariancePlan{std::move(params)};
 }
 
 hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
@@ -194,42 +200,42 @@ hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
 } // namespace
 
 // ============================================================================
-// BatchnormFwdInferencePlan - basic behavior
+// BatchnormFwdInferenceWithVariancePlan - basic behavior
 // ============================================================================
 
-TEST(TestBatchnormFwdInferencePlan, ExecuteWithoutCompileThrows)
+TEST(TestBatchnormFwdInferenceWithVariancePlan, ExecuteWithoutCompileThrows)
 {
     auto plan = createPlanFromGraph();
     HipKernelHandle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestBatchnormFwdInferencePlan, GetWorkspaceSizeReturnsZero)
+TEST(TestBatchnormFwdInferenceWithVariancePlan, GetWorkspaceSizeReturnsZero)
 {
     auto plan = createPlanFromGraph();
     HipKernelHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
-TEST(TestBatchnormFwdInferencePlan, IsMoveConstructible)
+TEST(TestBatchnormFwdInferenceWithVariancePlan, IsMoveConstructible)
 {
     auto plan = createPlanFromGraph();
 
-    BatchnormFwdInferencePlan moved(std::move(plan));
+    BatchnormFwdInferenceWithVariancePlan moved(std::move(plan));
     HipKernelHandle handle;
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 
-TEST(TestBatchnormFwdInferencePlan, IsNotCopyConstructible)
+TEST(TestBatchnormFwdInferenceWithVariancePlan, IsNotCopyConstructible)
 {
-    EXPECT_FALSE(std::is_copy_constructible_v<BatchnormFwdInferencePlan>);
+    EXPECT_FALSE(std::is_copy_constructible_v<BatchnormFwdInferenceWithVariancePlan>);
 }
 
 // ============================================================================
-// BatchnormFwdInferencePlan - compile
+// BatchnormFwdInferenceWithVariancePlan - compile
 // ============================================================================
 
-TEST(TestBatchnormFwdInferencePlan, CompileCallsCompilerWithCorrectKernelName)
+TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileCallsCompilerWithCorrectKernelName)
 {
     MockKernelCompiler mockCompiler;
 
@@ -238,7 +244,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileCallsCompilerWithCorrectKernelName)
     EXPECT_CALL(*mockKernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
 
     auto mockProgram = std::make_unique<MockCompiledProgram>();
-    EXPECT_CALL(*mockProgram, getKernel("BatchNormFwdInferSpatialEstInvVar"))
+    EXPECT_CALL(*mockProgram, getKernel("BatchNormFwdInferSpatialEst"))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
 
     EXPECT_CALL(mockCompiler, compile("BatchNormFwdInferSpatial.cpp", ::testing::_))
@@ -250,7 +256,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileCallsCompilerWithCorrectKernelName)
     plan.compile(mockCompiler, deviceProps);
 }
 
-TEST(TestBatchnormFwdInferencePlan, CompileIncludesOffloadArchOption)
+TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileIncludesOffloadArchOption)
 {
     MockKernelCompiler mockCompiler;
 
@@ -272,7 +278,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileIncludesOffloadArchOption)
     plan.compile(mockCompiler, deviceProps);
 }
 
-TEST(TestBatchnormFwdInferencePlan, CompileFp32SetsCorrectDefines)
+TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileFp32SetsCorrectDefines)
 {
     MockKernelCompiler mockCompiler;
 
@@ -304,7 +310,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileFp32SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
 }
 
-TEST(TestBatchnormFwdInferencePlan, CompileFp16SetsCorrectDefines)
+TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileFp16SetsCorrectDefines)
 {
     MockKernelCompiler mockCompiler;
 
@@ -338,7 +344,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileFp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FPMIX=1"));
 }
 
-TEST(TestBatchnormFwdInferencePlan, CompileBfp16SetsCorrectDefines)
+TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileBfp16SetsCorrectDefines)
 {
     MockKernelCompiler mockCompiler;
 
@@ -373,7 +379,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileBfp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFPMIX=1"));
 }
 
-TEST(TestBatchnormFwdInferencePlan, CompileNchwLayoutSetsCorrectDefine)
+TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileNchwLayoutSetsCorrectDefine)
 {
     MockKernelCompiler mockCompiler;
 
@@ -404,7 +410,7 @@ TEST(TestBatchnormFwdInferencePlan, CompileNchwLayoutSetsCorrectDefine)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_NHWC=0"));
 }
 
-TEST(TestBatchnormFwdInferencePlan, CompileNhwcLayoutSetsCorrectDefine)
+TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileNhwcLayoutSetsCorrectDefine)
 {
     MockKernelCompiler mockCompiler;
 
@@ -435,21 +441,21 @@ TEST(TestBatchnormFwdInferencePlan, CompileNhwcLayoutSetsCorrectDefine)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_NHWC=1"));
 }
 
-TEST(TestBatchnormFwdInferencePlan, CompileWithUnsupportedDimensionThrows)
+TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileWithUnsupportedDimensionThrows)
 {
     MockKernelCompiler mockCompiler;
 
     // 3D tensor is not supported
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
         {12, 4, 1}, {1, 3, 4}, hipdnn_data_sdk::data_objects::DataType::FLOAT);
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
     const auto& node = graph.getNode(0);
-    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
 
-    BatchnormFwdInferenceParams params(attr, graph.getTensorMap());
-    BatchnormFwdInferencePlan plan(std::move(params));
+    BatchnormFwdInferenceWithVarianceParams params(attr, graph.getTensorMap());
+    BatchnormFwdInferenceWithVariancePlan plan(std::move(params));
 
     auto deviceProps = createTestDeviceProps();
 

@@ -19,32 +19,38 @@ namespace hip_kernel_provider
 
 class IKernelCompiler;
 
-class BatchnormFwdInferenceParams
+class BatchnormFwdInferenceWithVarianceParams
 {
 public:
-    BatchnormFwdInferenceParams(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& attributes,
+    BatchnormFwdInferenceWithVarianceParams(
+        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
-    BatchnormFwdInferenceParams(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
+    BatchnormFwdInferenceWithVarianceParams(
+        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+            inferenceAttributes,
         const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
-    BatchnormFwdInferenceParams(const BatchnormFwdInferenceParams&) = delete;
-    BatchnormFwdInferenceParams& operator=(const BatchnormFwdInferenceParams&) = delete;
+    BatchnormFwdInferenceWithVarianceParams(const BatchnormFwdInferenceWithVarianceParams&)
+        = delete;
+    BatchnormFwdInferenceWithVarianceParams&
+        operator=(const BatchnormFwdInferenceWithVarianceParams&)
+        = delete;
 
-    BatchnormFwdInferenceParams(BatchnormFwdInferenceParams&&) = default;
-    BatchnormFwdInferenceParams& operator=(BatchnormFwdInferenceParams&&) = default;
+    BatchnormFwdInferenceWithVarianceParams(BatchnormFwdInferenceWithVarianceParams&&) = default;
+    BatchnormFwdInferenceWithVarianceParams& operator=(BatchnormFwdInferenceWithVarianceParams&&)
+        = default;
 
     const hipdnn_data_sdk::data_objects::TensorAttributes* x() const;
     const hipdnn_data_sdk::data_objects::TensorAttributes* y() const;
     const hipdnn_data_sdk::data_objects::TensorAttributes* scale() const;
     const hipdnn_data_sdk::data_objects::TensorAttributes* bias() const;
     const hipdnn_data_sdk::data_objects::TensorAttributes* estMean() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* invVariance() const;
+    const hipdnn_data_sdk::data_objects::TensorAttributes* estVariance() const;
+    double epsilonValue() const;
 
     const std::optional<hip_kernel_utils::ActivationParams>& optActivation() const;
     const hipdnn_data_sdk::data_objects::TensorAttributes* activationOut() const;
@@ -55,22 +61,26 @@ private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _scale;
     const hipdnn_data_sdk::data_objects::TensorAttributes* _bias;
     const hipdnn_data_sdk::data_objects::TensorAttributes* _estMean;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _invVariance;
+    const hipdnn_data_sdk::data_objects::TensorAttributes* _estVariance;
+    double _epsilonValue;
 
     std::optional<hip_kernel_utils::ActivationParams> _optActivation;
     const hipdnn_data_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
-class BatchnormFwdInferencePlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
+class BatchnormFwdInferenceWithVariancePlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
 {
 public:
-    explicit BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams);
+    explicit BatchnormFwdInferenceWithVariancePlan(
+        BatchnormFwdInferenceWithVarianceParams&& inferenceParams);
 
-    BatchnormFwdInferencePlan(const BatchnormFwdInferencePlan&) = delete;
-    BatchnormFwdInferencePlan& operator=(const BatchnormFwdInferencePlan&) = delete;
+    BatchnormFwdInferenceWithVariancePlan(const BatchnormFwdInferenceWithVariancePlan&) = delete;
+    BatchnormFwdInferenceWithVariancePlan& operator=(const BatchnormFwdInferenceWithVariancePlan&)
+        = delete;
 
-    BatchnormFwdInferencePlan(BatchnormFwdInferencePlan&&) = default;
-    BatchnormFwdInferencePlan& operator=(BatchnormFwdInferencePlan&&) = delete;
+    BatchnormFwdInferenceWithVariancePlan(BatchnormFwdInferenceWithVariancePlan&&) = default;
+    BatchnormFwdInferenceWithVariancePlan& operator=(BatchnormFwdInferenceWithVariancePlan&&)
+        = default;
 
     void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
@@ -82,7 +92,7 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    BatchnormFwdInferenceParams _inferenceParams;
+    BatchnormFwdInferenceWithVarianceParams _inferenceParams;
 
     // Populated by compile()
     std::unique_ptr<ICompiledProgram> _compiledProgram;
