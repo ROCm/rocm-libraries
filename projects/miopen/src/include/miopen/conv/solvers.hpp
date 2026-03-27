@@ -4904,13 +4904,7 @@ struct MIOPEN_INTERNALS_EXPORT Conv3dDepthwiseFwd final : ConvSolver
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
-    /// \todo `true` here is temporary: when `ExecutionContext::use_dynamic_solutions_only` is set
-    /// (default find mode DYNAMIC_HYBRID), `SolverContainer::SearchForAllSolutions` skips any
-    /// solver with `IsDynamic()==false` before `IsApplicable` runs. Returning true lets this stub
-    /// participate in default Find. If the implementation becomes compile-time N/H/W (or D/H/W)
-    /// template specialization, set this to `false` and rely on NORMAL/HYBRID find (or refactor to
-    /// runtime shape parameters so `true` remains correct).
-    bool IsDynamic() const override { return true; }
+    bool IsDynamic() const override { return false; }
     float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
     {
         return 0.02f;
