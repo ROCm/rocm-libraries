@@ -6,7 +6,6 @@ GlobalParameters:
   Architecture: gfx1250
   DeviceLDS: 327680
   PrintSolutionRejectionReason: True
-  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################

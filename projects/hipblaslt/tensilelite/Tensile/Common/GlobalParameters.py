@@ -119,7 +119,7 @@ globalParameters["ExitOnFails"] = (
     1  # 1: Exit after benchmark run if failures detected.  2: Exit during benchmark run.
 )
 globalParameters["CpuThreads"] = (
-    1
+    -1
 )  # How many CPU threads to use for kernel generation.  0=no threading, -1 == nproc, N=min(nproc,N).  TODO - 0 sometimes fails with a kernel name error?  0 does not check error codes correctly
 globalParameters["NumWarmups"] = 0
 globalParameters["TimingInstrumentation"] = False  # Enable detailed timing instrumentation output
@@ -301,10 +301,6 @@ globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
 )
-
-# if ROCmAgentEnumeratorPath is "rocm_agent_enumerator", the arch path is /opt/rocm/bin/rocm_agent_enumerator ;
-# otherwise it is /opt/rocm/llvm/bin/amdgpu-arch
-globalParameters["ROCmAgentEnumeratorPath"] = None
 
 globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the performance metric
 
@@ -626,9 +622,6 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
 
     if "CodeObjectVersion" in config:
         globalParameters["CodeObjectVersion"] = config["CodeObjectVersion"]
-
-    if "ROCmAgentEnumeratorPath" in config:
-        globalParameters["ROCmAgentEnumeratorPath"] = config["ROCmAgentEnumeratorPath"]
 
     if getVerbosity() >= 1:
         printCapabilitiesTable(isaInfoMap)

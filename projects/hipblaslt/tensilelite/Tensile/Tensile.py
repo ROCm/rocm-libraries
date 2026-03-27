@@ -570,9 +570,6 @@ def Tensile(userArgs):
     UseEffLike = config["GlobalParameters"].get("UseEffLike", globalParameters["UseEffLike"])
     UseEffLike = False if isRhel8() else UseEffLike
 
-    if 'ROCmAgentEnumeratorPath' in config.get("GlobalParameters"):
-        args.rocm_agent_enumerator = config.get("GlobalParameters").get("ROCmAgentEnumeratorPath")
-
     if 'LibraryLogic' in config and UseEffLike:
         max_frequency = get_gpu_max_frequency(device_id)
 
