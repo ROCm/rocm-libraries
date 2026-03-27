@@ -59,11 +59,11 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
 {% set const_name = df.test_constant_name if df.test_constant_name else ("K_CONV_" ~ (df.name | upper) if "conv" in op.effective_error_label else "K_" ~ (df.name | upper)) %}
 
     auto {{ df.camel_name }} = toVec({{ const_name }});
-    desc->setAttribute({{ df.attr_name }}, HIPDNN_TYPE_INT64, static_cast<int64_t>({{ df.camel_name }}.size()), {{ df.camel_name }}.data());
+    desc->setAttribute({{ df.attr_name }}, {{ df.backend_type }}, static_cast<int64_t>({{ df.camel_name }}.size()), {{ df.camel_name }}.data());
 {% else %}
 
     std::vector<int64_t> {{ df.camel_name }} = {{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }};
-    desc->setAttribute({{ df.attr_name }}, HIPDNN_TYPE_INT64, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
+    desc->setAttribute({{ df.attr_name }}, {{ df.backend_type }}, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
 {% endif %}
 {% elif df.is_mode %}
 
@@ -448,7 +448,7 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
 
     const std::vector<int64_t> kCustom{{ df.name | replace('_', ' ') | title | replace(' ', '') }} = {{ '{' }}{{ tv | join(', ') }}{{ '}' }};
     opDesc->setAttribute(
-        {{ df.attr_name }}, HIPDNN_TYPE_INT64, {{ tv | length }}, kCustom{{ df.name | replace('_', ' ') | title | replace(' ', '') }}.data());
+        {{ df.attr_name }}, {{ df.backend_type }}, {{ tv | length }}, kCustom{{ df.name | replace('_', ' ') | title | replace(' ', '') }}.data());
 {% elif df.is_mode %}
 
     auto {{ df.camel_name }} = {{ df.test_backend_value }};
