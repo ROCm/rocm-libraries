@@ -455,3 +455,8 @@ rocsparse_rocsparse_bsrpad_value()
 .. doxygenfunction:: rocsparse_cbsrpad_value
   :outline:
 .. doxygenfunction:: rocsparse_zbsrpad_value
+
+rocsparse_set_identity_permutation()
+------------------------------------
+
+.. doxygenfunction:: rocsparse_set_identity_permutation

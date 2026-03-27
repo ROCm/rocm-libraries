@@ -69,6 +69,16 @@ rocsparse_error_get_message()
 
 .. doxygenfunction:: rocsparse_error_get_message
 
+rocsparse_get_status_description()
+----------------------------------
+
+.. doxygenfunction:: rocsparse_get_status_description
+
+rocsparse_get_status_name()
+---------------------------
+
+.. doxygenfunction:: rocsparse_get_status_name
+
 rocsparse_create_mat_descr()
 ----------------------------
 
@@ -167,6 +177,21 @@ rocsparse_destroy_mat_info()
 ----------------------------
 
 .. doxygenfunction:: rocsparse_destroy_mat_info
+
+rocsparse_mat_info_create()
+---------------------------
+
+.. doxygenfunction:: rocsparse_mat_info_create
+
+rocsparse_mat_info_copy()
+-------------------------
+
+.. doxygenfunction:: rocsparse_mat_info_copy
+
+rocsparse_mat_info_destroy()
+----------------------------
+
+.. doxygenfunction:: rocsparse_mat_info_destroy
 
 rocsparse_create_color_info()
 -----------------------------
@@ -318,6 +343,16 @@ rocsparse_destroy_spgeam_descr
 
 .. doxygenfunction:: rocsparse_destroy_spgeam_descr
 
+rocsparse_spgeam_descr_create
+-----------------------------
+
+.. doxygenfunction:: rocsparse_spgeam_descr_create
+
+rocsparse_spgeam_descr_destroy
+------------------------------
+
+.. doxygenfunction:: rocsparse_spgeam_descr_destroy
+
 rocsparse_spgeam_set_input
 --------------------------
 
@@ -337,6 +372,16 @@ rocsparse_destroy_spmv_descr
 ----------------------------
 
 .. doxygenfunction:: rocsparse_destroy_spmv_descr
+
+rocsparse_spmv_descr_create
+---------------------------
+
+.. doxygenfunction:: rocsparse_spmv_descr_create
+
+rocsparse_spmv_descr_destroy
+----------------------------
+
+.. doxygenfunction:: rocsparse_spmv_descr_destroy
 
 rocsparse_spmv_set_input
 ------------------------
@@ -577,6 +622,11 @@ rocsparse_destroy_dnvec_descr
 
 .. doxygenfunction:: rocsparse_destroy_dnvec_descr
 
+rocsparse_dnvec_descr_destroy
+-----------------------------
+
+.. doxygenfunction:: rocsparse_dnvec_descr_destroy
+
 rocsparse_dnvec_get
 -------------------
 
@@ -771,10 +821,6 @@ rocsparse_dnvec_descr_create_batch
 ----------------------------------
 .. doxygenfunction:: rocsparse_dnvec_descr_create_batch
 
-rocsparse_dnvec_destroy
------------------------
-.. doxygenfunction:: rocsparse_dnvec_destroy
-
 rocsparse_dnvec_get_prop
 ------------------------
 .. doxygenfunction:: rocsparse_dnvec_get_prop
@@ -810,10 +856,6 @@ rocsparse_dnmat_descr_create
 rocsparse_dnmat_descr_create_batch
 ----------------------------------
 .. doxygenfunction:: rocsparse_dnmat_descr_create_batch
-
-rocsparse_dnmat_destroy
------------------------
-.. doxygenfunction:: rocsparse_dnmat_destroy
 
 rocsparse_dnmat_get_prop
 ------------------------
@@ -895,9 +937,10 @@ rocsparse_spmat_descr_destroy
 -----------------------------
 .. doxygenfunction:: rocsparse_spmat_descr_destroy
 
-rocsparse_spmat_descr_create_coo
---------------------------------
-.. doxygenfunction:: rocsparse_spmat_descr_create_coo
+rocsparse_spmat_descr_create
+----------------------------
+
+.. doxygenfunction:: rocsparse_spmat_descr_create
 
 rocsparse_spmat_get_prop
 ------------------------

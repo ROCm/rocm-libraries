@@ -340,7 +340,7 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_dnvec_descr_create_batch`       |
 +-----------------------------------------------------+
-|:cpp:func:`rocsparse_dnvec_destroy`                  |
+|:cpp:func:`rocsparse_dnvec_descr_destroy`            |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_dnvec_get_prop`                 |
 +-----------------------------------------------------+
@@ -360,7 +360,7 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_dnmat_descr_create_batch`       |
 +-----------------------------------------------------+
-|:cpp:func:`rocsparse_dnmat_destroy`                  |
+|:cpp:func:`rocsparse_dnmat_descr_destroy`            |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_dnmat_get_prop`                 |
 +-----------------------------------------------------+

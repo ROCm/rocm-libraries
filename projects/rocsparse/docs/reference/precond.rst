@@ -70,6 +70,10 @@ rocsparse_bsrilu0_numeric_boost()
 .. doxygenfunction:: rocsparse_cbsrilu0_numeric_boost
   :outline:
 .. doxygenfunction:: rocsparse_zbsrilu0_numeric_boost
+  :outline:
+.. doxygenfunction:: rocsparse_dcbsrilu0_numeric_boost
+  :outline:
+.. doxygenfunction:: rocsparse_dsbsrilu0_numeric_boost
 
 rocsparse_bsrilu0_buffer_size()
 -------------------------------
@@ -243,6 +247,10 @@ rocsparse_csrilu0_numeric_boost()
 .. doxygenfunction:: rocsparse_ccsrilu0_numeric_boost
   :outline:
 .. doxygenfunction:: rocsparse_zcsrilu0_numeric_boost
+  :outline:
+.. doxygenfunction:: rocsparse_dccsrilu0_numeric_boost
+  :outline:
+.. doxygenfunction:: rocsparse_dscsrilu0_numeric_boost
 
 rocsparse_csrilu0_buffer_size()
 -------------------------------
