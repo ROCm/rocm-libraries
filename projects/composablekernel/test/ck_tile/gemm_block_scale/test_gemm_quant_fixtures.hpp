@@ -937,8 +937,10 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                                    ck_tile::BQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>,
                 ck_tile::WPQuantBPipelineAgBgCrV2<PipelineProblem>>;
 
+            // clang-format off
             using BTypeForEpilogue =
                 std::conditional_t<std::is_same_v<BDataType, ck_tile::pk_fp4_t>, ADataType, BDataType>;
+            // clang-format on
 
             using GemmEpilogue = std::conditional_t<
                 TiledMMAPermuteN,
