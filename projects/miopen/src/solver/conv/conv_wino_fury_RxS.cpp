@@ -394,7 +394,18 @@ bool ConvWinoFuryRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
 #if WORKAROUND_ISSUE_3044
     if(dev_name == "gfx1103")
-        return false;
+    {
+        if constexpr(IS2X3)
+        {
+            if(!env::enabled(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F2X3))
+                return false;
+        }
+        if constexpr(IS3X2)
+        {
+            if(!env::enabled(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2))
+                return false;
+        }
+    }
 #endif
 
     if(!(problem.GetKernelStrideH() == 1 && problem.GetKernelStrideW() == 1))
@@ -630,7 +641,6 @@ ConvWinoFuryRxS<Winodata, Winofilter>::GetSolution(const ExecutionContext& ctx,
 
 template struct MIOPEN_INTERNALS_EXPORT ConvWinoFuryRxS<2, 3>;
 // template struct MIOPEN_INTERNALS_EXPORT ConvWinoFuryRxS<3, 2>;
-template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinoFuryRxS<2, 3>;
 
 } // namespace conv
 

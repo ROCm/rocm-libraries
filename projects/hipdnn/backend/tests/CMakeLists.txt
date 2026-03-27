@@ -22,6 +22,7 @@ add_executable(
     descriptors/TestBlockScaleDequantizeOperationDescriptor.cpp
     descriptors/TestBlockScaleDequantizeOperationFromNode.cpp
     descriptors/TestBlockScaleQuantizeOperationDescriptor.cpp
+    descriptors/TestBlockScaleQuantizeOperationFromNode.cpp
     descriptors/TestDescriptorFactory.cpp
     descriptors/TestEngineConfigDescriptor.cpp
     descriptors/TestEngineDescriptor.cpp
@@ -36,6 +37,7 @@ add_executable(
     descriptors/TestConvolutionWrwOperationFromNode.cpp
     descriptors/TestGraphDescriptorConvolutionWrw.cpp
     descriptors/TestBatchnormInferenceOperationDescriptor.cpp
+    descriptors/TestBatchnormInferenceOperationFromNode.cpp
     descriptors/TestBatchnormOperationDescriptor.cpp
     descriptors/TestBatchnormOperationFromNode.cpp
     descriptors/TestGraphDescriptorBatchnorm.cpp
@@ -47,6 +49,7 @@ add_executable(
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
     descriptors/TestGraphDescriptorBlockScaleQuantize.cpp
     descriptors/TestMatmulOperationDescriptor.cpp
+    descriptors/TestMatmulOperationFromNode.cpp
     descriptors/TestGraphDescriptorMatmul.cpp
     descriptors/TestGraphDescriptorBatchnormBackward.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
