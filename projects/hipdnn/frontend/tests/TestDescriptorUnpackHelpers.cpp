@@ -536,6 +536,144 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValue)
     EXPECT_FLOAT_EQ(tensor->get_pass_by_value<float>().value(), K_SCALAR_VALUE);
 }
 
+TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValueInt64)
+{
+    static constexpr int64_t K_SCALAR_VALUE = 123456789012345LL;
+
+    // UID
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(_fakeDesc, HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, _, _))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                        Invoke([](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+                            auto uid = K_UID;
+                            std::memcpy(arrayOfElements, &uid, sizeof(int64_t));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
+    // Name (empty)
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(_fakeDesc, HIPDNN_ATTR_TENSOR_NAME_EXT, HIPDNN_TYPE_CHAR, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{0}), Return(HIPDNN_STATUS_SUCCESS)));
+
+    // Data type (INT64)
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _fakeDesc, HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, _, _))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                        Invoke([](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+                            auto dt = HIPDNN_DATA_INT64;
+                            std::memcpy(arrayOfElements, &dt, sizeof(hipdnnDataType_t));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
+    // Dims: scalar tensor has dims = {1}
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(_fakeDesc, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}), Return(HIPDNN_STATUS_SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                        Invoke([](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+                            int64_t dim = 1;
+                            std::memcpy(arrayOfElements, &dim, sizeof(int64_t));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
+    // Strides: scalar tensor has strides = {1}
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(_fakeDesc, HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}), Return(HIPDNN_STATUS_SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                        Invoke([](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+                            int64_t stride = 1;
+                            std::memcpy(arrayOfElements, &stride, sizeof(int64_t));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
+    // is_virtual: false
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(_fakeDesc, HIPDNN_ATTR_TENSOR_IS_VIRTUAL, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                        Invoke([](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+                            auto val = false;
+                            std::memcpy(arrayOfElements, &val, sizeof(bool));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
+    // IS_BY_VALUE: true
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _fakeDesc, HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                        Invoke([](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+                            auto val = true;
+                            std::memcpy(arrayOfElements, &val, sizeof(bool));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
+    // TENSOR_VALUE: return the raw int64_t bytes
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(_fakeDesc, HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<4>(static_cast<int64_t>(sizeof(int64_t))),
+                        Invoke([](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+                            auto val = K_SCALAR_VALUE;
+                            std::memcpy(arrayOfElements, &val, sizeof(int64_t));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
+    std::shared_ptr<TensorAttributes> tensor;
+    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->get_uid(), K_UID);
+    EXPECT_EQ(tensor->get_data_type(), DataType::INT64);
+    EXPECT_EQ(tensor->get_dim(), (std::vector<int64_t>{1}));
+    EXPECT_EQ(tensor->get_stride(), (std::vector<int64_t>{1}));
+    EXPECT_TRUE(tensor->get_pass_by_value());
+    ASSERT_TRUE(tensor->get_pass_by_value<int64_t>().has_value());
+    EXPECT_EQ(tensor->get_pass_by_value<int64_t>().value(), K_SCALAR_VALUE);
+}
+
 TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesPassByValuePreserves4dDims)
 {
     static constexpr float K_SCALAR_VALUE = 1e-5f;

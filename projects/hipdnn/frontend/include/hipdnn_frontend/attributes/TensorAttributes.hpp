@@ -77,14 +77,14 @@ class TensorAttributes
 public:
     /// Variant type for storing pass-by-value scalar values
     using ValueVariant
-        = std::variant<std::monostate, double, float, half, bfloat16, uint8_t, int32_t>;
+        = std::variant<std::monostate, double, float, half, bfloat16, uint8_t, int32_t, int64_t>;
 
     /// @brief Default constructor
     TensorAttributes() = default;
 
     /**
      * @brief Construct a pass-by-value tensor from a scalar
-     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t)
+     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t)
      * @param scalar The scalar value to store in the tensor
      */
     template <typename T>
@@ -119,7 +119,7 @@ public:
 
     /**
      * @brief Set a pass-by-value scalar in this tensor
-     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t)
+     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t)
      * @param v The scalar value
      * @return Reference to this for method chaining
      */
@@ -132,7 +132,8 @@ public:
                                          std::is_same<T, half>,
                                          std::is_same<T, bfloat16>,
                                          std::is_same<T, uint8_t>,
-                                         std::is_same<T, int32_t>>,
+                                         std::is_same<T, int32_t>,
+                                         std::is_same<T, int64_t>>,
                       "Unsupported type for Tensor_attributes::set_value");
         _value = v;
         _dataType = getDataTypeEnumFromType<T>();
@@ -443,6 +444,12 @@ public:
                     return {hipdnn_data_sdk::data_objects::TensorValue::Int32Value,
                             builder.CreateStruct(int32Val).Union()};
                 }
+                else if constexpr(std::is_same_v<T, int64_t>)
+                {
+                    const hipdnn_data_sdk::data_objects::Int64Value int64Val(arg);
+                    return {hipdnn_data_sdk::data_objects::TensorValue::Int64Value,
+                            builder.CreateStruct(int64Val).Union()};
+                }
                 else
                 {
                     // For std::monostate case
@@ -517,6 +524,9 @@ public:
                 break;
             case hipdnn_data_sdk::data_objects::TensorValue::Int32Value:
                 tensor->set_value(fb->value_as_Int32Value()->value());
+                break;
+            case hipdnn_data_sdk::data_objects::TensorValue::Int64Value:
+                tensor->set_value(fb->value_as_Int64Value()->value());
                 break;
             default:
                 break;

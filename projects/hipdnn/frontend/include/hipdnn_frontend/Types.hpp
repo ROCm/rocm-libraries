@@ -181,6 +181,7 @@ enum class DataType
     INT4 = 12, ///< 4-bit signed integer
     FP6_E2M3 = 13, ///< 6-bit floating point (2 exponent, 3 mantissa bits)
     FP6_E3M2 = 14, ///< 6-bit floating point (3 exponent, 2 mantissa bits)
+    INT64 = 15, ///< 64-bit signed integer
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -318,6 +319,10 @@ DataType getDataTypeEnumFromType()
     else if constexpr(std::is_same_v<T, int32_t>)
     {
         return DataType::INT32;
+    }
+    else if constexpr(std::is_same_v<T, int64_t>)
+    {
+        return DataType::INT64;
     }
     else if constexpr(std::is_same_v<T, int8_t>)
     {
@@ -702,6 +707,8 @@ inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
         return hipdnn_data_sdk::data_objects::DataType::FP6_E2M3;
     case DataType::FP6_E3M2:
         return hipdnn_data_sdk::data_objects::DataType::FP6_E3M2;
+    case DataType::INT64:
+        return hipdnn_data_sdk::data_objects::DataType::INT64;
     default:
         return hipdnn_data_sdk::data_objects::DataType::UNSET;
     }
@@ -740,6 +747,8 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::FP6_E2M3;
     case hipdnn_data_sdk::data_objects::DataType::FP6_E3M2:
         return hipdnn_frontend::DataType::FP6_E3M2;
+    case hipdnn_data_sdk::data_objects::DataType::INT64:
+        return hipdnn_frontend::DataType::INT64;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -846,6 +855,8 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
         return HIPDNN_DATA_FP6_E2M3;
     case DataType::FP6_E3M2:
         return HIPDNN_DATA_FP6_E3M2;
+    case DataType::INT64:
+        return HIPDNN_DATA_INT64;
     case DataType::NOT_SET:
     default:
         return std::nullopt;
@@ -892,6 +903,8 @@ inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
         return {DataType::FP6_E2M3, {}};
     case HIPDNN_DATA_FP6_E3M2:
         return {DataType::FP6_E3M2, {}};
+    case HIPDNN_DATA_INT64:
+        return {DataType::INT64, {}};
     default:
         return {DataType::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -1286,6 +1299,8 @@ inline const char* to_string(const DataType& type)
         return "fp6_e2m3";
     case DataType::FP6_E3M2:
         return "fp6_e3m2";
+    case DataType::INT64:
+        return "int64";
     default:
         return "unknown";
     }

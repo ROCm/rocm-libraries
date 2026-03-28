@@ -209,7 +209,13 @@ TEST(TestTensorAttributes, ValidateDataType)
            {DataType::INT32, ErrorCode::OK},
            {DataType::INT8, ErrorCode::OK},
            {DataType::FP8_E4M3, ErrorCode::OK},
-           {DataType::FP8_E5M2, ErrorCode::OK}};
+           {DataType::FP8_E5M2, ErrorCode::OK},
+           {DataType::FP8_E8M0, ErrorCode::OK},
+           {DataType::FP4_E2M1, ErrorCode::OK},
+           {DataType::INT4, ErrorCode::OK},
+           {DataType::FP6_E2M3, ErrorCode::OK},
+           {DataType::FP6_E3M2, ErrorCode::OK},
+           {DataType::INT64, ErrorCode::OK}};
 
     for(auto [dataType, errorCode] : expectedResults)
     {
