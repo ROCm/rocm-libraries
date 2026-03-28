@@ -439,7 +439,7 @@ void RunPooling2dTestWithIndexType(const PoolingTestCase& test_case)
     verify_backward_pooling<2> backward_verifier;
     // For wsidx==0, index verification is known to produce noisy CHECK output ("FAILED:")
     // without causing test failure. Keep verification only for image index mode (wsidx!=0).
-    const bool use_global_index = (test_case.wsidx != 0);
+    const bool use_global_index = test_case.wsidx != 0;
     const bool verify_index     = use_global_index;
     auto backward_result        = backward_verifier.cpu(
         input, dout, forward_result, filter, indices, use_global_index, verify_index);
