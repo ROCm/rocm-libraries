@@ -92,7 +92,7 @@ Tests:
   c_equal_d: [false, true]
 
 - name: matmul_medium
-  category: pre_checkin
+  category: smoke
   function:
     - matmul: *real_precisions
     - matmul: *real_precisions_gemm_only
@@ -101,7 +101,7 @@ Tests:
   alpha_beta: *alpha_beta_range
 
 - name: matmul_batch_medium
-  category: pre_checkin
+  category: smoke
   function:
     - matmul: *real_precisions
     - matmul: *real_precisions_gemm_only
@@ -123,7 +123,7 @@ Tests:
   HMM: true
 
 - name: matmul_chunk
-  category: pre_checkin
+  category: smoke
   function:
     - matmul: *real_precisions
     - matmul: *real_precisions_gemm_only
@@ -164,7 +164,7 @@ Tests:
   gpu_arch: '120[0-1]'
 
 - name: matmul_deepbench
-  category: nightly
+  category: smoke
   function:
     - matmul: *real_precisions
     - matmul: *real_precisions_gemm_only
@@ -173,7 +173,7 @@ Tests:
   transA_transB: *deepbench_transA_transB_range
 
 - name: resnet50_fwd
-  category: nightly
+  category: smoke
   function:
     matmul: *real_precisions
   transA: N
@@ -183,7 +183,7 @@ Tests:
   beta: 0
 
 - name: resnet50_bwdwrw
-  category: nightly
+  category: smoke
   function:
     matmul: *real_precisions
   transA: T
@@ -193,7 +193,7 @@ Tests:
   beta: 1
 
 - name: resnet50_bwddata
-  category: nightly
+  category: smoke
   function:
     matmul: *real_precisions
   transA: N
