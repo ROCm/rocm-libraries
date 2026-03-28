@@ -25,12 +25,12 @@ struct Int32Value {
   value: int;
 }
 
-struct Int64Value {
-  value: long;
-}
-
 struct Float64Value {
   value: double;
+}
+
+struct Int64Value {
+  value: long;
 }
 
 // Note: FP4 and FP6 MX formats (e.g., FP4_E2M1, FP6_E2M3, FP6_E3M2) are intentionally
@@ -42,8 +42,8 @@ union TensorValue {
   BFloat16Value,
   Float8Value,
   Int32Value,
-  Int64Value,
-  Float64Value
+  Float64Value,
+  Int64Value
 }
 
 table TensorAttributes {

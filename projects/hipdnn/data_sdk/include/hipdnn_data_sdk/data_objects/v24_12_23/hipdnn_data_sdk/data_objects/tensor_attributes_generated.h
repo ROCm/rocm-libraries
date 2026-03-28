@@ -28,9 +28,9 @@ struct Float8Value;
 
 struct Int32Value;
 
-struct Int64Value;
-
 struct Float64Value;
+
+struct Int64Value;
 
 struct TensorAttributes;
 struct TensorAttributesBuilder;
@@ -46,10 +46,10 @@ bool operator==(const Float8Value &lhs, const Float8Value &rhs);
 bool operator!=(const Float8Value &lhs, const Float8Value &rhs);
 bool operator==(const Int32Value &lhs, const Int32Value &rhs);
 bool operator!=(const Int32Value &lhs, const Int32Value &rhs);
-bool operator==(const Int64Value &lhs, const Int64Value &rhs);
-bool operator!=(const Int64Value &lhs, const Int64Value &rhs);
 bool operator==(const Float64Value &lhs, const Float64Value &rhs);
 bool operator!=(const Float64Value &lhs, const Float64Value &rhs);
+bool operator==(const Int64Value &lhs, const Int64Value &rhs);
+bool operator!=(const Int64Value &lhs, const Int64Value &rhs);
 bool operator==(const TensorAttributesT &lhs, const TensorAttributesT &rhs);
 bool operator!=(const TensorAttributesT &lhs, const TensorAttributesT &rhs);
 
@@ -60,10 +60,10 @@ enum class TensorValue : uint8_t {
   BFloat16Value = 3,
   Float8Value = 4,
   Int32Value = 5,
-  Int64Value = 6,
-  Float64Value = 7,
+  Float64Value = 6,
+  Int64Value = 7,
   MIN = NONE,
-  MAX = Float64Value
+  MAX = Int64Value
 };
 
 inline const TensorValue (&EnumValuesTensorValue())[8] {
@@ -74,8 +74,8 @@ inline const TensorValue (&EnumValuesTensorValue())[8] {
     TensorValue::BFloat16Value,
     TensorValue::Float8Value,
     TensorValue::Int32Value,
-    TensorValue::Int64Value,
-    TensorValue::Float64Value
+    TensorValue::Float64Value,
+    TensorValue::Int64Value
   };
   return values;
 }
@@ -88,15 +88,15 @@ inline const char * const *EnumNamesTensorValue() {
     "BFloat16Value",
     "Float8Value",
     "Int32Value",
-    "Int64Value",
     "Float64Value",
+    "Int64Value",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameTensorValue(TensorValue e) {
-  if (::flatbuffers::IsOutRange(e, TensorValue::NONE, TensorValue::Float64Value)) return "";
+  if (::flatbuffers::IsOutRange(e, TensorValue::NONE, TensorValue::Int64Value)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesTensorValue()[index];
 }
@@ -125,12 +125,12 @@ template<> struct TensorValueTraits<hipdnn_data_sdk::data_objects::Int32Value> {
   static const TensorValue enum_value = TensorValue::Int32Value;
 };
 
-template<> struct TensorValueTraits<hipdnn_data_sdk::data_objects::Int64Value> {
-  static const TensorValue enum_value = TensorValue::Int64Value;
-};
-
 template<> struct TensorValueTraits<hipdnn_data_sdk::data_objects::Float64Value> {
   static const TensorValue enum_value = TensorValue::Float64Value;
+};
+
+template<> struct TensorValueTraits<hipdnn_data_sdk::data_objects::Int64Value> {
+  static const TensorValue enum_value = TensorValue::Int64Value;
 };
 
 template<typename T> struct TensorValueUnionTraits {
@@ -157,12 +157,12 @@ template<> struct TensorValueUnionTraits<hipdnn_data_sdk::data_objects::Int32Val
   static const TensorValue enum_value = TensorValue::Int32Value;
 };
 
-template<> struct TensorValueUnionTraits<hipdnn_data_sdk::data_objects::Int64Value> {
-  static const TensorValue enum_value = TensorValue::Int64Value;
-};
-
 template<> struct TensorValueUnionTraits<hipdnn_data_sdk::data_objects::Float64Value> {
   static const TensorValue enum_value = TensorValue::Float64Value;
+};
+
+template<> struct TensorValueUnionTraits<hipdnn_data_sdk::data_objects::Int64Value> {
+  static const TensorValue enum_value = TensorValue::Int64Value;
 };
 
 struct TensorValueUnion {
@@ -451,36 +451,6 @@ inline bool operator!=(const Int32Value &lhs, const Int32Value &rhs) {
 }
 
 
-FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) Int64Value FLATBUFFERS_FINAL_CLASS {
- private:
-  int64_t value_;
-
- public:
-  Int64Value()
-      : value_(0) {
-  }
-  Int64Value(int64_t _value)
-      : value_(::flatbuffers::EndianScalar(_value)) {
-  }
-  int64_t value() const {
-    return ::flatbuffers::EndianScalar(value_);
-  }
-  void mutate_value(int64_t _value) {
-    ::flatbuffers::WriteScalar(&value_, _value);
-  }
-};
-FLATBUFFERS_STRUCT_END(Int64Value, 8);
-
-inline bool operator==(const Int64Value &lhs, const Int64Value &rhs) {
-  return
-      (lhs.value() == rhs.value());
-}
-
-inline bool operator!=(const Int64Value &lhs, const Int64Value &rhs) {
-    return !(lhs == rhs);
-}
-
-
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) Float64Value FLATBUFFERS_FINAL_CLASS {
  private:
   double value_;
@@ -507,6 +477,36 @@ inline bool operator==(const Float64Value &lhs, const Float64Value &rhs) {
 }
 
 inline bool operator!=(const Float64Value &lhs, const Float64Value &rhs) {
+    return !(lhs == rhs);
+}
+
+
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) Int64Value FLATBUFFERS_FINAL_CLASS {
+ private:
+  int64_t value_;
+
+ public:
+  Int64Value()
+      : value_(0) {
+  }
+  Int64Value(int64_t _value)
+      : value_(::flatbuffers::EndianScalar(_value)) {
+  }
+  int64_t value() const {
+    return ::flatbuffers::EndianScalar(value_);
+  }
+  void mutate_value(int64_t _value) {
+    ::flatbuffers::WriteScalar(&value_, _value);
+  }
+};
+FLATBUFFERS_STRUCT_END(Int64Value, 8);
+
+inline bool operator==(const Int64Value &lhs, const Int64Value &rhs) {
+  return
+      (lhs.value() == rhs.value());
+}
+
+inline bool operator!=(const Int64Value &lhs, const Int64Value &rhs) {
     return !(lhs == rhs);
 }
 
@@ -593,11 +593,11 @@ struct TensorAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_data_sdk::data_objects::Int32Value *value_as_Int32Value() const {
     return value_type() == hipdnn_data_sdk::data_objects::TensorValue::Int32Value ? static_cast<const hipdnn_data_sdk::data_objects::Int32Value *>(value()) : nullptr;
   }
-  const hipdnn_data_sdk::data_objects::Int64Value *value_as_Int64Value() const {
-    return value_type() == hipdnn_data_sdk::data_objects::TensorValue::Int64Value ? static_cast<const hipdnn_data_sdk::data_objects::Int64Value *>(value()) : nullptr;
-  }
   const hipdnn_data_sdk::data_objects::Float64Value *value_as_Float64Value() const {
     return value_type() == hipdnn_data_sdk::data_objects::TensorValue::Float64Value ? static_cast<const hipdnn_data_sdk::data_objects::Float64Value *>(value()) : nullptr;
+  }
+  const hipdnn_data_sdk::data_objects::Int64Value *value_as_Int64Value() const {
+    return value_type() == hipdnn_data_sdk::data_objects::TensorValue::Int64Value ? static_cast<const hipdnn_data_sdk::data_objects::Int64Value *>(value()) : nullptr;
   }
   void *mutable_value() {
     return GetPointer<void *>(VT_VALUE);
@@ -643,12 +643,12 @@ template<> inline const hipdnn_data_sdk::data_objects::Int32Value *TensorAttribu
   return value_as_Int32Value();
 }
 
-template<> inline const hipdnn_data_sdk::data_objects::Int64Value *TensorAttributes::value_as<hipdnn_data_sdk::data_objects::Int64Value>() const {
-  return value_as_Int64Value();
-}
-
 template<> inline const hipdnn_data_sdk::data_objects::Float64Value *TensorAttributes::value_as<hipdnn_data_sdk::data_objects::Float64Value>() const {
   return value_as_Float64Value();
+}
+
+template<> inline const hipdnn_data_sdk::data_objects::Int64Value *TensorAttributes::value_as<hipdnn_data_sdk::data_objects::Int64Value>() const {
+  return value_as_Int64Value();
 }
 
 struct TensorAttributesBuilder {
