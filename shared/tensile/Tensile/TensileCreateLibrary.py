@@ -768,7 +768,6 @@ def buildObjectFilePaths(
     sourceLibFiles,
     asmLibFiles,
     masterLibraries,
-    archs: Optional[List[str]] = None,
 ):
     solutionPaths = []
     sourceKernelPaths = []
@@ -794,7 +793,7 @@ def buildObjectFilePaths(
         asmKernelPaths += [os.path.join(asmKernelDir, asmKernelFile)]
 
     # Build full paths for source and asm library files
-    libDir = str(libraryDir(prefixDir, archs or []))
+    libDir = os.path.join(prefixDir, "library")
 
     libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
     if not globalParameters["SeparateArchitectures"] and not globalParameters["LazyLibraryLoading"]:
@@ -1127,8 +1126,7 @@ def writeBenchmarkClientFiles(
         removeTemporaries=removeTemporaries,
     )
 
-    _, requestedArchs = splitArchs()
-    newLibraryDir = ensurePath(libraryDir(libraryWorkingPath, requestedArchs))
+    newLibraryDir = ensurePath(os.path.join(libraryWorkingPath, "library"))
     newLibraryFile = os.path.join(newLibraryDir, "TensileLibrary.yaml")
     newLibrary = MasterSolutionLibrary.BenchmarkingLibrary(solutions)
     newLibrary.applyNaming(kernelMinNaming)
@@ -1484,7 +1482,6 @@ def TensileCreateLibrary():
         sourceLibFiles,
         asmLibFiles,
         masterLibraries,
-        archs=requestedArchs,
     )
 
     toFile(Path(manifestFile), libMetadataPaths + sourceLibPaths + asmLibPaths)
@@ -1521,7 +1518,7 @@ def TensileCreateLibrary():
     tPrint(2, f"codeObjectFiles: {codeObjectFiles}")
     tPrint(2, f"sourceLibPaths + asmLibPaths: {sourceLibPaths + asmLibPaths}")
 
-    newLibraryDir = libraryDir(outputPath, requestedArchs)
+    newLibraryDir = Path(outputPath) / "library"
     newLibraryDir.mkdir(parents=True, exist_ok=True)
 
     masterFileList = generateMasterFileList(masterLibraries, supportedArchs, lazyLoading)
