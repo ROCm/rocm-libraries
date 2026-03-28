@@ -235,14 +235,6 @@ struct TensorValueUnion {
     return type == TensorValue::Int32Value ?
       reinterpret_cast<const hipdnn_data_sdk::data_objects::Int32Value *>(value) : nullptr;
   }
-  hipdnn_data_sdk::data_objects::Int64Value *AsInt64Value() {
-    return type == TensorValue::Int64Value ?
-      reinterpret_cast<hipdnn_data_sdk::data_objects::Int64Value *>(value) : nullptr;
-  }
-  const hipdnn_data_sdk::data_objects::Int64Value *AsInt64Value() const {
-    return type == TensorValue::Int64Value ?
-      reinterpret_cast<const hipdnn_data_sdk::data_objects::Int64Value *>(value) : nullptr;
-  }
   hipdnn_data_sdk::data_objects::Float64Value *AsFloat64Value() {
     return type == TensorValue::Float64Value ?
       reinterpret_cast<hipdnn_data_sdk::data_objects::Float64Value *>(value) : nullptr;
@@ -250,6 +242,14 @@ struct TensorValueUnion {
   const hipdnn_data_sdk::data_objects::Float64Value *AsFloat64Value() const {
     return type == TensorValue::Float64Value ?
       reinterpret_cast<const hipdnn_data_sdk::data_objects::Float64Value *>(value) : nullptr;
+  }
+  hipdnn_data_sdk::data_objects::Int64Value *AsInt64Value() {
+    return type == TensorValue::Int64Value ?
+      reinterpret_cast<hipdnn_data_sdk::data_objects::Int64Value *>(value) : nullptr;
+  }
+  const hipdnn_data_sdk::data_objects::Int64Value *AsInt64Value() const {
+    return type == TensorValue::Int64Value ?
+      reinterpret_cast<const hipdnn_data_sdk::data_objects::Int64Value *>(value) : nullptr;
   }
 };
 
@@ -280,13 +280,13 @@ inline bool operator==(const TensorValueUnion &lhs, const TensorValueUnion &rhs)
       return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::Int32Value *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_data_sdk::data_objects::Int32Value *>(rhs.value));
     }
-    case TensorValue::Int64Value: {
-      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::Int64Value *>(lhs.value)) ==
-             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::Int64Value *>(rhs.value));
-    }
     case TensorValue::Float64Value: {
       return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::Float64Value *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_data_sdk::data_objects::Float64Value *>(rhs.value));
+    }
+    case TensorValue::Int64Value: {
+      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::Int64Value *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::Int64Value *>(rhs.value));
     }
     default: {
       return false;
@@ -823,11 +823,11 @@ inline bool VerifyTensorValue(::flatbuffers::Verifier &verifier, const void *obj
     case TensorValue::Int32Value: {
       return verifier.VerifyField<hipdnn_data_sdk::data_objects::Int32Value>(static_cast<const uint8_t *>(obj), 0, 4);
     }
-    case TensorValue::Int64Value: {
-      return verifier.VerifyField<hipdnn_data_sdk::data_objects::Int64Value>(static_cast<const uint8_t *>(obj), 0, 8);
-    }
     case TensorValue::Float64Value: {
       return verifier.VerifyField<hipdnn_data_sdk::data_objects::Float64Value>(static_cast<const uint8_t *>(obj), 0, 8);
+    }
+    case TensorValue::Int64Value: {
+      return verifier.VerifyField<hipdnn_data_sdk::data_objects::Int64Value>(static_cast<const uint8_t *>(obj), 0, 8);
     }
     default: return true;
   }
@@ -868,13 +868,13 @@ inline void *TensorValueUnion::UnPack(const void *obj, TensorValue type, const :
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::Int32Value *>(obj);
       return new hipdnn_data_sdk::data_objects::Int32Value(*ptr);
     }
-    case TensorValue::Int64Value: {
-      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::Int64Value *>(obj);
-      return new hipdnn_data_sdk::data_objects::Int64Value(*ptr);
-    }
     case TensorValue::Float64Value: {
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::Float64Value *>(obj);
       return new hipdnn_data_sdk::data_objects::Float64Value(*ptr);
+    }
+    case TensorValue::Int64Value: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::Int64Value *>(obj);
+      return new hipdnn_data_sdk::data_objects::Int64Value(*ptr);
     }
     default: return nullptr;
   }
@@ -903,12 +903,12 @@ inline ::flatbuffers::Offset<void> TensorValueUnion::Pack(::flatbuffers::FlatBuf
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::Int32Value *>(value);
       return _fbb.CreateStruct(*ptr).Union();
     }
-    case TensorValue::Int64Value: {
-      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::Int64Value *>(value);
-      return _fbb.CreateStruct(*ptr).Union();
-    }
     case TensorValue::Float64Value: {
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::Float64Value *>(value);
+      return _fbb.CreateStruct(*ptr).Union();
+    }
+    case TensorValue::Int64Value: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::Int64Value *>(value);
       return _fbb.CreateStruct(*ptr).Union();
     }
     default: return 0;
@@ -937,12 +937,12 @@ inline TensorValueUnion::TensorValueUnion(const TensorValueUnion &u) : type(u.ty
       value = new hipdnn_data_sdk::data_objects::Int32Value(*reinterpret_cast<hipdnn_data_sdk::data_objects::Int32Value *>(u.value));
       break;
     }
-    case TensorValue::Int64Value: {
-      value = new hipdnn_data_sdk::data_objects::Int64Value(*reinterpret_cast<hipdnn_data_sdk::data_objects::Int64Value *>(u.value));
-      break;
-    }
     case TensorValue::Float64Value: {
       value = new hipdnn_data_sdk::data_objects::Float64Value(*reinterpret_cast<hipdnn_data_sdk::data_objects::Float64Value *>(u.value));
+      break;
+    }
+    case TensorValue::Int64Value: {
+      value = new hipdnn_data_sdk::data_objects::Int64Value(*reinterpret_cast<hipdnn_data_sdk::data_objects::Int64Value *>(u.value));
       break;
     }
     default:
@@ -977,13 +977,13 @@ inline void TensorValueUnion::Reset() {
       delete ptr;
       break;
     }
-    case TensorValue::Int64Value: {
-      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::Int64Value *>(value);
+    case TensorValue::Float64Value: {
+      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::Float64Value *>(value);
       delete ptr;
       break;
     }
-    case TensorValue::Float64Value: {
-      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::Float64Value *>(value);
+    case TensorValue::Int64Value: {
+      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::Int64Value *>(value);
       delete ptr;
       break;
     }
