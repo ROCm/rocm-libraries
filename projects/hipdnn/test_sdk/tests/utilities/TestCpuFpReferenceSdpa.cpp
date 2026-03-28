@@ -253,6 +253,69 @@ TEST(TestCpuFpReferenceSdpaFp64, MqaSupport)
     }
 }
 
+TEST(TestCpuFpReferenceSdpaFp64, GqaDifferentKVHeads)
+{
+    // H=4, Hk=2, Hv=1, Skv=2: K has 2 heads, V has 1 head.
+    // With Skv=2, distinct K-head values produce different attention patterns,
+    // verifying both K-head and V-head mappings.
+    // K head 0: [1,0] at skv=0, [0,0] at skv=1 → Q·K biased toward skv=0
+    // K head 1: [0,0] at skv=0, [1,0] at skv=1 → Q·K biased toward skv=1
+    // V head 0: [1,2] at skv=0, [3,4] at skv=1
+    // Q heads 0,1 → K head 0 (biased toward V[skv=0]=[1,2])
+    // Q heads 2,3 → K head 1 (biased toward V[skv=1]=[3,4])
+    Tensor<double> q({1, 4, 1, 2});
+    Tensor<double> k({1, 2, 2, 2});
+    Tensor<double> v({1, 1, 2, 2});
+    Tensor<double> o({1, 4, 1, 2});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+
+    // Q: all heads have query [1, 0]
+    for(int64_t h = 0; h < 4; ++h)
+    {
+        q.setHostValue(1.0, 0, h, 0, 0);
+    }
+
+    // K head 0: [1,0] at skv=0, [0,0] at skv=1
+    k.setHostValue(1.0, 0, 0, 0, 0);
+    // K head 1: [0,0] at skv=0, [1,0] at skv=1
+    k.setHostValue(1.0, 0, 1, 1, 0);
+
+    // V head 0: [1,2] at skv=0, [3,4] at skv=1
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(2.0, 0, 0, 0, 1);
+    v.setHostValue(3.0, 0, 0, 1, 0);
+    v.setHostValue(4.0, 0, 0, 1, 1);
+
+    CpuFpReferenceSdpa::forward(q, k, v, o);
+
+    const float scale = 1.0f / std::sqrt(2.0f);
+    const float eLow = std::exp(-scale);
+    const float sumExp = 1.0f + eLow;
+    const float pHigh = 1.0f / sumExp;
+    const float pLow = eLow / sumExp;
+    const double tol = 1e-5;
+
+    // Q heads 0,1 → K head 0 → biased toward skv=0: O ≈ pHigh*V[0] + pLow*V[1]
+    const auto expectedK0D0 = static_cast<double>(pHigh * 1.0f + pLow * 3.0f);
+    const auto expectedK0D1 = static_cast<double>(pHigh * 2.0f + pLow * 4.0f);
+    for(int64_t h = 0; h < 2; ++h)
+    {
+        EXPECT_NEAR(o.getHostValue(0, h, 0, 0), expectedK0D0, tol);
+        EXPECT_NEAR(o.getHostValue(0, h, 0, 1), expectedK0D1, tol);
+    }
+
+    // Q heads 2,3 → K head 1 → biased toward skv=1: O ≈ pLow*V[0] + pHigh*V[1]
+    const auto expectedK1D0 = static_cast<double>(pLow * 1.0f + pHigh * 3.0f);
+    const auto expectedK1D1 = static_cast<double>(pLow * 2.0f + pHigh * 4.0f);
+    for(int64_t h = 2; h < 4; ++h)
+    {
+        EXPECT_NEAR(o.getHostValue(0, h, 0, 0), expectedK1D0, tol);
+        EXPECT_NEAR(o.getHostValue(0, h, 0, 1), expectedK1D1, tol);
+    }
+}
+
 TEST(TestCpuFpReferenceSdpaFp64, AttnMaskBroadcastRank2)
 {
     // Rank-2 mask [1, Skv]: dim[0]=1 broadcasts over all sq (and also over batch and head
