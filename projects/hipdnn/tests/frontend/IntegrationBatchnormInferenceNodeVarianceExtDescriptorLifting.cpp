@@ -102,11 +102,11 @@ protected:
         bias->set_dim(toVec(K_BN_INF_VAR_EXT_BIAS_DIMS))
             .set_stride(toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
 
-        auto epsilon = std::make_shared<TensorAttributes>();
+        auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
         epsilon->set_uid(K_BN_INF_VAR_EXT_EPSILON_UID)
             .set_name("epsilon")
-            .set_data_type(DataType::FLOAT);
-        epsilon->set_dim(toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS))
+            .set_data_type(DataType::FLOAT)
+            .set_dim(toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS))
             .set_stride(toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
 
         BatchnormInferenceAttributesVarianceExt attrs;
@@ -207,6 +207,10 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_stride(),
               toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
     EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_TRUE(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_pass_by_value());
+    ASSERT_TRUE(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_pass_by_value<float>().has_value());
+    EXPECT_FLOAT_EQ(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_pass_by_value<float>().value(),
+                    1e-5f);
 
     // Verify tensor names
     EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_X_UID]->get_name(), "x");
@@ -399,9 +403,10 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     bias->set_dim(toVec(K_BN_INF_VAR_EXT_BIAS_DIMS))
         .set_stride(toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_name("epsilon").set_data_type(DataType::FLOAT);
-    epsilon->set_dim(toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS))
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_name("epsilon")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS))
         .set_stride(toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
 
     BatchnormInferenceAttributesVarianceExt attrs;
