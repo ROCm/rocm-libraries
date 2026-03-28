@@ -76,6 +76,16 @@ inline Error createBatchnormInferenceVarianceExtOperation(
                                   attributes.compute_data_type,
                                   "batchnorm inference variance ext compute data type"));
 
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(opDesc.get(),
+                                                   HIPDNN_ATTR_OPERATION_NAME_EXT,
+                                                   opName,
+                                                   "batchnorminferencevarianceext operation name"));
+    }
+
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(
         finalizeDescriptor(opDesc.get(), "batchnorm inference variance ext operation descriptor"));

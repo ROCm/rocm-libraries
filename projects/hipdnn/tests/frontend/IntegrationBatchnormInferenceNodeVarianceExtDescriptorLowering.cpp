@@ -268,10 +268,10 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, AutoAssignedUidsPreservedInRoun
         .set_stride(toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
     epsilon->set_value(1e-5f);
 
-    BatchnormInferenceAttributesVarianceExt bnAttrs;
+    const BatchnormInferenceAttributesVarianceExt bnAttrs;
 
     auto y = graph->batchnorm_inference_variance_ext(
-        x, mean, variance, scale, bias, epsilon, std::move(bnAttrs));
+        x, mean, variance, scale, bias, epsilon, BatchnormInferenceAttributesVarianceExt{bnAttrs});
     y->set_output(true);
 
     auto result = graph->validate();
@@ -302,7 +302,7 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, AutoAssignedUidsPreservedInRoun
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 7u) << "Tensor UIDs are not unique";
+    ASSERT_EQ(uids.size(), 7u);
 
     // The batchnorm operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -310,20 +310,13 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, AutoAssignedUidsPreservedInRoun
     ASSERT_NE(bnFwd, nullptr);
 
     // Tensor UIDs in the node should match tensors in the graph
-    EXPECT_TRUE(uids.count(bnFwd->x_tensor_uid) > 0)
-        << "X tensor UID " << bnFwd->x_tensor_uid << " not found in graph tensors";
-    EXPECT_TRUE(uids.count(bnFwd->mean_tensor_uid) > 0)
-        << "Mean tensor UID " << bnFwd->mean_tensor_uid << " not found in graph tensors";
-    EXPECT_TRUE(uids.count(bnFwd->variance_tensor_uid) > 0)
-        << "Variance tensor UID " << bnFwd->variance_tensor_uid << " not found in graph tensors";
-    EXPECT_TRUE(uids.count(bnFwd->scale_tensor_uid) > 0)
-        << "Scale tensor UID " << bnFwd->scale_tensor_uid << " not found in graph tensors";
-    EXPECT_TRUE(uids.count(bnFwd->bias_tensor_uid) > 0)
-        << "Bias tensor UID " << bnFwd->bias_tensor_uid << " not found in graph tensors";
-    EXPECT_TRUE(uids.count(bnFwd->y_tensor_uid) > 0)
-        << "Y tensor UID " << bnFwd->y_tensor_uid << " not found in graph tensors";
-    EXPECT_TRUE(uids.count(bnFwd->epsilon_tensor_uid) > 0)
-        << "Epsilon tensor UID " << bnFwd->epsilon_tensor_uid << " not found in graph tensors";
+    EXPECT_NE(uids.count(bnFwd->x_tensor_uid), 0u);
+    EXPECT_NE(uids.count(bnFwd->mean_tensor_uid), 0u);
+    EXPECT_NE(uids.count(bnFwd->variance_tensor_uid), 0u);
+    EXPECT_NE(uids.count(bnFwd->scale_tensor_uid), 0u);
+    EXPECT_NE(uids.count(bnFwd->bias_tensor_uid), 0u);
+    EXPECT_NE(uids.count(bnFwd->y_tensor_uid), 0u);
+    EXPECT_NE(uids.count(bnFwd->epsilon_tensor_uid), 0u);
 
     // All seven tensor UIDs referenced by the node should be distinct
     const std::unordered_set<int64_t> nodeUids = {bnFwd->x_tensor_uid,
@@ -333,7 +326,7 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, AutoAssignedUidsPreservedInRoun
                                                   bnFwd->bias_tensor_uid,
                                                   bnFwd->y_tensor_uid,
                                                   bnFwd->epsilon_tensor_uid};
-    EXPECT_EQ(nodeUids.size(), 7u) << "BN node tensor UIDs are not distinct";
+    ASSERT_EQ(nodeUids.size(), 7u);
 }
 
 } // namespace

@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/BatchnormInferenceNodeVarianceExtUnpacker.hpp>
 #include <hipdnn_frontend/detail/BatchnormInferenceVarianceExtPacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
@@ -181,6 +182,17 @@ public:
     {
         return detail::createBatchnormInferenceVarianceExtOperation(
             attributes, tensorDescs, operations);
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        BatchnormInferenceAttributesVarianceExt attrs;
+        HIPDNN_CHECK_ERROR(
+            detail::unpackBatchnormInferenceVarianceExtOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 };
 }
