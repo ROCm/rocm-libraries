@@ -18,7 +18,7 @@
 #include <type_traits>
 #include <vector>
 
-static ck::index_t param_mask     = 0xffffff;
+static ck::index_t param_mask = 0xffffff;
 
 using FP32 = float;
 using FP16 = ck::half_t;
@@ -293,7 +293,7 @@ int main(int argc, char** argv)
     if(argc == 1) {}
     else if(argc == 2)
     {
-        param_mask     = strtol(argv[1], nullptr, 0);
+        param_mask = strtol(argv[1], nullptr, 0);
     }
     else
     {
