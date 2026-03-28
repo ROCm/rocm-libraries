@@ -1,9 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <vector>
 #include <gtest/gtest.h>
 #include <half/half.hpp>
+#include <vector>
 #include "pooling2d_common.hpp"
 
 namespace {

@@ -4,8 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <numeric>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -15,8 +13,8 @@
 #include <miopen/logger.hpp>
 #include <miopen/tensor_layout.hpp>
 
-#include "pooling_gtest_common.hpp"
 #include "pooling2d_common.hpp"
+#include "pooling_gtest_common.hpp"
 
 namespace {
 

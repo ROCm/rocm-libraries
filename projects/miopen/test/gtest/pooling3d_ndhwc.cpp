@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <numeric>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -14,8 +13,8 @@
 #include <miopen/tensor_layout.hpp>
 
 #include "gtest_common.hpp"
-#include "pooling_gtest_common.hpp"
 #include "pooling2d_common.hpp"
+#include "pooling_gtest_common.hpp"
 
 namespace {
 

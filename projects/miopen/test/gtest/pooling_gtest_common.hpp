@@ -4,29 +4,26 @@
 #ifndef GUARD_MIOPEN_TEST_POOLING_COMMON_HPP
 #define GUARD_MIOPEN_TEST_POOLING_COMMON_HPP
 
-#include "../test.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <iostream>
-#include <iterator>
 #include <limits>
-#include <memory>
-#include <numeric>
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/pooling.hpp>
-#include <miopen/stringutils.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
+#include <numeric>
 #include <utility>
 
 // #include "../network_data.hpp"
-#include "get_handle.hpp"
-#include "../tensor_holder.hpp"
-#include "../verify.hpp"
 #include "../cpu_conv.hpp"
+#include "../tensor_holder.hpp"
+#include "../test.hpp"
+#include "../verify.hpp"
 #include "../workspace.hpp"
+#include "get_handle.hpp"
 
 #define TEST_PADDING_MODE 0
 
