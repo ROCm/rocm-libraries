@@ -445,6 +445,59 @@ inline hipdnnAttentionImplementation_t
 }
 
 /**
+ * @brief Convert backend hipdnnDiagonalAlignment_t to frontend DiagonalAlignment
+ *
+ * Maps the backend C API diagonal alignment enum to the frontend DiagonalAlignment enum.
+ *
+ * @param alignment The backend hipdnnDiagonalAlignment_t value
+ * @return A pair of DiagonalAlignment and Error; error is set for unknown values
+ */
+inline std::pair<DiagonalAlignment, Error>
+    fromHipdnnDiagonalAlignment(hipdnnDiagonalAlignment_t alignment)
+{
+    switch(alignment)
+    {
+    case HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT:
+        return {DiagonalAlignment::TOP_LEFT, {}};
+    case HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT:
+        return {DiagonalAlignment::BOTTOM_RIGHT, {}};
+    default:
+        return {DiagonalAlignment::TOP_LEFT,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnDiagonalAlignment_t value: "
+                     + std::to_string(static_cast<int>(alignment))}};
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnAttentionImplementation_t to frontend AttentionImplementation
+ *
+ * Maps the backend C API attention implementation enum to the frontend
+ * AttentionImplementation enum.
+ *
+ * @param impl The backend hipdnnAttentionImplementation_t value
+ * @return A pair of AttentionImplementation and Error; error is set for unknown values
+ */
+inline std::pair<AttentionImplementation, Error>
+    fromHipdnnAttentionImplementation(hipdnnAttentionImplementation_t impl)
+{
+    switch(impl)
+    {
+    case HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT:
+        return {AttentionImplementation::AUTO, {}};
+    case HIPDNN_ATTENTION_IMPLEMENTATION_COMPOSITE_EXT:
+        return {AttentionImplementation::COMPOSITE, {}};
+    case HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT:
+        return {AttentionImplementation::UNIFIED, {}};
+    default:
+        return {AttentionImplementation::AUTO,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnAttentionImplementation_t value: "
+                     + std::to_string(static_cast<int>(impl))}};
+    }
+}
+
+/**
  * @brief Convert frontend NormFwdPhase to backend hipdnnNormFwdPhase_t
  *
  * Maps frontend normalization forward phase to the backend C API enum type
