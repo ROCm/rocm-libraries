@@ -8,6 +8,7 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_public_frontend_tests
     main.cpp
+    IntegrationBatchnormBackwardDescriptorLifting.cpp
     IntegrationBatchnormBackwardDescriptorLowering.cpp
     IntegrationBatchnormDescriptorLifting.cpp
     IntegrationBatchnormDescriptorLowering.cpp
@@ -28,6 +29,7 @@ add_executable(
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
     IntegrationConvolutionDgradDescriptorLowering.cpp
+    IntegrationConvolutionDgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
