@@ -213,10 +213,10 @@ struct ProblemDescription : ProblemDescriptionBase
     std::size_t GetWeightsElementSize() const { return GetTypeSize(GetWeightsDataType()); }
     std::size_t GetWeightsSize() const { return weights.GetNumBytes(); }
 
-    const TensorDescriptor& GetIn() const { return in; }
-    const TensorDescriptor& GetWeights() const { return weights; }
-    const TensorDescriptor& GetOut() const { return out; }
-    const ConvolutionDescriptor& GetConv() const { return conv; }
+    const TensorDescriptor& GetIn() const [[clang::lifetimebound]] { return in; }
+    const TensorDescriptor& GetWeights() const [[clang::lifetimebound]] { return weights; }
+    const TensorDescriptor& GetOut() const [[clang::lifetimebound]] { return out; }
+    const ConvolutionDescriptor& GetConv() const [[clang::lifetimebound]] { return conv; }
 
     Direction GetDirection() const { return direction; }
     bool IsDirectionForward() const { return direction == conv::Direction::Forward; }
@@ -224,8 +224,8 @@ struct ProblemDescription : ProblemDescriptionBase
     bool IsDirectionBackwardWrW() const { return direction == conv::Direction::BackwardWeights; }
     MIOPEN_INTERNALS_EXPORT std::string GetDirectionStr() const;
 
-    const Scalar& GetAlpha() const { return alpha; }
-    const Scalar& GetBeta() const { return beta; }
+    const Scalar& GetAlpha() const [[clang::lifetimebound]] { return alpha; }
+    const Scalar& GetBeta() const [[clang::lifetimebound]] { return beta; }
 
     miopenAlphaBetaCase_t GetAlphaBetaCase() const { return alpha_beta_case; }
 

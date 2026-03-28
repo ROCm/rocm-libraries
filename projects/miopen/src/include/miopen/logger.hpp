@@ -274,7 +274,7 @@ std::ostream& LogParam([[clang::lifetimebound]] std::ostream& os, std::string na
 }
 
 template <class T, typename std::enable_if<(not std::is_pointer<T>{}), int>::type = 0>
-std::ostream& LogParam(std::ostream& os, std::string name, const T& x, bool indent = true)
+std::ostream& LogParam([[clang::lifetimebound]] std::ostream& os, std::string name, const T& x, bool indent = true)
 {
     if(indent)
         os << '\t';
