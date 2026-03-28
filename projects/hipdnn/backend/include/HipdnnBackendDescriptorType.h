@@ -278,4 +278,12 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT = 30,
 
+    /**
+     * @brief Reduction operation descriptor (extension)
+     *
+     * Represents a reduction operation with input (X) and output (Y)
+     * tensors, a reduction mode, and a compute data type.
+     */
+    HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT = 31,
+
 } hipdnnBackendDescriptorType_t;

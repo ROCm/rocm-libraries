@@ -449,4 +449,62 @@ hipdnnNormFwdPhase_t fromSdkNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdP
     }
 }
 
+hipdnn_data_sdk::data_objects::ReductionMode toSdkReductionMode(hipdnnReductionMode_t mode)
+{
+    using hipdnn_data_sdk::data_objects::ReductionMode;
+
+    switch(mode)
+    {
+    case HIPDNN_REDUCTION_ADD:
+        return ReductionMode::ADD;
+    case HIPDNN_REDUCTION_MUL:
+        return ReductionMode::MUL;
+    case HIPDNN_REDUCTION_MIN:
+        return ReductionMode::MIN_OP;
+    case HIPDNN_REDUCTION_MAX:
+        return ReductionMode::MAX_OP;
+    case HIPDNN_REDUCTION_AMAX:
+        return ReductionMode::AMAX;
+    case HIPDNN_REDUCTION_AVG:
+        return ReductionMode::AVG;
+    case HIPDNN_REDUCTION_NORM1:
+        return ReductionMode::NORM1;
+    case HIPDNN_REDUCTION_NORM2:
+        return ReductionMode::NORM2;
+    case HIPDNN_REDUCTION_MUL_NO_ZEROS:
+        return ReductionMode::MUL_NO_ZEROS;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnReductionMode_t value");
+    }
+}
+
+hipdnnReductionMode_t fromSdkReductionMode(hipdnn_data_sdk::data_objects::ReductionMode mode)
+{
+    using hipdnn_data_sdk::data_objects::ReductionMode;
+
+    switch(mode)
+    {
+    case ReductionMode::ADD:
+        return HIPDNN_REDUCTION_ADD;
+    case ReductionMode::MUL:
+        return HIPDNN_REDUCTION_MUL;
+    case ReductionMode::MIN_OP:
+        return HIPDNN_REDUCTION_MIN;
+    case ReductionMode::MAX_OP:
+        return HIPDNN_REDUCTION_MAX;
+    case ReductionMode::AMAX:
+        return HIPDNN_REDUCTION_AMAX;
+    case ReductionMode::AVG:
+        return HIPDNN_REDUCTION_AVG;
+    case ReductionMode::NORM1:
+        return HIPDNN_REDUCTION_NORM1;
+    case ReductionMode::NORM2:
+        return HIPDNN_REDUCTION_NORM2;
+    case ReductionMode::MUL_NO_ZEROS:
+        return HIPDNN_REDUCTION_MUL_NO_ZEROS;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK ReductionMode value");
+    }
+}
+
 } // namespace hipdnn_backend

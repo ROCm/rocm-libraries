@@ -54,6 +54,7 @@
  * - 2900-2913: Batchnorm training forward operation attributes
  * - 3000-3099: Custom op operation attributes
  * - 3100-3199: SDPA backward propagation operation attributes
+ * - 3200-3299: Reduction operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -1065,6 +1066,29 @@ typedef enum
 
     /** @brief Compute data type for SDPA backward */
     HIPDNN_ATTR_SDPA_BPROP_MATH_PREC_EXT = 3128,
+
+    /** @} */
+
+    /**
+     * @name Reduction Operation Attributes (3200-3299)
+     * Attributes for HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor (X) for reduction */
+    HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT = 3200,
+
+    /** @brief Output tensor (Y) for reduction */
+    HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT = 3201,
+
+    /** @brief Reduction mode (hipdnnReductionMode_t) */
+    HIPDNN_ATTR_REDUCTION_MODE_EXT = 3202,
+
+    /** @brief Compute data type for reduction */
+    HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT = 3203,
+
+    /** @brief Whether reduction is deterministic (bool) */
+    HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT = 3204,
 
     /** @} */
 

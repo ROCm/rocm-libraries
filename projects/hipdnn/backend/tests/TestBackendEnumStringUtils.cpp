@@ -85,6 +85,9 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
     EXPECT_STREQ(
         hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT),
         "HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT");
+    EXPECT_STREQ(
+        hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT),
+        "HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT");
 
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
@@ -654,6 +657,18 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT),
                  "HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT");
 
+    // Reduction operation attributes
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT),
+                 "HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT),
+                 "HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_REDUCTION_MODE_EXT),
+                 "HIPDNN_ATTR_REDUCTION_MODE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT),
+                 "HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT),
+                 "HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT");
+
     // Operation extension attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_NAME_EXT),
                  "HIPDNN_ATTR_OPERATION_NAME_EXT");
@@ -782,6 +797,8 @@ TEST(TestBackendEnumStringUtils, GetAttributeTypeString)
                  "HIPDNN_TYPE_DIAGONAL_ALIGNMENT");
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION),
                  "HIPDNN_TYPE_ATTENTION_IMPLEMENTATION");
+    EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_REDUCTION_MODE),
+                 "HIPDNN_TYPE_REDUCTION_MODE");
 
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT),
                  "HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT");
@@ -921,6 +938,23 @@ TEST(TestBackendEnumStringUtils, GetPointwiseModeString)
 
     EXPECT_STREQ(hipdnnGetPointwiseModeString(static_cast<hipdnnPointwiseMode_t>(-1)),
                  "HIPDNN_POINTWISE_UNKNOWN");
+}
+
+TEST(TestBackendEnumStringUtils, GetReductionModeString)
+{
+    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_ADD), "HIPDNN_REDUCTION_ADD");
+    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_MUL), "HIPDNN_REDUCTION_MUL");
+    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_MIN), "HIPDNN_REDUCTION_MIN");
+    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_MAX), "HIPDNN_REDUCTION_MAX");
+    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_AMAX), "HIPDNN_REDUCTION_AMAX");
+    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_AVG), "HIPDNN_REDUCTION_AVG");
+    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_NORM1), "HIPDNN_REDUCTION_NORM1");
+    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_NORM2), "HIPDNN_REDUCTION_NORM2");
+    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_MUL_NO_ZEROS),
+                 "HIPDNN_REDUCTION_MUL_NO_ZEROS");
+
+    EXPECT_STREQ(hipdnnGetReductionModeString(static_cast<hipdnnReductionMode_t>(-1)),
+                 "HIPDNN_REDUCTION_UNKNOWN");
 }
 
 TEST(TestBackendEnumStringUtils, GetNormFwdPhaseString)

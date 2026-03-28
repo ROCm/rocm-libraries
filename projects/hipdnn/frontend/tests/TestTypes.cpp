@@ -728,3 +728,66 @@ TEST(TestTypes, FromHipdnnPointwiseModeRoundTrip)
         EXPECT_EQ(roundTripped, mode) << "Round-trip mismatch for mode " << static_cast<int>(mode);
     }
 }
+
+TEST(TestTypes, FromHipdnnReductionModeAllValidModes)
+{
+    using namespace hipdnn_frontend;
+
+    const std::vector<std::pair<hipdnnReductionMode_t, ReductionMode>> validModes = {
+        {HIPDNN_REDUCTION_ADD, ReductionMode::ADD},
+        {HIPDNN_REDUCTION_MUL, ReductionMode::MUL},
+        {HIPDNN_REDUCTION_MIN, ReductionMode::MIN},
+        {HIPDNN_REDUCTION_MAX, ReductionMode::MAX},
+        {HIPDNN_REDUCTION_AMAX, ReductionMode::AMAX},
+        {HIPDNN_REDUCTION_AVG, ReductionMode::AVG},
+        {HIPDNN_REDUCTION_NORM1, ReductionMode::NORM1},
+        {HIPDNN_REDUCTION_NORM2, ReductionMode::NORM2},
+        {HIPDNN_REDUCTION_MUL_NO_ZEROS, ReductionMode::MUL_NO_ZEROS},
+    };
+
+    for(const auto& [hipdnnMode, expectedMode] : validModes)
+    {
+        auto [mode, err] = fromHipdnnReductionMode(hipdnnMode);
+        EXPECT_TRUE(err.is_good())
+            << "fromHipdnnReductionMode failed for mode value " << static_cast<int>(hipdnnMode);
+        EXPECT_EQ(mode, expectedMode) << "Mismatch for mode value " << static_cast<int>(hipdnnMode);
+    }
+}
+
+TEST(TestTypes, FromHipdnnReductionModeUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownMode = static_cast<hipdnnReductionMode_t>(9999);
+    auto [mode, err] = fromHipdnnReductionMode(unknownMode);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(mode, ReductionMode::NOT_SET);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnReductionModeRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto mode : {
+            ReductionMode::ADD,
+            ReductionMode::MUL,
+            ReductionMode::MIN,
+            ReductionMode::MAX,
+            ReductionMode::AMAX,
+            ReductionMode::AVG,
+            ReductionMode::NORM1,
+            ReductionMode::NORM2,
+            ReductionMode::MUL_NO_ZEROS,
+        })
+    {
+        auto hipdnnOpt = toBackendReductionMode(mode);
+        ASSERT_TRUE(hipdnnOpt.has_value())
+            << "toBackendReductionMode failed for mode " << static_cast<int>(mode);
+        auto [roundTripped, err] = fromHipdnnReductionMode(hipdnnOpt.value());
+        EXPECT_TRUE(err.is_good())
+            << "fromHipdnnReductionMode failed for mode " << static_cast<int>(mode);
+        EXPECT_EQ(roundTripped, mode) << "Round-trip mismatch for mode " << static_cast<int>(mode);
+    }
+}
