@@ -55,6 +55,7 @@ add_executable(
     descriptors/TestGraphDescriptorBatchnormBackward.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp
+    descriptors/TestBatchnormInferenceVarianceExtOperationFromNode.cpp
     descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
     descriptors/TestGraphDescriptorLayernorm.cpp
     descriptors/TestGraphDescriptorOps.cpp
