@@ -59,7 +59,7 @@ void delete_obj(T* x)
 }
 
 template <class T>
-T& get_object_impl(rank<0>, T& x)
+T& get_object_impl(rank<0>, [[clang::lifetimebound]] T& x)
 {
     return x;
 }

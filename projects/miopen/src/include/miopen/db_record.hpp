@@ -226,7 +226,7 @@ public:
 
     auto GetSize() const { return map.size(); }
 
-    const std::string& GetKey() const { return key; }
+    const std::string& GetKey() const [[clang::lifetimebound]] { return key; }
 
     /// Merges data from this record to data from that record if their keys are same.
     /// This record would contain all ID:VALUES pairs from that record that are not in this.

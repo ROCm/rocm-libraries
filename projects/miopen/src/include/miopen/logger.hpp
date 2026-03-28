@@ -261,7 +261,7 @@ inline const void* LogObjImpl(const void* x) { return x; }
 
 #if !WORKAROUND_ISSUE_PP_TRANSFORM_ARGS
 template <class T, typename std::enable_if<(std::is_pointer<T>{}), int>::type = 0>
-std::ostream& LogParam(std::ostream& os, std::string name, const T& x, bool indent = true)
+std::ostream& LogParam([[clang::lifetimebound]] std::ostream& os, std::string name, const T& x, bool indent = true)
 {
     if(indent)
         os << '\t';
