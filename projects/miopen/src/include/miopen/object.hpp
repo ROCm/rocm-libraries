@@ -59,7 +59,7 @@ void delete_obj(T* x)
 }
 
 template <class T>
-T& get_object_impl(rank<0>, [[clang::lifetimebound]] T& x)
+T& get_object_impl(rank<0>, T& x)
 {
     return x;
 }
@@ -73,7 +73,7 @@ auto get_object_impl(rank<1>, T& x) -> decltype(miopen_get_object(x))
 } // namespace detail
 
 template <class T>
-auto get_object([[clang::lifetimebound]] T& x) -> decltype(detail::get_object_impl(rank<1>{}, x))
+auto get_object(T& x) -> decltype(detail::get_object_impl(rank<1>{}, x))
 {
     return detail::get_object_impl(rank<1>{}, x);
 }
