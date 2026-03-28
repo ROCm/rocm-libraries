@@ -248,7 +248,16 @@ function(TensileCreateLibraryFiles
           set(Tensile_VAR_PREFIX TENSILE)
       endif()
 
-      set(Tensile_MANIFEST_FILE_PATH "${Tensile_OUTPUT_PATH}/library/TensileManifest.txt")
+      # For single-arch builds (TheRock shard), the manifest lives in library/<arch>/ so
+      # that each shard's artifacts are additive on install-tree overlay. The Python side
+      # (TensileCreateLibrary.py libraryDir()) applies the same routing rule.
+      list(LENGTH Tensile_ARCHITECTURE _tensile_arch_count)
+      if(_tensile_arch_count EQUAL 1)
+        list(GET Tensile_ARCHITECTURE 0 _tensile_single_arch)
+        set(Tensile_MANIFEST_FILE_PATH "${Tensile_OUTPUT_PATH}/library/${_tensile_single_arch}/TensileManifest.txt")
+      else()
+        set(Tensile_MANIFEST_FILE_PATH "${Tensile_OUTPUT_PATH}/library/TensileManifest.txt")
+      endif()
       message(STATUS "Tensile_MANIFEST_FILE_PATH: ${Tensile_MANIFEST_FILE_PATH}")
 
       if($ENV{ENABLE_ADDRESS_SANITIZER})

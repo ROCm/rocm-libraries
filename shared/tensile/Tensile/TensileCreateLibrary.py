@@ -72,6 +72,22 @@ from .Utilities.toFile import toFile
 TENSILE_MANIFEST_FILENAME = "TensileManifest.txt"
 TENSILE_LIBRARY_DIR = "library"
 
+
+def libraryDir(outputPath: Union[str, Path], archs: List[str]) -> Path:
+    """Return the library output directory for the given target architectures.
+
+    Single arch  → <outputPath>/library/<arch>/   (TheRock shard overlay safe)
+    Zero or multiple archs → <outputPath>/library/ (flat, multi-arch build)
+
+    The rocblas runtime already probes library/<arch>/ before falling back to
+    library/ (tensile_host.cpp), so no runtime changes are required.
+    """
+    path = Path(outputPath)
+    if len(archs) == 1:
+        return path / TENSILE_LIBRARY_DIR / archs[0]
+    return path / TENSILE_LIBRARY_DIR
+
+
 ProcessedKernelResult = Tuple[int, str, str, str, Optional[str]]
 ProcessedKernelLookup = Dict[str, List[ProcessedKernelResult]]
 
@@ -752,6 +768,7 @@ def buildObjectFilePaths(
     sourceLibFiles,
     asmLibFiles,
     masterLibraries,
+    archs: Optional[List[str]] = None,
 ):
     solutionPaths = []
     sourceKernelPaths = []
@@ -777,7 +794,7 @@ def buildObjectFilePaths(
         asmKernelPaths += [os.path.join(asmKernelDir, asmKernelFile)]
 
     # Build full paths for source and asm library files
-    libDir = os.path.join(prefixDir, "library")
+    libDir = str(libraryDir(prefixDir, archs or []))
 
     libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
     if not globalParameters["SeparateArchitectures"] and not globalParameters["LazyLibraryLoading"]:
@@ -1110,7 +1127,8 @@ def writeBenchmarkClientFiles(
         removeTemporaries=removeTemporaries,
     )
 
-    newLibraryDir = ensurePath(os.path.join(libraryWorkingPath, "library"))
+    _, requestedArchs = splitArchs()
+    newLibraryDir = ensurePath(libraryDir(libraryWorkingPath, requestedArchs))
     newLibraryFile = os.path.join(newLibraryDir, "TensileLibrary.yaml")
     newLibrary = MasterSolutionLibrary.BenchmarkingLibrary(solutions)
     newLibrary.applyNaming(kernelMinNaming)
@@ -1391,7 +1409,7 @@ def TensileCreateLibrary():
             f"No requested architecture is supported by ROCm {globalParameters['HipClangVersion']}\n  Requested {', '.join(requestedArchs)}\n  Supported {', '.join(supportedArchs)}"
         )
 
-    manifestFile = Path(outputPath) / TENSILE_LIBRARY_DIR / TENSILE_MANIFEST_FILENAME
+    manifestFile = libraryDir(outputPath, requestedArchs) / TENSILE_MANIFEST_FILENAME
     manifestFile.parent.mkdir(exist_ok=True)
 
     if args["VerifyManifest"]:
@@ -1466,6 +1484,7 @@ def TensileCreateLibrary():
         sourceLibFiles,
         asmLibFiles,
         masterLibraries,
+        archs=requestedArchs,
     )
 
     toFile(Path(manifestFile), libMetadataPaths + sourceLibPaths + asmLibPaths)
@@ -1502,7 +1521,7 @@ def TensileCreateLibrary():
     tPrint(2, f"codeObjectFiles: {codeObjectFiles}")
     tPrint(2, f"sourceLibPaths + asmLibPaths: {sourceLibPaths + asmLibPaths}")
 
-    newLibraryDir = Path(outputPath) / "library"
+    newLibraryDir = libraryDir(outputPath, requestedArchs)
     newLibraryDir.mkdir(exist_ok=True)
 
     masterFileList = generateMasterFileList(masterLibraries, supportedArchs, lazyLoading)
