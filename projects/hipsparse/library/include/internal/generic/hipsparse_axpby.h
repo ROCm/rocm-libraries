@@ -64,7 +64,7 @@ extern "C" {
 *  <tr><td>HIP_C_64F
 *  </table>
 *
-*  \par Mixed precisions:
+*  \par Mixed Precisions:
 *  <table>
 *  <caption id="axpby_mixed">Mixed Precisions</caption>
 *  <tr><th>X / Y      <th>compute_type
@@ -73,7 +73,7 @@ extern "C" {
 *  </table>
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  alpha       scalar \f$\alpha\f$.
 *  @param[in]
@@ -85,7 +85,7 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p vecX, \p beta or \p vecY is nullptr,
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p vecX, \p beta, or \p vecY is nullptr,
 *          or the vector sizes or data types are incompatible.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)

@@ -18,6 +18,11 @@ TEST(TestTypes, ToSdkTypeDataTypes)
     EXPECT_EQ(toSdkType(DataType::INT8), hipdnn_data_sdk::data_objects::DataType::INT8);
     EXPECT_EQ(toSdkType(DataType::FP8_E4M3), hipdnn_data_sdk::data_objects::DataType::FP8_E4M3);
     EXPECT_EQ(toSdkType(DataType::FP8_E5M2), hipdnn_data_sdk::data_objects::DataType::FP8_E5M2);
+    EXPECT_EQ(toSdkType(DataType::FP8_E8M0), hipdnn_data_sdk::data_objects::DataType::FP8_E8M0);
+    EXPECT_EQ(toSdkType(DataType::FP4_E2M1), hipdnn_data_sdk::data_objects::DataType::FP4_E2M1);
+    EXPECT_EQ(toSdkType(DataType::INT4), hipdnn_data_sdk::data_objects::DataType::INT4);
+    EXPECT_EQ(toSdkType(DataType::FP6_E2M3), hipdnn_data_sdk::data_objects::DataType::FP6_E2M3);
+    EXPECT_EQ(toSdkType(DataType::FP6_E3M2), hipdnn_data_sdk::data_objects::DataType::FP6_E3M2);
     EXPECT_EQ(toSdkType(DataType::NOT_SET), hipdnn_data_sdk::data_objects::DataType::UNSET);
 }
 
@@ -34,6 +39,11 @@ TEST(TestTypes, FromSdkTypeDataTypes)
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT8), DataType::INT8);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E4M3), DataType::FP8_E4M3);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E5M2), DataType::FP8_E5M2);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E8M0), DataType::FP8_E8M0);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP4_E2M1), DataType::FP4_E2M1);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT4), DataType::INT4);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP6_E2M3), DataType::FP6_E2M3);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP6_E3M2), DataType::FP6_E3M2);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::UNSET), DataType::NOT_SET);
 }
 
@@ -97,6 +107,11 @@ TEST(TestTypes, DataTypeToString)
     EXPECT_STREQ(to_string(DataType::INT8), "int8");
     EXPECT_STREQ(to_string(DataType::FP8_E4M3), "fp8_e4m3");
     EXPECT_STREQ(to_string(DataType::FP8_E5M2), "fp8_e5m2");
+    EXPECT_STREQ(to_string(DataType::FP8_E8M0), "fp8_e8m0");
+    EXPECT_STREQ(to_string(DataType::FP4_E2M1), "fp4_e2m1");
+    EXPECT_STREQ(to_string(DataType::INT4), "int4");
+    EXPECT_STREQ(to_string(DataType::FP6_E2M3), "fp6_e2m3");
+    EXPECT_STREQ(to_string(DataType::FP6_E3M2), "fp6_e3m2");
     EXPECT_STREQ(to_string(DataType::NOT_SET), "unknown");
 }
 
@@ -140,6 +155,26 @@ TEST(TestTypes, DataTypeStreamOperator)
 
     oss << DataType::FP8_E5M2;
     EXPECT_EQ(oss.str(), "fp8_e5m2");
+    oss.str("");
+
+    oss << DataType::FP8_E8M0;
+    EXPECT_EQ(oss.str(), "fp8_e8m0");
+    oss.str("");
+
+    oss << DataType::FP4_E2M1;
+    EXPECT_EQ(oss.str(), "fp4_e2m1");
+    oss.str("");
+
+    oss << DataType::INT4;
+    EXPECT_EQ(oss.str(), "int4");
+    oss.str("");
+
+    oss << DataType::FP6_E2M3;
+    EXPECT_EQ(oss.str(), "fp6_e2m3");
+    oss.str("");
+
+    oss << DataType::FP6_E3M2;
+    EXPECT_EQ(oss.str(), "fp6_e3m2");
     oss.str("");
 
     oss << DataType::NOT_SET;
@@ -246,6 +281,11 @@ TEST(TestTypes, ToHipdnnDataType)
     EXPECT_EQ(toHipdnnDataType(DataType::BFLOAT16), HIPDNN_DATA_BFLOAT16);
     EXPECT_EQ(toHipdnnDataType(DataType::FP8_E4M3), HIPDNN_DATA_FP8_E4M3);
     EXPECT_EQ(toHipdnnDataType(DataType::FP8_E5M2), HIPDNN_DATA_FP8_E5M2);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP8_E8M0), HIPDNN_DATA_FP8_E8M0);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP4_E2M1), HIPDNN_DATA_FP4_E2M1);
+    EXPECT_EQ(toHipdnnDataType(DataType::INT4), HIPDNN_DATA_INT4);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP6_E2M3), HIPDNN_DATA_FP6_E2M3);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP6_E3M2), HIPDNN_DATA_FP6_E3M2);
     EXPECT_EQ(toHipdnnDataType(DataType::NOT_SET), std::nullopt);
 }
 
@@ -269,6 +309,11 @@ TEST(TestTypes, FromHipdnnDataTypeAllValidTypes)
     check(HIPDNN_DATA_BFLOAT16, DataType::BFLOAT16);
     check(HIPDNN_DATA_FP8_E4M3, DataType::FP8_E4M3);
     check(HIPDNN_DATA_FP8_E5M2, DataType::FP8_E5M2);
+    check(HIPDNN_DATA_FP8_E8M0, DataType::FP8_E8M0);
+    check(HIPDNN_DATA_FP4_E2M1, DataType::FP4_E2M1);
+    check(HIPDNN_DATA_INT4, DataType::INT4);
+    check(HIPDNN_DATA_FP6_E2M3, DataType::FP6_E2M3);
+    check(HIPDNN_DATA_FP6_E3M2, DataType::FP6_E3M2);
 }
 
 TEST(TestTypes, FromHipdnnDataTypeUnknownReturnsError)
@@ -295,7 +340,12 @@ TEST(TestTypes, FromHipdnnDataTypeRoundTrip)
                    DataType::UINT8,
                    DataType::BFLOAT16,
                    DataType::FP8_E4M3,
-                   DataType::FP8_E5M2})
+                   DataType::FP8_E5M2,
+                   DataType::FP8_E8M0,
+                   DataType::FP4_E2M1,
+                   DataType::INT4,
+                   DataType::FP6_E2M3,
+                   DataType::FP6_E3M2})
     {
         auto hipdnnOpt = toHipdnnDataType(dt);
         ASSERT_TRUE(hipdnnOpt.has_value()) << "toHipdnnDataType failed for " << to_string(dt);
@@ -342,6 +392,75 @@ TEST(TestTypes, FromHipdnnConvModeRoundTrip)
         EXPECT_TRUE(err.is_good());
         EXPECT_EQ(roundTripped, mode);
     }
+}
+
+TEST(TestTypes, ToSdkTypeReductionMode)
+{
+    using namespace hipdnn_frontend;
+    using sdk = hipdnn_data_sdk::data_objects::ReductionMode;
+
+    EXPECT_EQ(toSdkType(ReductionMode::NOT_SET), sdk::NOT_SET);
+    EXPECT_EQ(toSdkType(ReductionMode::ADD), sdk::ADD);
+    EXPECT_EQ(toSdkType(ReductionMode::MUL), sdk::MUL);
+    EXPECT_EQ(toSdkType(ReductionMode::MIN), sdk::MIN_OP);
+    EXPECT_EQ(toSdkType(ReductionMode::MAX), sdk::MAX_OP);
+    EXPECT_EQ(toSdkType(ReductionMode::AMAX), sdk::AMAX);
+    EXPECT_EQ(toSdkType(ReductionMode::AVG), sdk::AVG);
+    EXPECT_EQ(toSdkType(ReductionMode::NORM1), sdk::NORM1);
+    EXPECT_EQ(toSdkType(ReductionMode::NORM2), sdk::NORM2);
+    EXPECT_EQ(toSdkType(ReductionMode::MUL_NO_ZEROS), sdk::MUL_NO_ZEROS);
+}
+
+TEST(TestTypes, FromSdkTypeReductionMode)
+{
+    using namespace hipdnn_frontend;
+    using sdk = hipdnn_data_sdk::data_objects::ReductionMode;
+
+    EXPECT_EQ(fromSdkType(sdk::NOT_SET), ReductionMode::NOT_SET);
+    EXPECT_EQ(fromSdkType(sdk::ADD), ReductionMode::ADD);
+    EXPECT_EQ(fromSdkType(sdk::MUL), ReductionMode::MUL);
+    EXPECT_EQ(fromSdkType(sdk::MIN_OP), ReductionMode::MIN);
+    EXPECT_EQ(fromSdkType(sdk::MAX_OP), ReductionMode::MAX);
+    EXPECT_EQ(fromSdkType(sdk::AMAX), ReductionMode::AMAX);
+    EXPECT_EQ(fromSdkType(sdk::AVG), ReductionMode::AVG);
+    EXPECT_EQ(fromSdkType(sdk::NORM1), ReductionMode::NORM1);
+    EXPECT_EQ(fromSdkType(sdk::NORM2), ReductionMode::NORM2);
+    EXPECT_EQ(fromSdkType(sdk::MUL_NO_ZEROS), ReductionMode::MUL_NO_ZEROS);
+}
+
+TEST(TestTypes, ReductionModeRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    const std::vector<ReductionMode> modes = {ReductionMode::NOT_SET,
+                                              ReductionMode::ADD,
+                                              ReductionMode::MUL,
+                                              ReductionMode::MIN,
+                                              ReductionMode::MAX,
+                                              ReductionMode::AMAX,
+                                              ReductionMode::AVG,
+                                              ReductionMode::NORM1,
+                                              ReductionMode::NORM2,
+                                              ReductionMode::MUL_NO_ZEROS};
+
+    for(auto mode : modes)
+    {
+        EXPECT_EQ(fromSdkType(toSdkType(mode)), mode)
+            << "Round-trip failed for ReductionMode " << static_cast<int>(mode);
+    }
+}
+
+TEST(TestTypes, ReductionModeMinMaxSdkNameMapping)
+{
+    using namespace hipdnn_frontend;
+    using sdk = hipdnn_data_sdk::data_objects::ReductionMode;
+
+    // MIN and MAX are renamed to MIN_OP and MAX_OP in the SDK schema due to
+    // flatc reserved identifier conflicts (matched to PointwiseMode convention).
+    EXPECT_EQ(toSdkType(ReductionMode::MIN), sdk::MIN_OP);
+    EXPECT_EQ(toSdkType(ReductionMode::MAX), sdk::MAX_OP);
+    EXPECT_EQ(fromSdkType(sdk::MIN_OP), ReductionMode::MIN);
+    EXPECT_EQ(fromSdkType(sdk::MAX_OP), ReductionMode::MAX);
 }
 
 TEST(TestTypes, FromHipdnnPointwiseModeAllValidModes)
@@ -458,6 +577,93 @@ TEST(TestTypes, FromHipdnnNormFwdPhaseRoundTrip)
             << "fromHipdnnNormFwdPhase failed for phase " << static_cast<int>(phase);
         EXPECT_EQ(roundTripped, phase)
             << "Round-trip mismatch for phase " << static_cast<int>(phase);
+    }
+}
+
+TEST(TestTypes, FromHipdnnDiagonalAlignmentValidValues)
+{
+    using namespace hipdnn_frontend;
+
+    auto [topLeft, topLeftErr]
+        = fromHipdnnDiagonalAlignment(HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT);
+    EXPECT_TRUE(topLeftErr.is_good());
+    EXPECT_EQ(topLeft, DiagonalAlignment::TOP_LEFT);
+
+    auto [bottomRight, bottomRightErr]
+        = fromHipdnnDiagonalAlignment(HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT);
+    EXPECT_TRUE(bottomRightErr.is_good());
+    EXPECT_EQ(bottomRight, DiagonalAlignment::BOTTOM_RIGHT);
+}
+
+TEST(TestTypes, FromHipdnnDiagonalAlignmentUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownVal = static_cast<hipdnnDiagonalAlignment_t>(9999);
+    auto [alignment, err] = fromHipdnnDiagonalAlignment(unknownVal);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(alignment, DiagonalAlignment::TOP_LEFT);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnDiagonalAlignmentRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
+    {
+        auto backend = toBackendDiagonalAlignment(alignment);
+        auto [roundTripped, err] = fromHipdnnDiagonalAlignment(backend);
+        EXPECT_TRUE(err.is_good());
+        EXPECT_EQ(roundTripped, alignment);
+    }
+}
+
+TEST(TestTypes, FromHipdnnAttentionImplementationValidValues)
+{
+    using namespace hipdnn_frontend;
+
+    auto [autoVal, autoErr]
+        = fromHipdnnAttentionImplementation(HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT);
+    EXPECT_TRUE(autoErr.is_good());
+    EXPECT_EQ(autoVal, AttentionImplementation::AUTO);
+
+    auto [composite, compositeErr]
+        = fromHipdnnAttentionImplementation(HIPDNN_ATTENTION_IMPLEMENTATION_COMPOSITE_EXT);
+    EXPECT_TRUE(compositeErr.is_good());
+    EXPECT_EQ(composite, AttentionImplementation::COMPOSITE);
+
+    auto [unified, unifiedErr]
+        = fromHipdnnAttentionImplementation(HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT);
+    EXPECT_TRUE(unifiedErr.is_good());
+    EXPECT_EQ(unified, AttentionImplementation::UNIFIED);
+}
+
+TEST(TestTypes, FromHipdnnAttentionImplementationUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownVal = static_cast<hipdnnAttentionImplementation_t>(9999);
+    auto [impl, err] = fromHipdnnAttentionImplementation(unknownVal);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(impl, AttentionImplementation::AUTO);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnAttentionImplementationRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto impl : {AttentionImplementation::AUTO,
+                     AttentionImplementation::COMPOSITE,
+                     AttentionImplementation::UNIFIED})
+    {
+        auto backend = toBackendAttentionImplementation(impl);
+        auto [roundTripped, err] = fromHipdnnAttentionImplementation(backend);
+        EXPECT_TRUE(err.is_good());
+        EXPECT_EQ(roundTripped, impl);
     }
 }
 

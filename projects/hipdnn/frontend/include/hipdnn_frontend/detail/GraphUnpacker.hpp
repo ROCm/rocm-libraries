@@ -42,6 +42,7 @@
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
+#include <hipdnn_frontend/node/ReductionNode.hpp>
 #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
 #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <memory>
@@ -260,6 +261,19 @@ void unpackNodeFromFlatBuffer(
                 attr.set_compute_data_type(fromSdkType(fbNode->compute_data_type()));
                 outNodes.emplace_back(
                     std::make_shared<graph::CustomOpNode>(std::move(attr), outGraphAttrs));
+                break;
+            }
+            case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
+            {
+                auto attr = graph::ReductionAttributes::fromFlatBuffer(
+                    fbNode->attributes_as_ReductionAttributes(), tensorMap);
+                if(fbNode->name() != nullptr)
+                {
+                    attr.set_name(fbNode->name()->str());
+                }
+                attr.set_compute_data_type(fromSdkType(fbNode->compute_data_type()));
+                outNodes.emplace_back(
+                    std::make_shared<graph::ReductionNode>(std::move(attr), outGraphAttrs));
                 break;
             }
             default:
