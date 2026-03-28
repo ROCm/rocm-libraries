@@ -106,7 +106,7 @@ public:
     void setHandle() const
     {
         auto desc = getDescriptor();
-        const hipdnnHandle_t handle = &_mockHandle;
+        hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1,
                            static_cast<const void*>(&handle));
     }
@@ -130,7 +130,7 @@ public:
                              DataType expectedDataType,
                              bool expectedVirtual = false)
     {
-        ASSERT_NE(tensor, nullptr) << "Tensor with UID " << expectedUid << " not found";
+        ASSERT_NE(tensor, nullptr) << "Tensor with UID " << expectedUid << " not found"; // NOLINT(readability-implicit-bool-conversion)
         EXPECT_EQ(tensor->uid, expectedUid);
         EXPECT_EQ(tensor->dims, expectedDims);
         EXPECT_EQ(tensor->strides, expectedStrides);
@@ -435,7 +435,7 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
 {% endif %}
 
     // Set operation name
-    std::string opName = "test_{{ op.name | lower }}";
+    const std::string opName = "test_{{ op.name | lower }}";
     opDesc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                          HIPDNN_TYPE_CHAR,
                          static_cast<int64_t>(opName.size()),

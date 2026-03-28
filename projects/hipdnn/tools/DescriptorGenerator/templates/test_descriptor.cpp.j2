@@ -453,11 +453,11 @@ TEST_F(Test{{ op.class_name }}, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrieved{{ op.tensor_fields[0].pascal_name }}));
+                                       static_cast<void*>(&retrieved{{ op.tensor_fields[0].pascal_name }})));
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrieved{{ op.tensor_fields[0].pascal_name }}, nullptr);
-    std::unique_ptr<HipdnnBackendDescriptor> guard{{ op.tensor_fields[0].pascal_name }}(retrieved{{ op.tensor_fields[0].pascal_name }});
+    const std::unique_ptr<HipdnnBackendDescriptor> guard{{ op.tensor_fields[0].pascal_name }}(retrieved{{ op.tensor_fields[0].pascal_name }});
 }
 
 // =============================================================================
@@ -743,7 +743,7 @@ TEST_F(Test{{ op.class_name }}, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("{{ op.class_name }}"), std::string::npos);
 {% for tf in op.tensor_fields %}
 {% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
@@ -925,7 +925,7 @@ TEST_F(Test{{ op.class_name }}, Get{{ taf.test_label or taf.name | replace('_', 
     ASSERT_NE(retrieved[{{ loop.index0 }}], nullptr);
 {% endfor %}
 {% for uid in taf.test_uids %}
-    std::unique_ptr<HipdnnBackendDescriptor> guard{{ loop.index0 }}(retrieved[{{ loop.index0 }}]);
+    const std::unique_ptr<HipdnnBackendDescriptor> guard{{ loop.index0 }}(retrieved[{{ loop.index0 }}]);
 {% endfor %}
 }
 {% endif %}
@@ -938,7 +938,7 @@ TEST_F(Test{{ op.class_name }}, Get{{ taf.test_label or taf.name | replace('_', 
 TEST_F(Test{{ op.class_name }}, SetAttributeNameSuccess)
 {
     auto desc = getDescriptor();
-    std::string name = "test_{{ op.name | lower }}_op";
+    const std::string name = "test_{{ op.name | lower }}_op";
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                                        HIPDNN_TYPE_CHAR,
@@ -963,7 +963,7 @@ TEST_F(Test{{ op.class_name }}, SetAttributeNameSuccess)
 TEST_F(Test{{ op.class_name }}, GetAttributeNameQueryReturnsSizeInclNull)
 {
     auto desc = getDescriptor();
-    std::string name = "my_op";
+    const std::string name = "my_op";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
                        static_cast<int64_t>(name.size()),
@@ -1012,7 +1012,7 @@ TEST_F(Test{{ op.class_name }}, BuildNodePreservesName)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string opName = "test_{{ op.name | lower }}";
+    const std::string opName = "test_{{ op.name | lower }}";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
                        static_cast<int64_t>(opName.size()),

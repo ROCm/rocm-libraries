@@ -361,6 +361,21 @@ class TestDataField:
         df = make_data_field(type="vector_int64", required=False)
         assert df.is_optional_scalar is False
 
+    def test_is_optional_scalar_bool_default_is_false(self):
+        """Plain bool (FBS bool field = false) is NOT optional scalar."""
+        df = make_data_field(type="bool", required=False, fbs_optional=False)
+        assert df.is_optional_scalar is False
+
+    def test_is_optional_scalar_bool_fbs_optional_is_true(self):
+        """FBS optional bool (bool field (optional)) IS optional scalar."""
+        df = make_data_field(type="bool", required=False, fbs_optional=True)
+        assert df.is_optional_scalar is True
+
+    def test_is_optional_scalar_bool_required_is_false(self):
+        """Required bool is never optional scalar regardless of fbs_optional."""
+        df = make_data_field(type="bool", required=True, fbs_optional=False)
+        assert df.is_optional_scalar is False
+
     # --- cpp_type ---
 
     @pytest.mark.parametrize(
