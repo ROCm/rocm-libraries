@@ -1410,7 +1410,7 @@ def TensileCreateLibrary():
         )
 
     manifestFile = libraryDir(outputPath, requestedArchs) / TENSILE_MANIFEST_FILENAME
-    manifestFile.parent.mkdir(exist_ok=True)
+    manifestFile.parent.mkdir(parents=True, exist_ok=True)
 
     if args["VerifyManifest"]:
         if verifyManifest(manifestFile):
@@ -1522,7 +1522,7 @@ def TensileCreateLibrary():
     tPrint(2, f"sourceLibPaths + asmLibPaths: {sourceLibPaths + asmLibPaths}")
 
     newLibraryDir = libraryDir(outputPath, requestedArchs)
-    newLibraryDir.mkdir(exist_ok=True)
+    newLibraryDir.mkdir(parents=True, exist_ok=True)
 
     masterFileList = generateMasterFileList(masterLibraries, supportedArchs, lazyLoading)
 
