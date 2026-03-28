@@ -38,7 +38,7 @@ public:
     InlineException(const std::string& trace) : _trace(trace) {}
 
     virtual std::string What() const = 0;
-    const std::string& GetTrace() const { return _trace; }
+    const std::string& GetTrace() const [[clang::lifetimebound]] { return _trace; }
 
 private:
     std::string _trace;
