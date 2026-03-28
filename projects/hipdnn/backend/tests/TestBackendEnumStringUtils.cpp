@@ -817,6 +817,7 @@ TEST(TestBackendEnumStringUtils, GetDataTypeString)
     EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_INT4), "HIPDNN_DATA_INT4");
     EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_FP6_E2M3), "HIPDNN_DATA_FP6_E2M3");
     EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_FP6_E3M2), "HIPDNN_DATA_FP6_E3M2");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_INT64), "HIPDNN_DATA_INT64");
 
     EXPECT_STREQ(hipdnnGetDataTypeString(static_cast<hipdnnDataType_t>(-1)), "HIPDNN_DATA_UNKNOWN");
 }
