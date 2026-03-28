@@ -5,6 +5,7 @@
 #include "CurrentDevicePropertyProvider.hpp"
 #include "engines/HipKernelEngine.hpp"
 #include "engines/plans/BatchnormPlanBuilder.hpp"
+#include "engines/plans/RMSnorm/RMSnormPlanBuilder.hpp"
 #include "hip/HipKernelCompiler.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -28,6 +29,8 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
              auto engine = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID);
              engine->addPlanBuilder(
                  std::make_unique<BatchnormPlanBuilder>(kernelCompiler, devicePropertyProvider));
+             engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormPlanBuilder>(
+                 kernelCompiler, devicePropertyProvider));
              return engine;
          }}};
 

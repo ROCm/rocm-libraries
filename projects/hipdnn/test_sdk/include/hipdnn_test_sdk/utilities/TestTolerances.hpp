@@ -116,8 +116,13 @@ constexpr float getToleranceBackward()
     }
 }
 
+} // namespace batchnorm
+
+namespace rmsnorm
+{
+
 template <typename T>
-constexpr float getRmsToleranceTraining()
+constexpr float getTolerance()
 {
     // RMS tolerance values for use with CpuFpReferenceMiopenRmsValidation
     // These match MIOpen's relative RMS error tolerance (typically 0.4% = 4e-3)
@@ -134,8 +139,7 @@ constexpr float getRmsToleranceTraining()
         static_assert(false, "Type not supported");
     }
 }
-
-} // namespace batchnorm
+} // namespace rmsnorm
 
 namespace conv
 {
