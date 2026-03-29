@@ -1472,8 +1472,10 @@ TEST_F(TestUnpackAndRegisterTensorArray, NullDescriptorInArray)
     auto err = unpackAndRegisterTensorArray(
         _fakeSource, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensors, "test");
 
-    EXPECT_TRUE(err.is_bad());
-    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    // Null descriptors are silently skipped; only the valid descriptor is returned.
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    ASSERT_EQ(outTensors.size(), 1u);
+    EXPECT_EQ(outTensors[0], existingTensor);
 }
 
 TEST_F(TestUnpackAndRegisterTensorArray, UidQueryFails)
