@@ -10,9 +10,9 @@
 #include <gtest/gtest.h>
 #include <half/half.hpp>
 #include <limits>
+#include <numeric>
 #include <miopen/logger.hpp>
 #include <miopen/tensor_layout.hpp>
-#include <numeric>
 #include <sstream>
 #include <vector>
 // network_data.hpp provides get_inputs() function used when TEST_GET_INPUT_TENSOR = 1

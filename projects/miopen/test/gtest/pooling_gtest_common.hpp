@@ -9,12 +9,12 @@
 #include <cstddef>
 #include <iostream>
 #include <limits>
+#include <numeric>
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/pooling.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
-#include <numeric>
 #include <utility>
 
 // #include "../network_data.hpp"
