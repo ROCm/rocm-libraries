@@ -389,6 +389,13 @@ template <typename T>
             tensor->set_value(val);
             break;
         }
+        case DataType::INT64:
+        {
+            int64_t val = 0;
+            std::memcpy(&val, valueBytes.data(), sizeof(int64_t));
+            tensor->set_value(val);
+            break;
+        }
         case DataType::UINT8:
         case DataType::INT8:
         case DataType::FP8_E4M3:
@@ -525,6 +532,55 @@ template <typename T>
     T raw{};
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(desc, attrName, attrType, raw, errorContext));
     value = raw;
+    return {};
+}
+
+/// Unpacks a tensor array attribute from an operation descriptor, deduplicating
+/// against the tensor map. Each tensor is either found in the map (shared) or
+/// unpacked fresh and registered.
+[[nodiscard]] inline Error unpackAndRegisterTensorArray(
+    hipdnnBackendDescriptor_t opDesc,
+    hipdnnBackendAttributeName_t tensorAttrName,
+    std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,
+    std::vector<std::shared_ptr<graph::TensorAttributes>>& outTensors,
+    const std::string& errorContext)
+{
+    auto [descs, descErr] = getDescriptorAttrDescArray(opDesc, tensorAttrName, errorContext);
+    if(descErr.is_bad())
+    {
+        return descErr;
+    }
+
+    outTensors.clear();
+    outTensors.reserve(descs.size());
+    for(auto& scopedDesc : descs)
+    {
+        if(scopedDesc.get() == nullptr)
+        {
+            continue;
+        }
+
+        int64_t uid = 0;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(scopedDesc.get(),
+                                                   HIPDNN_ATTR_TENSOR_UNIQUE_ID,
+                                                   HIPDNN_TYPE_INT64,
+                                                   uid,
+                                                   errorContext + " tensor UID"));
+
+        auto it = tensorMap.find(uid);
+        if(it != tensorMap.end())
+        {
+            outTensors.push_back(it->second);
+        }
+        else
+        {
+            std::shared_ptr<graph::TensorAttributes> tensor;
+            HIPDNN_CHECK_ERROR(unpackTensorAttributes(scopedDesc.get(), tensor));
+            tensorMap[uid] = tensor;
+            outTensors.push_back(std::move(tensor));
+        }
+    }
+
     return {};
 }
 
