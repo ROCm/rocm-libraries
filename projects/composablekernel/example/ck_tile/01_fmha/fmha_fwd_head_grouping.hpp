@@ -8,7 +8,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#ifndef _WIN32
 #include <dirent.h>
+#endif
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -102,6 +104,8 @@ inline std::optional<kfd_device_location> get_current_kfd_location()
                                ((props.pciBusID & 0xff) << 8) | ((props.pciDeviceID & 0x1f) << 3)};
 }
 
+#ifndef _WIN32
+
 inline std::optional<std::string> find_matching_kfd_node(const kfd_device_location& loc)
 {
     constexpr const char* kKfdNodesDir = "/sys/class/kfd/kfd/topology/nodes";
@@ -175,6 +179,25 @@ inline size_t get_kfd_sysfs_llc_cache_bytes()
 
     return read_kfd_node_l3_bytes(*node);
 }
+
+#else
+
+inline std::optional<std::string> find_matching_kfd_node(const kfd_device_location& loc)
+{
+	return std::nullopt;
+}
+
+inline size_t read_kfd_node_l3_bytes(const std::string& node_name)
+{
+	return 0;
+}
+
+inline size_t get_kfd_sysfs_llc_cache_bytes()
+{
+    return 0;
+}
+
+#endif // _WIN32
 
 inline size_t get_default_llc_cache_bytes_for_arch(const std::string& arch);
 
