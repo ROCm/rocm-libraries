@@ -206,7 +206,8 @@ public:
         validateInput(x, w, y, convStrides, dilations, prePadding, postPadding);
 
         const auto nDims = x.dims().size();
-        auto defines = detail::buildConvDefines<XDataType, WDataType, YDataType, ComputeDataType>(useTf32);
+        auto defines
+            = detail::buildConvDefines<XDataType, WDataType, YDataType, ComputeDataType>(useTf32);
 
         auto* xPtr = x.memory().deviceData();
         auto* wPtr = w.memory().deviceData();
