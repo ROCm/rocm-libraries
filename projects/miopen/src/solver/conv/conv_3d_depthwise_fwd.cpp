@@ -27,9 +27,12 @@
 #include <miopen/config.h>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/solvers.hpp>
+#include <miopen/env.hpp>
 #include <miopen/kernel_info.hpp>
 
 #include <string>
+
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_3D_DEPTHWISE_FWD)
 
 namespace miopen {
 namespace solver {
@@ -66,6 +69,8 @@ constexpr std::size_t kCase3Group    = 512;
 bool Conv3dDepthwiseFwd::IsApplicable(const ExecutionContext& ctx,
                                       const miopen::conv::ProblemDescription& problem) const
 {
+    if(env::disabled(MIOPEN_DEBUG_CONV_3D_DEPTHWISE_FWD))
+        return false;
     if(!ctx.use_hip_kernels)
         return false;
 
