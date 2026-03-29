@@ -151,6 +151,16 @@ public:
         });
     }
 
+    static hipdnnPluginStatus_t pluginSetLogLevel(hipdnnSeverity_t level)
+    {
+        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            hipdnn_data_sdk::logging::setLogLevel(level);
+            LOG_API_SUCCESS(apiName, "level=" << level);
+        });
+    }
+
     static hipdnnPluginStatus_t
         enginePluginGetAllEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines)
     {
@@ -501,6 +511,11 @@ private:
     hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)                \
     {                                                                                             \
         return TestPluginBase::pluginSetLoggingCallback(callback);                                \
+    }                                                                                             \
+                                                                                                  \
+    hipdnnPluginStatus_t hipdnnPluginSetLogLevel(hipdnnSeverity_t level)                          \
+    {                                                                                             \
+        return TestPluginBase::pluginSetLogLevel(level);                                          \
     }                                                                                             \
                                                                                                   \
     hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIds(int64_t* engineIds,                    \
