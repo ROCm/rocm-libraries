@@ -167,6 +167,7 @@ static std::string WriteError(kernel_type_t kern_type)
                "#endif\n"
                "extern \"C\" {\n"
                "__global__ void write(int* data) {\n"
+               "    int num = threadIdx.x + blockDim.x * blockIdx.x;\n"
                "    data[num] *= 2;\n"
                "}\n"
                "}\n";
