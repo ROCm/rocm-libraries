@@ -108,7 +108,11 @@ public:
             }
             if(allocated_capacity > host_max_capacity)
                 return 0;
-            return static_cast<size_t>(host_max_capacity - allocated_capacity);
+            size_t available_host_memory = static_cast<size_t>(host_max_capacity - allocated_capacity);
+            unsigned long long host_real_capacity = memStatus.ullAvailPhys;
+            hipblaslt_cout << "host_real_capacity: " << host_real_capacity << std::endl;
+            hipblaslt_cout << "available_host_memory: " << available_host_memory << std::endl;
+            return std::min(available_host_memory, host_real_capacity / 3.5);
         }
         else
         {
@@ -208,6 +212,7 @@ public:
 
         // Keep 20% of the available system memory for room of emergency
         size_t available_host_memory = get_available_host_memory(allocated_capacity) * 0.8;
+        hipblaslt_cout << "capacity: " << capacity << std::endl;
         // Need to ensure sufficient host memory, otherwise hipHostMalloc may OOM and hip api won't return error code,
         // and will cause the gtest get aborted
         if(available_host_memory < capacity || hipHostMalloc(&d, capacity) != hipSuccess)
