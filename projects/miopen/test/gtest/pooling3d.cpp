@@ -12,6 +12,7 @@
 #include <half/half.hpp>
 
 #include <miopen/logger.hpp>
+#include <numeric>
 #include <miopen/tensor_layout.hpp>
 
 #include "pooling2d_common.hpp"

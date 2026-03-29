@@ -12,6 +12,7 @@
 #include <limits>
 #include <numeric>
 #include <miopen/logger.hpp>
+#include <numeric>
 #include <miopen/tensor_layout.hpp>
 #include <sstream>
 #include <vector>

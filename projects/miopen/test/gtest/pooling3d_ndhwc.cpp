@@ -11,6 +11,7 @@
 #include <half/half.hpp>
 
 #include <miopen/logger.hpp>
+#include <numeric>
 #include <miopen/tensor_layout.hpp>
 
 #include "gtest_common.hpp"

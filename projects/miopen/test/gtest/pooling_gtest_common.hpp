@@ -14,6 +14,7 @@
 #include <miopen/miopen.h>
 #include <miopen/pooling.hpp>
 #include <miopen/tensor.hpp>
+#include <numeric>
 #include <miopen/tensor_layout.hpp>
 #include <utility>
 
