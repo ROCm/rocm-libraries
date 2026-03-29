@@ -389,6 +389,13 @@ template <typename T>
             tensor->set_value(val);
             break;
         }
+        case DataType::INT64:
+        {
+            int64_t val = 0;
+            std::memcpy(&val, valueBytes.data(), sizeof(int64_t));
+            tensor->set_value(val);
+            break;
+        }
         case DataType::UINT8:
         case DataType::INT8:
         case DataType::FP8_E4M3:
@@ -528,9 +535,9 @@ template <typename T>
     return {};
 }
 
-/// Unpacks an array of tensor descriptors from a backend operation descriptor.
-/// For each tensor descriptor, finds it in the tensorMap (by UID, for sharing) or
-/// creates a new one and registers it.
+/// Unpacks a tensor array attribute from an operation descriptor, deduplicating
+/// against the tensor map. Each tensor is either found in the map (shared) or
+/// unpacked fresh and registered.
 [[nodiscard]] inline Error unpackAndRegisterTensorArray(
     hipdnnBackendDescriptor_t opDesc,
     hipdnnBackendAttributeName_t tensorAttrName,
@@ -538,31 +545,27 @@ template <typename T>
     std::vector<std::shared_ptr<graph::TensorAttributes>>& outTensors,
     const std::string& errorContext)
 {
-    auto [tensorDescs, descErr] = getDescriptorAttrDescArray(opDesc, tensorAttrName, errorContext);
+    auto [descs, descErr] = getDescriptorAttrDescArray(opDesc, tensorAttrName, errorContext);
     if(descErr.is_bad())
     {
         return descErr;
     }
 
     outTensors.clear();
-    outTensors.reserve(tensorDescs.size());
-    for(size_t i = 0; i < tensorDescs.size(); ++i)
+    outTensors.reserve(descs.size());
+    for(auto& scopedDesc : descs)
     {
-        if(tensorDescs[i].get() == nullptr)
+        if(scopedDesc.get() == nullptr)
         {
-            return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    "Null tensor descriptor at index " + std::to_string(i) + " for "
-                        + errorContext};
+            continue;
         }
 
-        // Read the UID to check if we already have this tensor
         int64_t uid = 0;
-        HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(tensorDescs[i].get(),
+        HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(scopedDesc.get(),
                                                    HIPDNN_ATTR_TENSOR_UNIQUE_ID,
                                                    HIPDNN_TYPE_INT64,
                                                    uid,
-                                                   "tensor UID for " + errorContext + "["
-                                                       + std::to_string(i) + "]"));
+                                                   errorContext + " tensor UID"));
 
         auto it = tensorMap.find(uid);
         if(it != tensorMap.end())
@@ -572,7 +575,7 @@ template <typename T>
         else
         {
             std::shared_ptr<graph::TensorAttributes> tensor;
-            HIPDNN_CHECK_ERROR(unpackTensorAttributes(tensorDescs[i].get(), tensor));
+            HIPDNN_CHECK_ERROR(unpackTensorAttributes(scopedDesc.get(), tensor));
             tensorMap[uid] = tensor;
             outTensors.push_back(std::move(tensor));
         }
