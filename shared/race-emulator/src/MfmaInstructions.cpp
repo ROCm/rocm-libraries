@@ -3,6 +3,7 @@
 
 #include "race-emulator/FloatTypes.h"
 #include "race-emulator/Instruction.h"
+#include "race-emulator/Util.h"
 #include "race-emulator/Wave.h"
 #include <array>
 #include <bit>

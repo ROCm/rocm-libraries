@@ -5,6 +5,7 @@
 #include "race-emulator/Instruction.h"
 #include "race-emulator/Util.h"
 #include "race-emulator/Wave.h"
+#include "race-emulator/Workgroup.h"
 #include <cassert>
 #include <cmath>
 #include <cstdint>

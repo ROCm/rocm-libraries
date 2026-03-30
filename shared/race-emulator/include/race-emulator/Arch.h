@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "Workgroup.h"
+#include "Types.h"
 #include <memory>
 #include <stdexcept>
 #include <string>

@@ -4,6 +4,7 @@
 #include "race-emulator/Wave.h"
 #include "race-emulator/Instruction.h"
 #include "race-emulator/Util.h"
+#include "race-emulator/Workgroup.h"
 #include <algorithm>
 #include <bit>
 #include <cassert>
@@ -554,6 +555,70 @@ bool Wave::isOutstandingFromVgpr(int lane, int reg) const {
 }
 
 Workgroup &Wave::getWorkgroup() { return *workgroup; }
+
+uint32_t Wave::getVgpr(int reg, int lane) const {
+  int32_t index = reg * waveSize + lane;
+  assert(index < static_cast<int64_t>(vgprs.size()));
+  if (raceChecks) {
+    for (EventId eid : vgprMemoryEvents[reg]) {
+      if (isToVgpr(workgroup->getEventType(eid)) &&
+          (workgroup->getEventByteMask(eid) & 0xF) != 0 &&
+          workgroup->isEventActiveForLane(eid, lane)) {
+        throw RaceConditionException::Vgpr(reg, waveId.value, lane, false);
+      }
+    }
+  }
+  return vgprs[index];
+}
+
+void Wave::getVgprs(int reg, uint32_t *out) const {
+  assert(reg >= 0);
+  assert((reg + 1) * waveSize <= static_cast<int>(vgprs.size()));
+  if (raceChecks) {
+    if (getRegEventCount(MemoryEventType::GLOBAL_TO_VGPR, reg) != 0 ||
+        getRegEventCount(MemoryEventType::LDS_TO_VGPR, reg) != 0) {
+      for (EventId eid : vgprMemoryEvents[reg]) {
+        if (isToVgpr(workgroup->getEventType(eid)) &&
+            (workgroup->getEventByteMask(eid) & 0xF) != 0) {
+          int lane = std::countr_zero(workgroup->getEventExecMask(eid));
+          throw RaceConditionException::Vgpr(reg, waveId.value, lane, false);
+        }
+      }
+    }
+  }
+  std::memcpy(out, vgprs.data() + reg * waveSize,
+              waveSize * sizeof(uint32_t));
+}
+
+template <typename T> T Wave::readLds(int addr, int lane) const {
+  return workgroup->readLds<T>(addr, waveId, lane);
+}
+
+template <typename T>
+void Wave::readLds(int addr, int lane, T *out, int count) const {
+  workgroup->readLds<T>(addr, waveId, lane, out, count);
+}
+
+template <typename T> void Wave::writeLds(int addr, int lane, T value) {
+  workgroup->writeLds<T>(addr, waveId, lane, value);
+}
+
+// Explicit instantiations for all LDS element types used by instructions.
+template uint8_t Wave::readLds<uint8_t>(int, int) const;
+template int8_t Wave::readLds<int8_t>(int, int) const;
+template uint16_t Wave::readLds<uint16_t>(int, int) const;
+template int16_t Wave::readLds<int16_t>(int, int) const;
+template uint32_t Wave::readLds<uint32_t>(int, int) const;
+
+template void Wave::readLds<uint8_t>(int, int, uint8_t *, int) const;
+template void Wave::readLds<int8_t>(int, int, int8_t *, int) const;
+template void Wave::readLds<uint16_t>(int, int, uint16_t *, int) const;
+template void Wave::readLds<int16_t>(int, int, int16_t *, int) const;
+template void Wave::readLds<uint32_t>(int, int, uint32_t *, int) const;
+
+template void Wave::writeLds<uint8_t>(int, int, uint8_t);
+template void Wave::writeLds<uint16_t>(int, int, uint16_t);
+template void Wave::writeLds<uint32_t>(int, int, uint32_t);
 
 Profiler::ScopedStopwatch Wave::profileScope(std::string_view key) {
   return profiler ? profiler->scopedStopwatch(key)

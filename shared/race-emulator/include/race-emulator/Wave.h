@@ -3,11 +3,10 @@
 
 #pragma once
 #include "CommonRegister.h"
+#include "IntervalSet.h"
 #include "Profiler.h"
-#include "Util.h"
-#include "Workgroup.h"
+#include "Types.h"
 #include <array>
-#include <bit>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -20,6 +19,8 @@
 #include <vector>
 
 namespace raceemulator {
+
+class Workgroup;
 
 /// An assembly macro (.macro / .endm) with its line range and argument names.
 class Macro {
@@ -85,43 +86,12 @@ public:
 
   /// Return the value in the given VGPR. Throws RaceConditionException if
   /// race checks are enabled and an outstanding load targets this register.
-  uint32_t getVgpr(int reg, int lane) const {
-    int32_t index = reg * waveSize + lane;
-    assert(index < static_cast<int64_t>(vgprs.size()));
-    if (raceChecks) {
-      for (EventId eid : vgprMemoryEvents[reg]) {
-        if (isToVgpr(workgroup->getEventType(eid)) &&
-            (workgroup->getEventByteMask(eid) & 0xF) != 0 &&
-            workgroup->isEventActiveForLane(eid, lane)) {
-          throw RaceConditionException::Vgpr(reg, waveId.value, lane, false);
-        }
-      }
-    }
-    return vgprs[index];
-  }
+  uint32_t getVgpr(int reg, int lane) const;
 
   /// Read all lanes of a single VGPR into out[0..waveSize-1]. Race checking
   /// is O(1) per register via regEventCount; only falls back to per-lane
   /// checking when outstanding events exist.
-  void getVgprs(int reg, uint32_t *out) const {
-    assert(reg >= 0);
-    assert((reg + 1) * waveSize <= static_cast<int>(vgprs.size()));
-    if (raceChecks) {
-      if (getRegEventCount(MemoryEventType::GLOBAL_TO_VGPR, reg) != 0 ||
-          getRegEventCount(MemoryEventType::LDS_TO_VGPR, reg) != 0) {
-        for (EventId eid : vgprMemoryEvents[reg]) {
-          if (isToVgpr(workgroup->getEventType(eid)) &&
-              (workgroup->getEventByteMask(eid) & 0xF) != 0) {
-            // Find a lane this event applies to for the error message.
-            int lane = std::countr_zero(workgroup->getEventExecMask(eid));
-            throw RaceConditionException::Vgpr(reg, waveId.value, lane, false);
-          }
-        }
-      }
-    }
-    std::memcpy(out, vgprs.data() + reg * waveSize,
-                waveSize * sizeof(uint32_t));
-  }
+  void getVgprs(int reg, uint32_t *out) const;
 
   /// Return a single byte from a VGPR. Race-checks only that byte.
   /// byteIdx 0 = bits [7:0], 3 = bits [31:24].
@@ -181,21 +151,15 @@ public:
   Workgroup &getWorkgroup();
 
   /// Validated LDS read: auto-supplies waveId and delegates to Workgroup.
-  template <typename T> T readLds(int addr, int lane) const {
-    return workgroup->readLds<T>(addr, waveId, lane);
-  }
+  template <typename T> T readLds(int addr, int lane) const;
 
   /// Validated bulk LDS read: validates the full range once, then copies
   /// count elements of type T.
   template <typename T>
-  void readLds(int addr, int lane, T *out, int count) const {
-    workgroup->readLds<T>(addr, waveId, lane, out, count);
-  }
+  void readLds(int addr, int lane, T *out, int count) const;
 
   /// Validated LDS write: auto-supplies waveId and delegates to Workgroup.
-  template <typename T> void writeLds(int addr, int lane, T value) {
-    workgroup->writeLds<T>(addr, waveId, lane, value);
-  }
+  template <typename T> void writeLds(int addr, int lane, T value);
 
   /// Register an in-flight memory event. The event remains outstanding until
   /// retired by s_waitcnt. byteMask selects which bytes of each register are
