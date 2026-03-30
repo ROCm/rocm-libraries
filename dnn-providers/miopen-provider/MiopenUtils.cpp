@@ -67,6 +67,48 @@ MiopenTensor createTensor(
     return {tensorAttr};
 }
 
+MiopenTensor createBatchnormTensor(
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    int64_t uid)
+{
+    const auto& tensorAttr = findTensorAttributes(tensorMap, uid);
+
+    if(tensorAttr.dims() == nullptr || tensorAttr.strides() == nullptr)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Tensor dims or strides are null for UID: "
+                                                           + std::to_string(uid));
+    }
+
+    if(tensorAttr.dims()->size() != 3)
+    {
+        return {tensorAttr};
+    }
+
+    if(tensorAttr.dims()->size() != tensorAttr.strides()->size())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Tensor dims and strides size mismatch for UID: " + std::to_string(uid));
+    }
+
+    std::vector<int64_t> dims(tensorAttr.dims()->begin(), tensorAttr.dims()->end());
+    std::vector<int64_t> strides(tensorAttr.strides()->begin(), tensorAttr.strides()->end());
+
+    // MIOpen requires at least 4D tensors for batchnorm.
+    // Pad 3D to 4D by appending W=1 dimension.
+    // Stride for W: 1 for channels-first (NCL→NCHW), C for channels-last (NLC→NHWC).
+    dims.push_back(1);
+
+    constexpr size_t C_IDX = 1;
+    constexpr size_t L_IDX = 2;
+    bool isChannelsLast = strides[C_IDX] < strides[L_IDX];
+    strides.push_back(isChannelsLast ? dims[C_IDX] : 1);
+
+    return {uid, tensorAttr.data_type(), dims, strides};
+}
+
 size_t getSpatialDimCount(const hipdnn_data_sdk::data_objects::TensorAttributes& attr)
 {
     if(attr.dims()->size() < 3)

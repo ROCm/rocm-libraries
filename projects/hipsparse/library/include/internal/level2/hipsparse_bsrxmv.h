@@ -30,7 +30,7 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication with mask operation using BSR storage format
+*  \brief Sparse matrix vector multiplication with mask operation using the BSR storage format.
 *
 *  \details
 *  \p hipsparseXbsrxmv multiplies the scalar \f$\alpha\f$ with a sparse
@@ -57,19 +57,19 @@ extern "C" {
 *  is defined with two arrays, \p bsrRowPtr and \p bsr_end_ptr (both of size \p mb), rather the usual \p bsrRowPtr of size \p mb+1.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
-*  Currently, only \p trans == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
-*  Currently, \p blockDim == 1 is not supported.
+*  Currently, only \p trans == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported,
+*  and \p blockDim == 1 is not supported.
 *
 *  \deprecated
 *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
 *  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  dir         matrix storage of BSR blocks.
 *  @param[in]
@@ -114,10 +114,10 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p alpha or \p beta is nullptr,
-*          \p mb, \p nb, \p nnzb or \p sizeOfMask is negative, \p sizeOfMask is greater than \p mb,
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p alpha, or \p beta is nullptr,
+*          \p mb, \p nb, \p nnzb, or \p sizeOfMask is negative, \p sizeOfMask is greater than \p mb,
 *          \p blockDim is less than or equal to 1, or \p bsrVal, \p bsrMaskPtr, \p bsrRowPtr,
-*          \p bsrEndPtr, \p bsrColInd, \p x or \p y is nullptr.
+*          \p bsrEndPtr, \p bsrColInd, \p x, or \p y is nullptr.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p trans is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
 *          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
