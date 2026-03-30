@@ -16,6 +16,9 @@ add_library(
     engines/plans/BatchnormFwdInferencePlan.cpp
     engines/plans/BatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/BatchnormApplicabilityChecks.cpp
+    engines/plans/RMSnorm/RMSnormPlanBuilder.cpp
+    engines/plans/RMSnorm/RMSnormFwdPlan.cpp
+    engines/plans/RMSnorm/RMSnormApplicabilityChecks.cpp
 )
 if(ENABLE_ASM_SDPA_ENGINE)
     add_subdirectory(engines/asm_sdpa_engine)
