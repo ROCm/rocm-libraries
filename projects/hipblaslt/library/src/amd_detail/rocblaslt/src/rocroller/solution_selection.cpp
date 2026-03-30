@@ -337,7 +337,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             if(kernelType.swizzleA)
                 cu_multiplier = 4;
             if(numTiles * cu_multiplier < analytical_hardware.N_CU && itersPerTile >= 16
-               && !isF6 && !isLargeF8 && !is256Tile)
+               && !isF6 && !isLargeF8)
             {
                 useStreamK = true;
             }
