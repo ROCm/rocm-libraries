@@ -59,6 +59,10 @@ public:
     // Set plugin unloading mode (lazy keeps plugins loaded until app exit or path change)
     static void setPluginUnloadingMode(hipdnnPluginUnloadingMode_ext_t mode);
 
+    // Set the log level on all currently loaded plugins.
+    // This is a no-op if no plugins are loaded or if plugins don't support the API.
+    static void setPluginLogLevel(hipdnnSeverity_t level);
+
     static std::shared_ptr<EnginePluginResourceManager> create();
 
     EnginePluginResourceManager(std::shared_ptr<EnginePluginManager> pm);
