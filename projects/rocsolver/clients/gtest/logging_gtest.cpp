@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,6 +34,7 @@ namespace fs = std::filesystem;
 namespace fs = std::experimental::filesystem;
 #endif
 #include <fstream>
+#include <tuple>
 #include <vector>
 
 #include "rocsolver_utility.hpp"
@@ -437,4 +438,31 @@ TEST_F(checkin_misc_LOGGING, end_twice)
 TEST_F(checkin_misc_LOGGING, end_before_begin)
 {
     ASSERT_EQ(rocsolver_log_end(), rocblas_status_internal_error);
+}
+
+TEST(checkin_misc_FORMATTING, join_vector)
+{
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_EQ(rocsolver::formatting::join(v, ", "), "1, 2, 3");
+}
+
+TEST(checkin_misc_FORMATTING, join_empty_range)
+{
+    std::vector<int> v = {};
+    EXPECT_EQ(rocsolver::formatting::join(v, ", "), "");
+}
+
+TEST(checkin_misc_FORMATTING, join_single_element)
+{
+    std::vector<int> v = {42};
+    EXPECT_EQ(rocsolver::formatting::join(v, ", "), "42");
+}
+
+TEST(checkin_misc_FORMATTING, join_tuple)
+{
+    int a = 1;
+    double b = 2.5;
+    auto t = std::tie(a, b);
+    std::string result = rocsolver::formatting::join(t, " ");
+    EXPECT_EQ(result, "1 2.5");
 }
