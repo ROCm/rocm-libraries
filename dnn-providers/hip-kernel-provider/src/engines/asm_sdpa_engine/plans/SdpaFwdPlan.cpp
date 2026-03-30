@@ -11,32 +11,32 @@ namespace asm_sdpa_engine
 {
 
 SdpaFwdPlan::SdpaFwdPlan(hipModule_t kernelModule,
-                           hipFunction_t function,
-                           int64_t qUid,
-                           int64_t kUid,
-                           int64_t vUid,
-                           int64_t oUid,
-                           unsigned int batchSize,
-                           unsigned int numHeadsQ,
-                           unsigned int numHeadsKv,
-                           unsigned int seqLenQ,
-                           unsigned int seqLenKv,
-                           unsigned int headDimQk,
-                           unsigned int headDimV,
-                           unsigned int qStrideSeq,
-                           unsigned int qStrideRow,
-                           unsigned int qStrideHead,
-                           unsigned int qStrideBatch,
-                           unsigned int kStrideSeq,
-                           unsigned int kStrideHead,
-                           unsigned int kStrideBatch,
-                           unsigned int vStrideSeq,
-                           unsigned int vStrideHead,
-                           unsigned int vStrideBatch,
-                           unsigned int oStrideSeq,
-                           unsigned int oStrideHead,
-                           unsigned int oStrideBatch,
-                           float attnScale)
+                         hipFunction_t function,
+                         int64_t qUid,
+                         int64_t kUid,
+                         int64_t vUid,
+                         int64_t oUid,
+                         unsigned int batchSize,
+                         unsigned int numHeadsQ,
+                         unsigned int numHeadsKv,
+                         unsigned int seqLenQ,
+                         unsigned int seqLenKv,
+                         unsigned int headDimQk,
+                         unsigned int headDimV,
+                         unsigned int qStrideSeq,
+                         unsigned int qStrideRow,
+                         unsigned int qStrideHead,
+                         unsigned int qStrideBatch,
+                         unsigned int kStrideSeq,
+                         unsigned int kStrideHead,
+                         unsigned int kStrideBatch,
+                         unsigned int vStrideSeq,
+                         unsigned int vStrideHead,
+                         unsigned int vStrideBatch,
+                         unsigned int oStrideSeq,
+                         unsigned int oStrideHead,
+                         unsigned int oStrideBatch,
+                         float attnScale)
     : _module(kernelModule)
     , _function(function)
     , _qUid(qUid)
@@ -173,9 +173,9 @@ size_t SdpaFwdPlan::getWorkspaceSize(const HipKernelHandle& /*handle*/) const
 }
 
 void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
-                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                           uint32_t numDeviceBuffers,
-                           void* /*workspace*/) const
+                          const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                          uint32_t numDeviceBuffers,
+                          void* /*workspace*/) const
 {
     // Build UID→ptr map from device buffers
     std::unordered_map<int64_t, void*> uidToPtrMap;

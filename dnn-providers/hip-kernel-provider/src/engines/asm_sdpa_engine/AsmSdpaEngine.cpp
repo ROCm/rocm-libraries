@@ -30,8 +30,8 @@ int64_t AsmSdpaEngine::staticId()
     return s_cachedId;
 }
 
-bool AsmSdpaEngine::isApplicable(
-    HipKernelHandle& handle, const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+bool AsmSdpaEngine::isApplicable(HipKernelHandle& handle,
+                                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     for(const auto& pb : _planBuilders)
     {
@@ -44,8 +44,8 @@ bool AsmSdpaEngine::isApplicable(
 }
 
 void AsmSdpaEngine::getDetails(HipKernelHandle& handle,
-                                const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-                                hipdnnPluginConstData_t& detailsOut) const
+                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+                               hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
 

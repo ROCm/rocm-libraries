@@ -12,9 +12,8 @@
 namespace asm_sdpa_engine
 {
 
-class SdpaFwdPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<HipKernelHandle,
-                                                                   HipKernelSettings,
-                                                                   HipKernelContext>
+class SdpaFwdPlanBuilder
+    : public hipdnn_plugin_sdk::IPlanBuilder<HipKernelHandle, HipKernelSettings, HipKernelContext>
 {
 public:
     bool isApplicable(const HipKernelHandle& handle,
