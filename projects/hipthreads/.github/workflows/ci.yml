@@ -305,3 +305,101 @@ jobs:
         rm -rf libhipcxx
         rm -rf examples/*/step*/build examples/*/*/step*/build
         echo "Cleanup complete"
+  
+  notify:
+    name: Send Email Notification
+    runs-on: gpu-thread-code-scan
+    needs: build-and-test
+    # always() overrides the default behavior where a job with 'needs' is skipped
+    # if the dependency failed. This ensures we send the email regardless of
+    # whether build-and-test succeeded or failed (especially useful for failures).
+    if: ${{ github.event_name == 'schedule' && always() }}
+    
+    steps:
+    - name: Send success email
+      if: needs.build-and-test.result == 'success'
+      continue-on-error: true
+      env:
+        SMTP_SERVER: ${{ secrets.SMTP_SERVER_NAME }}
+        MAIL_FROM: ${{ secrets.MAIL_USERNAME }}
+        REPO: ${{ github.repository }}
+        BRANCH: ${{ github.ref_name }}
+        COMMIT: ${{ github.sha }}
+        COMMIT_MSG: ${{ github.event.head_commit.message || github.event.pull_request.title || '' }}
+        AUTHOR: ${{ github.actor }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        
+        cat <<EOF | sed 's/$/\r/' > email.txt
+        From: ${MAIL_FROM}
+        To: charboyd@amd.com,dmcintos@amd.com,kelvilui@amd.com,marsavic@amd.com
+        Subject: =?UTF-8?B?4pyFIENJIEJ1aWxkIFN1Y2Nlc3NmdWw=?= - hipThreads [${BRANCH}]
+        MIME-Version: 1.0
+        Content-Type: text/plain; charset=UTF-8
+
+        The CI workflow completed successfully.
+
+        Repository: ${REPO}
+        Branch: ${BRANCH}
+        Commit: ${COMMIT}
+        Commit Message: ${COMMIT_MSG}
+        Author: ${AUTHOR}
+
+        Workflow Run: ${RUN_URL}
+        EOF
+        
+        cat email.txt
+        
+        curl --connect-timeout 10 --max-time 30 \
+          --url "smtp://${SMTP_SERVER}:25" \
+          --mail-from "${MAIL_FROM}" \
+          --mail-rcpt "charboyd@amd.com" \
+          --mail-rcpt "dmcintos@amd.com" \
+          --mail-rcpt "kelvilui@amd.com" \
+          --mail-rcpt "marsavic@amd.com" \
+          --upload-file email.txt
+        
+    - name: Send failure email
+      if: needs.build-and-test.result == 'failure'
+      continue-on-error: true
+      env:
+        SMTP_SERVER: ${{ secrets.SMTP_SERVER_NAME }}
+        MAIL_FROM: ${{ secrets.MAIL_USERNAME }}
+        REPO: ${{ github.repository }}
+        BRANCH: ${{ github.ref_name }}
+        COMMIT: ${{ github.sha }}
+        COMMIT_MSG: ${{ github.event.head_commit.message || github.event.pull_request.title || '' }}
+        AUTHOR: ${{ github.actor }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        
+        cat <<EOF | sed 's/$/\r/' > email.txt
+        From: ${MAIL_FROM}
+        To: charboyd@amd.com,dmcintos@amd.com,kelvilui@amd.com,marsavic@amd.com
+        Subject: =?UTF-8?B?4p2MIENJIEJ1aWxkIEZhaWxlZA==?= - hipThreads [${BRANCH}]
+        MIME-Version: 1.0
+        Content-Type: text/plain; charset=UTF-8
+
+        The CI workflow has failed.
+
+        Repository: ${REPO}
+        Branch: ${BRANCH}
+        Commit: ${COMMIT}
+        Commit Message: ${COMMIT_MSG}
+        Author: ${AUTHOR}
+
+        Workflow Run: ${RUN_URL}
+        EOF
+        
+        cat email.txt
+        
+        curl --connect-timeout 10 --max-time 30 \
+          --url "smtp://${SMTP_SERVER}:25" \
+          --mail-from "${MAIL_FROM}" \
+          --mail-rcpt "charboyd@amd.com" \
+          --mail-rcpt "dmcintos@amd.com" \
+          --mail-rcpt "kelvilui@amd.com" \
+          --mail-rcpt "marsavic@amd.com" \
+          --upload-file email.txt
