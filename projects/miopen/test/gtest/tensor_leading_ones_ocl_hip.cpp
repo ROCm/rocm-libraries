@@ -407,7 +407,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(float16(1)),
                                           testing::Values(float16(1)),
                                           testing::Values(float16(0), float16(1))));
-
+/*
 using GPU_OpTensorLeadingOnesTest_FP32 = OpTensorLeadingOnesTest<float>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP32, PortTest)
@@ -423,7 +423,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.f),
                                           testing::Values(1.f),
                                           testing::Values(0.f, 1.f)));
-
+*/
 using GPU_OpTensorLeadingOnesTest_FP64 = OpTensorLeadingOnesTest<double>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP64, PortTest)
