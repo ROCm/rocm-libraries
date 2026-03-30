@@ -186,22 +186,16 @@ void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves) {
   const auto &labels = parsedAsm->labels;
   const auto &macros = parsedAsm->macros;
 
+  workgroup.setRaceChecks(raceChecks);
+  workgroup.setCompleteEmulation(completeEmulation);
+  workgroup.setProfiler(&profiler);
+  workgroup.setWaveSchedule(waveSchedule);
+
   for (int i = 0; i < nWaves; ++i) {
     workgroup.addWave(Wave(nextFreeVgpr, accumOffset, nextFreeSgpr,
                            parsedAsm->wavefrontSize, WaveId{i}, workgroup,
                            &labels, &macros));
-    workgroup.getWave(i).setProfiler(&profiler);
-    if (raceChecks) {
-      workgroup.getWave(i).setRaceChecks(true);
-    }
   }
-
-  if (raceChecks) {
-    workgroup.setRaceChecks(true);
-  }
-
-  workgroup.setProfiler(&profiler);
-  workgroup.setWaveSchedule(waveSchedule);
 
   for (int i = 0; i < nWaves; ++i) {
     auto &r = workgroup.getWave(i);

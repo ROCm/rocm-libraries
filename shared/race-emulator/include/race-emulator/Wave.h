@@ -180,10 +180,8 @@ public:
   /// True if any outstanding store reads from the given VGPR lane.
   bool isOutstandingFromVgpr(int lane, int reg) const;
 
-  void setRaceChecks(bool enable) { raceChecks = enable; }
-  void setCompleteEmulation(bool enable) { completeEmulation = enable; }
-
-  bool isCompleteEmulation() const { return completeEmulation; }
+  bool isRaceChecks() const;
+  bool isCompleteEmulation() const;
 
   /// Retire global memory events until at most vmcnt remain outstanding.
   void sWaitCntVmcnt(int vmcnt);
@@ -206,7 +204,6 @@ public:
 
   WaveId getWaveId() const { return waveId; }
 
-  void setProfiler(Profiler *p) { profiler = p; }
   Profiler::ScopedStopwatch profileScope(std::string_view key);
 
   /// Discard all wave-complete events. Called when all waves have reached
@@ -309,11 +306,6 @@ private:
   const std::map<std::string, Macro> *macros;
 
   std::vector<std::function<int()>> instructionCache;
-
-  bool raceChecks{false};
-  bool completeEmulation{true};
-
-  Profiler *profiler = nullptr;
 
   void retireEventRegisters(EventId);
 

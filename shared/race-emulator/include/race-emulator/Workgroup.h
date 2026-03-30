@@ -135,6 +135,12 @@ public:
   const std::vector<EventId> &getLdsReadEvents() const { return ldsReadEvents; }
 
   void setRaceChecks(bool enable) { raceChecks = enable; }
+  bool isRaceChecks() const { return raceChecks; }
+
+  void setCompleteEmulation(bool enable) { completeEmulation = enable; }
+  bool isCompleteEmulation() const { return completeEmulation; }
+
+  Profiler *getProfiler() const { return profiler; }
 
   // --- Wave management ---
 
@@ -258,6 +264,7 @@ private:
   int nextEventId{0};
 
   bool raceChecks{false};
+  bool completeEmulation{true};
 };
 
 } // namespace raceemulator

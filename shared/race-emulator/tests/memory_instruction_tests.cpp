@@ -30,8 +30,8 @@ void setupSrd(Wave &wave, int srdBase, uintptr_t baseAddr, uint32_t size) {
 
 TEST(Instructions, MemoryRoundTrip) {
   Workgroup wg;
+  wg.setRaceChecks(true);
   Wave regs(/*vgprCount*/ 10, /*sgprCount*/ 10, WaveSize{1}, wg);
-  regs.setRaceChecks(true);
 
   // 1. Allocate a safe "global memory" buffer on the host
   // Using a vector ensures memory is valid and cleaned up automatically.
@@ -919,9 +919,9 @@ TEST(Instructions, DsStoreB16_RDNA3Rename) {
 // when only the drained half is subsequently read.
 TEST(Instructions, BufferLoadD16_ByteLevelRace) {
   Workgroup wg;
+  wg.setRaceChecks(true);
+  wg.setCompleteEmulation(true);
   Wave regs(/*vgprCount*/ 64, /*sgprCount*/ 32, WaveSize{1}, wg);
-  regs.setRaceChecks(true);
-  regs.setCompleteEmulation(true);
 
   uint16_t hostMem[] = {0x1234, 0xABCD, 0x5678, 0x9999};
   uintptr_t baseAddr = reinterpret_cast<uintptr_t>(hostMem);
@@ -970,9 +970,9 @@ TEST(Instructions, BufferLoad_Lds_DirectToLds) {
   Workgroup wg;
   wg.resizeLds(1024);
   // waveSize=2 for manageable test size (2 lanes × 16 bytes = 32 bytes LDS).
+  wg.setRaceChecks(true);
+  wg.setCompleteEmulation(true);
   Wave wave(/*vgprCount=*/4, /*sgprCount=*/10, WaveSize{2}, wg);
-  wave.setRaceChecks(true);
-  wave.setCompleteEmulation(true);
 
   // Host memory: 8 dwords (4 per lane × 2 lanes).
   std::vector<uint32_t> hostMem = {0x11111111, 0x22222222, 0x33333333,
@@ -1019,9 +1019,8 @@ TEST(Instructions, BufferLoad_Lds_RaceBeforeVmcnt) {
   Workgroup wg;
   wg.resizeLds(1024);
   wg.setRaceChecks(true);
+  wg.setCompleteEmulation(true);
   Wave wave(/*vgprCount=*/4, /*sgprCount=*/10, WaveSize{1}, wg);
-  wave.setRaceChecks(true);
-  wave.setCompleteEmulation(true);
 
   std::vector<uint32_t> hostMem = {0xAAAAAAAA};
   uintptr_t baseAddr = reinterpret_cast<uintptr_t>(hostMem.data());

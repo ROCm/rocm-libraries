@@ -166,7 +166,7 @@ uint8_t Wave::getVgprByte(int reg, int lane, int byteIdx) const {
   assert(byteIdx >= 0 && byteIdx < 4);
   int32_t index = reg * waveSize + lane;
   assert(index < static_cast<int64_t>(vgprs.size()));
-  if (raceChecks) {
+  if (workgroup->isRaceChecks()) {
     uint8_t byteMask = static_cast<uint8_t>(1 << byteIdx);
     for (EventId eid : vgprMemoryEvents[reg]) {
       if (isToVgpr(workgroup->getEventType(eid)) &&
@@ -182,7 +182,7 @@ uint8_t Wave::getVgprByte(int reg, int lane, int byteIdx) const {
 uint16_t Wave::getHalfVgpr(int reg, int lane, bool hi) const {
   int32_t index = reg * waveSize + lane;
   assert(index < static_cast<int64_t>(vgprs.size()));
-  if (raceChecks) {
+  if (workgroup->isRaceChecks()) {
     uint8_t byteMask = hi ? 0xC : 0x3;
     for (EventId eid : vgprMemoryEvents[reg]) {
       if (isToVgpr(workgroup->getEventType(eid)) &&
@@ -547,7 +547,7 @@ Workgroup &Wave::getWorkgroup() { return *workgroup; }
 uint32_t Wave::getVgpr(int reg, int lane) const {
   int32_t index = reg * waveSize + lane;
   assert(index < static_cast<int64_t>(vgprs.size()));
-  if (raceChecks) {
+  if (workgroup->isRaceChecks()) {
     for (EventId eid : vgprMemoryEvents[reg]) {
       if (isToVgpr(workgroup->getEventType(eid)) &&
           (workgroup->getEventByteMask(eid) & 0xF) != 0 &&
@@ -562,7 +562,7 @@ uint32_t Wave::getVgpr(int reg, int lane) const {
 void Wave::getVgprs(int reg, uint32_t *out) const {
   assert(reg >= 0);
   assert((reg + 1) * waveSize <= static_cast<int>(vgprs.size()));
-  if (raceChecks) {
+  if (workgroup->isRaceChecks()) {
     if (getRegEventCount(MemoryEventType::GLOBAL_TO_VGPR, reg) != 0 ||
         getRegEventCount(MemoryEventType::LDS_TO_VGPR, reg) != 0) {
       for (EventId eid : vgprMemoryEvents[reg]) {
@@ -608,9 +608,15 @@ template void Wave::writeLds<uint8_t>(int, int, uint8_t);
 template void Wave::writeLds<uint16_t>(int, int, uint16_t);
 template void Wave::writeLds<uint32_t>(int, int, uint32_t);
 
+bool Wave::isRaceChecks() const { return workgroup->isRaceChecks(); }
+
+bool Wave::isCompleteEmulation() const {
+  return workgroup->isCompleteEmulation();
+}
+
 Profiler::ScopedStopwatch Wave::profileScope(std::string_view key) {
-  return profiler ? profiler->scopedStopwatch(key)
-                  : Profiler::ScopedStopwatch{};
+  auto *p = workgroup->getProfiler();
+  return p ? p->scopedStopwatch(key) : Profiler::ScopedStopwatch{};
 }
 
 void CommonRegister::appendStr(std::ostream &os) const {
