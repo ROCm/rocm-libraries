@@ -109,7 +109,9 @@ public:
             if(allocated_capacity > host_max_capacity)
                 return 0;
             size_t available_host_memory = static_cast<size_t>(host_max_capacity - allocated_capacity);
-            size_t host_real_capacity = memStatus.ullAvailPhys / 3.5;
+            size_t host_real_capacity = (memStatus.ullAvailPhys > (memStatus.ullTotalPhys / 2)) \
+                                        ? memStatus.ullAvailPhys - (memStatus.ullTotalPhys / 2) \
+                                        : 0;
             hipblaslt_cout << "host_real_capacity: " << host_real_capacity << std::endl;
             hipblaslt_cout << "available_host_memory: " << available_host_memory << std::endl;
             return std::min(available_host_memory, host_real_capacity);
