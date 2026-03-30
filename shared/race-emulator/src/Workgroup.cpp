@@ -178,7 +178,6 @@ void Workgroup::clear() {
   byteWriteCounts.clear();
   byteReadCounts.clear();
   eventRegistry.clear();
-  nextEventId = 0;
 }
 
 } // namespace raceemulator

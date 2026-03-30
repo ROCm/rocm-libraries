@@ -190,7 +190,7 @@ public:
     }
 
     if (profiling_) {
-      std::cerr << "\n" << emulator.getProfileReport() << "\n";
+      std::cerr << emulator.getProfileReport() << "\n";
     }
 
     // 6. Verify Results

@@ -161,14 +161,10 @@ public:
                           const std::vector<uint32_t> &registers,
                           uint64_t execMask, uint8_t byteMask = 0xF,
                           IntervalSet ldsIntervals = {}) {
-    int id = nextEventId++;
-    if (id >= static_cast<int64_t>(eventRegistry.size())) {
-      eventRegistry.resize(id + 1);
-    }
+    int id = static_cast<int>(eventRegistry.size());
     bool hasLds = !ldsIntervals.empty();
-    eventRegistry[id] = {
-        waveId,   pc,       type,      EventStatus::ACTIVE,
-        byteMask, execMask, registers, std::move(ldsIntervals)};
+    eventRegistry.push_back({waveId, pc, type, EventStatus::ACTIVE, byteMask,
+                             execMask, registers, std::move(ldsIntervals)});
     EventId eid{id};
     if (hasLds) {
       const auto &ivs = eventRegistry[id].ldsIntervals;
@@ -260,8 +256,10 @@ private:
   std::vector<int> byteReadCounts; // LDS_TO_VGPR events per byte
 
   // Per-event metadata, indexed by eventId (sequential from 0).
+  // TODO(newling) Reuse IDs of flushed events (free list) to bound memory
+  // by the concurrent high-water mark rather than total lifetime count.
+  // F16_WMMA_TN_128x128x8192 allocates 49,280 events per workgroup.
   std::vector<EventInfo> eventRegistry;
-  int nextEventId{0};
 
   bool raceChecks{false};
   bool completeEmulation{true};
