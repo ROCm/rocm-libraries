@@ -1206,7 +1206,13 @@ namespace TensileLite
         {
             uint32_t synchronizerUsage
                 = sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B;
-            gsuVal = synchronizerUsage > 409600 ? 1 : gsuVal;
+
+            if (problem.groupedGemm() && (problem.groupedGemmCount() > 1))
+            {
+                gsuVal = synchronizerUsage > (409600 * 16 / problem.groupedGemmCount()) ? 1 : gsuVal;
+            }
+            else
+                gsuVal = synchronizerUsage > (409600 * 16) ? 1 : gsuVal;
         }
 
         // Avoid selecting a gsu value that would make launch grid over the limit

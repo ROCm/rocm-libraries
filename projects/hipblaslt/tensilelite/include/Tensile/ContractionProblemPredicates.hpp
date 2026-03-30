@@ -417,29 +417,33 @@ namespace TensileLite
 
                     // WorkGroup numbers x number of global write instruction x Wave numbers
                     // M/MT0 x N/MT1 x NumElementsPerThread/StoreVectorWidth x x Wavenumbers x batch
-                    bool ret = (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
+                    uint32_t synchronizerUsage = (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
                                 * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
-                                   * value[2] * value[4] * value[3] * problem.d().sizes()[2]
-                               <= 409600;
-                    if(problem.groupedGemm())
-                        ret = ret && (problem.groupedGemmCount() <= 16);
+                                   * value[2] * value[4] * value[3] * problem.d().sizes()[2];
 
-                    return ret;
+                    if(problem.groupedGemm())
+                        return synchronizerUsage <= 409600 * 16 / problem.groupedGemmCount();
+                    else
+                        return synchronizerUsage <= 409600 * 16;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    uint32_t synchronizerSize = 409600 * 16;
+                    if(problem.groupedGemm())
+                        synchronizerSize /= problem.groupedGemmCount();
+
                     return debugEvalCmp(
                         problem,
                         stream,
                         "prob",
                         (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
                          * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
-                            * (value[2]) * (value[4] / 64) * value[3],
-                        "==",
-                        "sol",
-                        40960);
+                            * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2],
+                        ">=",
+                        "limit",
+                        synchronizerSize);
                 }
             };
 
