@@ -18,12 +18,14 @@ add_executable(
     utilities/TestCpuFpReferenceBatchnorm.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
     utilities/TestCpuFpReferenceRMSNorm.cpp
+    utilities/TestCpuFpReferenceSdpa.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceLayernorm.cpp
     utilities/TestCpuFpReferenceMatmul.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
     utilities/TestCpuFpReferenceUtilities.cpp
     utilities/TestCpuFpReferenceValidation.cpp
+    utilities/TestCpuTypeUtilities.cpp
     utilities/TestCpuReferencePointwise.cpp
     utilities/TestDynamicTolerances.cpp
     utilities/TestFlatbufferDatatypeMapping.cpp
@@ -34,6 +36,7 @@ add_executable(
     utilities/TestScopedDirectory.cpp
     utilities/TestScopedEnvironmentVariableSetter.cpp
     utilities/TestSeeds.cpp
+    utilities/TestTensorDiff.cpp
     utilities/TestVectorLoggingUtils.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
@@ -61,6 +64,8 @@ add_executable(
     utilities/cpu_graph_executor/TestPointwiseSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp
+    utilities/cpu_graph_executor/TestSdpaFwdSignatureKey.cpp
     TestVersion.cpp
 )
 

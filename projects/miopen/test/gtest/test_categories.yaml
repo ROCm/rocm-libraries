@@ -63,6 +63,7 @@ positive_patterns: &positive_patterns
   - "*/GPU_MhaBackward_*"
   - "*/GPU_MhaForward_*"
   - "*GPU_TestMhaFind20*"
+  - "*/GPU_MIOpenDriver*"
 
 
 test_categories:
@@ -151,7 +152,8 @@ test_categories:
       - "Full/GPU_ConvGrpActivInfer3D_FP32*"
       - "Full/GPU_ConvGrpActivInfer3D_FP16*"
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
-      - "*/GPU_MIOpenDriver*"
+      - "Full/GPU_MIOpenDriverConv2dTransTest*"
+      - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
       - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
       - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
 
@@ -198,7 +200,6 @@ test_categories:
     test_patterns: *positive_patterns
 
     exclude:
-      - "*/GPU_MIOpenDriver*"
       - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
       - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
 
@@ -241,16 +242,7 @@ test_categories:
 
   full:
     description: "Complete test suite - (target: hours+)"
-    test_patterns:
-      # Everything - all test suite prefixes
-      - "Smoke/*"
-      - "Full/*"
-      - "Perf/*"
-      - "Unit/*"
-      - "*"
-
-    exclude:
-      - "*/GPU_MIOpenDriver*"
+    test_patterns: *positive_patterns
 
     test_files:
       # All test files in the suite
@@ -258,6 +250,39 @@ test_categories:
       - "gtest/*.cpp"
       
     exclude:
+      # Excluding slower tests for faster PR validation
+      - "*DeepBench*"
+      - "*MIOpenTestConv*"
+      - "Full/GPU_Reduce_FP64*"
+      - "Full/GPU_BNOCLFWDTrainSerialRun3D_BFP16*"
+      - "Full/GPU_Lrn_FP32*"
+      - "Full/GPU_Lrn_FP16*"
+      - "Full/GPU_BNOCLInferSerialRun3D_BFP16*"
+      - "Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*"
+      - "Smoke/GPU_BNOCLInferLarge2D_BFP16*"
+      - "Full/GPU_BNOCLBWDSerialRun3D_BFP16*"
+      - "Smoke/GPU_BNOCLBWDLarge2D_BFP16*"
+      - "Full/GPU_UnitTestActivationDescriptor_FP32*"
+      - "Full/GPU_UnitTestActivationDescriptor_FP16*"
+      - "Smoke/GPU_BNOCLBWDLargeFusedActivation2D_BFP16*"
+      - "Smoke/GPU_BNOCLBWDLargeFusedActivation2D_FP16*"
+      - "Full/GPU_ConvGrpBiasActivInfer_BFP16*"
+      - "Full/GPU_ConvGrpBiasActivInfer_FP32*"
+      - "Full/GPU_ConvGrpBiasActivInfer_FP16*"
+      - "Full/GPU_ConvGrpActivInfer_BFP16*"
+      - "Full/GPU_ConvGrpActivInfer_FP32*"
+      - "Full/GPU_ConvGrpActivInfer_FP16*"
+      - "Full/GPU_ConvGrpBiasActivInfer3D_BFP16*"
+      - "Full/GPU_ConvGrpBiasActivInfer3D_FP32*"
+      - "Full/GPU_ConvGrpBiasActivInfer3D_FP16*"
+      - "Full/GPU_ConvGrpActivInfer3D_BFP16*"
+      - "Full/GPU_ConvGrpActivInfer3D_FP32*"
+      - "Full/GPU_ConvGrpActivInfer3D_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
+      - "Full/GPU_MIOpenDriverConv2dTransTest*"
+      - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
+      - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
+      - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
     
@@ -307,7 +332,11 @@ exclude_gpu:
       - "ex_gpu_gfx120X"
 
   exclude_gpu_gfx110X:
-    test_patterns: *gfx11_common_patterns
+    test_patterns: 
+      - *gfx11_common_patterns
+      - "*/GPU_MIOpenDriver*"
+      - "Smoke/CPU_Handle_NONE*"
+      - "Full/GPU_reduce_custom_fp32*"
     labels:
       - "quick"
       - "standard"

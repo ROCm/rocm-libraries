@@ -9,13 +9,14 @@ using namespace hipdnn_frontend::graph;
 
 TEST(TestLayernormAttributes, DefaultValues)
 {
-    LayernormAttributes attrs;
+    const LayernormAttributes attrs;
 
     EXPECT_EQ(attrs.get_x(), nullptr);
     EXPECT_EQ(attrs.get_scale(), nullptr);
     EXPECT_EQ(attrs.get_bias(), nullptr);
     EXPECT_EQ(attrs.get_epsilon(), nullptr);
     EXPECT_EQ(attrs.get_y(), nullptr);
+    EXPECT_EQ(attrs.get_normalized_dim_count(), 0);
     EXPECT_EQ(attrs.get_mean(), nullptr);
     EXPECT_EQ(attrs.get_inv_variance(), nullptr);
     EXPECT_EQ(attrs.get_forward_phase(), NormFwdPhase::NOT_SET);
@@ -49,6 +50,16 @@ TEST(TestLayernormAttributes, SetRequiredTensors)
     EXPECT_EQ(attrs.get_y(), y);
     EXPECT_EQ(attrs.get_mean(), nullptr);
     EXPECT_EQ(attrs.get_inv_variance(), nullptr);
+}
+
+TEST(TestLayernormAttributes, SetNormalizedDimCount)
+{
+    LayernormAttributes attrs;
+
+    const int64_t normalizedDimCount = 3;
+    attrs.set_normalized_dim_count(normalizedDimCount);
+
+    EXPECT_EQ(attrs.get_normalized_dim_count(), normalizedDimCount);
 }
 
 TEST(TestLayernormAttributes, SetOptionalMean)
@@ -110,6 +121,7 @@ TEST(TestLayernormAttributes, PackAttributes)
     attrs.set_bias(bias);
     attrs.set_epsilon(epsilon);
     attrs.set_y(y);
+    attrs.set_normalized_dim_count(3);
     attrs.set_mean(mean);
     attrs.set_inv_variance(invVariance);
     attrs.set_forward_phase(NormFwdPhase::TRAINING);
@@ -126,6 +138,7 @@ TEST(TestLayernormAttributes, PackAttributes)
     EXPECT_EQ(fb->bias_tensor_uid(), 3);
     EXPECT_EQ(fb->epsilon_tensor_uid(), 4);
     EXPECT_EQ(fb->y_tensor_uid(), 5);
+    EXPECT_EQ(fb->normalized_dim_count(), 3);
     ASSERT_TRUE(fb->mean_tensor_uid().has_value());
     EXPECT_EQ(*fb->mean_tensor_uid(), 6);
     ASSERT_TRUE(fb->inv_variance_tensor_uid().has_value());
@@ -181,6 +194,7 @@ TEST(TestLayernormAttributes, FromFlatBuffer)
         30,
         40,
         50,
+        3,
         flatbuffers::Optional<int64_t>(60),
         flatbuffers::Optional<int64_t>(70),
         hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
@@ -210,6 +224,7 @@ TEST(TestLayernormAttributes, FromFlatBuffer)
     EXPECT_EQ(attrs.get_epsilon()->get_uid(), 40);
     ASSERT_NE(attrs.get_y(), nullptr);
     EXPECT_EQ(attrs.get_y()->get_uid(), 50);
+    EXPECT_EQ(attrs.get_normalized_dim_count(), 3);
     ASSERT_NE(attrs.get_mean(), nullptr);
     EXPECT_EQ(attrs.get_mean()->get_uid(), 60);
     ASSERT_NE(attrs.get_inv_variance(), nullptr);
@@ -221,7 +236,8 @@ TEST(TestLayernormAttributes, FromFlatBufferNoOptionals)
 {
     // Build a FlatBuffer without optional fields
     flatbuffers::FlatBufferBuilder builder;
-    auto packed = hipdnn_data_sdk::data_objects::CreateLayernormAttributes(builder, 1, 2, 3, 4, 5);
+    auto packed
+        = hipdnn_data_sdk::data_objects::CreateLayernormAttributes(builder, 1, 2, 3, 4, 5, 3);
     builder.Finish(packed);
 
     auto buf = builder.GetBufferPointer();

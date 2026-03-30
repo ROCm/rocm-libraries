@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Logging.hpp"
+#include "GraphLogger.hpp"
 #include "PlatformUtils.hpp"
 #include "UserCallbackSink.hpp"
 
@@ -34,8 +35,8 @@ namespace
 // initialize() and backendLoggingCallback() to short-circuit before touching the state object.
 std::atomic<bool> sLoggingShutdown{false};
 
-const std::string S_BACKEND_ASYNC_LOGGER_NAME = "hipdnn_backend_async";
-const std::string S_BACKEND_SYNC_LOGGER_NAME = "hipdnn_backend_sync";
+constexpr const char* S_BACKEND_ASYNC_LOGGER_NAME = "hipdnn_backend_async";
+constexpr const char* S_BACKEND_SYNC_LOGGER_NAME = "hipdnn_backend_sync";
 
 // Pattern string for the backend logger.
 // Component name is already included in messages (e.g., "[hipdnn_backend] ..."),
@@ -75,7 +76,7 @@ struct BackendLogState
         hipdnnUserLogCallback_t callback;
         hipdnnUserLogCallbackHandle_t userHandle;
         std::shared_ptr<std::atomic<hipdnnUserLogCallback_t>> callbackHolder;
-        std::shared_ptr<spdlog::sinks::sink> sink;
+        std::shared_ptr<UserCallbackSink> sink;
         hipdnnLogCallbackMode_t mode;
     };
 
@@ -131,6 +132,7 @@ BackendLogState& getBackendLogState()
 
 } // namespace
 
+// NOLINTNEXTLINE(misc-no-recursion) Intentional: logging macros trigger lazy initialization
 void logHipDeviceInfo(hipStream_t stream)
 {
     int deviceId = 0;
@@ -162,9 +164,10 @@ void logHipDeviceInfo(hipStream_t stream)
         props.clockRate);
 }
 
+// NOLINTNEXTLINE(misc-no-recursion) Intentional: lazy init may trigger logging which re-enters
 void initialize()
 {
-    if(sLoggingShutdown.load(std::memory_order_relaxed))
+    if(sLoggingShutdown.load(std::memory_order_acquire))
     {
         // Program is shutting down; do not initialize the logger.
         return;
@@ -173,7 +176,7 @@ void initialize()
     auto& state = getBackendLogState();
     // Fast path: check if already initialized with read lock (allows concurrent read access)
     {
-        std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
+        const std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
         if(state.loggerInitialized)
         {
             return;
@@ -183,7 +186,7 @@ void initialize()
     // Slow path: actually initialize with write lock (first call only)
     try
     {
-        std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+        const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
         if(state.loggerInitialized) // Check again - race protection
         {
             return;
@@ -223,8 +226,8 @@ void initialize()
         // Add console or file sink to async dist_sink if logging enabled via env vars
         // getLogLevel() will read from environment on first call, or return cached value
         // if setLogLevel() was called programmatically
-        hipdnnSeverity_t logLevel = hipdnn_data_sdk::logging::getLogLevel();
-        std::string logFilePath = hipdnn_data_sdk::utilities::trim(
+        const hipdnnSeverity_t logLevel = hipdnn_data_sdk::logging::getLogLevel();
+        const std::string logFilePath = hipdnn_data_sdk::utilities::trim(
             hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_FILE", ""));
 
         if(logLevel != HIPDNN_SEV_OFF)
@@ -269,7 +272,7 @@ void initialize()
 void loggerShutdown()
 {
     auto& state = getBackendLogState();
-    std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+    const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
 
     // Clear all user callbacks first (atomically disable)
     for(auto& [key, info] : state.userCallbacks)
@@ -280,10 +283,9 @@ void loggerShutdown()
     // Ensure that any in-progress callbacks have completed before this function returns.
     for(auto& [key, info] : state.userCallbacks)
     {
-        auto* userSink = dynamic_cast<UserCallbackSink*>(info.sink.get());
-        if(userSink != nullptr)
+        if(info.sink != nullptr)
         {
-            userSink->waitForIdle();
+            info.sink->waitForIdle();
         }
     }
 
@@ -308,6 +310,7 @@ void loggerShutdown()
     // level so that if/when the logger is restarted it will reread the value from the
     // environment, following the original start-up behavior.
     hipdnn_data_sdk::logging::resetLogLevelCache();
+    GraphLogger::resetCache();
 
     state.loggerInitialized = false;
 }
@@ -349,7 +352,7 @@ hipdnnStatus_t lockedAddUserCallback(BackendLogState& state,
     sink->set_level(toSpdlogLevel(minLevel));
     sink->set_pattern(BACKEND_LOGGER_PATTERN);
 
-    bool isAsync = (mode == HIPDNN_LOG_CALLBACK_ASYNC);
+    const bool isAsync = (mode == HIPDNN_LOG_CALLBACK_ASYNC);
 
     // Add to appropriate dist_sink (loggers already created in initialize())
     if(isAsync)
@@ -377,9 +380,9 @@ hipdnnStatus_t lockedUpdateUserCallback(BackendLogState& state,
 {
 
     // Check if mode changed (requires sink migration)
-    bool wasSyncNowAsync
+    const bool wasSyncNowAsync
         = (info.mode == HIPDNN_LOG_CALLBACK_SYNC && newMode == HIPDNN_LOG_CALLBACK_ASYNC);
-    bool wasAsyncNowSync
+    const bool wasAsyncNowSync
         = (info.mode == HIPDNN_LOG_CALLBACK_ASYNC && newMode == HIPDNN_LOG_CALLBACK_SYNC);
 
     if(wasSyncNowAsync || wasAsyncNowSync)
@@ -434,14 +437,13 @@ hipdnnStatus_t lockedRemoveUserCallback(BackendLogState& state,
 
     // Wait until any in-progress callback completes
     // This ensures user can safely destroy data structures after this function returns
-    auto* userSink = dynamic_cast<UserCallbackSink*>(info.sink.get());
-    if(userSink != nullptr)
+    if(info.sink != nullptr)
     {
-        userSink->waitForIdle();
+        info.sink->waitForIdle();
     }
 
     // Remove from dist_sink
-    bool isAsync = (info.mode == HIPDNN_LOG_CALLBACK_ASYNC);
+    const bool isAsync = (info.mode == HIPDNN_LOG_CALLBACK_ASYNC);
     if(isAsync)
     {
         state.asyncSharedDistSink->remove_sink(info.sink);
@@ -481,7 +483,7 @@ hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
     initialize();
 
     auto& state = getBackendLogState();
-    std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+    const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
 
     if(!state.loggerInitialized)
     {
@@ -489,7 +491,7 @@ hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
     }
 
     // Create composite key
-    BackendLogState::CallbackKey key{callback, userHandle};
+    const BackendLogState::CallbackKey key{callback, userHandle};
 
     // Check if removing (SEV_OFF)
     if(minLevel == HIPDNN_SEV_OFF)
@@ -512,7 +514,7 @@ void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
 {
     // Check the shutdown flag before accessing BackendLogState. The atexit handler sets this
     // flag to prevent any thread from accessing logging infrastructure during static destruction.
-    if(sLoggingShutdown.load(std::memory_order_relaxed))
+    if(sLoggingShutdown.load(std::memory_order_acquire))
     {
         return;
     }
@@ -526,7 +528,7 @@ void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
     // Detect and prevent reentrant logging to avoid stack overflow. This can occur when
     // a user's synchronous log callback triggers another log message (e.g., by calling a
     // hipDNN API that logs, or by directly invoking the logger from within the callback).
-    thread_local int s_recursionDepth = 0;
+    static thread_local int s_recursionDepth = 0;
 
     if(s_recursionDepth > 0)
     {
@@ -547,7 +549,7 @@ void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
         {
             --s_recursionDepth;
         }
-    } guard;
+    } const guard;
 
     // Lazy-init; ensure backend logger is initialized.
     initialize();
@@ -562,7 +564,7 @@ void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
 
     {
         auto& state = getBackendLogState();
-        std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
+        const std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
 
         if(state.asyncSinkCount.load(std::memory_order_acquire) > 0)
         {

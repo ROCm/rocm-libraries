@@ -29,6 +29,15 @@ namespace {
 
 struct TestCase
 {
+    TestCase(int usePadding_, int inputMode_, int biasMode_, int dirMode_, int algoMode_)
+        : usePadding(usePadding_),
+          inputMode(inputMode_),
+          biasMode(biasMode_),
+          dirMode(dirMode_),
+          algoMode(algoMode_)
+    {
+    }
+
     int usePadding;
     int inputMode;
     int biasMode;
