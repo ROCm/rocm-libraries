@@ -25,7 +25,7 @@ using hipdnn_data_sdk::types::half;
 
 // --- Linear regime (nU < 0.01) ---
 
-TEST(TestComputeGamma, LinearRegime_Float_K1)
+TEST(TestComputeGamma, LinearRegimeFloatK1)
 {
     // float eps = 2^-23, k=1: nU = 2 * 2^-23 = 2^-22 ≈ 2.38e-7 << 0.01
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
@@ -35,7 +35,7 @@ TEST(TestComputeGamma, LinearRegime_Float_K1)
     EXPECT_NEAR(computeGamma(1, u), expected, 1e-15);
 }
 
-TEST(TestComputeGamma, LinearRegime_Float_K100)
+TEST(TestComputeGamma, LinearRegimeFloatK100)
 {
     // float eps = 2^-23, k=100: nU = 200 * 2^-23 ≈ 2.38e-5 << 0.01
     auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
@@ -45,7 +45,7 @@ TEST(TestComputeGamma, LinearRegime_Float_K100)
     EXPECT_NEAR(computeGamma(100, u), expected, 1e-15);
 }
 
-TEST(TestComputeGamma, LinearRegime_Half_K1)
+TEST(TestComputeGamma, LinearRegimeHalfK1)
 {
     // half eps = 2^-10, k=1: nU = 2 * 2^-10 = 2^-9 ≈ 0.00195 < 0.01
     auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
@@ -55,7 +55,7 @@ TEST(TestComputeGamma, LinearRegime_Half_K1)
     EXPECT_NEAR(computeGamma(1, u), expected, 1e-10);
 }
 
-TEST(TestComputeGamma, LinearRegime_Half_K5)
+TEST(TestComputeGamma, LinearRegimeHalfK5)
 {
     // half eps = 2^-10, k=5: nU = 10 * 2^-10 = 10/1024 ≈ 0.00977 < 0.01 (boundary)
     auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
@@ -65,7 +65,7 @@ TEST(TestComputeGamma, LinearRegime_Half_K5)
     EXPECT_NEAR(computeGamma(5, u), expected, 1e-10);
 }
 
-TEST(TestComputeGamma, LinearRegime_Double_K1000)
+TEST(TestComputeGamma, LinearRegimeDoubleK1000)
 {
     // double eps = 2^-52, k=1000: nU = 2000 * 2^-52 ≈ 4.44e-13 << 0.01
     const auto u = std::numeric_limits<double>::epsilon();
@@ -77,7 +77,7 @@ TEST(TestComputeGamma, LinearRegime_Double_K1000)
 
 // --- Statistical regime (nU >= 0.01) ---
 
-TEST(TestComputeGamma, StatisticalRegime_Bf16_K1)
+TEST(TestComputeGamma, StatisticalRegimeBf16K1)
 {
     // bf16 eps = 2^-7, k=1: nU = 2 * 2^-7 = 2^-6 = 0.015625 >= 0.01
     auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
@@ -86,7 +86,7 @@ TEST(TestComputeGamma, StatisticalRegime_Bf16_K1)
     EXPECT_NEAR(computeGamma(1, u), expected, 1e-10);
 }
 
-TEST(TestComputeGamma, StatisticalRegime_Bf16_K10)
+TEST(TestComputeGamma, StatisticalRegimeBf16K10)
 {
     // bf16 eps = 2^-7, k=10: nU = 20 * 2^-7 ≈ 0.156 >= 0.01
     auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
@@ -95,7 +95,7 @@ TEST(TestComputeGamma, StatisticalRegime_Bf16_K10)
     EXPECT_NEAR(computeGamma(10, u), expected, 1e-10);
 }
 
-TEST(TestComputeGamma, StatisticalRegime_Bf16_K100)
+TEST(TestComputeGamma, StatisticalRegimeBf16K100)
 {
     // bf16 eps = 2^-7, k=100: nU = 200 * 2^-7 ≈ 1.56 >= 0.01
     // gamma = 6 * sqrt(200) * 2^-7 ≈ 0.663 (exceeds 0.5 — useful for overflow tests)
@@ -106,7 +106,7 @@ TEST(TestComputeGamma, StatisticalRegime_Bf16_K100)
     EXPECT_GT(computeGamma(100, u), 0.5); // Confirms this triggers validateGamma overflow
 }
 
-TEST(TestComputeGamma, StatisticalRegime_Half_K6)
+TEST(TestComputeGamma, StatisticalRegimeHalfK6)
 {
     // half eps = 2^-10, k=6: nU = 12 * 2^-10 ≈ 0.01172 >= 0.01 (just above threshold)
     auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
@@ -115,7 +115,7 @@ TEST(TestComputeGamma, StatisticalRegime_Half_K6)
     EXPECT_NEAR(computeGamma(6, u), expected, 1e-10);
 }
 
-TEST(TestComputeGamma, StatisticalRegime_Half_K10)
+TEST(TestComputeGamma, StatisticalRegimeHalfK10)
 {
     // half eps = 2^-10, k=10: nU = 20 * 2^-10 ≈ 0.0195 >= 0.01
     auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
@@ -126,7 +126,7 @@ TEST(TestComputeGamma, StatisticalRegime_Half_K10)
 
 // --- Threshold boundary ---
 
-TEST(TestComputeGamma, ThresholdBoundary_ExactlyAtThreshold)
+TEST(TestComputeGamma, ThresholdBoundaryExactlyAtThreshold)
 {
     // Construct epsilon such that nU = 2*k*eps = exactly 0.01
     // k=1, eps=0.005 → nU = 0.01 → should use statistical (nU >= 0.01)
@@ -136,7 +136,7 @@ TEST(TestComputeGamma, ThresholdBoundary_ExactlyAtThreshold)
     EXPECT_NEAR(computeGamma(1, eps), expected, 1e-15);
 }
 
-TEST(TestComputeGamma, ThresholdBoundary_JustBelowThreshold)
+TEST(TestComputeGamma, ThresholdBoundaryJustBelowThreshold)
 {
     // k=1, eps=0.004999 → nU = 0.009998 < 0.01 → should use linear
     const double eps = 0.004999;
@@ -194,7 +194,7 @@ TEST(TestValidateGamma, CustomThreshold)
 // TestComputeInputCastingError
 // =================================================================================================
 
-TEST(TestComputeInputCastingError, HigherPrecisionInput_ReturnsError)
+TEST(TestComputeInputCastingError, HigherPrecisionInputReturnsError)
 {
     // double→float downcast: inputEps < computeEps → error = 2 * signal * computeEps
     auto computeEps = static_cast<double>(std::numeric_limits<float>::epsilon());
@@ -204,13 +204,13 @@ TEST(TestComputeInputCastingError, HigherPrecisionInput_ReturnsError)
     EXPECT_NEAR((computeInputCastingError<double, float>(signal)), expected, 1e-15);
 }
 
-TEST(TestComputeInputCastingError, LowerPrecisionInput_ReturnsZero)
+TEST(TestComputeInputCastingError, LowerPrecisionInputReturnsZero)
 {
     // half→float upcast: inputEps > computeEps → no error
     EXPECT_DOUBLE_EQ((computeInputCastingError<half, float>(100.0)), 0.0);
 }
 
-TEST(TestComputeInputCastingError, SamePrecision_ReturnsZero)
+TEST(TestComputeInputCastingError, SamePrecisionReturnsZero)
 {
     // float→float: no casting → no error
     EXPECT_DOUBLE_EQ((computeInputCastingError<float, float>(100.0)), 0.0);
@@ -230,7 +230,7 @@ TEST(TestComputeInputCastingError, SingleInputFactor)
 // TestComputeOutputCastingError
 // =================================================================================================
 
-TEST(TestComputeOutputCastingError, LowerPrecisionOutput_ReturnsError)
+TEST(TestComputeOutputCastingError, LowerPrecisionOutputReturnsError)
 {
     // float→half downcast: outputEps > computeEps → error = magnitude * outputEps
     auto outputEps = static_cast<double>(std::numeric_limits<half>::epsilon());
@@ -240,18 +240,18 @@ TEST(TestComputeOutputCastingError, LowerPrecisionOutput_ReturnsError)
     EXPECT_NEAR((computeOutputCastingError<half, float>(magnitude)), expected, 1e-15);
 }
 
-TEST(TestComputeOutputCastingError, HigherPrecisionOutput_ReturnsZero)
+TEST(TestComputeOutputCastingError, HigherPrecisionOutputReturnsZero)
 {
     // float→double upcast: outputEps < computeEps → no error
     EXPECT_DOUBLE_EQ((computeOutputCastingError<double, float>(200.0)), 0.0);
 }
 
-TEST(TestComputeOutputCastingError, SamePrecision_ReturnsZero)
+TEST(TestComputeOutputCastingError, SamePrecisionReturnsZero)
 {
     EXPECT_DOUBLE_EQ((computeOutputCastingError<float, float>(200.0)), 0.0);
 }
 
-TEST(TestComputeOutputCastingError, Bf16Output_ReturnsError)
+TEST(TestComputeOutputCastingError, Bf16OutputReturnsError)
 {
     // float→bf16 downcast
     auto outputEps = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
@@ -265,27 +265,27 @@ TEST(TestComputeOutputCastingError, Bf16Output_ReturnsError)
 // TestValidateToleranceRange
 // =================================================================================================
 
-TEST(TestValidateToleranceRange, WithinRange_NoThrow)
+TEST(TestValidateToleranceRange, WithinRangeNoThrow)
 {
     EXPECT_NO_THROW((validateToleranceRange<float>(1.0)));
     EXPECT_NO_THROW((validateToleranceRange<half>(100.0)));
     EXPECT_NO_THROW((validateToleranceRange<bfloat16>(100.0)));
 }
 
-TEST(TestValidateToleranceRange, ExceedsHalfMax_Throws)
+TEST(TestValidateToleranceRange, ExceedsHalfMaxThrows)
 {
     // half max ≈ 65504
     EXPECT_THROW((validateToleranceRange<half>(70000.0)), std::overflow_error);
 }
 
-TEST(TestValidateToleranceRange, ExceedsBf16Max_Throws)
+TEST(TestValidateToleranceRange, ExceedsBf16MaxThrows)
 {
     // bf16 max ≈ 3.39e+38 (same exponent range as float, less mantissa)
     // Use a value larger than float max
     EXPECT_THROW((validateToleranceRange<bfloat16>(1e39)), std::overflow_error);
 }
 
-TEST(TestValidateToleranceRange, AtExactMax_NoThrow)
+TEST(TestValidateToleranceRange, AtExactMaxNoThrow)
 {
     auto halfMax = static_cast<double>(std::numeric_limits<half>::max());
     EXPECT_NO_THROW((validateToleranceRange<half>(halfMax)));
