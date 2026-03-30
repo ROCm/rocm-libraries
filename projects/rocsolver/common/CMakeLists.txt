@@ -27,7 +27,7 @@
 
 add_library(rocsolver-common INTERFACE)
 
-# add cmake 23 requirement
+# add c++23 requirement
 if (NOT USE_FMT_LIB)
    # add an interface target for specifying higher c++ standard required
    add_library(cxx23_compiler_flags INTERFACE)
