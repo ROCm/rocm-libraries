@@ -12,6 +12,7 @@
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 
 #include <optional>
+#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -321,28 +322,45 @@ namespace hipdnn_frontend::detail
         return err;
     }
 
-    outKnobs.clear();
-    outKnobs.reserve(knobDescs.size());
+    std::vector<Knob> unpackedKnobs;
+    unpackedKnobs.reserve(knobDescs.size());
+    std::unordered_set<std::string> usedKnobIds;
+    size_t skippedCount = 0;
 
-    for(size_t i = 0; i < knobDescs.size(); ++i)
+    for(const auto& knobDesc : knobDescs)
     {
-        auto [knobErr, knob] = unpackKnobDescriptor(knobDescs[i].get());
+        auto [knobErr, knob] = unpackKnobDescriptor(knobDesc.get());
         if(knobErr.is_bad())
         {
-            return {knobErr.code,
-                    "Failed to unpack knob info at index " + std::to_string(i) + ": "
-                        + knobErr.get_message()};
+            ++skippedCount;
+            continue;
         }
         if(!knob.has_value())
         {
-            return {ErrorCode::INVALID_VALUE,
-                    "Failed to unpack knob info at index " + std::to_string(i)
-                        + ": missing knob without an error"};
+            ++skippedCount;
+            continue;
         }
-        outKnobs.push_back(std::move(knob.value()));
+
+        if(!usedKnobIds.insert(knob->knobId()).second)
+        {
+            ++skippedCount;
+            continue;
+        }
+
+        unpackedKnobs.push_back(std::move(knob.value()));
     }
 
-    return {};
+    outKnobs = std::move(unpackedKnobs);
+
+    if(skippedCount > 0)
+    {
+        std::ostringstream oss;
+        oss << "Loaded " << outKnobs.size() << " knobs, skipped " << skippedCount
+            << " invalid/duplicate knobs";
+        return {ErrorCode::OK, oss.str()};
+    }
+
+    return {ErrorCode::OK, ""};
 }
 
 } // namespace hipdnn_frontend::detail

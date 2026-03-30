@@ -725,7 +725,7 @@ TEST_F(TestUnpackKnobsFromDescriptors, CountQueryFailurePropagates)
     EXPECT_TRUE(knobs.empty());
 }
 
-TEST_F(TestUnpackKnobsFromDescriptors, MidArrayFailurePropagates)
+TEST_F(TestUnpackKnobsFromDescriptors, MidArrayFailureSkipsInvalidKnob)
 {
     expectKnobDescArrayQuery({_fakeDesc1, _fakeDesc2});
 
@@ -746,8 +746,33 @@ TEST_F(TestUnpackKnobsFromDescriptors, MidArrayFailurePropagates)
     std::vector<Knob> knobs;
     auto err = unpackKnobsFromDescriptors(_fakeEngine, knobs);
 
-    EXPECT_TRUE(err.is_bad());
-    EXPECT_NE(err.get_message().find("index 1"), std::string::npos);
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_NE(err.get_message().find("Loaded 1 knobs, skipped 1 invalid/duplicate knobs"),
+              std::string::npos);
+    ASSERT_EQ(knobs.size(), 1u);
+    EXPECT_EQ(knobs[0].knobId(), "knob.one");
+}
+
+TEST_F(TestUnpackKnobsFromDescriptors, DuplicateKnobIdsAreSkipped)
+{
+    expectKnobDescArrayQuery({_fakeDesc1, _fakeDesc2});
+
+    expectIntKnobMocks(_fakeDesc1, "knob.duplicate");
+    expectIntKnobMocks(_fakeDesc2, "knob.duplicate");
+
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_fakeDesc1))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_fakeDesc2))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    std::vector<Knob> knobs;
+    auto err = unpackKnobsFromDescriptors(_fakeEngine, knobs);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_NE(err.get_message().find("Loaded 1 knobs, skipped 1 invalid/duplicate knobs"),
+              std::string::npos);
+    ASSERT_EQ(knobs.size(), 1u);
+    EXPECT_EQ(knobs[0].knobId(), "knob.duplicate");
 }
 
 } // anonymous namespace
