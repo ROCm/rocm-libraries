@@ -63,7 +63,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     {
         bool trueVal = true;
         desc->setAttribute(
-            HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trueVal);
+            HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC, HIPDNN_TYPE_BOOLEAN, 1, &trueVal);
     }
 
     if(!name.empty())

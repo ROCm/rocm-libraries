@@ -6,7 +6,6 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 #include "HipdnnOperationType.h"
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
 {
@@ -68,7 +67,7 @@ void ReductionOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                          arrayOfElements,
                          "ReductionOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT:
+    case HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC:
         setScalar(_data.is_deterministic,
                   HIPDNN_TYPE_BOOLEAN,
                   attributeType,
@@ -137,7 +136,7 @@ void ReductionOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                          arrayOfElements,
                          "ReductionOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT:
+    case HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC:
         getScalar(_data.is_deterministic,
                   HIPDNN_TYPE_BOOLEAN,
                   attributeType,
@@ -204,7 +203,6 @@ hipdnnBackendDescriptorType_t ReductionOperationDescriptor::getStaticType()
 
 std::string ReductionOperationDescriptor::toString() const
 {
-    using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "ReductionOperationDescriptor: {";
     str += "name=" + _name;
     str += ", x_uid=" + std::to_string(_data.in_tensor_uid);

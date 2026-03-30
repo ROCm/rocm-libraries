@@ -665,8 +665,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_REDUCTION_OPERATOR");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_REDUCTION_COMP_TYPE),
                  "HIPDNN_ATTR_REDUCTION_COMP_TYPE");
-    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT),
-                 "HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC),
+                 "HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC");
 
     // Operation extension attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_NAME_EXT),

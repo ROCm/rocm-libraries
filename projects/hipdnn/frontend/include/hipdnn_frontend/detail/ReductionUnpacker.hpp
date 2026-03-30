@@ -53,12 +53,11 @@ namespace hipdnn_frontend::detail
     // Unpack is_deterministic (optional)
     {
         std::optional<bool> isDeterministic;
-        HIPDNN_CHECK_ERROR(
-            getDescriptorAttrOptionalScalar(opDesc,
-                                            HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT,
-                                            HIPDNN_TYPE_BOOLEAN,
-                                            isDeterministic,
-                                            "reduction is_deterministic"));
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                           HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC,
+                                                           HIPDNN_TYPE_BOOLEAN,
+                                                           isDeterministic,
+                                                           "reduction is_deterministic"));
         if(isDeterministic.has_value())
         {
             attributes.set_is_deterministic(*isDeterministic);

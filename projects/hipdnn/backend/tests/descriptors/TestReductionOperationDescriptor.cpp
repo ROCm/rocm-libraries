@@ -231,6 +231,16 @@ TEST_F(TestReductionOperationDescriptor, SetReductionModeWrongElementCount)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST_F(TestReductionOperationDescriptor, SetReductionModeWrongType)
+{
+    auto desc = getDescriptor();
+    int64_t wrongValue = 0;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_INT64, 1, &wrongValue),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
 TEST_F(TestReductionOperationDescriptor, SetComputeDataType)
 {
     auto desc = getDescriptor();
@@ -252,6 +262,16 @@ TEST_F(TestReductionOperationDescriptor, SetComputeDataTypeWrongElementCount)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST_F(TestReductionOperationDescriptor, SetComputeDataTypeWrongType)
+{
+    auto desc = getDescriptor();
+    int64_t wrongValue = 0;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_INT64, 1, &wrongValue),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
 // =============================================================================
 // SetAttribute Tests - Boolean Fields
 // =============================================================================
@@ -265,11 +285,8 @@ TEST_F(TestReductionOperationDescriptor, SetAttributeIsDeterministic)
     desc->finalize();
     bool retrieved = true;
     int64_t elementCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT,
-                       HIPDNN_TYPE_BOOLEAN,
-                       1,
-                       &elementCount,
-                       &retrieved);
+    desc->getAttribute(
+        HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &retrieved);
     EXPECT_FALSE(retrieved);
 
     // Now test with explicit true
@@ -285,17 +302,13 @@ TEST_F(TestReductionOperationDescriptor, SetAttributeIsDeterministic)
     desc2->setAttribute(
         HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, 1, &mode);
     bool trueVal = true;
-    desc2->setAttribute(
-        HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trueVal);
+    desc2->setAttribute(HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC, HIPDNN_TYPE_BOOLEAN, 1, &trueVal);
     desc2->finalize();
 
     retrieved = false;
     elementCount = 0;
-    desc2->getAttribute(HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT,
-                        HIPDNN_TYPE_BOOLEAN,
-                        1,
-                        &elementCount,
-                        &retrieved);
+    desc2->getAttribute(
+        HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &retrieved);
     ASSERT_EQ(elementCount, 1);
     EXPECT_TRUE(retrieved);
 }
@@ -306,11 +319,8 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeIsDeterministicQueryMode)
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT,
-                                       HIPDNN_TYPE_BOOLEAN,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC, HIPDNN_TYPE_BOOLEAN, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 

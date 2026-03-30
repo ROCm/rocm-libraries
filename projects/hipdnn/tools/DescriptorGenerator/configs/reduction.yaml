@@ -90,7 +90,7 @@ operation:
 
     - name: "is_deterministic"
       fbs_field: "is_deterministic"
-      attr_name: "HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT"
+      attr_name: "HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC"
       type: "bool"
       required: false
       frontend_getter: "get_is_deterministic()"

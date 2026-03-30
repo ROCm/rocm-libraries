@@ -1088,7 +1088,7 @@ typedef enum
     HIPDNN_ATTR_REDUCTION_COMP_TYPE = 3203,
 
     /** @brief Whether reduction is deterministic (bool) */
-    HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT = 3204,
+    HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC = 3204,
 
     /** @} */
 

@@ -799,8 +799,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_REDUCTION_OPERATOR";
     case HIPDNN_ATTR_REDUCTION_COMP_TYPE:
         return "HIPDNN_ATTR_REDUCTION_COMP_TYPE";
-    case HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT:
-        return "HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT";
+    case HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC:
+        return "HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC";
 
     // Operation extension attributes
     case HIPDNN_ATTR_OPERATION_NAME_EXT:

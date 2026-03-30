@@ -54,7 +54,7 @@ inline Error createReductionOperation(
                                                *mode,
                                                "reduction mode"));
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT,
+                                               HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC,
                                                HIPDNN_TYPE_BOOLEAN,
                                                attributes.get_is_deterministic(),
                                                "reduction is_deterministic"));

@@ -133,6 +133,7 @@ TEST_F(IntegrationReductionDescriptorLifting, BasicReductionRoundTrip)
     EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->get_stride(),
               toVec(K_REDUCTION_TENSOR_X_STRIDES));
     EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->get_name(), "x");
 
     // Verify y tensor
     ASSERT_NE(tensorMap.count(K_REDUCTION_TENSOR_Y_UID), 0u);
@@ -141,6 +142,7 @@ TEST_F(IntegrationReductionDescriptorLifting, BasicReductionRoundTrip)
     EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_Y_UID]->get_stride(),
               toVec(K_REDUCTION_TENSOR_Y_STRIDES));
     EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_Y_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_Y_UID]->get_name(), "y");
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
@@ -185,9 +187,11 @@ TEST_F(IntegrationReductionDescriptorLifting, ReductionTensorSharingPreserved)
 
     // Verify x tensor sharing
     EXPECT_EQ(opNode->attributes.get_x()->get_uid(), K_REDUCTION_TENSOR_X_UID);
+    EXPECT_EQ(opNode->attributes.get_x()->get_name(), "x");
     EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID].get(), opNode->attributes.get_x().get());
     // Verify y tensor sharing
     EXPECT_EQ(opNode->attributes.get_y()->get_uid(), K_REDUCTION_TENSOR_Y_UID);
+    EXPECT_EQ(opNode->attributes.get_y()->get_name(), "y");
     EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_Y_UID].get(), opNode->attributes.get_y().get());
 }
 
@@ -240,10 +244,12 @@ TEST_F(IntegrationReductionDescriptorLifting, ReductionLiftWithoutFinalization)
     EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->get_dim(), toVec(K_REDUCTION_TENSOR_X_DIMS));
     EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->get_stride(),
               toVec(K_REDUCTION_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->get_name(), "x");
     ASSERT_NE(tensorMap.count(K_REDUCTION_TENSOR_Y_UID), 0u);
     EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_Y_UID]->get_dim(), toVec(K_REDUCTION_TENSOR_Y_DIMS));
     EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_Y_UID]->get_stride(),
               toVec(K_REDUCTION_TENSOR_Y_STRIDES));
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_Y_UID]->get_name(), "y");
 }
 
 // Verifies that the optional is_deterministic attribute survives a lifting round-trip.
