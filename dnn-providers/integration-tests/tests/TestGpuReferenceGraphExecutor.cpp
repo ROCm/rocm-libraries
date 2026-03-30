@@ -189,7 +189,7 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
                  std::runtime_error);
 }
 
-TEST(TestGpuReferenceGraphExecutor, PointwiseAddOneExecutes)
+TEST(TestGpuReferenceGraphExecutor, PointwiseDummyAddOneExecutes)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -216,7 +216,7 @@ TEST(TestGpuReferenceGraphExecutor, PointwiseAddOneExecutes)
     EXPECT_FLOAT_EQ(output[3], 8.0f);
 }
 
-TEST(TestGpuReferenceGraphExecutor, PointwiseAddOneMultiDimensional)
+TEST(TestGpuReferenceGraphExecutor, PointwiseDummyAddOneMultiDimensional)
 {
     SKIP_IF_NO_DEVICES();
 

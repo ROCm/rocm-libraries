@@ -17,10 +17,10 @@ namespace hipdnn_integration_tests::gpu_graph_executor::detail
 // Dummy GPU plan that computes output[i] = input[i] + 1.0f for each element.
 // This is a proof-of-concept plan to exercise the GPU executor infrastructure.
 // Real GPU plans will use HipRTC-compiled kernels operating on device memory.
-class GpuAddOnePlanExecutor : public IGpuGraphNodePlanExecutor
+class GpuDummyAddOnePlanExecutor : public IGpuGraphNodePlanExecutor
 {
 public:
-    GpuAddOnePlanExecutor(int64_t inputUid, int64_t outputUid, size_t elementCount)
+    GpuDummyAddOnePlanExecutor(int64_t inputUid, int64_t outputUid, size_t elementCount)
         : _inputUid(inputUid)
         , _outputUid(outputUid)
         , _elementCount(elementCount)
@@ -44,7 +44,7 @@ private:
     size_t _elementCount;
 };
 
-class GpuAddOnePlanBuilder : public IGpuGraphNodePlanBuilder
+class GpuDummyAddOnePlanBuilder : public IGpuGraphNodePlanBuilder
 {
 public:
     bool isApplicable(
@@ -79,7 +79,7 @@ public:
             elementCount *= static_cast<size_t>(outTensor->dims()->Get(i));
         }
 
-        return std::make_unique<GpuAddOnePlanExecutor>(inputUid, outputUid, elementCount);
+        return std::make_unique<GpuDummyAddOnePlanExecutor>(inputUid, outputUid, elementCount);
     }
 };
 

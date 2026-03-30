@@ -97,7 +97,7 @@ private:
         switch(node.attributes_type())
         {
         case NodeAttrs::PointwiseAttributes:
-            return detail::GpuPointwiseSignatureKey(node, tensorMap);
+            return detail::GpuPointwiseDummySignatureKey(node, tensorMap);
 
         // Node types with no GPU plan yet - throw descriptive error
         case NodeAttrs::BatchnormInferenceAttributes:
