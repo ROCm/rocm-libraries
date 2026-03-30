@@ -89,6 +89,8 @@ inline const char* hipdnnGetDataTypeString(hipdnnDataType_t type)
         return "HIPDNN_DATA_FP6_E2M3";
     case HIPDNN_DATA_FP6_E3M2:
         return "HIPDNN_DATA_FP6_E3M2";
+    case HIPDNN_DATA_INT64:
+        return "HIPDNN_DATA_INT64";
     default:
         return "HIPDNN_DATA_UNKNOWN";
     }
@@ -388,6 +390,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_TENSOR_IS_VIRTUAL";
     case HIPDNN_ATTR_TENSOR_VALUE_EXT:
         return "HIPDNN_ATTR_TENSOR_VALUE_EXT";
+    case HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT:
+        return "HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT";
 
     // Convolution forward operation attributes
     case HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W:
