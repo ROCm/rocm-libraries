@@ -25,11 +25,12 @@ if(GPU_TARGETS MATCHES "gfx90a|gfx942|gfx950")
     add_gtest_executable(test_ck_tile_streamk_tile_partitioner test_streamk_tile_partitioner.cpp)
 
     # ---- Code-generate test .cpp files from types header ----
-    set(TYPES_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_streamk_types.hpp)
-    set(GEN_SCRIPT   ${CMAKE_CURRENT_SOURCE_DIR}/generate_test_files.py)
+    set(STREAMK_TYPES_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_streamk_types.hpp)
+    set(STREAMK_GEN_SCRIPT   ${CMAKE_CURRENT_SOURCE_DIR}/generate_test_files.py)
 
     # Re-run configure automatically if the types header changes (e.g. types added/removed)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${TYPES_HEADER})
+    # or if the generation script changes
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${STREAMK_TYPES_HEADER} ${STREAMK_GEN_SCRIPT})
 
     # Define the targets and their corresponding executable names
     set(STREAMK_GEN_TARGETS extended atomic_smoke linear_smoke tree_smoke pipelines_smoke)
@@ -51,26 +52,30 @@ if(GPU_TARGETS MATCHES "gfx90a|gfx942|gfx950")
 
         # Phase 1 (configure time): discover the list of files that will be generated
         execute_process(
-            COMMAND ${Python3_EXECUTABLE} ${GEN_SCRIPT}
-                --types_header ${TYPES_HEADER}
+            COMMAND ${Python3_EXECUTABLE} ${STREAMK_GEN_SCRIPT}
+                --types_header ${STREAMK_TYPES_HEADER}
                 --output_dir ${GEN_DIR}
                 --target ${target}
                 --list_files ${LIST_FILE}
-            RESULT_VARIABLE ret)
+            RESULT_VARIABLE ret
+            ERROR_VARIABLE list_files_stderr)
         if(ret AND NOT ret EQUAL 0)
-            message(FATAL_ERROR "Failed to list ${target} test files via Python: ${ret}")
+            message(FATAL_ERROR 
+                "Failed to list ${target} test files via Python: ${ret}\n"
+                "stderr: ${list_files_stderr}"
+            )
         endif()
         file(STRINGS ${LIST_FILE} ALL_SOURCES_${target})
 
         # Phase 2 (build time): generate the .cpp files when the types header changes
         add_custom_command(
             OUTPUT ${ALL_SOURCES_${target}}
-            COMMAND ${Python3_EXECUTABLE} ${GEN_SCRIPT}
-                --types_header ${TYPES_HEADER}
+            COMMAND ${Python3_EXECUTABLE} ${STREAMK_GEN_SCRIPT}
+                --types_header ${STREAMK_TYPES_HEADER}
                 --output_dir ${GEN_DIR}
                 --target ${target}
                 --gen_files
-            DEPENDS ${TYPES_HEADER} ${GEN_SCRIPT}
+            DEPENDS ${STREAMK_TYPES_HEADER} ${STREAMK_GEN_SCRIPT}
             COMMENT "Generating StreamK ${target} test sources from types header")
 
         # Filter out fp8/bf8 sources on gfx90a since those types are not natively supported
