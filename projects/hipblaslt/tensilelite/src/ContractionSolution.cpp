@@ -1437,7 +1437,7 @@ namespace TensileLite
             rv.numWorkGroups.z = 1;
         }
 
-        // Use arch from existing hardware to avoid repeated hipGetDeviceProperties (SWDEV-579719)
+        // Use arch from existing hardware to avoid repeated hipGetDeviceProperties
         auto removePrefix = [](const std::string& s) {
             size_t pos = s.find("gfx");
             if(pos != std::string::npos)
@@ -2538,7 +2538,8 @@ namespace TensileLite
         }
         else
         {
-            mt1 = int(problem.d().sizes()[1] / 2) * 2;
+            // MT1 should be the power of 2 to match setting in tensileLite
+            mt1 = static_cast<int>(pow(2, ceil(log2(mt1))));
             if(mt1 == 0)
                 mt1 = 1;
         }

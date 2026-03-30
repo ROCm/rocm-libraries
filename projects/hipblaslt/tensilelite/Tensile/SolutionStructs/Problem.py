@@ -919,7 +919,7 @@ class ProblemType(Mapping):
         if self["ActivationType"] != 'none' and self["UseE"] == False:
           printWarning("Use E is enabled cause Activation is enabled.")
           self["UseE"] = True
-        elif self["ActivationType"] != 'none' and self["UseE"] == False:
+        elif self["ActivationType"] == 'none' and self["UseE"] == True:
           printWarning("Use E is disabled cause Activation is disabled.")
           self["UseE"] = False
         # if self["UseScaleAlphaVec"]:

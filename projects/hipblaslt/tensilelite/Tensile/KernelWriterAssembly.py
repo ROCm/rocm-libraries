@@ -595,18 +595,6 @@ class KernelWriterAssembly(KernelWriter):
     self.removeSgprVarFromPool("GlobalReadIncsB")
     return module
 
-  def shiftSrd(self, tc) -> Module:
-    module = Module("shiftSrd")
-    if self.states.version[:2] == (12, 5):
-      with self.allocTmpSgpr(1) as stmpRes:
-        module.addComment("Shift num records for gfx125x")
-        module.add(SAndB32(sgpr(stmpRes.idx), sgpr("Srd%s+2"%tc), 0x7F))
-        module.add(SLShiftLeftB32(sgpr(stmpRes.idx), 25, sgpr(stmpRes.idx)))
-        module.add(SAndB32(sgpr("Srd%s+1"%tc), sgpr("Srd%s+1"%tc), 0x1FFFFFF))
-        module.add(SOrB32(sgpr("Srd%s+1"%tc), sgpr("Srd%s+1"%tc), sgpr(stmpRes.idx)))
-        module.add(SLShiftRightB32(sgpr("Srd%s+2"%tc), 7, sgpr("Srd%s+2"%tc)))
-    return module
-
   def defineVariableSgprs(self, kernel):
     module = Module("DefineVariableSgpr")
     #------------------------
@@ -12426,6 +12414,18 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
+  def shiftSrd(self, tc) -> Module:
+    module = Module("shiftSrd")
+    if self.states.version[:2] == (12, 5):
+      with self.allocTmpSgpr(1) as stmpRes:
+        module.addComment("Shift num records for gfx125x")
+        module.add(SAndB32(sgpr(stmpRes.idx), sgpr("Srd%s+2"%tc), 0x7F))
+        module.add(SLShiftLeftB32(sgpr(stmpRes.idx), 25, sgpr(stmpRes.idx)))
+        module.add(SAndB32(sgpr("Srd%s+1"%tc), sgpr("Srd%s+1"%tc), 0x1FFFFFF))
+        module.add(SOrB32(sgpr("Srd%s+1"%tc), sgpr("Srd%s+1"%tc), sgpr(stmpRes.idx)))
+        module.add(SLShiftRightB32(sgpr("Srd%s+2"%tc), 7, sgpr("Srd%s+2"%tc)))
+    return module
+
   def allocPostLoopSrd(self, ch: str):
     module = Module("allocPostLoopSrd")
     # Buffer-load uses one base read pointer stored in the SRD - set it here:
@@ -12435,6 +12435,25 @@ class KernelWriterAssembly(KernelWriter):
     module.add(self.shiftSrd(ch))
     module.addSpaceLine()
     return module
+
+  def allocPostLoopSrdSuppressRaw(self, ch: str, chAddress: str, labelStr: str, sgprLength) -> Module:
+    module = Module("allocPostLoopSrdSuppress")
+    label  = Label("%sAddrValid"%labelStr, "")
+    label2 = Label("%sAddrValid_End"%labelStr, "")
+    # Buffer-load uses one base read pointer stored in the SRD - set it here:
+    module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%chAddress, 2), comment="init SRD base address" ))
+    module.add(SMovB32(dst=sgpr("Srd%s+3"%ch), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
+    module.add(BranchIfNotZero("Address%s"%chAddress, DataType('int64').toEnum(), label))
+    module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src=0))
+    module.add(SBranch(label2.getLabelName()))
+    module.add(label)
+    module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src=sgprLength))
+    module.add(label2)
+    module.addSpaceLine()
+    return module
+
+  def allocPostLoopSrdSuppress(self, ch: str, labelStr: str, sgprLength) -> Module:
+    return self.allocPostLoopSrdSuppressRaw(ch, ch, labelStr, sgprLength)
 
   ##############################################################################
   # Not LocalSplitU: Global Write Indices
@@ -13488,11 +13507,11 @@ class KernelWriterAssembly(KernelWriter):
             tmpSgpr = tmpSgprRes.idx
             module.add(self.getSCMPKInstruction("EQU32", "FactorDim", 0, comment="FactorDim == 0"))
             module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr("SizeI"), src1=sgpr("SizeJ")))
-            module.add(allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr(tmpSgpr)))
+            module.add(self.allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr(tmpSgpr)))
         elif self.states.FactorDim == 2:
-          module.add(allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeJ")))
+          module.add(self.allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeJ")))
         else:
-          module.add(allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeI")))
+          module.add(self.allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeI")))
         module.add(SMulI32(dst=sgpr("SrdScaleAlphaVec+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleAlphaVec+2"), comment="ScaleAlphaVec scaled by BPE"))# scaled by BPE
         for d in range(len(factorDims)):
           vectorDataTypes.scaleAlpha(d).dataType = kernel["ProblemType"]["ComputeDataType"]
@@ -13502,10 +13521,12 @@ class KernelWriterAssembly(KernelWriter):
       if ((kernel["ProblemType"]["UseScaleAB"] == "Vector")) and isSingleKernel:
         labelStrA = self.labels.getNameInc("ScaleAVec")
         labelStrB = self.labels.getNameInc("ScaleBVec")
-        module.add(allocPostLoopSrdSuppress("ScaleA", labelStrA, sgprLength=sgpr("SizeI")))
-        module.add(allocPostLoopSrdSuppress("ScaleB", labelStrB, sgprLength=sgpr("SizeJ")))
+        module.add(self.allocPostLoopSrdSuppress("ScaleA", labelStrA, sgprLength=sgpr("SizeI")))
+        module.add(self.allocPostLoopSrdSuppress("ScaleB", labelStrB, sgprLength=sgpr("SizeJ")))
         module.add(SMulI32(dst=sgpr("SrdScaleA+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleA+2"), comment="ScaleAVec scaled by BPE"))# scaled by BPE
         module.add(SMulI32(dst=sgpr("SrdScaleB+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleB+2"), comment="ScaleBVec scaled by BPE"))# scaled by BPE
+        module.add(self.shiftSrd("ScaleA"))
+        module.add(self.shiftSrd("ScaleB"))
         vectorDataTypes.scaleA.dataType = kernel["ProblemType"]["ComputeDataType"]
         vectorDataTypes.scaleB.dataType = kernel["ProblemType"]["ComputeDataType"]
 
@@ -13533,7 +13554,7 @@ class KernelWriterAssembly(KernelWriter):
           else:
             module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr("SizeI"), src1=sgpr(tmpSgpr)))
           # module.add(SMovB32(dst=sgpr(tmpSgpr), src=128, comment="set bias stride"))
-          module.add(allocPostLoopSrdSuppress("Bias", labelStr, sgprLength=sgpr(tmpSgpr)))
+          module.add(self.allocPostLoopSrdSuppress("Bias", labelStr, sgprLength=sgpr(tmpSgpr)))
 
         loadBiasEndLabel = Label(self.labels.getNameInc("Load_Bias_End"), "")
         if self.states.FactorDim == 3:
@@ -13603,7 +13624,7 @@ class KernelWriterAssembly(KernelWriter):
             sourceAddress = "Bias"
           numRecordsStr = "SizeI" if kernel["ProblemType"]["BiasSrc"] == "A" else "SizeJ"
           # Init bias Srd
-          module.add(allocPostLoopSrdSuppressRaw("Bias", sourceAddress, labelStr, sgprLength=sgpr(numRecordsStr)))
+          module.add(self.allocPostLoopSrdSuppressRaw("Bias", sourceAddress, labelStr, sgprLength=sgpr(numRecordsStr)))
           if sourceAddress == "D":
             module.add(self.undefineSgpr("AddressD"))
           multiBiasTypeLabel = []
@@ -13641,7 +13662,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(skipGlobalStoreLabel)
         else:
           # Init bias Srd
-          module.add(allocPostLoopSrdSuppress("Bias", labelStr, "BufferOOB"))
+          module.add(self.allocPostLoopSrdSuppress("Bias", labelStr, "BufferOOB"))
           module.add(self.shiftSrd("Bias"))
           ssslist.append("Bias")
           useSize.append(True)
@@ -13735,7 +13756,7 @@ class KernelWriterAssembly(KernelWriter):
         strideE1 = "StrideE%s" % (self.states.indexChars[kernel["PackedC1IndicesX"][0]])
         module.add(VMulLOU32(dst=vgpr(self.vgprs.coutRowPtrE), src0=vgpr(self.vgprs.coutRowPtrE), src1=sgpr(strideE1), comment=" offset 1"))
         labelEStr = self.labels.getNameInc("E")
-        module.add(allocPostLoopSrdSuppress("E", labelEStr, "BufferOOB"))
+        module.add(self.allocPostLoopSrdSuppress("E", labelEStr, "BufferOOB"))
         module.add(self.shiftSrd("E"))
         ssslist.append("E")
         useSize.append(False)
@@ -15121,6 +15142,7 @@ class KernelWriterAssembly(KernelWriter):
     if biasDataType:
       # Recalculate bias length
       module.add(SMulI32(dst=sgpr("SrdBias+2"), src0=hex(biasBpe), src1=sgpr("SrdBias+2"), comment="scaled by BPE"))
+      module.add(self.shiftSrd("Bias"))
       if biasOffsetVgpr not in offsetIsInit:
         offsetIsInit[biasOffsetVgpr] = 1
         module.addModuleAsFlatItems(self.calculateVectorGlobalStride(offsetVgpr, biasOffsetVgpr, tmpSgpr, dim, "BiasStride"))
@@ -15312,6 +15334,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # Num records
     module.add(SMulI32(dst=sgpr("SrdBias+2"), src0=hex(biasBpe), src1=sgpr("SrdBias+2"), comment="scaled by BPE"))
+    module.add(self.shiftSrd("Bias"))
 
     # Local read
     # remaining size % VW
@@ -15440,13 +15463,13 @@ class KernelWriterAssembly(KernelWriter):
               module.add(VPackF16toB32(dst=vgpr(tmpVgprN - 1), src0=vgpr(tmpVgprN - 1), src1=vgpr(tmpVgprN), \
                          comment="Pack with neighbor"))
           elif biasDataType.isBFloat16():
-            module.add(VCmpUF32(dst=sgpr(tmpSgprRes.idx,2), src0=vgpr(tmpVgprN), src1=vgpr(tmpVgprN), comment="check Nan"))
+            module.add(VCmpUF32(dst=sgpr(tmpSgprRes.idx,self.states.laneSGPRCount), src0=vgpr(tmpVgprN), src1=vgpr(tmpVgprN), comment="check Nan"))
             module.add(VBfeU32(dst=vgpr(bf16CVTVgprStruct.vgprBf16Temp), src0=vgpr(tmpVgprN), src1=16, src2=1, \
                          comment="Non-Nan case: store lsb of bf16" ))
             module.add(VAdd3U32(dst=vgpr(bf16CVTVgprStruct.vgprBf16Temp), src0=vgpr(tmpVgprN), src1=vgpr(bf16CVTVgprStruct.vgprBf16Temp), \
                          src2=vgpr(bf16CVTVgprStruct.vgprBf16Inc), comment="Non-Nan case: add lsb and the increment for rounding" ))
             module.add(VCndMaskB32(dst=vgpr(tmpVgprN), src0=vgpr(bf16CVTVgprStruct.vgprBf16Temp), \
-                         src1=vgpr(bf16CVTVgprStruct.vgprFp32Nan), src2=sgpr(tmpSgprRes.idx,2)))
+                         src1=vgpr(bf16CVTVgprStruct.vgprFp32Nan), src2=sgpr(tmpSgprRes.idx,self.states.laneSGPRCount)))
             module.add(VLShiftRightB32(dst=vgpr(tmpVgprN), shiftHex=16, src=vgpr(tmpVgprN), comment="convert to bf16"))
             if vi % 2 == 1 and enablePack:
               module.add(VPackF16toB32(dst=vgpr(tmpVgprN - 1), src0=vgpr(tmpVgprN - 1), src1=vgpr(tmpVgprN), \
