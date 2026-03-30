@@ -277,7 +277,7 @@ if(HIPDNN_ENABLE_COVERAGE)
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
         -object
-        ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_public_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_data_sdk_tests
         -object

@@ -833,7 +833,7 @@ void copy_gemm_to_host(hipStream_t                   stream,
     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
     {
-        CHECK_HIP_ERROR(synchronize(hDst[gemmIdx], dSrc[gemmIdx]));
+        CHECK_HIP_ERROR(synchronize(hDst[gemmIdx], dSrc[gemmIdx], 0, 0, 0, 0, 1, false, stream));
     }
 }
 
@@ -876,16 +876,16 @@ void check(hipStream_t                   stream,
     {
         if(!arg.gradient && arg.use_e)
         {
-            CHECK_HIP_ERROR(synchronize(hE[gemmIdx], dE[gemmIdx]));
+            CHECK_HIP_ERROR(synchronize(hE[gemmIdx], dE[gemmIdx], 0, 0, 0, 0, 1, false, stream));
         }
 
         if(arg.amaxD)
         {
-            CHECK_HIP_ERROR(synchronize(hAmaxD[gemmIdx], dAmaxD[gemmIdx]));
+            CHECK_HIP_ERROR(synchronize(hAmaxD[gemmIdx], dAmaxD[gemmIdx], 0, 0, 0, 0, 1, false, stream));
         }
         if(arg.gradient && arg.bias_vector)
         {
-            CHECK_HIP_ERROR(synchronize(hBias[gemmIdx], dBias[gemmIdx]));
+            CHECK_HIP_ERROR(synchronize(hBias[gemmIdx], dBias[gemmIdx], 0, 0, 0, 0, 1, false, stream));
         }
         if(arg.unit_check)
         {
@@ -2040,7 +2040,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         A_col[i],
                                         lda[i],
                                         realDataTypeSize(TiA),
-                                        do_swizzle_a));
+                                        do_swizzle_a,
+                                        stream));
             CHECK_HIP_ERROR(synchronize(hB[i],
                                         dB[i],
                                         num_batches[i],
@@ -2048,8 +2049,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         B_col[i],
                                         ldb[i],
                                         realDataTypeSize(TiB),
-                                        do_swizzle_b));
-            CHECK_HIP_ERROR(synchronize(hC[i], dC[i]));
+                                        do_swizzle_b,
+                                        stream));
+            CHECK_HIP_ERROR(synchronize(hC[i], dC[i], 0, 0, 0, 0, 1, false, stream));
 
             if(arg.dump_matrix)
             {

@@ -46,6 +46,19 @@ namespace
     }
 }
 
+io_data_label other(io_data_label io)
+{
+    switch(io)
+    {
+    case io_data_label::INPUT:
+        return io_data_label::OUTPUT;
+    case io_data_label::OUTPUT:
+        return io_data_label::INPUT;
+    default:
+        throw std::invalid_argument("Unknown io data label given to " + ROCFFT_CURRENT_FUNCTION);
+    }
+}
+
 std::string to_str(io_data_label io)
 {
     switch(io)
@@ -118,6 +131,32 @@ data_layout_t::data_layout_t(const std::vector<size_t>& lower,
         (*this)[dim].inbuffer_stride = strides[dim];
         (*this)[dim].is_partial      = is_partial;
     }
+}
+
+data_layout_t data_layout_t::full_layout(const std::vector<size_t>& lengths,
+                                         const std::vector<size_t>& strides,
+                                         size_t                     batch,
+                                         size_t                     distance)
+{
+    return data_layout_t{std::vector<size_t>(lengths.size() + 1, 0),
+                         concatenate(lengths, batch),
+                         concatenate(strides, distance),
+                         1,
+                         false /* : is_partial */};
+}
+
+data_layout_t data_layout_t::default_full_layout(const std::vector<size_t>& lengths,
+                                                 size_t                     batch,
+                                                 bool                       real_case_with_padding)
+{
+    data_layout_t             ret;
+    const std::vector<size_t> empty_for_default_strides_and_dist = {};
+    ret.full_range_reset(lengths,
+                         empty_for_default_strides_and_dist,
+                         {batch},
+                         empty_for_default_strides_and_dist,
+                         real_case_with_padding);
+    return ret;
 }
 
 size_t data_layout_t::get_len_rank() const
@@ -484,4 +523,70 @@ void data_layout_t::full_range_reset(const std::vector<size_t>& lengths,
 bool data_layout_t::is_dimensionally_consistent_with(const data_layout_t& other) const
 {
     return get_batch_rank() == other.get_batch_rank() && get_len_rank() == other.get_len_rank();
+}
+
+bool data_layout_t::has_some_partial_length_axis() const
+{
+    return std::any_of(
+        len_axes.begin(), len_axes.end(), [](const auto& len_axis) { return len_axis.is_partial; });
+}
+
+std::optional<data_layout_t>
+    data_layout_t::get_other_inplace_layout_for(io_data_label         other_io,
+                                                rocfft_transform_type fft_type,
+                                                bool other_innermost_length_is_odd) const
+{
+    if(other_io != io_data_label::INPUT && other_io != io_data_label::OUTPUT)
+        throw std::invalid_argument("Unknown I/O data label given to " + ROCFFT_CURRENT_FUNCTION);
+
+    if(is_empty())
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " queried on an empty layout");
+
+    if(has_some_partial_length_axis())
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                               + " queried on a layout involving partial lengths");
+
+    if(fft_type == rocfft_transform_type_complex_forward
+       || fft_type == rocfft_transform_type_complex_inverse)
+    {
+        // simple copy
+        return std::make_optional<data_layout_t>(*this);
+    }
+    else if(fft_type != rocfft_transform_type_real_forward
+            && fft_type != rocfft_transform_type_real_inverse)
+    {
+        throw std::invalid_argument("Unknown type of transform given to "
+                                    + ROCFFT_CURRENT_FUNCTION);
+    }
+
+    // real transform: unit stride is required along the innermost axis
+    if((*this)[0].logical_span() > 1 && (*this)[0].inbuffer_stride != 1)
+        return std::nullopt;
+    const bool other_is_hermitian_domain
+        = (other_io == io_data_label::INPUT) ^ (fft_type == rocfft_transform_type_real_forward);
+    if(other_is_hermitian_domain)
+    {
+        bool strides_are_consistent = true;
+        for(size_t dim = 1; strides_are_consistent && dim < get_full_rank(); dim++)
+        {
+            if((*this)[dim].logical_span() == 1)
+                continue;
+            strides_are_consistent
+                &= (*this)[dim].inbuffer_stride % 2 == 0
+                   && (*this)[dim].inbuffer_stride >= 2 * ((*this)[0].logical_span() / 2 + 1);
+        }
+        if(!strides_are_consistent)
+            return std::nullopt;
+    }
+    // copy layout and modify what needs be
+    auto ret        = std::make_optional<data_layout_t>(*this);
+    (*ret)[0].upper = other_is_hermitian_domain ? (*this)[0].logical_span() / 2 + 1
+                                                : 2 * ((*this)[0].logical_span() - 1)
+                                                      + (other_innermost_length_is_odd ? 1 : 0);
+    for(size_t dim = 1; dim < ret->get_full_rank(); dim++)
+    {
+        (*ret)[dim].inbuffer_stride = other_is_hermitian_domain ? (*this)[dim].inbuffer_stride / 2
+                                                                : 2 * (*this)[dim].inbuffer_stride;
+    }
+    return ret;
 }
