@@ -112,6 +112,7 @@ public:
             size_t host_real_capacity = (memStatus.ullAvailPhys > (memStatus.ullTotalPhys / 2)) \
                                         ? memStatus.ullAvailPhys - (memStatus.ullTotalPhys / 2) \
                                         : 0;
+            hipblaslt_cout << "memStatus.ullAvailPhys: " << memStatus.ullAvailPhys << std::endl;
             hipblaslt_cout << "host_real_capacity: " << host_real_capacity << std::endl;
             hipblaslt_cout << "available_host_memory: " << available_host_memory << std::endl;
             return std::min(available_host_memory, host_real_capacity);
@@ -335,7 +336,10 @@ private:
     void add_allocated_capacity(M& dm)
     {
         if(std::is_same<M, h_memory>::value)
+        {
+            hipblaslt_cout << "add_allocated_capacity: " << dm.capacity() << std::endl;
             host_allocated_capacity += dm.capacity();
+        }
         else if(dm.is_managed())
             host_allocated_capacity += dm.capacity();
     }
@@ -343,7 +347,10 @@ private:
     void subtract_allocated_capacity(M& dm)
     {
         if(std::is_same<M, h_memory>::value)
+        {
+            hipblaslt_cout << "subtract_allocated_capacity: " << dm.capacity() << std::endl;
             host_allocated_capacity -= dm.capacity();
+        }
         else if(dm.is_managed())
             host_allocated_capacity -= dm.capacity();
     }
@@ -356,9 +363,14 @@ private:
             pool_capacity += m.capacity();
         }
         if(std::is_same<M, h_memory>::value)
+        {
+            hipblaslt_cout << "clean_allocated_capacity: " << pool_capacity << std::endl;
             host_allocated_capacity -= pool_capacity;
+        }
         else if(dm.is_managed())
+        {
             host_allocated_capacity -= pool_capacity;
+        }
     }
 };
 
