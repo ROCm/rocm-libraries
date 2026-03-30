@@ -15,6 +15,7 @@ add_executable(
     TestHipKernelHandle.cpp
     TestHipKernelContext.cpp
     TestHipKernelUtils.cpp
+    TestHipKernelPluginPublic.cpp
     engines/TestHipKernelEngine.cpp
     engines/plans/Batchnorm/TestBatchnormPlanBuilder.cpp
     engines/plans/Batchnorm/TestBatchnormFwdInferencePlan.cpp

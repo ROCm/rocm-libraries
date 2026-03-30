@@ -203,6 +203,14 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)
     });
 }
 
+hipdnnPluginStatus_t hipdnnPluginSetLogLevel(hipdnnSeverity_t level)
+{
+    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        hipdnn_plugin_sdk::logging::setLogLevel(level);
+        LOG_API_SUCCESS(apiName, "level=" << level);
+    });
+}
+
 // =============================================================================
 // Engine plugin API functions
 // =============================================================================

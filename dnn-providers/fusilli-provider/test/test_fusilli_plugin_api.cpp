@@ -10,6 +10,7 @@
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
@@ -636,4 +637,11 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsSdpa) {
   ASSERT_EQ(numEngines, 0);
 
   EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
+TEST(TestFusilliPluginApi, SetLogLevelSuccess) {
+  EXPECT_EQ(hipdnnPluginSetLogLevel(HIPDNN_SEV_INFO),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  EXPECT_EQ(hipdnnPluginSetLogLevel(HIPDNN_SEV_WARN),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
 }

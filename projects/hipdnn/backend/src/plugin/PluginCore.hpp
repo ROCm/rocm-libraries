@@ -55,6 +55,17 @@ public:
 
     hipdnnPluginStatus_t setLoggingCallback(hipdnnCallback_t callback) const;
 
+    /**
+     * @brief Sets the log level for the plugin.
+     *
+     * This method calls the plugin's hipdnnPluginSetLogLevel function if available.
+     * If the plugin does not implement this function, the call is a no-op and returns success.
+     *
+     * @param level The log level to set.
+     * @return hipdnnPluginStatus_t indicating success or failure.
+     */
+    hipdnnPluginStatus_t setLogLevel(hipdnnSeverity_t level) const;
+
 protected:
     // This function must not throw as it is used during error handling.
     std::string_view getLastErrorString() const noexcept;
@@ -101,6 +112,7 @@ private:
     hipdnnPluginStatus_t (*_funcGetType)(hipdnnPluginType_t*);
     void (*_funcGetLastErrorStr)(const char**);
     hipdnnPluginStatus_t (*_funcSetLoggingCallback)(hipdnnCallback_t);
+    hipdnnPluginStatus_t (*_funcSetLogLevel)(hipdnnSeverity_t);
 };
 
 // The PluginManagerBase is responsible for loading and unloading plugins. This class is the base class for all plugin managers.
@@ -274,6 +286,11 @@ private:
                 }
 
                 plugin->setLoggingCallback(logging::backendLoggingCallback);
+
+                // Synchronize plugin log level with backend's global log level
+                hipdnnSeverity_t currentLogLevel{};
+                logging::getGlobalLogLevel(currentLogLevel);
+                plugin->setLogLevel(currentLogLevel);
 
                 validateBeforeAdding(*plugin);
 

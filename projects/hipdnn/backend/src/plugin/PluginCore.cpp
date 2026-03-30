@@ -40,6 +40,10 @@ void PluginBase::resolveSymbols()
     {
         HIPDNN_BACKEND_LOG_INFO("Plugin does not support logging callback");
     }
+    if(!tryAssignSymbol(_funcSetLogLevel, "hipdnnPluginSetLogLevel"))
+    {
+        HIPDNN_BACKEND_LOG_INFO("Plugin does not support log level synchronization");
+    }
 
 #ifndef NDEBUG
     _initialized = true;
@@ -100,6 +104,18 @@ hipdnnPluginStatus_t PluginBase::setLoggingCallback(hipdnnCallback_t callback) c
     }
 
     return _funcSetLoggingCallback(callback);
+}
+
+hipdnnPluginStatus_t PluginBase::setLogLevel(hipdnnSeverity_t level) const
+{
+    assert(_initialized);
+    if(_funcSetLogLevel == nullptr)
+    {
+        // Plugin does not support log level synchronization, so we vacuously return success
+        return HIPDNN_PLUGIN_STATUS_SUCCESS;
+    }
+
+    return _funcSetLogLevel(level);
 }
 
 } // namespace plugin

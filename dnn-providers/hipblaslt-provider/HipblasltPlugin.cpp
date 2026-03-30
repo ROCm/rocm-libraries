@@ -95,6 +95,14 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallbackImpl(hipdnnCallback_t callbac
     });
 }
 
+hipdnnPluginStatus_t hipdnnPluginSetLogLevelImpl(hipdnnSeverity_t level)
+{
+    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        hipdnn_plugin_sdk::logging::setLogLevel(level);
+        LOG_API_SUCCESS(apiName, "level=" << level);
+    });
+}
+
 hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
                                                            uint32_t maxEngines,
                                                            uint32_t* numEngines)

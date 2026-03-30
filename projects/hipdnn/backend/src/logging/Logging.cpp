@@ -5,6 +5,7 @@
 #include "GraphLogger.hpp"
 #include "PlatformUtils.hpp"
 #include "UserCallbackSink.hpp"
+#include "plugin/EnginePluginResourceManager.hpp"
 
 #include <cstdint>
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
@@ -591,6 +592,9 @@ hipdnnStatus_t setGlobalLogLevel(hipdnnSeverity_t level)
 {
     // Set the global log level in data_sdk cache (backend's copy)
     hipdnn_data_sdk::logging::setLogLevel(level);
+
+    // Notify all loaded plugins of the log level change
+    plugin::EnginePluginResourceManager::setPluginLogLevel(level);
 
     return HIPDNN_STATUS_SUCCESS;
 }

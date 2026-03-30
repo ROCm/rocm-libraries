@@ -350,6 +350,14 @@ public:
         return LogRecording::instance(_recordingId).getRecordedLogs();
     }
 
+    /**
+     * @brief Clear all recorded logs for the current log recorder.
+     */
+    void clearLogs()
+    {
+        LogRecording::instance(_recordingId).clearLogs();
+    }
+
 protected:
     /**
      * @brief Protected constructor - use factory methods in derived classes
