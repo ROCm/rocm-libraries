@@ -1474,23 +1474,26 @@ int main(int argc, const char* argv[])
                                             TimingEvents startEvents(enq, eventCount);
                                             TimingEvents stopEvents(enq, eventCount);
 
-                                            listeners.preEnqueues(stream);
-
-                                            for(int j = 0; j < enq; j++)
                                             {
-                                                size_t kIdx = ((i * enq) + j) % kernels.size();
-                                                rotateAndSelect();
-                                                HIP_CHECK_EXC(adapter.launchKernels(
-                                                    kernels[kIdx], stream, nullptr, nullptr));
+                                                ScopedTimer kernelTimer("gpu_kernel_execution");
+                                                listeners.preEnqueues(stream);
 
-                                                if(icacheFlush)
+                                                for(int j = 0; j < enq; j++)
                                                 {
-                                                    hipLaunchKernelGGL(
-                                                        flush_icache, flushGridSize, 64, 0, stream);
-                                                }
-                                            }
+                                                    size_t kIdx = ((i * enq) + j) % kernels.size();
+                                                    rotateAndSelect();
+                                                    HIP_CHECK_EXC(adapter.launchKernels(
+                                                        kernels[kIdx], stream, nullptr, nullptr));
 
-                                            listeners.postEnqueues(startEvents, stopEvents, stream);
+                                                    if(icacheFlush)
+                                                    {
+                                                        hipLaunchKernelGGL(
+                                                            flush_icache, flushGridSize, 64, 0, stream);
+                                                    }
+                                                }
+
+                                                listeners.postEnqueues(startEvents, stopEvents, stream);
+                                            }
                                             listeners.validateEnqueues(inputs, startEvents, stopEvents);
                                         }
 
