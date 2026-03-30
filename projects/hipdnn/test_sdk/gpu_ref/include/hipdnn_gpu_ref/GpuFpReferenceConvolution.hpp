@@ -5,6 +5,7 @@
 
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
+#include <hipdnn_data_sdk/utilities/ConvolutionValidation.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
@@ -292,95 +293,15 @@ private:
     {
         const auto nDims = x.dims().size();
 
+        // GPU kernels only support 1D (3), 2D (4), and 3D (5) convolutions
         if(nDims != 3 && nDims != 4 && nDims != 5)
         {
             throw std::invalid_argument("Input tensor must have 3 dimensions (1D conv), "
                                         "4 dimensions (2D conv), or 5 dimensions (3D conv)");
         }
 
-        if(w.dims().size() != nDims)
-        {
-            throw std::invalid_argument(
-                "Weight tensor must have the same number of dimensions as input");
-        }
-
-        if(y.dims().size() != nDims)
-        {
-            throw std::invalid_argument(
-                "Output tensor must have the same number of dimensions as input");
-        }
-
-        auto nSpatialDims = nDims - 2;
-
-        if(strides.size() != nSpatialDims)
-        {
-            throw std::invalid_argument("Strides must have exactly " + std::to_string(nSpatialDims)
-                                        + " elements for this convolution");
-        }
-
-        if(dilations.size() != nSpatialDims)
-        {
-            throw std::invalid_argument("Dilations must have exactly "
-                                        + std::to_string(nSpatialDims)
-                                        + " elements for this convolution");
-        }
-
-        if(prePadding.size() != nSpatialDims)
-        {
-            throw std::invalid_argument("PrePadding must have exactly "
-                                        + std::to_string(nSpatialDims)
-                                        + " elements for this convolution");
-        }
-
-        if(postPadding.size() != nSpatialDims)
-        {
-            throw std::invalid_argument("PostPadding must have exactly "
-                                        + std::to_string(nSpatialDims)
-                                        + " elements for this convolution");
-        }
-
-        const auto& xDims = x.dims();
-        const auto& wDims = w.dims();
-        const auto& yDims = y.dims();
-
-        for(size_t i = 0; i < nSpatialDims; ++i)
-        {
-            if(strides[i] <= 0)
-            {
-                throw std::invalid_argument("Stride values must be positive");
-            }
-
-            if(dilations[i] <= 0)
-            {
-                throw std::invalid_argument("Dilation values must be positive");
-            }
-
-            if(prePadding[i] < 0)
-            {
-                throw std::invalid_argument("PrePadding values must be non-negative");
-            }
-
-            if(postPadding[i] < 0)
-            {
-                throw std::invalid_argument("PostPadding values must be non-negative");
-            }
-
-            const int64_t xDim = xDims[i + 2];
-            const int64_t kernelDim = wDims[i + 2];
-            const int64_t yDim = yDims[i + 2];
-
-            const int64_t kernelSize = (dilations[i] * (kernelDim - 1)) + 1;
-            const int64_t expectedOutputDim
-                = ((xDim + prePadding[i] + postPadding[i] - kernelSize) / strides[i]) + 1;
-
-            if(expectedOutputDim != yDim)
-            {
-                throw std::invalid_argument("Output dimension " + std::to_string(yDim)
-                                            + " at spatial dimension " + std::to_string(i)
-                                            + " does not match expected dimension "
-                                            + std::to_string(expectedOutputDim));
-            }
-        }
+        hipdnn_data_sdk::utilities::validateConvolutionParams(
+            x, w, y, strides, dilations, prePadding, postPadding);
     }
 
     // --- 1D kernel launcher ---

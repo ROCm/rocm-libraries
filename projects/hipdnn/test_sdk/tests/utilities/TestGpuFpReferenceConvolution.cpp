@@ -373,80 +373,6 @@ TEST(TestGpuConvFwdRefAsymPadBfp16, MatchesCpuRef)
 }
 
 // ============================================================================
-// TestGpuConvFwdRefNhwcFp32 — NHWC layout tests
-// ============================================================================
-
-TEST(TestGpuConvFwdRefNhwcFp32, BasicConvolution)
-{
-    SKIP_IF_NO_DEVICES();
-    runGpuVsCpuConvFwd<float>({1, 1, 4, 4},
-                              {1, 1, 3, 3},
-                              {1, 1, 2, 2},
-                              {1, 1},
-                              {1, 1},
-                              {0, 0},
-                              1e-5f,
-                              TensorLayout::NHWC,
-                              TensorLayout::NHWC);
-}
-
-TEST(TestGpuConvFwdRefNhwcFp32, WithPadding)
-{
-    SKIP_IF_NO_DEVICES();
-    runGpuVsCpuConvFwd<float>({1, 1, 3, 3},
-                              {1, 1, 3, 3},
-                              {1, 1, 3, 3},
-                              {1, 1},
-                              {1, 1},
-                              {1, 1},
-                              1e-5f,
-                              TensorLayout::NHWC,
-                              TensorLayout::NHWC);
-}
-
-TEST(TestGpuConvFwdRefNhwcFp32, WithStride)
-{
-    SKIP_IF_NO_DEVICES();
-    runGpuVsCpuConvFwd<float>({1, 1, 5, 5},
-                              {1, 1, 3, 3},
-                              {1, 1, 2, 2},
-                              {2, 2},
-                              {1, 1},
-                              {0, 0},
-                              1e-5f,
-                              TensorLayout::NHWC,
-                              TensorLayout::NHWC);
-}
-
-TEST(TestGpuConvFwdRefNhwcFp32, GroupedConvolution)
-{
-    SKIP_IF_NO_DEVICES();
-    runGpuVsCpuConvFwd<float>({1, 4, 4, 4},
-                              {4, 2, 3, 3},
-                              {1, 4, 2, 2},
-                              {1, 1},
-                              {1, 1},
-                              {0, 0},
-                              1e-4f,
-                              TensorLayout::NHWC,
-                              TensorLayout::NHWC);
-}
-
-TEST(TestGpuConvFwdRefNhwcFp32, MultiChannel)
-{
-    SKIP_IF_NO_DEVICES();
-    runGpuVsCpuConvFwd<float>({1, 3, 4, 4},
-                              {2, 3, 3, 3},
-                              {1, 2, 2, 2},
-                              {1, 1},
-                              {1, 1},
-                              {0, 0},
-                              1e-4f,
-                              TensorLayout::NHWC,
-                              TensorLayout::NHWC);
-}
-
-// ============================================================================
 // TestGpuConvFwdRef3dFp32 — 3D layout-specific tests (shapes covered by catalog)
 // ============================================================================
 
@@ -1072,6 +998,75 @@ INSTANTIATE_TEST_SUITE_P(Small1d,
 INSTANTIATE_TEST_SUITE_P(Small3d,
                          TestGpuConvFwdRefShapesBfp16,
                          ::testing::ValuesIn(getSmall3dConvCases()),
+                         [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
+                             return info.param.tag;
+                         });
+
+// ============================================================================
+// TestGpuConvFwdRefNhwcShapes — NHWC layout coverage from shape catalog
+// ============================================================================
+
+template <typename DataType>
+class ConvFwdNhwcShapeSuite : public ::testing::TestWithParam<ConvFwdShapeCase>
+{
+protected:
+    static float tolerance(const ConvFwdShapeCase& tc)
+    {
+        constexpr double FILL_RANGE = 1.0;
+        return hipdnn_test_sdk::utilities::conv::
+            calculateConvFpropTolerance<DataType, DataType, double>(
+                -FILL_RANGE, FILL_RANGE, -FILL_RANGE, FILL_RANGE, tc.wDims);
+    }
+
+    void runConvFwdNhwcShapeTest()
+    {
+        SKIP_IF_NO_DEVICES();
+        const auto& tc = GetParam();
+        auto yDims = tc.computeOutputDims();
+        runGpuVsCpuConvFwd<DataType>(tc.xDims,
+                                     tc.wDims,
+                                     yDims,
+                                     tc.strides,
+                                     tc.dilations,
+                                     tc.padding,
+                                     tolerance(tc),
+                                     TensorLayout::NHWC,
+                                     TensorLayout::NHWC);
+    }
+};
+
+using TestGpuConvFwdRefNhwcShapesFp32 = ConvFwdNhwcShapeSuite<float>;
+using TestGpuConvFwdRefNhwcShapesFp16 = ConvFwdNhwcShapeSuite<half>;
+using TestGpuConvFwdRefNhwcShapesBfp16 = ConvFwdNhwcShapeSuite<bfloat16>;
+
+TEST_P(TestGpuConvFwdRefNhwcShapesFp32, MatchesCpuRef)
+{
+    this->runConvFwdNhwcShapeTest();
+}
+TEST_P(TestGpuConvFwdRefNhwcShapesFp16, MatchesCpuRef)
+{
+    this->runConvFwdNhwcShapeTest();
+}
+TEST_P(TestGpuConvFwdRefNhwcShapesBfp16, MatchesCpuRef)
+{
+    this->runConvFwdNhwcShapeTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Small2dNhwc,
+                         TestGpuConvFwdRefNhwcShapesFp32,
+                         ::testing::ValuesIn(getSmall2dConvCases()),
+                         [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
+                             return info.param.tag;
+                         });
+INSTANTIATE_TEST_SUITE_P(Small2dNhwc,
+                         TestGpuConvFwdRefNhwcShapesFp16,
+                         ::testing::ValuesIn(getSmall2dConvCases()),
+                         [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
+                             return info.param.tag;
+                         });
+INSTANTIATE_TEST_SUITE_P(Small2dNhwc,
+                         TestGpuConvFwdRefNhwcShapesBfp16,
+                         ::testing::ValuesIn(getSmall2dConvCases()),
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
                              return info.param.tag;
                          });
