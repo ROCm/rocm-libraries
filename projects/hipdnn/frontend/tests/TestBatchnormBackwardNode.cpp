@@ -821,6 +821,75 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalid5DSpatialDimensions)
                 != std::string::npos);
 }
 
+TEST(TestBatchnormBackwardNode, PackNodePreservesName)
+{
+    BatchnormBackwardAttributes batchnormAttributes;
+    batchnormAttributes.set_name("bn_bwd_custom_name");
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_uid(1)
+        .set_name("DyTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({4, 3, 2, 1});
+    batchnormAttributes.set_dy(dyTensor);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(2)
+        .set_name("XTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({4, 3, 2, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_uid(3)
+        .set_name("ScaleTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1})
+        .set_stride({2, 1, 1, 1});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_uid(4)
+        .set_name("DxTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 3, 4})
+        .set_stride({4, 3, 2, 1});
+    batchnormAttributes.set_dx(dxTensor);
+
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_uid(5)
+        .set_name("DscaleTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1})
+        .set_stride({2, 1, 1, 1});
+    batchnormAttributes.set_dscale(dscaleTensor);
+
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_uid(6)
+        .set_name("DbiasTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1})
+        .set_stride({2, 1, 1, 1});
+    batchnormAttributes.set_dbias(dbiasTensor);
+
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto offset = node.pack_node(builder);
+    EXPECT_NE(offset.o, 0);
+
+    builder.Finish(offset);
+    auto bufferPointer = builder.GetBufferPointer();
+    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(bufferPointer);
+
+    EXPECT_STREQ(nodeFlatbuffer->name()->c_str(), "bn_bwd_custom_name");
+    EXPECT_EQ(nodeFlatbuffer->attributes_type(),
+              hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes);
+}
+
 TEST(TestBatchnormBackwardNode, GetNodeTypeReturnsBatchnormBackward)
 {
     const GraphAttributes graphAttrs;
