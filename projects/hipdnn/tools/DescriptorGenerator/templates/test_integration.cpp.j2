@@ -89,11 +89,11 @@ protected:
 {% set tf_name = rmap.get(param.tensor_name, param.tensor_name) %}
 {% set tc = op.test_data.tensor_configs.get(tf_name) %}
         auto {{ param.name }} = std::make_shared<TensorAttributes>();
-        {{ param.name }}->set_uid(K_TENSOR_{{ tf_name | upper }}_UID)
+        {{ param.name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_UID)
             .set_name("{{ param.tensor_name }}")
             .set_data_type(DataType::FLOAT);
 {% if tc %}
-        {{ param.name }}->set_dim(toVec(K_TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec(K_TENSOR_{{ tf_name | upper }}_STRIDES));
+        {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
 {% endif %}
 
 {% endfor %}
@@ -106,7 +106,7 @@ protected:
             {{ param.name }},
 {% endfor %}
             attrs);
-        {{ out_name }}->set_uid(K_TENSOR_{{ out_tf_name | upper }}_UID)
+        {{ out_name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ out_tf_name | upper }}_UID)
             .set_output(true)
             .set_name("{{ out_name }}");
 {% endif %}
@@ -178,12 +178,12 @@ TEST_F(Integration{{ op.name }}DescriptorLowering, {{ op.name }}LoweringRoundTri
 {% for tf in op.required_tensor_fields %}
 {% set tf_upper = tf.name | upper %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
-    ASSERT_NE(tensorMap.count(K_TENSOR_{{ tf_upper }}_UID), 0u);
+    ASSERT_NE(tensorMap.count({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID), 0u);
 {% if tc %}
-    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->dims, toVec(K_TENSOR_{{ tf_upper }}_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->strides, toVec(K_TENSOR_{{ tf_upper }}_STRIDES));
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->dims, toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_DIMS));
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->strides, toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
-    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->data_type, DataTypeSdk::FLOAT);
 {% endfor %}
 
     // Verify operation node
@@ -199,7 +199,7 @@ TEST_F(Integration{{ op.name }}DescriptorLowering, {{ op.name }}LoweringRoundTri
 
     // Verify required tensor UIDs
 {% for tf in op.required_tensor_fields %}
-    EXPECT_EQ(opNode->{{ tf.fbs_field }}, K_TENSOR_{{ tf.name | upper }}_UID);
+    EXPECT_EQ(opNode->{{ tf.fbs_field }}, {{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_UID);
 {% endfor %}
 
     // Verify operation name preserved through lowering

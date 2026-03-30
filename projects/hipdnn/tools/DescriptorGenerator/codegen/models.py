@@ -182,6 +182,16 @@ class DataField:
     test_constant_name: str = ""
     test_backend_value: str = ""
 
+    # FBS optional qualifier: True when the FBS field uses (optional) qualifier.
+    # Controls whether bool fields use optional patterns or plain scalar patterns.
+    # FBS `bool field = false` -> fbs_optional: false (plain bool, use setScalar/getScalar)
+    # FBS `bool field (optional)` -> fbs_optional: true (Optional<bool>, use setOptionalScalar)
+    fbs_optional: bool = False
+
+    # Whether the frontend getter returns std::optional for mode fields.
+    # New codegen-generated frontend getters return optional; hand-written ones may not.
+    frontend_getter_returns_optional: bool = False
+
     # Mode-specific config (for conv_mode, pointwise_mode, etc.)
     backend_setter: str = ""
     backend_getter: str = ""
@@ -201,6 +211,18 @@ class DataField:
     def has_enum_def(self) -> bool:
         """Whether this field has a generatable enum definition."""
         return self.enum_def is not None and len(self.enum_def.values) > 0
+
+    @property
+    def effective_sentinel_value(self) -> str:
+        """Sentinel enum value for finalize() validation.
+
+        Returns the sentinel name from enum_def if available, otherwise 'NOT_SET'.
+        """
+        if self.enum_def:
+            for v in self.enum_def.values:
+                if v.sentinel:
+                    return v.effective_sdk_name
+        return "NOT_SET"
 
     @property
     def camel_name(self) -> str:
@@ -231,6 +253,8 @@ class DataField:
 
     @property
     def is_optional_scalar(self) -> bool:
+        if self.type == "bool":
+            return self.fbs_optional
         return self.is_scalar and not self.required
 
     @property
@@ -867,3 +891,14 @@ class OperationConfig:
         if self.test_data.constants_include:
             return self.test_data.constants_include
         return f"{self.name}Constants"
+
+    @property
+    def tensor_const_prefix(self) -> str:
+        """Prefix for tensor constant names.
+
+        Returns 'K_' for pre-existing constants headers (backward compatible),
+        'K_{NAME}_' for new operations (avoids collisions).
+        """
+        if self.test_data and self.test_data.constants_include:
+            return "K_"
+        return f"K_{self.name.upper()}_"

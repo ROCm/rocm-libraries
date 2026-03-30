@@ -93,11 +93,11 @@ protected:
 {% set tf_name = rmap.get(param.tensor_name, param.tensor_name) %}
 {% set tc = op.test_data.tensor_configs.get(tf_name) %}
         auto {{ param.name }} = std::make_shared<TensorAttributes>();
-        {{ param.name }}->set_uid(K_TENSOR_{{ tf_name | upper }}_UID)
+        {{ param.name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_UID)
             .set_name("{{ param.tensor_name }}")
             .set_data_type(DataType::FLOAT);
 {% if tc %}
-        {{ param.name }}->set_dim(toVec(K_TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec(K_TENSOR_{{ tf_name | upper }}_STRIDES));
+        {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
 {% endif %}
 
 {% endfor %}
@@ -125,7 +125,7 @@ protected:
             {{ param.name }},
 {% endfor %}
             attrs);
-        {{ out_name }}->set_uid(K_TENSOR_{{ out_tf_name | upper }}_UID)
+        {{ out_name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ out_tf_name | upper }}_UID)
             .set_output(true)
             .set_name("{{ out_name }}");
 {% elif op.frontend.graph_return_type == 'array' %}
@@ -137,7 +137,7 @@ protected:
             {{ param.name }},
 {% endfor %}
             attrs);
-        results[0]->set_uid(K_TENSOR_{{ out_tf_name | upper }}_UID)
+        results[0]->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ out_tf_name | upper }}_UID)
             .set_output(true)
             .set_name("{{ out_name }}");
 {% endif %}
@@ -181,21 +181,21 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, Basic{{ op.name }}RoundTrip)
 {% set tf_upper = tf.name | upper %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
     // Verify {{ tf.name }} tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_{{ tf_upper }}_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->get_uid(), K_TENSOR_{{ tf_upper }}_UID);
+    ASSERT_NE(tensorMap.count({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID), 0u);
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_uid(), {{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID);
 {% if tc %}
-    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->get_dim(), toVec(K_TENSOR_{{ tf_upper }}_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->get_stride(), toVec(K_TENSOR_{{ tf_upper }}_STRIDES));
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_dim(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_DIMS));
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_stride(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
-    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_data_type(), DataType::FLOAT);
 
 {% endfor %}
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* opNode = dynamic_cast<{{ op.frontend.node_class }}*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a {{ op.frontend.node_class }}";
+    ASSERT_NE(opNode, nullptr) << "Expected a {{ op.frontend.node_class }}"; // NOLINT(readability-implicit-bool-conversion)
 
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
@@ -249,8 +249,8 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}TensorSharingPres
 {% set ft = tf_map.get(tf.name) %}
 {% if ft %}
     // Verify {{ tf.name }} tensor sharing
-    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_uid(), K_TENSOR_{{ tf.name | upper }}_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf.name | upper }}_UID].get(),
+    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_uid(), {{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_UID);
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_UID].get(),
               opNode->attributes.{{ ft.effective_getter_name }}().get());
 {% endif %}
 {% endfor %}
@@ -272,7 +272,7 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinali
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
     const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
-    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
+    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor"; // NOLINT(readability-implicit-bool-conversion)
 
     // Lift into a new graph via fromBackendDescriptor
     auto liftedGraph = std::make_shared<TestableGraph>();
@@ -317,10 +317,10 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinali
 {% for tf in op.required_tensor_fields %}
 {% set tf_upper = tf.name | upper %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
-    ASSERT_NE(tensorMap.count(K_TENSOR_{{ tf_upper }}_UID), 0u);
+    ASSERT_NE(tensorMap.count({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID), 0u);
 {% if tc %}
-    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->get_dim(), toVec(K_TENSOR_{{ tf_upper }}_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_{{ tf_upper }}_UID]->get_stride(), toVec(K_TENSOR_{{ tf_upper }}_STRIDES));
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_dim(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_DIMS));
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_stride(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
 {% endfor %}
 }
@@ -349,11 +349,11 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedI
 {% set tf_name = rmap.get(param.tensor_name, param.tensor_name) %}
 {% set tc = op.test_data.tensor_configs.get(tf_name) %}
     auto {{ param.name }} = std::make_shared<TensorAttributes>();
-    {{ param.name }}->set_uid(K_TENSOR_{{ tf_name | upper }}_UID)
+    {{ param.name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_UID)
         .set_name("{{ param.tensor_name }}")
         .set_data_type(DataType::FLOAT);
 {% if tc %}
-    {{ param.name }}->set_dim(toVec(K_TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec(K_TENSOR_{{ tf_name | upper }}_STRIDES));
+    {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
 {% endif %}
 
 {% endfor %}
@@ -382,7 +382,7 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedI
         {{ param.name }},
 {% endfor %}
         attrs);
-    {{ out_name }}->set_uid(K_TENSOR_{{ out_tf_name | upper }}_UID)
+    {{ out_name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ out_tf_name | upper }}_UID)
         .set_output(true)
         .set_name("{{ out_name }}");
 {% elif op.frontend.graph_return_type == 'array' %}
@@ -394,7 +394,7 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedI
         {{ param.name }},
 {% endfor %}
         attrs);
-    results[0]->set_uid(K_TENSOR_{{ out_tf_name | upper }}_UID)
+    results[0]->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ out_tf_name | upper }}_UID)
         .set_output(true)
         .set_name("{{ out_name }}");
 {% endif %}
@@ -416,7 +416,7 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedI
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* opNode = dynamic_cast<{{ op.frontend.node_class }}*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a {{ op.frontend.node_class }}";
+    ASSERT_NE(opNode, nullptr) << "Expected a {{ op.frontend.node_class }}"; // NOLINT(readability-implicit-bool-conversion)
 
     ASSERT_TRUE(opNode->attributes.{{ df.frontend_getter }}.has_value());
 {% if df.type == 'scalar_float' %}
@@ -446,7 +446,7 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, AutoAssignedUidsPreservedInLif
     {{ param.name }}->set_name("{{ param.tensor_name }}")
         .set_data_type(DataType::FLOAT);
 {% if tc %}
-    {{ param.name }}->set_dim(toVec(K_TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec(K_TENSOR_{{ tf_name | upper }}_STRIDES));
+    {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
 {% endif %}
 
 {% endfor %}
@@ -507,12 +507,12 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, AutoAssignedUidsPreservedInLif
     uids.reserve(tensorMap.size());
     for(const auto& [uid, tensor] : tensorMap)
     {
-        EXPECT_GT(uid, 0) << "Auto-assigned UID should be positive";
+        EXPECT_GT(uid, 0) << "Auto-assigned UID should be positive"; // NOLINT(readability-implicit-bool-conversion)
         uids.push_back(uid);
     }
     std::sort(uids.begin(), uids.end());
     ASSERT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "Found duplicate auto-assigned UIDs";
+        << "Found duplicate auto-assigned UIDs"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify sub-node tensor UIDs are distinct via the node attributes
     auto& subNodes = liftedGraph->getSubNodes();
@@ -531,15 +531,15 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, AutoAssignedUidsPreservedInLif
 {% endif %}
 {% endfor %}
     ASSERT_EQ(nodeUids.size(), {{ op.required_tensor_fields | length }}u)
-        << "Node tensor UIDs are not all distinct";
+        << "Node tensor UIDs are not all distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify tensor dims survived the round trip
 {% for tf in op.required_tensor_fields %}
 {% set ft = tf_map.get(tf.name) %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if ft and tc %}
-    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_dim(), toVec(K_TENSOR_{{ tf.name | upper }}_DIMS));
-    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_stride(), toVec(K_TENSOR_{{ tf.name | upper }}_STRIDES));
+    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_dim(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_DIMS));
+    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_stride(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_STRIDES));
 {% endif %}
 {% endfor %}
 }

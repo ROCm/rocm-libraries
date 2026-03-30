@@ -1330,8 +1330,9 @@ class TestConstantsGeneration:
         content = full_path.read_text()
         assert "#pragma once" in content
         assert "namespace hipdnn_tests::constants" in content
-        assert "K_TENSOR_DY_UID" in content
-        assert "K_TENSOR_X_UID" in content
+        prefix = config.tensor_const_prefix
+        assert f"{prefix}TENSOR_DY_UID" in content
+        assert f"{prefix}TENSOR_X_UID" in content
 
     def test_constants_not_generated_when_set(
         self, convolution_fwd_config, generator, tmp_path
@@ -1390,9 +1391,10 @@ class TestConstantsGeneration:
         )
         content = constants_path.read_text()
 
+        prefix = config.tensor_const_prefix
         for tf in config.tensor_fields:
             uid = config.test_data.tensor_uids.get(tf.name, 0)
-            assert f"K_TENSOR_{tf.name.upper()}_UID = {uid}" in content
+            assert f"{prefix}TENSOR_{tf.name.upper()}_UID = {uid}" in content
 
     def test_constants_has_dims_and_strides(
         self, load_test_config, generator, tmp_path
@@ -1410,8 +1412,9 @@ class TestConstantsGeneration:
         )
         content = constants_path.read_text()
 
-        assert "K_TENSOR_X_DIMS" in content
-        assert "K_TENSOR_X_STRIDES" in content
+        prefix = config.tensor_const_prefix
+        assert f"{prefix}TENSOR_X_DIMS" in content
+        assert f"{prefix}TENSOR_X_STRIDES" in content
 
     def test_all_test_files_reference_constants_header(
         self, load_test_config, generator, tmp_path

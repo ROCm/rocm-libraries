@@ -111,13 +111,13 @@ protected:
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
-{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
-{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
         {{ tf.member_name }} = createFinalizedTensor(
             {{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
 {% else %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
         {{ tf.member_name }} = createFinalizedTensor({{ uid_const }});
 {% endif %}
 {% endfor %}
@@ -260,7 +260,7 @@ TEST_F(Test{{ op.class_name }}, SetTensorDescriptor{{ tf.pascal_name }})
 {% if loop.first %}
     // Verify UID extracted via getData()
 {% endif %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     ASSERT_EQ(desc->getData().{{ tf.uid_field }}, {{ uid_const }});
     ASSERT_NE(desc->{{ tf.getter_name }}(), nullptr);
 }
@@ -453,11 +453,11 @@ TEST_F(Test{{ op.class_name }}, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrieved{{ op.tensor_fields[0].pascal_name }}));
+                                       static_cast<void*>(&retrieved{{ op.tensor_fields[0].pascal_name }})));
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrieved{{ op.tensor_fields[0].pascal_name }}, nullptr);
-    std::unique_ptr<HipdnnBackendDescriptor> guard{{ op.tensor_fields[0].pascal_name }}(retrieved{{ op.tensor_fields[0].pascal_name }});
+    const std::unique_ptr<HipdnnBackendDescriptor> guard{{ op.tensor_fields[0].pascal_name }}(retrieved{{ op.tensor_fields[0].pascal_name }});
 }
 
 // =============================================================================
@@ -729,7 +729,7 @@ TEST_F(Test{{ op.class_name }}, FinalizePreservesTensorReferences)
 
     // Verify UIDs match
 {% for tf in op.tensor_fields %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     ASSERT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
 {% endfor %}
 }
@@ -743,10 +743,10 @@ TEST_F(Test{{ op.class_name }}, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("{{ op.class_name }}"), std::string::npos);
 {% for tf in op.tensor_fields %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     ASSERT_NE(str.find("{{ tf.name }}_uid=" + std::to_string({{ uid_const }})), std::string::npos);
 {% endfor %}
 {% if op.has_compute_data_type %}
@@ -766,7 +766,7 @@ TEST_F(Test{{ op.class_name }}, GetTensorDescriptorsReturnsAllTensors)
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), {{ op.tensor_fields | length }});
 {% for tf in op.tensor_fields %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     ASSERT_EQ(tensors[{{ loop.index0 }}]->getData().uid, {{ uid_const }});
 {% endfor %}
 }
@@ -792,7 +792,7 @@ TEST_F(Test{{ op.class_name }}, BuildNodeProducesCorrectNodeT)
     auto* {{ op.effective_build_node_attrs_var }} = node->attributes.As{{ op.fbs_table }}();
     ASSERT_NE({{ op.effective_build_node_attrs_var }}, nullptr);
 {% for tf in op.tensor_fields %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     ASSERT_EQ({{ op.effective_build_node_attrs_var }}->{{ tf.uid_field }}, {{ uid_const }});
 {% endfor %}
 {% for df in op.vector_fields %}
@@ -848,7 +848,7 @@ TEST_F(Test{{ op.class_name }}, TryAsInterfaceReturnsValidGraphOp)
     // Verify the returned interface is the same underlying object
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), {{ op.tensor_fields | length }});
-{% set uid_const = "K_TENSOR_" ~ (op.tensor_fields[0].name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (op.tensor_fields[0].name | upper) ~ "_UID" %}
     ASSERT_EQ(tensors[0]->getData().uid, {{ uid_const }});
 }
 
@@ -925,7 +925,7 @@ TEST_F(Test{{ op.class_name }}, Get{{ taf.test_label or taf.name | replace('_', 
     ASSERT_NE(retrieved[{{ loop.index0 }}], nullptr);
 {% endfor %}
 {% for uid in taf.test_uids %}
-    std::unique_ptr<HipdnnBackendDescriptor> guard{{ loop.index0 }}(retrieved[{{ loop.index0 }}]);
+    const std::unique_ptr<HipdnnBackendDescriptor> guard{{ loop.index0 }}(retrieved[{{ loop.index0 }}]);
 {% endfor %}
 }
 {% endif %}
@@ -938,7 +938,7 @@ TEST_F(Test{{ op.class_name }}, Get{{ taf.test_label or taf.name | replace('_', 
 TEST_F(Test{{ op.class_name }}, SetAttributeNameSuccess)
 {
     auto desc = getDescriptor();
-    std::string name = "test_{{ op.name | lower }}_op";
+    const std::string name = "test_{{ op.name | lower }}_op";
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                                        HIPDNN_TYPE_CHAR,
@@ -963,7 +963,7 @@ TEST_F(Test{{ op.class_name }}, SetAttributeNameSuccess)
 TEST_F(Test{{ op.class_name }}, GetAttributeNameQueryReturnsSizeInclNull)
 {
     auto desc = getDescriptor();
-    std::string name = "my_op";
+    const std::string name = "my_op";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
                        static_cast<int64_t>(name.size()),
@@ -1012,7 +1012,7 @@ TEST_F(Test{{ op.class_name }}, BuildNodePreservesName)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string opName = "test_{{ op.name | lower }}";
+    const std::string opName = "test_{{ op.name | lower }}";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
                        static_cast<int64_t>(opName.size()),
