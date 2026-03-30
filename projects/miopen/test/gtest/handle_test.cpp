@@ -182,15 +182,15 @@ static void test_errors(kernel_type_t kern_type)
     auto&& h = get_handle();
     if(kern_type == miopenOpenCLKernelType)
     {
-        EXPECT_NO_THROW(h.AddKernel("NoAlgo",
-                                    "",
-                                    "error_ocl.cl",
-                                    "write",
-                                    {1, 1, 1},
-                                    {1, 1, 1},
-                                    "",
-                                    0,
-                                    WriteError(kern_type)));
+        EXPECT_ANY_THROW(h.AddKernel("NoAlgo",
+                                     "",
+                                     "error_ocl.cl",
+                                     "write",
+                                     {1, 1, 1},
+                                     {1, 1, 1},
+                                     "",
+                                     0,
+                                     WriteError(kern_type)));
 
         try
         {
@@ -211,15 +211,15 @@ static void test_errors(kernel_type_t kern_type)
     }
     else if(kern_type == miopenHIPKernelType)
     {
-        EXPECT_NO_THROW(h.AddKernel("NoAlgo",
-                                    "",
-                                    "error_hip.cpp",
-                                    "write",
-                                    {1, 1, 1},
-                                    {1, 1, 1},
-                                    "",
-                                    0,
-                                    WriteError(miopenHIPKernelType)));
+        EXPECT_ANY_THROW(h.AddKernel("NoAlgo",
+                                     "",
+                                     "error_hip.cpp",
+                                     "write",
+                                     {1, 1, 1},
+                                     {1, 1, 1},
+                                     "",
+                                     0,
+                                     WriteError(miopenHIPKernelType)));
 
         try
         {
