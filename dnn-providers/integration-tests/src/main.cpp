@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <argparse.hpp>
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -10,47 +11,14 @@
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <iostream>
-#include <optional>
 #include <string>
+#include <vector>
 
 #include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
 
 namespace
 {
-
-// Extract and remove a CLI argument from argv
-std::optional<std::string> extractArg(int& argc, char** argv, std::string_view flag)
-{
-    for(int i = 1; i < argc; ++i)
-    {
-        if(argv[i] == flag)
-        {
-            if(i + 1 >= argc)
-            {
-                return std::nullopt; // flag present but no value
-            }
-            std::optional<std::string> value = argv[i + 1];
-            // Shift arguments to remove the flag and its value
-            for(int j = i; j < argc - 2; ++j)
-            {
-                argv[j] = argv[j + 2];
-            }
-            argc -= 2;
-            return value;
-        }
-    }
-    return std::nullopt;
-}
-
-void printUsage(const char* programName)
-{
-    std::cerr << "Usage: " << programName
-              << " --test-article <path> --test-engine <name> [gtest options]\n"
-              << "  --test-article <path>  Full path to the hipdnn engine plugin .so to test\n"
-              << "  --test-engine <name>   Engine name to test against (e.g., MIOPEN_ENGINE)\n"
-              << "  [gtest options]        Standard gtest options (--gtest_filter, etc.)\n";
-}
 
 bool engineIsLoaded(hipdnnHandle_t handle, std::string_view targetEngineName)
 {
@@ -118,24 +86,39 @@ int main(int argc, char** argv) noexcept
     try
     {
         // Parse custom arguments before InitGoogleTest to avoid unknown flag warnings
-        auto articlePath = extractArg(argc, argv, "--test-article");
-        auto engineName = extractArg(argc, argv, "--test-engine");
+        argparse::ArgumentParser parser(
+            "hipdnn_integration_tests", "", argparse::default_arguments::help);
+        parser.add_argument("--ta", "--test-article")
+            .required()
+            .help("Full path to the hipdnn engine plugin .so to test");
+        parser.add_argument("--te", "--test-engine")
+            .required()
+            .help("Engine name to test against (e.g., MIOPEN_ENGINE)");
 
-        if(!articlePath || !engineName)
+        std::vector<std::string> remainingArgs;
+        try
         {
-            printUsage(argv[0]);
+            remainingArgs = parser.parse_known_args(argc, argv);
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << e.what() << '\n';
+            std::cerr << parser;
             return 1;
         }
+
+        auto articlePathArg = parser.get<std::string>("--test-article");
+        auto engineNameArg = parser.get<std::string>("--test-engine");
 
         // Validate and canonicalize article path (resolves relative paths)
         std::filesystem::path articlePathObj;
         try
         {
-            articlePathObj = std::filesystem::canonical(*articlePath);
+            articlePathObj = std::filesystem::canonical(articlePathArg);
         }
         catch(const std::filesystem::filesystem_error&)
         {
-            std::cerr << "Error: Article path does not exist: " << *articlePath << '\n';
+            std::cerr << "Error: Article path does not exist: " << articlePathArg << '\n';
             return 1;
         }
 
@@ -151,10 +134,18 @@ int main(int argc, char** argv) noexcept
 
         // Initialize TestConfig with CLI arguments
         hipdnn_integration_tests::TestConfig::initialize(std::move(articlePathObj),
-                                                         std::move(*engineName));
+                                                         std::move(engineNameArg));
 
-        // Now safe to call InitGoogleTest (all custom flags removed)
-        ::testing::InitGoogleTest(&argc, argv);
+        // Reconstruct argc/argv for GTest from remaining (unknown) args
+        std::vector<char*> gtestArgv;
+        gtestArgv.reserve(remainingArgs.size() + 1);
+        for(auto& arg : remainingArgs)
+        {
+            gtestArgv.push_back(arg.data());
+        }
+        gtestArgv.push_back(nullptr);
+        auto gtestArgc = static_cast<int>(remainingArgs.size());
+        ::testing::InitGoogleTest(&gtestArgc, gtestArgv.data());
 
         // Initialize test logging infrastructure to forward logs to std::cerr based
         // on the current environment HIPDNN_LOG_LEVEL value when this function is called.

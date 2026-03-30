@@ -97,6 +97,9 @@ add_executable(hipdnn_integration_tests
 )
 
 target_include_directories(hipdnn_integration_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(hipdnn_integration_tests SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/argparse
+)
 
 target_link_libraries(hipdnn_integration_tests
     PRIVATE
