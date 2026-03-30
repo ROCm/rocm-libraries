@@ -23,8 +23,7 @@ namespace PrefetchScaleTest
         using namespace rocRoller::KernelGraph::CoordinateGraph;
         using namespace rocRoller::Operations;
 
-        auto context
-            = TestContext::ForTarget(GPUArchitectureTarget{GPUArchitectureGFX::GFX950});
+        auto context = TestContext::ForTarget(GPUArchitectureTarget{GPUArchitectureGFX::GFX950});
         auto example = rocRollerTest::Graphs::GEMM(DataType::FP4, DataType::FP4, DataType::Half);
 
         example.setTileSize(128, 128, 256);
@@ -59,13 +58,12 @@ namespace PrefetchScaleTest
         {
             auto numWGsArg = findArgumentByName(command, NUMWGS);
             REQUIRE(numWGsArg != nullptr);
-            graph = transform<AddStreamK>(
-                graph,
-                context.get(),
-                params,
-                XLOOP,
-                KLOOP,
-                std::make_shared<Expression::Expression>(numWGsArg));
+            graph = transform<AddStreamK>(graph,
+                                          context.get(),
+                                          params,
+                                          XLOOP,
+                                          KLOOP,
+                                          std::make_shared<Expression::Expression>(numWGsArg));
         }
 
         graph = transform<ConnectWorkgroups>(graph, context.get());
@@ -83,9 +81,8 @@ namespace PrefetchScaleTest
 
         auto findLoop = [&](std::string const& name) {
             auto const rootTag = graph.control.roots().only().value();
-            for(auto const loop :
-                filter(graph.control.isElemType<ForLoopOp>(),
-                       graph.control.depthFirstVisit(rootTag)))
+            for(auto const loop : filter(graph.control.isElemType<ForLoopOp>(),
+                                         graph.control.depthFirstVisit(rootTag)))
             {
                 auto forloop = graph.control.get<ForLoopOp>(loop).value();
                 if(forloop.loopName == name)
@@ -108,8 +105,7 @@ namespace PrefetchScaleTest
             std::optional<int> kLoopTailTag;
             for(auto const loop :
                 filter(graph.control.isElemType<ForLoopOp>(),
-                       graph.control.depthFirstVisit(
-                           graph.control.roots().only().value())))
+                       graph.control.depthFirstVisit(graph.control.roots().only().value())))
             {
                 auto forloop = graph.control.get<ForLoopOp>(loop).value();
                 if(forloop.loopName == KLOOPTAIL)
@@ -119,22 +115,19 @@ namespace PrefetchScaleTest
             for(auto exchangeTag : graph.control.getNodes().filter(isExchange))
             {
                 totalExchanges++;
-                auto stack = controlStack(exchangeTag, graph);
-                bool insideKLoop
-                    = std::find(stack.begin(), stack.end(), kLoopTag) != stack.end();
+                auto stack       = controlStack(exchangeTag, graph);
+                bool insideKLoop = std::find(stack.begin(), stack.end(), kLoopTag) != stack.end();
                 bool insideKLoopTail
                     = kLoopTailTag
-                      && std::find(stack.begin(), stack.end(), *kLoopTailTag)
-                             != stack.end();
+                      && std::find(stack.begin(), stack.end(), *kLoopTailTag) != stack.end();
                 if(insideKLoop && !insideKLoopTail)
                     exchangesInKLoop++;
                 else
                     exchangesOutsideK++;
             }
 
-            INFO("totalExchanges=" << totalExchanges
-                 << " inKLoopBody=" << exchangesInKLoop
-                 << " outsideKBody=" << exchangesOutsideK);
+            INFO("totalExchanges=" << totalExchanges << " inKLoopBody=" << exchangesInKLoop
+                                   << " outsideKBody=" << exchangesOutsideK);
             REQUIRE(totalExchanges > 0);
 
             // With prefetchScale and StreamK, the K loop body must contain

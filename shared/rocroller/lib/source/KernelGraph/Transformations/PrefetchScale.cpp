@@ -463,11 +463,10 @@ namespace rocRoller
          *                     pre-loop loads from K loop body loads)
          * @return PrefetchPositions indexed by sub-iteration
          */
-        PrefetchPositions
-            DeterminePrefetchPositions(KernelGraph const&               graph,
-                                      UnrollColouring const&           colouring,
-                                      std::vector<int> const&          nonSwizzleLoads,
-                                      std::unordered_set<int> const&   kLoopLoadSet)
+        PrefetchPositions DeterminePrefetchPositions(KernelGraph const&             graph,
+                                                     UnrollColouring const&         colouring,
+                                                     std::vector<int> const&        nonSwizzleLoads,
+                                                     std::unordered_set<int> const& kLoopLoadSet)
         {
             std::vector<int>   prefetchPosition;
             std::vector<int>   exchangePosition;
