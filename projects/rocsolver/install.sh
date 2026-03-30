@@ -327,8 +327,7 @@ optimal=true
 cleanup=false
 build_sanitizer=false
 build_codecoverage=false
-force_libfmt=false
-libfmt=false
+libfmt=auto
 unset build_with_sparse
 unset architecture
 unset rocblas_path
@@ -441,11 +440,9 @@ while true; do
         cmake_common_options+=("${2}")
         shift 2 ;;
     --libfmt)
-        force_libfmt=true
         libfmt=true
         shift ;;
     --no-libfmt)
-        force_libfmt=true
         libfmt=false
         shift ;;
     --) shift ; break ;;
@@ -627,14 +624,10 @@ if [[ "${build_codecoverage}" == true ]]; then
     cmake_common_options+=('-DBUILD_CODE_COVERAGE=ON')
 fi
 
-if [[ "${force_libfmt}" == true ]]; then
-    if [[ "${libfmt}" == true ]]; then
-        cmake_common_options+=('-DFORCE_USE_FMT_LIB_OPTION=ON')
-        cmake_common_options+=('-DUSE_FMT_LIB=ON')
-    else
-        cmake_common_options+=('-DFORCE_USE_FMT_LIB_OPTION=ON')
-        cmake_common_options+=('-DUSE_FMT_LIB=OFF')
-    fi
+if [[ "${libfmt}" == true ]]; then
+    cmake_common_options+=('-DUSE_FMT_LIB=ON')
+elif [[ "${libfmt}" == false ]]; then
+    cmake_common_options+=('-DUSE_FMT_LIB=OFF')
 fi
 
 # check exit codes for everything from here onwards

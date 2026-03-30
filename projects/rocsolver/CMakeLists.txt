@@ -69,12 +69,9 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 option(ROCSOLVER_EMBED_FMT "Hide libfmt symbols" ON)
 
-option(FORCE_USE_FMT_LIB_OPTION "Use the user provided USE_FMT_LIB option, rather than the result of the automated check by CMake if std::format is available" OFF)
-option(USE_FMT_LIB "Use the fmt library instead of std::print" OFF)
-message(STATUS "Value of FORCE_USE_FMT_LIB: ${FORCE_USE_FMT_LIB_OPTION}")
-message(STATUS "Value of USE_FMT_LIB: ${USE_FMT_LIB}")
+set(USE_FMT_LIB "auto" CACHE STRING "Use the fmt library instead of std::format (auto, ON, or OFF)")
 
-if (NOT FORCE_USE_FMT_LIB_OPTION)
+if(USE_FMT_LIB STREQUAL "auto")
     # Verify std::format and std::print actually compile, not just that headers exist
     include(CheckCXXSourceCompiles)
     set(CMAKE_REQUIRED_FLAGS "-std=c++23")
@@ -90,14 +87,14 @@ if (NOT FORCE_USE_FMT_LIB_OPTION)
         }
     " CXX_FORMAT_SUPPORT)
     message(STATUS "C++ std::format/std::print support: ${CXX_FORMAT_SUPPORT}")
-    if(NOT CXX_FORMAT_SUPPORT)
-        set(USE_FMT_LIB ON)
-    else()
+    if(CXX_FORMAT_SUPPORT)
         set(USE_FMT_LIB OFF)
+    else()
+        set(USE_FMT_LIB ON)
     endif()
 endif()
 
-message(STATUS "New value of USE_FMT_LIB: ${USE_FMT_LIB}")
+message(STATUS "USE_FMT_LIB: ${USE_FMT_LIB}")
 
 if(USE_FMT_LIB)
   find_package(fmt REQUIRED)
