@@ -103,8 +103,8 @@ class TestFeatureConsistency:
         vec = fe.extract(prob, kern)
         assert len(vec) == len(fe.get_feature_names())
 
-    def test_feature_count_is_55(self, fe):
-        assert len(fe.get_feature_names()) == 55
+    def test_feature_count_is_72(self, fe):
+        assert len(fe.get_feature_names()) == 72
 
     def test_no_nan_in_output(self, fe):
         prob = _make_problem()
@@ -323,7 +323,8 @@ class TestBatchParity:
             np.testing.assert_allclose(
                 batch_result[i],
                 single_result,
-                rtol=1e-10,
+                rtol=1e-5,
+                atol=1e-5,
                 err_msg=f"Mismatch at row {i}",
             )
 

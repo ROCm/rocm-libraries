@@ -493,19 +493,44 @@ class GemmUniversalFeatureEngine(FeatureEngine):
             float
         )  # any_dim_too_small
 
+        # P1 FIX: Padding requirement features
+        pad_m_bool = df["pad_m"].fillna(False).astype(bool).values
+        pad_n_bool = df["pad_n"].fillna(False).astype(bool).values
+        pad_k_bool = df["pad_k"].fillna(False).astype(bool).values
+
+        needs_padding_m = (np.mod(M, np.maximum(tile_m, 1)) != 0)
+        needs_padding_n = (np.mod(N, np.maximum(tile_n, 1)) != 0)
+        needs_padding_k = (np.mod(K, np.maximum(tile_k, 1)) != 0)
+
+        result[:, 50] = needs_padding_m.astype(float)
+        result[:, 51] = needs_padding_n.astype(float)
+        result[:, 52] = needs_padding_k.astype(float)
+
+        # Interaction features: kernel has padding when problem needs it
+        result[:, 53] = (needs_padding_m & pad_m_bool).astype(float)  # has_padding_when_needed_m
+        result[:, 54] = (needs_padding_n & pad_n_bool).astype(float)  # has_padding_when_needed_n
+        result[:, 55] = (needs_padding_k & pad_k_bool).astype(float)  # has_padding_when_needed_k
+
+        # Critical feature: missing required padding
+        result[:, 56] = (needs_padding_m & ~pad_m_bool).astype(float)  # missing_required_padding_m
+        result[:, 57] = (needs_padding_n & ~pad_n_bool).astype(float)  # missing_required_padding_n
+        result[:, 58] = (needs_padding_k & ~pad_k_bool).astype(float)  # missing_required_padding_k
+        result[:, 59] = ((needs_padding_m & ~pad_m_bool) | (needs_padding_n & ~pad_n_bool) | (needs_padding_k & ~pad_k_bool)).astype(float)  # missing_any_required_padding
+
+        # Hardware profile features
         hw = self._hw
-        result[:, 50] = hw["num_cus"]
-        result[:, 51] = hw["simds_per_cu"]
-        result[:, 52] = hw["total_simds"]
-        result[:, 53] = hw["shader_engines"]
-        result[:, 54] = hw["max_clock_mhz"]
-        result[:, 55] = hw["max_waves_per_cu"]
-        result[:, 56] = hw["wavefront_size"]
-        result[:, 57] = hw["lds_capacity"]
-        result[:, 58] = hw["l1_cache_kb"]
-        result[:, 59] = hw["l2_cache_kb"]
-        result[:, 60] = hw["l3_cache_kb"]
-        result[:, 61] = hw["num_xcd"]
+        result[:, 60] = hw["num_cus"]
+        result[:, 61] = hw["simds_per_cu"]
+        result[:, 62] = hw["total_simds"]
+        result[:, 63] = hw["shader_engines"]
+        result[:, 64] = hw["max_clock_mhz"]
+        result[:, 65] = hw["max_waves_per_cu"]
+        result[:, 66] = hw["wavefront_size"]
+        result[:, 67] = hw["lds_capacity"]
+        result[:, 68] = hw["l1_cache_kb"]
+        result[:, 69] = hw["l2_cache_kb"]
+        result[:, 70] = hw["l3_cache_kb"]
+        result[:, 71] = hw["num_xcd"]
 
         return result
 
