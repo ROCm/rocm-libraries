@@ -436,23 +436,29 @@ void test(std::string fileName) {
     std::cout << "Time(" << fileName << ") = " << total.count() << "ns\n";
 }
 
-int main() {
-    test("../data/test_general.mtx");
-    test("../data/shallow_water1.mtx");
-    // Other matrices are in data/matrices.tgz
-    // test("../data/pdb1HYS.mtx");
-    // test("../data/2cubes_sphere.mtx");
-    // test("../data/cant.mtx");
-    // test("../data/scircuit.mtx");
-    // test("../data/cop20k_A.mtx");
-    // test("../data/mac_econ_fwd500.mtx");
-    // test("../data/crankseg_2.mtx");
-    // test("../data/nd24k.mtx");
-    // test("../data/pwtk.mtx");
-    // test("../data/webbase-1M.mtx");
-    // test("../data/F1.mtx");
-    // test("../data/atmosmodd.mtx");
-    // test("../data/cage14.mtx");
-    // test("../data/ldoor.mtx");
+int main(int argc, char* argv[]) {
+    if (argc > 1) {
+        for (int i = 1; i < argc; ++i)
+            test(argv[i]);
+    } else {
+        test("../data/test_general.mtx");
+        test("../data/shallow_water1.mtx");
+        // Other matrices are in data/matrices.tgz
+        // test("../data/pdb1HYS.mtx");
+        // test("../data/2cubes_sphere.mtx");
+        // test("../data/cant.mtx");
+        // test("../data/scircuit.mtx");
+        // test("../data/cop20k_A.mtx");
+        // test("../data/mac_econ_fwd500.mtx");
+        // test("../data/crankseg_2.mtx");
+        // test("../data/nd24k.mtx");
+        // test("../data/pwtk.mtx");
+        // test("../data/webbase-1M.mtx");
+        // test("../data/F1.mtx");
+        // test("../data/atmosmodd.mtx");
+        // test("../data/cage14.mtx");
+        // test("../data/ldoor.mtx");
+    }
+
     return 0;
 }
