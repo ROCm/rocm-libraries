@@ -4,7 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/grouped_convolution/kernel/depthwise_conv_fwd_traits.hpp"
+#include "ck_tile/ops/grouped_convolution/utils/grouped_convolution_utils.hpp"
 namespace ck_tile {
 
 // TODO: replace with ck_tile-level inner_product once available
@@ -48,6 +48,13 @@ struct DepthwiseConvFwdPipeline
     using WeiDataType = typename Traits::WeiDataType;
     using AccDataType = typename Traits::AccDataType;
     using OutDataType = typename Traits::OutDataType;
+
+    // GEMM-compatible aliases for unified Pipeline interface
+    using ADataType = InDataType;
+    using BDataType = WeiDataType;
+    using ALayout   = int;
+    using BLayout   = int;
+    using CLayout   = int;
 
     using InVector          = typename Traits::InVector;
     using OutVector         = typename Traits::OutVector;

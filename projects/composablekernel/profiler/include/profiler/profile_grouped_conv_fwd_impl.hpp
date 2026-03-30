@@ -27,10 +27,101 @@
 #include "ck/library/reference_tensor_operation/gpu/naive_conv_fwd_gpu.hpp"
 #include "ck/library/utility/gpu_verification.hpp"
 
-#include "profiler/profile_depthwise_conv_fwd_impl.hpp"
+#include "grouped_convolution_forward_depthwise_dispatch.hpp"
 
 namespace ck {
 namespace profiler {
+
+namespace depthwise_ref {
+
+template <typename InDataType, typename WeiDataType, typename AccDataType, typename OutDataType>
+void cpu_conv_fwd_ngchw(const InDataType* p_in,
+                        const WeiDataType* p_wei,
+                        OutDataType* p_out,
+                        const ck::utils::conv::ConvParam& p)
+{
+    const auto G = p.G_, N = p.N_;
+    const auto Hi = p.input_spatial_lengths_[0], Wi = p.input_spatial_lengths_[1];
+    const auto Ho = p.output_spatial_lengths_[0], Wo = p.output_spatial_lengths_[1];
+    const auto Y = p.filter_spatial_lengths_[0], X = p.filter_spatial_lengths_[1];
+    const auto Sh = p.conv_filter_strides_[0], Sw = p.conv_filter_strides_[1];
+    const auto Dh = p.conv_filter_dilations_[0], Dw = p.conv_filter_dilations_[1];
+    const auto Ph = p.input_left_pads_[0], Pw = p.input_left_pads_[1];
+
+    const long long in_g = Hi * Wi, in_n = G * in_g;
+    const long long wei_g = Y * X;
+    const long long out_g = Ho * Wo, out_n = G * out_g;
+
+    for(long long n = 0; n < N; ++n)
+    {
+        for(long long g = 0; g < G; ++g)
+        {
+            for(long long ho = 0; ho < Ho; ++ho)
+            {
+                for(long long wo = 0; wo < Wo; ++wo)
+                {
+                    AccDataType acc = 0;
+                    for(long long y = 0; y < Y; ++y)
+                    {
+                        for(long long x = 0; x < X; ++x)
+                        {
+                            long long hi = ho * Sh + y * Dh - Ph;
+                            long long wi = wo * Sw + x * Dw - Pw;
+                            if(hi >= 0 && hi < Hi && wi >= 0 && wi < Wi)
+                            {
+                                acc += static_cast<AccDataType>(
+                                           p_in[n * in_n + g * in_g + hi * Wi + wi]) *
+                                       static_cast<AccDataType>(p_wei[g * wei_g + y * X + x]);
+                            }
+                        }
+                    }
+                    p_out[n * out_n + g * out_g + ho * Wo + wo] = static_cast<OutDataType>(acc);
+                }
+            }
+        }
+    }
+}
+
+template <typename OutDataType>
+bool verify(const OutDataType* p_gpu,
+            const OutDataType* p_ref,
+            std::size_t size,
+            double rtol = 1e-3,
+            double atol = 1e-3)
+{
+    std::size_t error_count = 0;
+    double max_err          = 0.0;
+    int printed             = 0;
+
+    for(std::size_t i = 0; i < size; ++i)
+    {
+        double diff = std::abs(static_cast<double>(p_gpu[i]) - static_cast<double>(p_ref[i]));
+        if(diff > max_err)
+        {
+            max_err = diff;
+        }
+        if(diff > atol + rtol * std::abs(static_cast<double>(p_ref[i])))
+        {
+            if(printed < 4)
+            {
+                std::cout << "\tout[" << i << "] != ref[" << i
+                          << "]: " << static_cast<float>(p_gpu[i])
+                          << " != " << static_cast<float>(p_ref[i]) << std::endl;
+                printed++;
+            }
+            error_count++;
+        }
+    }
+    if(error_count > 0)
+    {
+        std::cout << "max err: " << max_err << ", errors: " << error_count << " / " << size << " ("
+                  << std::fixed << std::setprecision(2) << 100.0 * error_count / size << "%)"
+                  << std::endl;
+    }
+    return error_count == 0;
+}
+
+} // namespace depthwise_ref
 
 namespace fwd {
 template <ck::index_t NDimSpatial,
@@ -478,76 +569,133 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
         run_impl(op_ptr, argument_ptr);
     }
 
-    // Depthwise conv instances: C=K=1, 2D, fp16/fp32 only, w_stride==1
+    // Depthwise conv: NGCHW tensors + CPU verification
     if constexpr(NDimSpatial == 2)
     {
-        constexpr bool is_supported_dtype =
+        constexpr bool is_dw_dtype =
             std::is_same_v<InDataType, ck::half_t> || std::is_same_v<InDataType, float>;
 
-        if constexpr(is_supported_dtype)
+        if constexpr(is_dw_dtype)
         {
-            if(conv_param.C_ == 1 && conv_param.K_ == 1 &&
-               a_g_n_c_wis_strides[NDimSpatial + 2] == 1)
+            if(conv_param.C_ == 1 && conv_param.K_ == 1)
             {
-                ck_tile::conv::ConvParam dw_param{
-                    2,
-                    conv_param.G_,
-                    conv_param.N_,
-                    conv_param.K_,
-                    conv_param.C_,
-                    {conv_param.filter_spatial_lengths_[0], conv_param.filter_spatial_lengths_[1]},
-                    {conv_param.input_spatial_lengths_[0], conv_param.input_spatial_lengths_[1]},
-                    {conv_param.conv_filter_strides_[0], conv_param.conv_filter_strides_[1]},
-                    {conv_param.conv_filter_dilations_[0], conv_param.conv_filter_dilations_[1]},
-                    {conv_param.input_left_pads_[0], conv_param.input_left_pads_[1]},
-                    {conv_param.input_right_pads_[0], conv_param.input_right_pads_[1]}};
+                const auto G  = conv_param.G_;
+                const auto N  = conv_param.N_;
+                const auto Hi = conv_param.input_spatial_lengths_[0];
+                const auto Wi = conv_param.input_spatial_lengths_[1];
+                const auto Ho = conv_param.output_spatial_lengths_[0];
+                const auto Wo = conv_param.output_spatial_lengths_[1];
+                const auto Y  = conv_param.filter_spatial_lengths_[0];
+                const auto X  = conv_param.filter_spatial_lengths_[1];
 
-                std::array<ck_tile::index_t, 5> dw_in_strides{};
-                std::array<ck_tile::index_t, 5> dw_wei_strides{};
-                std::array<ck_tile::index_t, 5> dw_out_strides{};
-                for(int i = 0; i < 5; ++i)
+                const std::size_t dw_in_sz  = static_cast<std::size_t>(N) * G * Hi * Wi;
+                const std::size_t dw_wei_sz = static_cast<std::size_t>(G) * Y * X;
+                const std::size_t dw_out_sz = static_cast<std::size_t>(N) * G * Ho * Wo;
+
+                DeviceMem dw_in_dev(sizeof(InDataType) * dw_in_sz);
+                DeviceMem dw_wei_dev(sizeof(WeiDataType) * dw_wei_sz);
+                DeviceMem dw_out_dev(sizeof(OutDataType) * dw_out_sz);
+
+                switch(init_method)
                 {
-                    dw_in_strides[i]  = static_cast<ck_tile::index_t>(a_g_n_c_wis_strides[i]);
-                    dw_wei_strides[i] = static_cast<ck_tile::index_t>(b_g_k_c_xs_strides[i]);
-                    dw_out_strides[i] = static_cast<ck_tile::index_t>(e_g_n_k_wos_strides[i]);
+                case 0:
+                    dw_in_dev.SetZero();
+                    dw_wei_dev.SetZero();
+                    break;
+                case 1:
+                    dw_in_dev.FillUniformRandInteger<InDataType>(-5, 5);
+                    dw_wei_dev.FillUniformRandInteger<WeiDataType>(-5, 5);
+                    break;
+                default:
+                    dw_in_dev.FillUniformRandFp<InDataType>(0.0f, 1.0f);
+                    dw_wei_dev.FillUniformRandFp<WeiDataType>(-0.5f, 0.5f);
                 }
 
-                ck_tile::DepthwiseConvFwdHostArgs dw_args(dw_param,
-                                                          in_device_buf.GetDeviceBuffer(),
-                                                          wei_device_buf.GetDeviceBuffer(),
-                                                          out_device_buf.GetDeviceBuffer(),
-                                                          dw_in_strides,
-                                                          dw_wei_strides,
-                                                          dw_out_strides);
+                // GPU reference doesn't support NGCHW; use CPU (do_verification=2 → 1)
+                const int dw_verify = (do_verification == 2) ? 1 : do_verification;
 
-                ck_tile::stream_config dw_stream{nullptr, time_kernel, 0, 5, 50, true};
-
-                std::size_t flop      = conv_param.GetFlops();
-                std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
-
-                depthwise_detail::VerificationInfo<OutDataType> dw_verify{
-                    false, nullptr, nullptr, nullptr, 0};
-
-                auto [dw_time, dw_config, dw_vstatus, dw_idx, dw_valid, dw_total] =
-                    depthwise_detail::
-                        run_all_instances<InDataType, WeiDataType, float, OutDataType>(
-                            dw_args, dw_stream, dw_verify, flop, num_btype);
-
-                total_instances += dw_total;
-                valid_instances += dw_valid;
-                num_kernel += dw_total;
-
-                if(dw_idx >= 0)
+                std::vector<OutDataType> dw_ref;
+                if(dw_verify == 1)
                 {
-                    float dw_tflops     = static_cast<float>(flop) / 1.E9 / dw_time;
-                    float dw_gb_per_sec = static_cast<float>(num_btype) / 1.E6 / dw_time;
-                    if(dw_tflops > best_tflops)
+                    dw_ref.assign(dw_out_sz, OutDataType{0});
+
+                    std::vector<InDataType> dw_in_host(dw_in_sz);
+                    std::vector<WeiDataType> dw_wei_host(dw_wei_sz);
+                    dw_in_dev.FromDevice(dw_in_host.data());
+                    dw_wei_dev.FromDevice(dw_wei_host.data());
+
+                    depthwise_ref::cpu_conv_fwd_ngchw<InDataType, WeiDataType, float, OutDataType>(
+                        dw_in_host.data(), dw_wei_host.data(), dw_ref.data(), conv_param);
+                }
+
+                ck_tile::conv::ConvParam dw_param(conv_param.num_dim_spatial_,
+                                                  conv_param.G_,
+                                                  conv_param.N_,
+                                                  conv_param.K_,
+                                                  conv_param.C_,
+                                                  conv_param.filter_spatial_lengths_,
+                                                  conv_param.input_spatial_lengths_,
+                                                  conv_param.conv_filter_strides_,
+                                                  conv_param.conv_filter_dilations_,
+                                                  conv_param.input_left_pads_,
+                                                  conv_param.input_right_pads_);
+
+                using TileInType  = std::conditional_t<std::is_same_v<InDataType, ck::half_t>,
+                                                       ck_tile::half_t,
+                                                       InDataType>;
+                using TileWeiType = std::conditional_t<std::is_same_v<WeiDataType, ck::half_t>,
+                                                       ck_tile::half_t,
+                                                       WeiDataType>;
+                using TileOutType = std::conditional_t<std::is_same_v<OutDataType, ck::half_t>,
+                                                       ck_tile::half_t,
+                                                       OutDataType>;
+
+                ck_tile::GroupedConvFwdHostArgs<> dw_host_args(dw_param,
+                                                               dw_in_dev.GetDeviceBuffer(),
+                                                               dw_wei_dev.GetDeviceBuffer(),
+                                                               {},
+                                                               dw_out_dev.GetDeviceBuffer(),
+                                                               1);
+
+                ck_tile::stream_config dw_stream{nullptr, time_kernel, 1, 5, 50, time_kernel};
+                const std::size_t flop = conv_param.GetFlops();
+                const std::size_t num_btype =
+                    conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
+
+                auto dw_result = ck_tile::grouped_conv_fwd_depthwise_dispatch<TileInType,
+                                                                              TileWeiType,
+                                                                              float,
+                                                                              TileOutType>(
+                    dw_host_args, dw_stream, flop, num_btype);
+
+                total_instances += dw_result.total_count;
+                valid_instances += dw_result.valid_count;
+                num_kernel += dw_result.total_count;
+
+                bool dw_pass = true;
+                if(dw_verify == 1 && dw_result.valid_count > 0)
+                {
+                    std::vector<OutDataType> dw_out_host(dw_out_sz);
+                    dw_out_dev.FromDevice(dw_out_host.data());
+
+                    dw_pass = depthwise_ref::verify(dw_out_host.data(), dw_ref.data(), dw_out_sz);
+                    if(!dw_pass)
                     {
-                        best_op_name    = dw_config;
-                        best_avg_time   = dw_time;
-                        best_tflops     = dw_tflops;
-                        best_gb_per_sec = dw_gb_per_sec;
+                        pass = false;
                     }
+
+                    std::cout << "Depthwise verification: " << (dw_pass ? "PASSED" : "FAILED")
+                              << std::endl;
+                }
+
+                if(dw_pass && dw_result.best_instance_idx >= 0 &&
+                   dw_result.best_tflops > best_tflops)
+                {
+                    best_op_name        = dw_result.best_config;
+                    best_avg_time       = dw_result.best_time;
+                    best_tflops         = dw_result.best_tflops;
+                    best_gb_per_sec     = dw_result.best_gb_per_sec;
+                    best_instance_index = dw_result.best_instance_idx;
                 }
             }
         }
