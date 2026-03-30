@@ -97,7 +97,7 @@ set(__clang_cxx_compile_options
     -Wno-unused-parameter
     -Wmissing-noreturn
     -Wno-lifetime-safety
-    -Wno-lifetime-safety-suggestion
+    -Wno-lifetime-safety-suggestions
     -Wno-lifetime-safety-intra-tu-suggestions
     -Wno-lifetime-safety-cross-tu-suggestions)
 
