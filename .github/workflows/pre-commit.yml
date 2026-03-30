@@ -5,6 +5,7 @@ on:
     branches:
       - develop
       - release/therock-*
+      - users/sareeder/pre-commit-push-fix # temporary: testing push event fix
   pull_request:
     branches: [develop]
 
