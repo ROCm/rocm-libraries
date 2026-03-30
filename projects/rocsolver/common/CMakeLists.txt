@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -30,9 +30,9 @@ add_library(rocsolver-common INTERFACE)
 # add cmake 23 requirement
 if (NOT USE_FMT_LIB)
    # add an interface target for specifying higher c++ standard required
-   add_library(c++23_compiler_flags INTERFACE)
-   target_compile_features(c++23_compiler_flags INTERFACE cxx_std_23)
-   target_link_libraries(rocsolver-common INTERFACE c++23_compiler_flags)
+   add_library(cxx23_compiler_flags INTERFACE)
+   target_compile_features(cxx23_compiler_flags INTERFACE cxx_std_23)
+   target_link_libraries(rocsolver-common INTERFACE cxx23_compiler_flags)
 else()
    #if (USE_FMT_LIB)
    # add preprocessor definition for aliased printing
