@@ -2338,11 +2338,13 @@ CK_TILE_DEVICE void amd_global_atomic_add_impl(const thread_buffer<T, N>& src_th
                 src_thread_data.template get_as<ck_tile::bf16x2_t>()[i]);
         });
     }
-#endif
     else
     {
         static_assert(false, "Not supported!");
     }
+#else
+    static_assert(false, "Not supported!");
+#endif
 }
 
 template <typename T, index_t N>
