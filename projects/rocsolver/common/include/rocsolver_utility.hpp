@@ -93,7 +93,7 @@ struct std::formatter<joinable_range<std::tuple<T...>>, CharT>
         return std::format_to(ctx.out(), "{}", result);
     }
 };
-#endif
+#endif  // not USE_FMT_LIB
 
 namespace rocsolver
 {
