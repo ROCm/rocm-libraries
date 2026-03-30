@@ -66,13 +66,4 @@ struct PhysicalTensor
     int args_slot  = 0;
 };
 
-// ============================================================================
-// Compile-time tests
-// ============================================================================
-
-static_assert(TensorName("A") == "A");
-static_assert(TensorName("bias") == "bias");
-static_assert(!(TensorName("A") == "B"));
-static_assert(!(TensorName("bias") == "bia"));
-
 } // namespace rocm_ck

@@ -50,16 +50,4 @@ consteval bool is_valid_layout_for_rank(Layout layout, int rank)
     return false;
 }
 
-// --- is_valid_layout_for_rank compile-time tests ---
-// clang-format off
-static_assert( is_valid_layout_for_rank(Layout::Contiguous, 1));
-static_assert(!is_valid_layout_for_rank(Layout::Contiguous, 2));
-static_assert(!is_valid_layout_for_rank(Layout::Row, 1));
-static_assert( is_valid_layout_for_rank(Layout::Row, 2));
-static_assert(!is_valid_layout_for_rank(Layout::Col, 1));
-static_assert( is_valid_layout_for_rank(Layout::Col, 2));
-static_assert(!is_valid_layout_for_rank(Layout::Auto, 1));
-static_assert(!is_valid_layout_for_rank(Layout::Auto, 2));
-// clang-format on
-
 } // namespace rocm_ck

@@ -33,12 +33,27 @@ if(NOT TARGET rocm_ck)
     add_subdirectory(../../include rocm_ck_build)
 endif()
 
-# --- Kernel variants: fp32, fp16, bf16, fp16 with 32×32 warp tile, fp16+add, fp16+add+relu ---
-set(KERNEL_VARIANTS gemm_fp32 gemm_fp16 gemm_bf16 gemm_fp16_w32 gemm_fp16_add gemm_fp16_add_relu)
+# --- Kernel variants: types, warp tiles, fused epilogues, layout combinations ---
+set(KERNEL_VARIANTS gemm_fp32 gemm_fp16 gemm_bf16 gemm_fp16_w32 gemm_fp16_add gemm_fp16_add_relu
+    gemm_fp16_rr gemm_fp16_cr gemm_fp16_cc gemm_fp16_splitk gemm_fp16_v3 gemm_fp16_add_add
+    gemm_fp16_batched gemm_fp16_gfx90a gemm_fp16_gfx942 gemm_fp16_preshuffle)
 
 # rocm_ck headers for device code (DataType, Layout enums used by gemm_api.hpp)
 set(ROCM_CK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 get_filename_component(ROCM_CK_INCLUDE_DIR "${ROCM_CK_INCLUDE_DIR}" ABSOLUTE)
+
+# --- Verify pack.py has entries for all KERNEL_VARIANTS ---
+# pack.py has a hardcoded VARIANTS list that must stay in sync with KERNEL_VARIANTS.
+# Missing entries cause silent failures (hsaco compiles but isn't archived).
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/pack.py PACK_PY_CONTENT)
+foreach(variant IN LISTS KERNEL_VARIANTS)
+    string(FIND "${PACK_PY_CONTENT}" "\"name\": \"${variant}\"" PACK_PY_MATCH)
+    if(PACK_PY_MATCH EQUAL -1)
+        message(FATAL_ERROR
+            "Variant '${variant}' is in KERNEL_VARIANTS but missing from pack.py. "
+            "Add a matching entry to pack.py or the kpack archive will be incomplete.")
+    endif()
+endforeach()
 
 # --- Compile each variant x architecture into .hsaco code objects ---
 # Uses --cuda-device-only to produce raw code objects without host stubs.
@@ -61,6 +76,7 @@ foreach(variant IN LISTS KERNEL_VARIANTS)
                     -o ${hsaco_output}
                     ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
             DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
+                    ${CMAKE_CURRENT_SOURCE_DIR}/gemm_variants.hpp
                     ${ROCM_CK_INCLUDE_DIR}/rocm_ck/gemm_spec.hpp
                     ${ROCM_CK_INCLUDE_DIR}/rocm_ck/gemm_dev.hpp
             COMMENT "Compiling ${variant}.hip -> ${arch}.hsaco"

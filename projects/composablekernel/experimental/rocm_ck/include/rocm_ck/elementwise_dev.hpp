@@ -44,8 +44,8 @@ __device__ void run(Args args)
 {
     // Device-side validation — catches invalid manual construction.
     static_assert(S.block_tile > 0, "block_tile must be positive");
-    static_assert(S.thread_block_size > 0, "thread_block_size must be positive");
-    static_assert(S.block_warps > 0, "block_warps must be positive");
+    static_assert(S.workgroup_size > 0, "workgroup_size must be positive");
+    static_assert(S.block_waves > 0, "block_waves must be positive");
 
     using X = typename CkTypeMap<S.lhs().dtype>::type;
     using Y = typename CkTypeMap<S.output().dtype>::type;
@@ -53,10 +53,12 @@ __device__ void run(Args args)
     // Use the wider type for ElementWiseShape so kVectorM is valid for both
     // input loads and output stores.
     using WiderType = std::conditional_t<(sizeof(X) >= sizeof(Y)), X, Y>;
-    using Shape     = ck_tile::ElementWiseShape<ck_tile::sequence<S.block_warps>,
-                                                ck_tile::sequence<S.block_tile>,
-                                                ck_tile::sequence<S.warp_tile>,
-                                                WiderType>;
+    // rocm_ck "block_waves" -> CK Tile "BlockWarps"
+    // rocm_ck "wave_tile"   -> CK Tile "WarpTile"
+    using Shape = ck_tile::ElementWiseShape<ck_tile::sequence<S.block_waves>,
+                                            ck_tile::sequence<S.block_tile>,
+                                            ck_tile::sequence<S.wave_tile>,
+                                            WiderType>;
 
     static_assert(sizeof(rocm_ck::index_t) == sizeof(ck_tile::index_t),
                   "rocm_ck::index_t and ck_tile::index_t must match");

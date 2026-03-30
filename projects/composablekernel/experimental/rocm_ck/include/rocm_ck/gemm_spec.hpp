@@ -5,8 +5,8 @@
 // template instantiation.
 //
 // SHARED header: compiled in both host and device (--cuda-device-only) passes.
-// Contains structural types, consteval make_kernel() factory, named accessors,
-// and warp tile validation. No runtime code.
+// Contains structural types, consteval make_spec() factory, named accessors,
+// and MFMA tile validation. No runtime code.
 //
 // Compilation boundary:
 //   _spec.hpp (this) — schema types + consteval factory (both passes)
@@ -64,19 +64,57 @@ inline constexpr int kMaxEpilogueOps = 4;
 // Tile geometry types
 // ============================================================================
 
+/// Pipeline implementation strategy for the GEMM kernel.
+///
+/// V1: Simple pipeline — A/B from global memory, C in registers.
+///     Uses GemmPipelineProblem + GemmPipelineAGmemBGmemCRegV1.
+///
+/// V3: Compute-optimized pipeline — software-pipelined loads.
+///     Uses UniversalGemmPipelineProblem + GemmPipelineAgBgCrCompV3.
+///     Better compute utilization through overlapped memory/compute.
+///
+/// Preshuffle: Weight preshuffle pipeline — B matrix pre-rearranged for
+///     optimal LDS loads. Uses WeightPreshufflePipelineAGmemBGmemCRegV2.
+///     Requires A=RowMajor, B=ColumnMajor. Host must call preshuffle on B
+///     before kernel launch.
+enum class Pipeline
+{
+    V1,
+    V3,
+    Preshuffle
+};
+
+/// Tile-to-CU work distribution strategy.
+///
+/// TileBased: Standard 1D tile partitioner. Each tile mapped to one block.
+///     Grid: ceil(M/TileM) * ceil(N/TileN) x 1 x k_batch.
+///     Uses GemmKernel<GemmTile1DPartitioner, Pipeline, Epilogue>.
+///
+/// StreamK: Work-balanced scheduling across CUs. Tiles streamed across blocks.
+///     Grid: num_CUs * occupancy (not tile-based).
+///     Uses StreamKKernel<StreamKTilePartitioner, Pipeline, Epilogue>.
+enum class Scheduling
+{
+    TileBased,
+    StreamK
+};
+
 /// M x N x K dimension triple for tile geometry specification.
 struct Dim3
 {
     int m, n, k;
 };
 
-/// Algorithm: describes HOW a GEMM executes (tile geometry).
-/// Independent of data types — paired with Signature in make_kernel().
+/// Algorithm: describes HOW a GEMM executes (tile geometry, scheduling).
+/// Independent of data types — paired with Signature in make_spec().
 struct GemmAlgorithm
 {
-    Dim3 block_tile;  // Elements per thread block {M, N, K}
-    Dim3 block_warps; // Warp distribution {M, N, K}
-    Dim3 warp_tile;   // Elements per warp per MFMA step {M, N, K}
+    Dim3 block_tile;                               // Elements per workgroup {M, N, K}
+    Dim3 block_waves;                              // Wavefront layout within workgroup {M, N, K}
+    Dim3 mfma_tile;                                // MFMA instruction tile {M, N, K}
+    int k_batch           = 1;                     // Split-K factor: partitions K across blockIdx.z
+    Pipeline pipeline     = Pipeline::V1;          // Pipeline implementation strategy
+    Scheduling scheduling = Scheduling::TileBased; // Work distribution strategy
 };
 
 // ============================================================================
@@ -103,9 +141,16 @@ struct GemmSpec
 
     // Tile geometry
     Dim3 block_tile;
-    Dim3 block_warps;
-    Dim3 warp_tile;
-    int thread_block_size;
+    Dim3 block_waves;
+    Dim3 mfma_tile;
+    int workgroup_size;
+    int k_batch; // Split-K factor (1 = no split)
+
+    // Pipeline implementation strategy
+    Pipeline pipeline;
+
+    // Work distribution strategy
+    Scheduling scheduling;
 
     // Epilogue: composable op chain applied after matmul
     int num_epilogue_ops;
@@ -129,6 +174,14 @@ struct GemmSpec
     /// GEMM output tensor (position 2 in the physical tensor table).
     /// Name varies by epilogue chain: "C" (plain), "D" (with combine), "E" (with activation).
     constexpr PhysicalTensor output() const { return physical_tensors[2]; }
+
+    /// First auxiliary tensor D0 (position 3 — e.g., bias for AddOp).
+    /// Only valid when num_physical_tensors > 3.
+    constexpr PhysicalTensor d0() const { return physical_tensors[3]; }
+
+    /// Second auxiliary tensor D1 (position 4 — e.g., second bias/scale).
+    /// Only valid when num_physical_tensors > 4.
+    constexpr PhysicalTensor d1() const { return physical_tensors[4]; }
 };
 
 // ============================================================================
@@ -136,7 +189,7 @@ struct GemmSpec
 // ============================================================================
 
 /// Lookup a physical tensor by name. consteval — compile-time only.
-/// Used in static_asserts and consteval make_kernel() result inspection.
+/// Used in static_asserts and consteval make_spec() result inspection.
 /// For runtime access, use GemmSpec::output() or physical_tensors[] directly.
 consteval PhysicalTensor tensor(GemmSpec k, std::string_view name)
 {
@@ -156,13 +209,13 @@ consteval DataType dtype(GemmSpec k, std::string_view name) { return tensor(k, n
 consteval Layout layout(GemmSpec k, std::string_view name) { return tensor(k, name).layout; }
 
 // ============================================================================
-// Warp tile validation
+// MFMA tile validation
 // ============================================================================
 
-/// Check if (a_dtype, warp_m, warp_n, warp_k) is a valid MFMA warp gemm
-/// configuration. Based on CK Tile's WarpGemmDispatcher specializations
-/// for gfx9 (MFMA). Only covers standard symmetric tile shapes.
-consteval bool is_valid_warp_gemm(DataType a_dtype, int m, int n, int k)
+/// Check if (a_dtype, m, n, k) maps to a valid MFMA instruction shape.
+/// Based on CK Tile's WarpGemmDispatcher specializations for gfx9.
+/// Only covers standard symmetric tile shapes.
+consteval bool is_valid_mfma(DataType a_dtype, int m, int n, int k)
 {
     if(a_dtype == DataType::FP32)
     {
@@ -189,7 +242,7 @@ consteval bool is_valid_warp_gemm(DataType a_dtype, int m, int n, int k)
 }
 
 // ============================================================================
-// make_kernel: operator-centric Signature -> GemmSpec
+// make_spec: operator-centric Signature -> GemmSpec
 // ============================================================================
 
 /// Resolve and validate a GEMM using the operator-centric Signature.
@@ -206,18 +259,18 @@ consteval bool is_valid_warp_gemm(DataType a_dtype, int m, int n, int k)
 ///
 /// Validates:
 ///   - All tile dimensions are positive
-///   - block_warps.k == 1 (CShuffleEpilogue requires warps_m x warps_n block size)
-///   - Warp tile matches MFMA dispatcher table for the input dtype
-///   - Block tile is divisible by (block_warps x warp_tile) in each dimension
+///   - block_waves.k == 1 (CShuffleEpilogue requires waves_m x waves_n layout)
+///   - MFMA tile matches instruction table for the input dtype
+///   - Block tile is divisible by (block_waves x mfma_tile) in each dimension
 ///
-/// Derives thread_block_size = block_warps.m x block_warps.n x block_warps.k x 64.
-consteval GemmSpec make_kernel(Signature sig, GemmAlgorithm algo)
+/// Derives workgroup_size = block_waves.m x block_waves.n x block_waves.k x wavefront_size.
+consteval GemmSpec make_spec(Signature sig, GemmAlgorithm algo)
 {
     ResolvedSignature resolved = resolve(sig);
 
     // First op must be GemmOp
     if(!std::holds_alternative<GemmOp>(sig.ops[0]))
-        throw "GEMM make_kernel requires GemmOp as first operator";
+        throw "GEMM make_spec requires GemmOp as first operator";
     const GemmOp& gemm = std::get<GemmOp>(sig.ops[0]);
 
     TensorDesc a_td = resolved.tensor(gemm.lhs);
@@ -234,6 +287,9 @@ consteval GemmSpec make_kernel(Signature sig, GemmAlgorithm algo)
     std::string_view d0_name;
     DataType d0_dtype = DataType::FP32;
     Layout d0_layout  = Layout::Row;
+    std::string_view d1_name;
+    DataType d1_dtype = DataType::FP32;
+    Layout d1_layout  = Layout::Row;
 
     int next_op = 1;
 
@@ -249,6 +305,22 @@ consteval GemmSpec make_kernel(Signature sig, GemmAlgorithm algo)
         d0_layout              = d0_td.layout != Layout::Auto ? d0_td.layout : Layout::Row;
         final_output           = add.out;
         next_op++;
+
+        // Second consecutive AddOp — second D tensor (Add+Add: result += D0 + D1).
+        // CK Tile's ComposedCDEOp folds D tensors via parameter pack:
+        //   ((result += convert(ds)), ...) applies one Add to ALL D tensors.
+        // Two consecutive AddOps with one EpilogueOp::Add gives correct behavior.
+        if(next_op < kMaxOps && std::holds_alternative<AddOp>(sig.ops[next_op]))
+        {
+            const AddOp& add2 = std::get<AddOp>(sig.ops[next_op]);
+            num_d_tensors     = 2;
+            d1_name           = add2.rhs;
+            TensorDesc d1_td  = resolved.tensor(d1_name);
+            d1_dtype          = d1_td.dtype;
+            d1_layout         = d1_td.layout != Layout::Auto ? d1_td.layout : Layout::Row;
+            final_output      = add2.out;
+            next_op++;
+        }
     }
     else if(next_op < kMaxOps && std::holds_alternative<MulOp>(sig.ops[next_op]))
     {
@@ -306,26 +378,42 @@ consteval GemmSpec make_kernel(Signature sig, GemmAlgorithm algo)
     // Tile validation
     if(algo.block_tile.m <= 0 || algo.block_tile.n <= 0 || algo.block_tile.k <= 0)
         throw "block_tile dimensions must be positive";
-    if(algo.block_warps.m <= 0 || algo.block_warps.n <= 0 || algo.block_warps.k <= 0)
-        throw "block_warps dimensions must be positive";
-    if(algo.warp_tile.m <= 0 || algo.warp_tile.n <= 0 || algo.warp_tile.k <= 0)
-        throw "warp_tile dimensions must be positive";
+    if(algo.block_waves.m <= 0 || algo.block_waves.n <= 0 || algo.block_waves.k <= 0)
+        throw "block_waves dimensions must be positive";
+    if(algo.mfma_tile.m <= 0 || algo.mfma_tile.n <= 0 || algo.mfma_tile.k <= 0)
+        throw "mfma_tile dimensions must be positive";
 
-    if(algo.block_warps.k != 1)
-        throw "block_warps.k must be 1 (CShuffleEpilogue constraint)";
+    if(algo.k_batch <= 0)
+        throw "k_batch must be positive";
 
-    if(!is_valid_warp_gemm(a_td.dtype, algo.warp_tile.m, algo.warp_tile.n, algo.warp_tile.k))
-        throw "warp_tile is not a valid MFMA configuration for this dtype";
+    if(algo.block_waves.k != 1)
+        throw "block_waves.k must be 1 (CShuffleEpilogue constraint)";
 
-    if(algo.block_tile.m % (algo.block_warps.m * algo.warp_tile.m) != 0)
-        throw "block_tile.m must be divisible by (block_warps.m * warp_tile.m)";
-    if(algo.block_tile.n % (algo.block_warps.n * algo.warp_tile.n) != 0)
-        throw "block_tile.n must be divisible by (block_warps.n * warp_tile.n)";
-    if(algo.block_tile.k % (algo.block_warps.k * algo.warp_tile.k) != 0)
-        throw "block_tile.k must be divisible by (block_warps.k * warp_tile.k)";
+    // Pipeline-specific constraints
+    if(algo.pipeline == Pipeline::Preshuffle)
+    {
+        if(a_td.layout != Layout::Row)
+            throw "Preshuffle pipeline requires A layout = Row";
+        if(b_td.layout != Layout::Col)
+            throw "Preshuffle pipeline requires B layout = Col";
+    }
 
-    int thread_block_size =
-        algo.block_warps.m * algo.block_warps.n * algo.block_warps.k * warp_size;
+    // Scheduling constraints
+    if(algo.scheduling == Scheduling::StreamK && algo.k_batch > 1)
+        throw "Stream-K scheduling is incompatible with split-K (k_batch > 1)";
+
+    if(!is_valid_mfma(a_td.dtype, algo.mfma_tile.m, algo.mfma_tile.n, algo.mfma_tile.k))
+        throw "mfma_tile is not a valid MFMA instruction shape for this dtype";
+
+    if(algo.block_tile.m % (algo.block_waves.m * algo.mfma_tile.m) != 0)
+        throw "block_tile.m must be divisible by (block_waves.m * mfma_tile.m)";
+    if(algo.block_tile.n % (algo.block_waves.n * algo.mfma_tile.n) != 0)
+        throw "block_tile.n must be divisible by (block_waves.n * mfma_tile.n)";
+    if(algo.block_tile.k % (algo.block_waves.k * algo.mfma_tile.k) != 0)
+        throw "block_tile.k must be divisible by (block_waves.k * mfma_tile.k)";
+
+    int workgroup_size =
+        algo.block_waves.m * algo.block_waves.n * algo.block_waves.k * wavefront_size;
 
     // Build physical tensor table
     int num_phys = 3;
@@ -339,147 +427,24 @@ consteval GemmSpec make_kernel(Signature sig, GemmAlgorithm algo)
         phys[num_phys] = {d0_name, d0_dtype, d0_layout, num_phys};
         num_phys++;
     }
+    if(num_d_tensors >= 2)
+    {
+        phys[num_phys] = {d1_name, d1_dtype, d1_layout, num_phys};
+        num_phys++;
+    }
 
     return {num_phys,
             phys,
             acc,
             algo.block_tile,
-            algo.block_warps,
-            algo.warp_tile,
-            thread_block_size,
+            algo.block_waves,
+            algo.mfma_tile,
+            workgroup_size,
+            algo.k_batch,
+            algo.pipeline,
+            algo.scheduling,
             num_epi_ops,
             epi_ops};
 }
-
-// ============================================================================
-// Compile-time tests
-// ============================================================================
-
-// --- is_valid_warp_gemm ---
-
-// FP32: supports 16x16x{4,8,16} and 32x32x{4,8}
-static_assert(is_valid_warp_gemm(DataType::FP32, 16, 16, 4));
-static_assert(is_valid_warp_gemm(DataType::FP32, 16, 16, 16));
-static_assert(is_valid_warp_gemm(DataType::FP32, 32, 32, 8));
-static_assert(!is_valid_warp_gemm(DataType::FP32, 32, 32, 16)); // fp32 only k in {4,8} at 32x32
-
-// FP16: supports 16x16x{16,32} and 32x32x{8,16}
-static_assert(is_valid_warp_gemm(DataType::FP16, 16, 16, 16));
-static_assert(is_valid_warp_gemm(DataType::FP16, 32, 32, 16));
-static_assert(!is_valid_warp_gemm(DataType::FP16, 32, 32, 4)); // fp16 only k in {8,16} at 32x32
-
-// BF16: same valid set as FP16
-static_assert(is_valid_warp_gemm(DataType::BF16, 16, 16, 16));
-static_assert(is_valid_warp_gemm(DataType::BF16, 32, 32, 16));
-
-// --- make_kernel: plain GEMM — physical tensor table ---
-
-static_assert(make_kernel(Signature{.dtype = DataType::FP16,
-                                    .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}},
-                          GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}})
-                  .num_physical_tensors == 3);
-static_assert(slot(make_kernel(Signature{.dtype = DataType::FP16,
-                                         .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}},
-                               GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}}),
-                   "A") == 0);
-static_assert(slot(make_kernel(Signature{.dtype = DataType::FP16,
-                                         .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}},
-                               GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}}),
-                   "B") == 1);
-static_assert(slot(make_kernel(Signature{.dtype = DataType::FP16,
-                                         .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}},
-                               GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}}),
-                   "C") == 2);
-static_assert(dtype(make_kernel(Signature{.dtype = DataType::FP16,
-                                          .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}},
-                                GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}}),
-                    "A") == DataType::FP16);
-static_assert(make_kernel(Signature{.dtype = DataType::FP16,
-                                    .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}},
-                          GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}})
-                  .thread_block_size == 256);
-static_assert(make_kernel(Signature{.dtype = DataType::FP16,
-                                    .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}},
-                          GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}})
-                  .num_epilogue_ops == 0);
-
-// --- make_kernel: GEMM + Add — output is "D", D0 is "bias" ---
-
-static_assert(make_kernel(Signature{.dtype = DataType::FP16,
-                                    .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
-                                              AddOp{.lhs = "C", .rhs = "bias", .out = "D"}}},
-                          GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}})
-                  .epilogue_ops[0] == EpilogueOp::Add);
-static_assert(make_kernel(Signature{.dtype = DataType::FP16,
-                                    .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
-                                              AddOp{.lhs = "C", .rhs = "bias", .out = "D"}}},
-                          GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}})
-                  .num_physical_tensors == 4);
-static_assert(slot(make_kernel(Signature{.dtype = DataType::FP16,
-                                         .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
-                                                   AddOp{.lhs = "C", .rhs = "bias", .out = "D"}}},
-                               GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}}),
-                   "D") == 2);
-static_assert(slot(make_kernel(Signature{.dtype = DataType::FP16,
-                                         .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
-                                                   AddOp{.lhs = "C", .rhs = "bias", .out = "D"}}},
-                               GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}}),
-                   "bias") == 3);
-static_assert(dtype(make_kernel(Signature{.dtype = DataType::FP16,
-                                          .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
-                                                    AddOp{.lhs = "C", .rhs = "bias", .out = "D"}}},
-                                GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}}),
-                    "bias") == DataType::FP16);
-
-// --- make_kernel: GEMM + Add + Relu — output is "E" ---
-
-static_assert(make_kernel(Signature{.dtype = DataType::FP16,
-                                    .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
-                                              AddOp{.lhs = "C", .rhs = "bias", .out = "D"},
-                                              ReluOp{.in = "D", .out = "E"}}},
-                          GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}})
-                  .num_epilogue_ops == 2);
-static_assert(make_kernel(Signature{.dtype = DataType::FP16,
-                                    .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
-                                              AddOp{.lhs = "C", .rhs = "bias", .out = "D"},
-                                              ReluOp{.in = "D", .out = "E"}}},
-                          GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}})
-                  .has_epilogue_op(EpilogueOp::Add));
-static_assert(make_kernel(Signature{.dtype = DataType::FP16,
-                                    .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
-                                              AddOp{.lhs = "C", .rhs = "bias", .out = "D"},
-                                              ReluOp{.in = "D", .out = "E"}}},
-                          GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}})
-                  .has_epilogue_op(EpilogueOp::Relu));
-static_assert(slot(make_kernel(Signature{.dtype = DataType::FP16,
-                                         .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
-                                                   AddOp{.lhs = "C", .rhs = "bias", .out = "D"},
-                                                   ReluOp{.in = "D", .out = "E"}}},
-                               GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}}),
-                   "E") == 2);
-static_assert(make_kernel(Signature{.dtype = DataType::FP16,
-                                    .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
-                                              AddOp{.lhs = "C", .rhs = "bias", .out = "D"},
-                                              ReluOp{.in = "D", .out = "E"}}},
-                          GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}})
-                  .num_physical_tensors == 4);
-
-// --- make_kernel: fp16 32x32x16 warp tile ---
-
-static_assert(make_kernel(Signature{.dtype = DataType::FP16,
-                                    .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}},
-                          GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {32, 32, 16}})
-                  .thread_block_size == 256);
-
-// --- Layout defaults (A=Row, B=Col, output=Row) ---
-
-static_assert(layout(make_kernel(Signature{.dtype = DataType::FP32,
-                                           .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}},
-                                 GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}}),
-                     "A") == Layout::Row);
-static_assert(layout(make_kernel(Signature{.dtype = DataType::FP32,
-                                           .ops   = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}},
-                                 GemmAlgorithm{{128, 128, 32}, {2, 2, 1}, {16, 16, 16}}),
-                     "B") == Layout::Col);
 
 } // namespace rocm_ck

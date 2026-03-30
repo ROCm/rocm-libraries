@@ -68,6 +68,7 @@ foreach(variant IN LISTS KERNEL_VARIANTS)
                     -o ${hsaco_output}
                     ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
             DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
+                    ${CMAKE_CURRENT_SOURCE_DIR}/vector_add_variants.hpp
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/elementwise_dev.hpp
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/elementwise_spec.hpp
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/datatype_utils.hpp

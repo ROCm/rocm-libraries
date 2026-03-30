@@ -164,7 +164,7 @@ Signature{
             ReluOp{.in = "D", .out = "E"}}}
 ```
 
-`make_kernel()` pattern-matches the ops sequence to select the CK Tile kernel
+`make_spec()` pattern-matches the ops sequence to select the CK Tile kernel
 and epilogue configuration. The mapping is:
 
 | Ops Pattern | Kernel |
@@ -195,7 +195,7 @@ produced. This determines:
 - Scalar values (problem sizes, alpha/beta, etc.)
 
 The same compiled binary handles different problem sizes. Validation at compile time
-(`consteval make_kernel`) catches configuration errors as compiler diagnostics, not
+(`consteval make_spec`) catches configuration errors as compiler diagnostics, not
 runtime crashes.
 
 The runtime arguments are a **flat POD struct** with stable ABI — no constructors,
@@ -210,7 +210,7 @@ information in the signature — it enables better validation and clearer code.
 
 **Epilogue composition is general.** Epilogue fusion is expressed as a composable graph
 of typed operators in the signature's `ops` array. Each fusion step is a typed operator
-(`AddOp`, `ReluOp`, etc.) with named tensor slots. `make_kernel()` pattern-matches the
+(`AddOp`, `ReluOp`, etc.) with named tensor slots. `make_spec()` pattern-matches the
 operator sequence to select the CK Tile epilogue configuration. This avoids accumulating
 special cases — adding a new epilogue combination requires no new enum values.
 
@@ -220,5 +220,5 @@ and tuning parameters belong in the algorithm, not the signature. The signature 
 
 **Problem-size constraints live in the algorithm.** Constraints like "K must be a multiple
 of 32" arise from tile geometry choices, not from the mathematical operation. The algorithm
-declares its constraints; `make_kernel` cross-validates them against the signature. Runtime
+declares its constraints; `make_spec` cross-validates them against the signature. Runtime
 argument validation checks actual values against the compiled variant's requirements.

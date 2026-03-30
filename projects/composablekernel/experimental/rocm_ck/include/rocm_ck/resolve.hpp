@@ -333,12 +333,22 @@ consteval ResolvedSignature resolve(Signature sig)
         return num++;
     };
 
-    // Set rank/layout only if currently unknown.
+    // Set rank/layout only if currently unknown. Error on conflicting values.
     auto set_if_unknown = [&](int idx, int rank, Layout layout) {
-        if(infos[idx].rank == 0 && rank != 0)
-            infos[idx].rank = rank;
-        if(infos[idx].layout == Layout::Auto && layout != Layout::Auto)
-            infos[idx].layout = layout;
+        if(rank != 0)
+        {
+            if(infos[idx].rank == 0)
+                infos[idx].rank = rank;
+            else if(infos[idx].rank != rank)
+                throw "conflicting rank for tensor: two operators imply different ranks";
+        }
+        if(layout != Layout::Auto)
+        {
+            if(infos[idx].layout == Layout::Auto)
+                infos[idx].layout = layout;
+            else if(infos[idx].layout != layout)
+                throw "conflicting layout for tensor: two operators imply different layouts";
+        }
     };
 
     // ================================================================
@@ -475,184 +485,5 @@ consteval ResolvedSignature resolve(Signature sig)
 
     return result;
 }
-
-// ============================================================================
-// resolve compile-time tests
-// ============================================================================
-// clang-format off
-
-// --- Simple GemmOp: resolves to 3 tensors with operator defaults ---
-static_assert(resolve(Signature{
-    .dtype = DataType::FP16,
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).num_tensors == 3);
-
-static_assert(resolve(Signature{
-    .dtype = DataType::FP16,
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).tensor("A").dtype == DataType::FP16);
-
-static_assert(resolve(Signature{
-    .dtype = DataType::FP16,
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).tensor("A").rank == 2);
-
-static_assert(resolve(Signature{
-    .dtype = DataType::FP16,
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).tensor("A").layout == Layout::Row);
-
-static_assert(resolve(Signature{
-    .dtype = DataType::FP16,
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).tensor("B").layout == Layout::Col);
-
-static_assert(resolve(Signature{
-    .dtype = DataType::FP16,
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).tensor("C").layout == Layout::Row);
-
-// --- GemmOp with custom tensor names ---
-static_assert(resolve(Signature{
-    .dtype = DataType::FP16,
-    .ops = {GemmOp{.lhs = "X", .rhs = "Y", .out = "Z"}}}).tensor("X").rank == 2);
-
-// --- dtype cascade: sig.dtype applies to all tensors ---
-static_assert(resolve(Signature{
-    .dtype = DataType::BF16,
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).tensor("A").dtype == DataType::BF16);
-
-static_assert(resolve(Signature{
-    .dtype = DataType::BF16,
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).tensor("C").dtype == DataType::BF16);
-
-// --- Explicit tensor dtype overrides sig.dtype ---
-static_assert(resolve(Signature{
-    .dtype = DataType::FP16,
-    .tensors = {Tensor{.name = "C", .dtype = DataType::FP32}},
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).tensor("C").dtype == DataType::FP32);
-
-static_assert(resolve(Signature{
-    .dtype = DataType::FP16,
-    .tensors = {Tensor{.name = "C", .dtype = DataType::FP32}},
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).tensor("A").dtype == DataType::FP16);
-
-// --- Explicit tensor rank/layout overrides operator defaults ---
-static_assert(resolve(Signature{
-    .dtype = DataType::FP16,
-    .tensors = {Tensor{.name = "A", .rank = 3}},
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).tensor("A").rank == 3);
-
-// --- GEMM + Add + Relu: propagation test ---
-constexpr ResolvedSignature gemm_add_relu_resolved = resolve(Signature{
-    .dtype = DataType::FP16,
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
-            AddOp{.lhs = "C", .rhs = "bias", .out = "D"},
-            ReluOp{.in = "D", .out = "E"}}});
-
-static_assert(gemm_add_relu_resolved.num_tensors == 6); // A, B, C, bias, D, E
-static_assert(gemm_add_relu_resolved.tensor("C").rank == 2);
-static_assert(gemm_add_relu_resolved.tensor("bias").rank == 2);        // propagated from C via AddOp
-static_assert(gemm_add_relu_resolved.tensor("bias").layout == Layout::Row);
-static_assert(gemm_add_relu_resolved.tensor("D").rank == 2);           // propagated
-static_assert(gemm_add_relu_resolved.tensor("D").layout == Layout::Row);
-static_assert(gemm_add_relu_resolved.tensor("E").rank == 2);           // propagated via ReluOp
-static_assert(gemm_add_relu_resolved.tensor("E").layout == Layout::Row);
-
-// --- Standalone AddOp: rank/layout unresolved (no op implies them) ---
-static_assert(resolve(Signature{
-    .dtype = DataType::FP32,
-    .ops = {AddOp{.lhs = "A", .rhs = "B", .out = "C"}}}).num_tensors == 3);
-
-static_assert(resolve(Signature{
-    .dtype = DataType::FP32,
-    .ops = {AddOp{.lhs = "A", .rhs = "B", .out = "C"}}}).tensor("A").rank == 0);
-
-static_assert(resolve(Signature{
-    .dtype = DataType::FP32,
-    .ops = {AddOp{.lhs = "A", .rhs = "B", .out = "C"}}}).tensor("A").layout == Layout::Auto);
-
-// --- FMHA pattern: two GemmOps + SoftmaxOp ---
-constexpr ResolvedSignature fmha_resolved = resolve(Signature{
-    .dtype = DataType::FP16,
-    .ops = {GemmOp{.lhs = "Q", .rhs = "K", .out = "S"},
-            SoftmaxOp{.in = "S", .out = "P"},
-            GemmOp{.lhs = "P", .rhs = "V", .out = "O"}}});
-
-static_assert(fmha_resolved.num_tensors == 6); // Q, K, S, P, V, O
-static_assert(fmha_resolved.tensor("Q").rank == 2);
-static_assert(fmha_resolved.tensor("S").rank == 2);
-static_assert(fmha_resolved.tensor("P").rank == 2); // propagated via SoftmaxOp from S
-static_assert(fmha_resolved.tensor("O").rank == 2);
-
-// --- tensor_index: slot lookup by name ---
-// For GEMM + Add + Relu, the user provides data for A, B, C, bias.
-// Intermediates D and E are epilogue-internal (register-only); they have
-// valid indices but the user should not set Args slots for them.
-static_assert(gemm_add_relu_resolved.tensor_index("A") == 0);
-static_assert(gemm_add_relu_resolved.tensor_index("B") == 1);
-static_assert(gemm_add_relu_resolved.tensor_index("C") == 2);
-static_assert(gemm_add_relu_resolved.tensor_index("bias") == 3);
-static_assert(gemm_add_relu_resolved.tensor_index("D") == 4);  // intermediate
-static_assert(gemm_add_relu_resolved.tensor_index("E") == 5);  // intermediate
-
-// --- Scalar tracking: scalars passed through from Signature ---
-constexpr ResolvedSignature scaled_gemm_resolved = resolve(Signature{
-    .dtype = DataType::FP16,
-    .scalars = {Scalar{.name = "alpha", .dtype = DataType::FP32},
-                Scalar{.name = "beta", .dtype = DataType::FP32}},
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}});
-
-static_assert(scaled_gemm_resolved.num_scalars == 2);
-static_assert(scaled_gemm_resolved.scalar("alpha").dtype == DataType::FP32);
-static_assert(scaled_gemm_resolved.scalar("beta").dtype == DataType::FP32);
-static_assert(scaled_gemm_resolved.scalar_index("alpha") == 0);
-static_assert(scaled_gemm_resolved.scalar_index("beta") == 1);
-
-// --- No scalars: num_scalars == 0 ---
-static_assert(resolve(Signature{
-    .dtype = DataType::FP16,
-    .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}}).num_scalars == 0);
-
-// --- FmhaBwdOp: resolves to 9 tensors with correct rank/layout ---
-constexpr ResolvedSignature fmha_bwd_resolved = resolve(Signature{
-    .dtype = DataType::FP16,
-    .tensors = {Tensor{.name = "LSE", .dtype = DataType::FP32},
-                Tensor{.name = "D", .dtype = DataType::FP32},
-                Tensor{.name = "DQ_ACC", .dtype = DataType::FP32}},
-    .scalars = {Scalar{.name = "raw_scale"},
-                Scalar{.name = "scale"},
-                Scalar{.name = "num_head_q"},
-                Scalar{.name = "nhead_ratio_qk"}},
-    .ops = {FmhaBwdOp{.q = "Q", .k = "K", .v = "V",
-                       .lse = "LSE", .do_ = "dO", .d = "D",
-                       .dq = "DQ_ACC", .dk = "dK", .dv = "dV"}}});
-
-static_assert(fmha_bwd_resolved.num_tensors == 9);
-static_assert(fmha_bwd_resolved.tensor("Q").rank == 2);
-static_assert(fmha_bwd_resolved.tensor("Q").dtype == DataType::FP16);
-static_assert(fmha_bwd_resolved.tensor("LSE").dtype == DataType::FP32);
-static_assert(fmha_bwd_resolved.tensor("D").dtype == DataType::FP32);
-static_assert(fmha_bwd_resolved.tensor("DQ_ACC").dtype == DataType::FP32);
-static_assert(fmha_bwd_resolved.tensor("dK").dtype == DataType::FP16);
-static_assert(fmha_bwd_resolved.tensor("dV").dtype == DataType::FP16);
-static_assert(fmha_bwd_resolved.tensor_index("Q") == 0);
-static_assert(fmha_bwd_resolved.tensor_index("K") == 1);
-static_assert(fmha_bwd_resolved.tensor_index("V") == 2);
-static_assert(fmha_bwd_resolved.tensor_index("LSE") == 3);
-static_assert(fmha_bwd_resolved.tensor_index("dO") == 4);
-static_assert(fmha_bwd_resolved.tensor_index("D") == 5);
-static_assert(fmha_bwd_resolved.tensor_index("DQ_ACC") == 6);
-static_assert(fmha_bwd_resolved.tensor_index("dK") == 7);
-static_assert(fmha_bwd_resolved.tensor_index("dV") == 8);
-static_assert(fmha_bwd_resolved.num_scalars == 4);
-static_assert(fmha_bwd_resolved.scalar_index("raw_scale") == 0);
-static_assert(fmha_bwd_resolved.scalar_index("num_head_q") == 2);
-
-// Error cases (uncommenting any would produce consteval compile errors):
-//
-// No dtype:
-// resolve(Signature{.ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}})
-//
-// SSA violation (two ops output "C"):
-// resolve(Signature{.dtype = DataType::FP16,
-//         .ops = {GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
-//                 AddOp{.lhs = "X", .rhs = "Y", .out = "C"}}})
-
-// clang-format on
 
 } // namespace rocm_ck

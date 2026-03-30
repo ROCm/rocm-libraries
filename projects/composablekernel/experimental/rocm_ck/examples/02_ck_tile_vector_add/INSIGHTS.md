@@ -69,4 +69,4 @@ const int BLOCK_SIZE = 256;  // Must match BlockTile
 const int GRID_SIZE  = (NUM_ELEMENTS + BLOCK_SIZE - 1) / BLOCK_SIZE;
 ```
 
-There is no runtime check for this — a mismatch produces wrong results silently. In Example 03, this coupling is managed by embedding the block size in the kernel descriptor, so the host reads `kernel.thread_block_size` instead of hardcoding a constant. That's the production model: the descriptor is the single source of truth for launch parameters.
+There is no runtime check for this — a mismatch produces wrong results silently. In Example 03, this coupling is managed by embedding the block size in the kernel descriptor, so the host reads `kernel.workgroup_size` instead of hardcoding a constant. That's the production model: the descriptor is the single source of truth for launch parameters.

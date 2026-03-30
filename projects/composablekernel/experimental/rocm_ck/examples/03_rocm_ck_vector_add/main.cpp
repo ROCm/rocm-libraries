@@ -8,7 +8,7 @@
 // variants. Each variant gets typed device buffers with host-side conversion
 // for upload/download/verification. Kernels compute c = alpha * a + beta * b.
 
-#include "rocm_vector_add_registry.hpp"
+#include "vector_add_variants.hpp"
 
 #include <rocm_ck/datatype_convert.hpp>
 #include <rocm_ck/datatype_utils.hpp>
@@ -23,12 +23,12 @@
 #include <cstdlib>
 #include <vector>
 
-using rocm_ck::ALL_VARIANTS;
-using rocm_ck::ALL_VARIANTS_COUNT;
+using rocm_ck::vector_add_variant_count;
+using rocm_ck::vector_add_variants;
 
 /// Run a single variant: load from archive, launch kernel, verify results.
 /// Returns true if the variant passed verification.
-static bool runVariant(const rocm_ck::VariantDescriptor& variant,
+static bool runVariant(const rocm_ck::ElementwiseVariant& variant,
                        const rocm_ck::KpackArchive& archive,
                        const std::vector<float>& host_a,
                        const std::vector<float>& host_b,
@@ -36,8 +36,8 @@ static bool runVariant(const rocm_ck::VariantDescriptor& variant,
                        float beta)
 {
     const int num_elements = static_cast<int>(host_a.size());
-    const auto in_dtype    = variant.kernel.lhs().dtype;
-    const auto out_dtype   = variant.kernel.output().dtype;
+    const auto in_dtype    = variant.spec.lhs().dtype;
+    const auto out_dtype   = variant.spec.output().dtype;
 
     // Load kernel
     rocm_ck::KpackKernel kernel;
@@ -54,14 +54,13 @@ static bool runVariant(const rocm_ck::VariantDescriptor& variant,
     buf_result.zero();
 
     // Launch
-    const int grid_size =
-        (num_elements + variant.kernel.block_tile - 1) / variant.kernel.block_tile;
-    const int block_size = variant.kernel.thread_block_size;
-    const bool aligned   = rocm_ck::isAligned(variant.kernel, num_elements);
-    std::printf("  %s: tile=%d, warps=%d, threads=%d, N=%d %s\n",
+    const int grid_size  = (num_elements + variant.spec.block_tile - 1) / variant.spec.block_tile;
+    const int block_size = variant.spec.workgroup_size;
+    const bool aligned   = rocm_ck::isAligned(variant.spec, num_elements);
+    std::printf("  %s: tile=%d, waves=%d, work_items=%d, N=%d %s\n",
                 variant.name,
-                variant.kernel.block_tile,
-                variant.kernel.block_warps,
+                variant.spec.block_tile,
+                variant.spec.block_waves,
                 block_size,
                 num_elements,
                 aligned ? "(aligned)" : "(padded)");
@@ -146,11 +145,11 @@ int main(int argc, char** argv)
     {
         const auto* best = rocm_ck::findVariant(dt, dt, NUM_ELEMENTS);
         if(best)
-            std::printf("  %s -> %s (tile=%d, warps=%d)\n",
+            std::printf("  %s -> %s (tile=%d, waves=%d)\n",
                         rocm_ck::data_type_name(dt),
                         best->name,
-                        best->kernel.block_tile,
-                        best->kernel.block_warps);
+                        best->spec.block_tile,
+                        best->spec.block_waves);
     }
     // Mixed-type: widening variants (narrow input -> FP32 output)
     for(auto in_dt : {rocm_ck::DataType::FP16, rocm_ck::DataType::BF16})
@@ -160,14 +159,14 @@ int main(int argc, char** argv)
             std::printf("  %s->FP32 -> %s (tile=%d)\n",
                         rocm_ck::data_type_name(in_dt),
                         best->name,
-                        best->kernel.block_tile);
+                        best->spec.block_tile);
     }
 
     // --- Verify all variants with plain add (alpha=1, beta=1) ---
-    std::printf("\nRunning all %d variants (alpha=1, beta=1):\n", ALL_VARIANTS_COUNT);
+    std::printf("\nRunning all %d variants (alpha=1, beta=1):\n", vector_add_variant_count);
     bool all_passed = true;
 
-    for(const auto& variant : ALL_VARIANTS)
+    for(const auto& variant : vector_add_variants)
     {
         if(!runVariant(variant, archive, host_a, host_b, 1.0f, 1.0f))
             all_passed = false;

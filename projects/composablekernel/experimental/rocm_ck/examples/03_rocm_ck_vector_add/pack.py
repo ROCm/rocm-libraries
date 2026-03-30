@@ -36,7 +36,7 @@ KPACK_VERSION = 1
 HEADER_SIZE = 16  # 4 (magic) + 4 (version) + 8 (toc_offset)
 
 # Variant metadata mirrors the constexpr ALL_VARIANTS table in
-# rocm_vector_add_registry.hpp. Each entry carries the make_kernel
+# rocm_vector_add_registry.hpp. Each entry carries the make_spec
 # parameters so the archive TOC can describe the tuning surface.
 VARIANTS = [
     {
@@ -44,8 +44,8 @@ VARIANTS = [
         "in_dtype": "fp32",
         "out_dtype": "fp32",
         "block_tile": 256,
-        "block_warps": 1,
-        "warp_tile": 256,
+        "block_waves": 1,
+        "wave_tile": 256,
         "pad": True,
     },
     {
@@ -53,8 +53,8 @@ VARIANTS = [
         "in_dtype": "fp32",
         "out_dtype": "fp32",
         "block_tile": 512,
-        "block_warps": 1,
-        "warp_tile": 512,
+        "block_waves": 1,
+        "wave_tile": 512,
         "pad": True,
     },
     {
@@ -62,8 +62,8 @@ VARIANTS = [
         "in_dtype": "fp32",
         "out_dtype": "fp32",
         "block_tile": 1024,
-        "block_warps": 1,
-        "warp_tile": 1024,
+        "block_waves": 1,
+        "wave_tile": 1024,
         "pad": True,
     },
     {
@@ -71,8 +71,8 @@ VARIANTS = [
         "in_dtype": "fp16",
         "out_dtype": "fp16",
         "block_tile": 512,
-        "block_warps": 1,
-        "warp_tile": 512,
+        "block_waves": 1,
+        "wave_tile": 512,
         "pad": True,
     },
     {
@@ -80,8 +80,8 @@ VARIANTS = [
         "in_dtype": "fp16",
         "out_dtype": "fp16",
         "block_tile": 1024,
-        "block_warps": 1,
-        "warp_tile": 1024,
+        "block_waves": 1,
+        "wave_tile": 1024,
         "pad": True,
     },
     {
@@ -89,8 +89,8 @@ VARIANTS = [
         "in_dtype": "bf16",
         "out_dtype": "bf16",
         "block_tile": 512,
-        "block_warps": 1,
-        "warp_tile": 512,
+        "block_waves": 1,
+        "wave_tile": 512,
         "pad": True,
     },
     {
@@ -98,8 +98,8 @@ VARIANTS = [
         "in_dtype": "bf16",
         "out_dtype": "bf16",
         "block_tile": 1024,
-        "block_warps": 1,
-        "warp_tile": 1024,
+        "block_waves": 1,
+        "wave_tile": 1024,
         "pad": True,
     },
     {
@@ -107,8 +107,8 @@ VARIANTS = [
         "in_dtype": "fp32",
         "out_dtype": "fp32",
         "block_tile": 2048,
-        "block_warps": 8,
-        "warp_tile": 64,
+        "block_waves": 8,
+        "wave_tile": 64,
         "pad": True,
     },
     {
@@ -116,8 +116,8 @@ VARIANTS = [
         "in_dtype": "fp16",
         "out_dtype": "fp16",
         "block_tile": 1024,
-        "block_warps": 2,
-        "warp_tile": 512,
+        "block_waves": 2,
+        "wave_tile": 512,
         "pad": True,
     },
     # Mixed-type variants
@@ -126,8 +126,8 @@ VARIANTS = [
         "in_dtype": "fp16",
         "out_dtype": "fp32",
         "block_tile": 1024,
-        "block_warps": 1,
-        "warp_tile": 1024,
+        "block_waves": 1,
+        "wave_tile": 1024,
         "pad": True,
     },
     {
@@ -135,8 +135,8 @@ VARIANTS = [
         "in_dtype": "fp32",
         "out_dtype": "fp16",
         "block_tile": 1024,
-        "block_warps": 1,
-        "warp_tile": 1024,
+        "block_waves": 1,
+        "wave_tile": 1024,
         "pad": True,
     },
     {
@@ -144,8 +144,8 @@ VARIANTS = [
         "in_dtype": "bf16",
         "out_dtype": "fp32",
         "block_tile": 1024,
-        "block_warps": 1,
-        "warp_tile": 1024,
+        "block_waves": 1,
+        "wave_tile": 1024,
         "pad": True,
     },
 ]
@@ -216,8 +216,8 @@ def main() -> None:
                     "in_dtype": v["in_dtype"],
                     "out_dtype": v["out_dtype"],
                     "block_tile": v["block_tile"],
-                    "block_warps": v["block_warps"],
-                    "warp_tile": v["warp_tile"],
+                    "block_waves": v["block_waves"],
+                    "wave_tile": v["wave_tile"],
                     "pad": v["pad"],
                 }
 

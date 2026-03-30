@@ -7,13 +7,13 @@ Describe GPU kernels as data (Signature + Algorithm), validate at compile time, 
 rocm_ck replaces CK Tile's template-parameter API with a data-driven schema. Kernels are defined by two pure-data structs — no template parameters at the user level:
 
 - **Signature** (what to compute) — a directed compute graph where tensors are nodes, operators are edges, and scalars are named parameters. Expressed with C++ designated initializers.
-- **Algorithm** (how to compute) — tile geometry, pipeline strategy, warp configuration, padding. Independent of data types.
+- **Algorithm** (how to compute) — tile geometry, pipeline strategy, wavefront layout, padding. Independent of data types.
 
 These flow through a compile-time pipeline:
 
 ```text
 Signature (what) + Algorithm (how)
-    → consteval resolve() + make_kernel()    compile-time validation
+    → consteval resolve() + make_spec()    compile-time validation
     → NTTP kernel descriptor                 structural type, zero runtime cost
     → extern "C" __global__ fn(Args)         bridge: host C++ ↔ device CK Tile
     → host fills Args, launches kernel       runtime
@@ -21,7 +21,7 @@ Signature (what) + Algorithm (how)
 
 **resolve()** is `consteval` — it propagates dtypes, validates SSA uniqueness, resolves rank and layout defaults. Invalid configurations fail at compile time with actionable error messages, not linker errors or runtime crashes.
 
-**make_kernel()** pattern-matches the operator sequence (e.g., `[GemmOp, AddOp, ReluOp]`) and returns a structural NTTP kernel descriptor that triggers the correct CK Tile template instantiation.
+**make_spec()** pattern-matches the operator sequence (e.g., `[GemmOp, AddOp, ReluOp]`) and returns a structural NTTP kernel descriptor that triggers the correct CK Tile template instantiation.
 
 **Args** is a universal 1408-byte flat POD struct. It lives in the GPU's kernarg segment (device memory, not registers). Each wave issues `s_load` instructions for only the fields it reads — unused slots cost nothing. Any language or dispatcher that can fill a byte buffer can launch a kernel.
 
@@ -35,23 +35,23 @@ This is a full kernel definition — GEMM with fused bias addition and ReLU acti
 // gemm_fp16_add_relu.hip
 #include "gemm_dev.hpp"
 
-static constexpr rocm_ck::GemmKernel kernel = rocm_ck::make_kernel(
+static constexpr rocm_ck::GemmSpec spec = rocm_ck::make_spec(
     rocm_ck::Signature{
         .dtype = rocm_ck::DataType::FP16,
         .ops = {rocm_ck::GemmOp{.lhs = "A", .rhs = "B", .out = "C"},
                 rocm_ck::AddOp{.lhs = "C", .rhs = "bias", .out = "D"},
                 rocm_ck::ReluOp{.in = "D", .out = "E"}}},
     rocm_ck::GemmAlgorithm{.block_tile  = {128, 128, 32},
-                            .block_warps = {2, 2, 1},
-                            .warp_tile   = {16, 16, 16}});
+                            .block_waves = {2, 2, 1},
+                            .mfma_tile   = {16, 16, 16}});
 
 extern "C" __global__ void gemm_fp16_add_relu(rocm_ck::Args args)
 {
-    rocm_ck::runGemm<kernel>(args);
+    rocm_ck::run<spec>(args);
 }
 ```
 
-Every architectural concept is visible: Signature declares the compute graph, Algorithm specifies the tile strategy, `make_kernel` validates and resolves at compile time, and the bridge function takes universal `Args`.
+Every architectural concept is visible: Signature declares the compute graph, Algorithm specifies the tile strategy, `make_spec` validates and resolves at compile time, and the bridge function takes universal `Args`.
 
 ## Compilation Boundary
 
@@ -59,7 +59,7 @@ Examples 03 and 04 use a three-file pattern that enforces clean separation
 between metaprogramming, host runtime, and device code:
 
 ```text
-                  _kernel.hpp (metaprogramming)
+                  _spec.hpp (metaprogramming)
                  /            \
         _api.hpp               _dev.hpp
        (host only)            (device only)
@@ -67,9 +67,9 @@ between metaprogramming, host runtime, and device code:
        main.cpp               *.hip files
 ```
 
-**`_kernel.hpp`** is pure metaprogramming. It contains `consteval` factories
-(`make_kernel`, `is_valid_warp_gemm`), `constexpr` structural types
-(`GemmKernel`, `VectorAddKernel`), named accessors, and `static_assert` tests.
+**`_spec.hpp`** is pure metaprogramming. It contains `consteval` factories
+(`make_spec`, `is_valid_mfma`), `constexpr` structural types
+(`GemmSpec`, `ElementwiseSpec`), named accessors, and `static_assert` tests.
 The compiler evaluates everything at compile time — no runtime code is generated
 on either side. Both host (g++) and device (hipcc `--cuda-device-only`) passes
 include this header.
@@ -125,7 +125,7 @@ Progressive examples, each building on the last:
 |---------|---------------------|
 | [01_hello_world](examples/01_hello_world/) | Multiarch pipeline baseline — hand-written HIP kernel, one binary per arch |
 | [02_ck_tile_vector_add](examples/02_ck_tile_vector_add/) | Bridge pattern — `extern "C"` wrapper around CK Tile's `ElementWiseKernel` |
-| [03_rocm_ck_vector_add](examples/03_rocm_ck_vector_add/) | Full schema — Signature/Algorithm split, `make_kernel` validation, 12 compiled variants, registry-based selection |
+| [03_rocm_ck_vector_add](examples/03_rocm_ck_vector_add/) | Full schema — Signature/Algorithm split, `make_spec` validation, 12 compiled variants, registry-based selection |
 | [04_gemm](examples/04_gemm/) | Composed operators — multi-type GEMM (fp32/fp16/bf16), fused epilogue, mixed-precision accumulation |
 
 ### Example 01: Hello World
@@ -140,9 +140,9 @@ Proves that CK Tile kernels can be compiled into standalone `.hsaco` code object
 
 Production-ready pattern with:
 
-- **Signature/Algorithm separation** — *what* (operator graph + data types) vs *how* (tile geometry, warp count, vector width, padding)
-- **12 compiled variants** across FP32, FP16, BF16 with different block sizes, multi-warp, and mixed-precision
-- **Constexpr validation** via `make_kernel` that catches invalid configurations at compile time
+- **Signature/Algorithm separation** — *what* (operator graph + data types) vs *how* (tile geometry, wavefront count, vector width, padding)
+- **12 compiled variants** across FP32, FP16, BF16 with different block sizes, multi-wave, and mixed-precision
+- **Constexpr validation** via `make_spec` that catches invalid configurations at compile time
 - **Variant registry** with `find_variant(DataType, problem_size)` for automatic kernel selection
 - **Archive metadata** — tuning parameters stored in the kpack TOC for tooling
 
@@ -153,7 +153,7 @@ See the [example 03 README](examples/03_rocm_ck_vector_add/README.md) for full d
 Extends the schema to GEMM:
 
 - **Operator-centric Signature** — `GemmOp`, `AddOp`, `ReluOp` compose the compute graph
-- **Multi-type variants** — fp32, fp16, bf16 compiled from ~20-line `.hip` files via `runGemm<K>` template
+- **Multi-type variants** — fp32, fp16, bf16 compiled from ~20-line `.hip` files via `run<S>` template
 - **Mixed-precision epilogue** — all variants accumulate in fp32; CShuffleEpilogue handles output type conversion
 - **Composed epilogue** — `GemmOp + AddOp + ReluOp` for fused bias + activation
 - **Typed host buffers** — `float_to_typed` / `typed_to_float` for type-agnostic verification
@@ -195,7 +195,7 @@ experimental/rocm_ck/
 │   ├── CMakeLists.txt              # INTERFACE library target "rocm_ck"
 │   └── rocm_ck/
 │       │ # Types — pure definitions, no runtime, no CK deps
-│       ├── types.hpp               # index_t, warp_size
+│       ├── types.hpp               # index_t, wavefront_size
 │       ├── datatype_utils.hpp      # DataType enum, data_type_bits(), data_type_name()
 │       ├── layout.hpp              # Layout enum (Row, Col, Contiguous, Auto)
 │       ├── tensor_desc.hpp         # TensorDesc: name, dtype, rank, layout
@@ -247,24 +247,14 @@ experimental/rocm_ck/
     │   └── main.cpp
     ├── 03_rocm_ck_vector_add/      # Full tuning surface: variants + registry
     │   ├── CMakeLists.txt
-    │   ├── rocm_vector_add_kernel.hpp  # Metaprogramming: types, consteval make_kernel, static_asserts
-    │   ├── rocm_vector_add_api.hpp     # Host-only: arg assembly, launch helpers (guarded)
-    │   ├── rocm_vector_add_dev.hpp     # Device-only: CK Tile bridge, runVectorAdd<K> (guarded)
-    │   ├── rocm_vector_add_registry.hpp # Variant table + find_variant selection
-    │   ├── vector_add_*.hip            # 12 variant instantiations (include _dev.hpp only)
+    │   ├── vector_add_variants.hpp     # Variant table + consteval lookup + findVariant
+    │   ├── vector_add_*.hip            # 12 variant instantiations (~12 lines each)
     │   ├── pack.py                     # Variant-aware packer with metadata
     │   └── main.cpp                    # Variant selection demo + verify-all mode
     └── 04_gemm/                     # GEMM: multi-type via operator-centric Signature
         ├── CMakeLists.txt
-        ├── gemm_kernel.hpp             # Metaprogramming: types, consteval make_kernel, static_asserts
-        ├── gemm_api.hpp                # Host-only: arg assembly, launch helpers (guarded)
-        ├── gemm_dev.hpp                # Device-only: CK Tile bridge, runGemm<K> (guarded)
-        ├── gemm_fp32.hip               # fp32 variant (include gemm_dev.hpp only)
-        ├── gemm_fp16.hip               # fp16 variant
-        ├── gemm_fp16_w32.hip           # fp16 variant with WarpTile=32
-        ├── gemm_fp16_add.hip           # fp16 + bias addition (fused epilogue)
-        ├── gemm_fp16_add_relu.hip      # fp16 + bias + ReLU (composed epilogue)
-        ├── gemm_bf16.hip               # bf16 variant
+        ├── gemm_variants.hpp           # Variant table + consteval lookup
+        ├── gemm_*.hip                  # 6 variant instantiations (~12 lines each)
         ├── cpu_ref.hpp                 # CPU reference GEMM implementation
         ├── cpu_ref.cpp                 # CPU reference implementation
         ├── pack.py                     # Variant-aware packer with dtype metadata

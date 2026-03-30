@@ -1,18 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-//
-// fp16 GEMM kernel variant with 16×16×16 warp tile. Accumulates in fp32,
-// stores fp16 output via CShuffleEpilogue.
 
+#include "gemm_variants.hpp"
 #include <rocm_ck/gemm_dev.hpp>
 
-static constexpr rocm_ck::GemmSpec spec = rocm_ck::make_kernel(
-    rocm_ck::Signature{
-        .dtype = rocm_ck::DataType::FP16,
-        .ops = {rocm_ck::GemmOp{.lhs = "A", .rhs = "B", .out = "C"}}},
-    rocm_ck::GemmAlgorithm{.block_tile  = {128, 128, 32},
-                            .block_warps = {2, 2, 1},
-                            .warp_tile   = {16, 16, 16}});
+static constexpr rocm_ck::GemmSpec spec = rocm_ck::gemm_variant_spec("gemm_fp16");
 
 extern "C" __global__ void gemm_fp16(rocm_ck::Args args)
 {

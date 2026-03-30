@@ -4,7 +4,7 @@ This example is the design prototype for the production rocm_ck API. It validate
 
 ## 1. Config -> consteval -> Kernel: The Three-Layer Pattern
 
-The user-facing `Signature` + `ElementwiseAlgorithm` (using `std::optional`, `std::variant`, not valid as NTTPs) are transformed by `consteval make_kernel()` into `VectorAddKernel` (a structural type, valid as an NTTP). This separation is fundamental:
+The user-facing `Signature` + `ElementwiseAlgorithm` (using `std::optional`, `std::variant`, not valid as NTTPs) are transformed by `consteval make_spec()` into `ElementwiseSpec` (a structural type, valid as an NTTP). This separation is fundamental:
 
 - **Signature + Algorithm** — flexible, user-facing. Uses `std::optional` fields and operator composition so users specify only what differs from defaults.
 - **consteval** — validates and transforms. Throws at compile time if the config is invalid. Invalid configs never produce binaries.
@@ -12,12 +12,12 @@ The user-facing `Signature` + `ElementwiseAlgorithm` (using `std::optional`, `st
 
 ```cpp
 // User writes:
-constexpr auto kernel = make_kernel(
+constexpr auto kernel = make_spec(
     Signature{.dtype = DataType::FP32, .ops = {AddOp{}}},
-    ElementwiseAlgorithm{.block_tile = 1024, .block_warps = 1, .warp_tile = 1024, .pad = true});
+    ElementwiseAlgorithm{.block_tile = 1024, .block_waves = 1, .wave_tile = 1024, .pad = true});
 
-// make_kernel returns a VectorAddKernel with all fields resolved and validated.
-// This value is used directly as a template parameter: runVectorAdd<kernel>(args)
+// make_spec returns a ElementwiseSpec with all fields resolved and validated.
+// This value is used directly as a template parameter: run<kernel>(args)
 ```
 
 > **Production implication**: Every rocm_ck operation will follow this pattern. The Signature defines WHAT; the Algorithm defines HOW. `consteval` is the bridge that enforces invariants.
@@ -49,42 +49,43 @@ Signature{.dtype = DataType::FP16,
 
 ## 3. consteval for Immediate Feedback
 
-Throwing in a `consteval` function produces a compile error at the call site with the throw message as the diagnostic. `make_kernel` validates 7 constraints:
+Throwing in a `consteval` function produces a compile error at the call site with the throw message as the diagnostic. `make_spec` validates 7 constraints:
 
 - Input types must match (`a_dtype == b_dtype` for vector add)
 - Tile dimensions must be positive
-- `block_warps` must be a power of 2
+- `block_waves` must be a power of 2
 - `kVectorM` must be >= 1 (validates type/tile compatibility)
-- `block_tile` must be divisible by `(block_warps * kVectorM * warp_size)`
+- `block_tile` must be divisible by `(block_waves * kVectorM * wavefront_size)`
 - `kRepeatM` must be >= 1
 
-Invalid configs fail at compile time with readable messages like `"block_tile must be divisible by (block_warps * kVectorM * warp_size)"`. This is dramatically better than runtime validation — broken kernel configs never produce `.hsaco` files.
+Invalid configs fail at compile time with readable messages like `"block_tile must be divisible by (block_waves * kVectorM * wavefront_size)"`. This is dramatically better than runtime validation — broken kernel configs never produce `.hsaco` files.
 
 ## 4. Signature / Algorithm Separation
 
 "What" (data types + operation) vs "How" (tile geometry) are orthogonal concerns:
 
 - **Signature**: `{dtype, tensors[], scalars[], ops[]}` — specifies the compute graph and types
-- **Algorithm**: `{block_tile, block_warps, warp_tile, pad}` — specifies the tile geometry
+- **Algorithm**: `{block_tile, block_waves, wave_tile, pad}` — specifies the tile geometry
 
-The same signature can be paired with different algorithms to explore the tuning surface. The same algorithm can run on FP32, FP16, or BF16 (subject to `kVectorM` constraints validated by `make_kernel`).
+The same signature can be paired with different algorithms to explore the tuning surface. The same algorithm can run on FP32, FP16, or BF16 (subject to `kVectorM` constraints validated by `make_spec`).
 
 > **Production implication**: Tuning tools generate Algorithm variants; the Signature comes from the user's problem specification. This composition is how rocm_ck will expose its tuning surface.
 
-## 5. _api / _dev Interface Model
+## 5. _spec / _variants / _dev Interface Model
 
-Two header files, strict dependency boundary:
+Three layers, strict dependency boundary:
 
 | Header | CK Tile dependency | Used by |
 |--------|-------------------|---------|
-| `rocm_vector_add_api.hpp` | None | Host, device, tests |
-| `rocm_vector_add_dev.hpp` | Yes (CK Tile) | Device only |
+| `elementwise_spec.hpp` (shared) | None | Host, device, tests |
+| `vector_add_variants.hpp` (example-local) | None | Host, device |
+| `elementwise_dev.hpp` (shared) | Yes (CK Tile) | Device only |
 
-The API header contains the config types, `make_kernel`, `VectorAddKernel`, and all compile-time validation. It is testable with `constexpr`/`consteval` without any GPU — the 10 `static_assert` tests in the source run on any C++20 compiler. The generic `Args` struct (from `args.hpp`) replaces per-operation args structs.
+The spec header (in `include/rocm_ck/`) contains config types, `make_spec`, `ElementwiseSpec`, and all compile-time validation. It is testable with `constexpr`/`consteval` without any GPU. The variants header defines the variant table and consteval lookup, shared by both device `.hip` files and host `main.cpp`. The generic `Args` struct (from `args.hpp`) replaces per-operation args structs.
 
-The device header contains the CK Tile kernel implementation, `CkTypeMap`, and `runVectorAdd<K>`. It is compiled only with `--cuda-device-only` and never included in host code.
+The device header contains the CK Tile kernel implementation, `CkTypeMap`, and `run<S>`. It is compiled only with `--cuda-device-only` and never included in host code.
 
-> **Production implication**: This is the model for all rocm_ck operation headers. The `_api` header is the public interface; the `_dev` header is an implementation detail. Consumers include only `_api`.
+> **Production implication**: This is the model for all rocm_ck operation headers. Shared `_spec` and `_dev` headers live in `include/rocm_ck/`. Example-local `_variants` headers define concrete configurations.
 
 ## 6. Generic Args ABI
 
@@ -113,23 +114,24 @@ ABI is locked with `static_assert` checks for size, alignment, standard layout, 
 
 ## 7. One .hip File Per Variant
 
-Each variant file is ~15 lines:
+Variant specs are defined once in `vector_add_variants.hpp`. Each `.hip` file
+looks up its spec by name and wraps it in a thin kernel:
 
 ```cpp
-#include "rocm_vector_add_dev.hpp"
-static constexpr rocm_ck::VectorAddKernel K = rocm_ck::make_kernel(
-    rocm_ck::Signature{.dtype = rocm_ck::DataType::FP32,
-                       .ops = {rocm_ck::AddOp{}}},
-    rocm_ck::ElementwiseAlgorithm{1024, 1, 1024, true});
+#include "vector_add_variants.hpp"
+#include <rocm_ck/elementwise_dev.hpp>
+
+static constexpr rocm_ck::ElementwiseSpec spec =
+    rocm_ck::vector_add_variant_spec("vector_add_fp32_b1024");
 
 extern "C" __global__ void vector_add_fp32_b1024(rocm_ck::Args args) {
-    rocm_ck::runVectorAdd<K>(args);
+    rocm_ck::run<spec>(args);
 }
 ```
 
 Separate files enable parallel compilation and clear traceability — each `.hip` produces one `.hsaco` per architecture. CMake loops over `(variant x arch)` to produce `N x M` code objects.
 
-> **Production implication**: Variant generation can be automated. The `.hip` file is mechanical — operation + config + symbol name. A code generator producing these files from a variant table is a natural next step.
+> **Production implication**: The `.hip` file is pure boilerplate — include, lookup, wrapper. At ~20+ variants, a code generator producing these files from the variant table is a natural next step.
 
 ## 8. CkTypeMap for Enum -> Type Dispatch
 
@@ -149,7 +151,7 @@ This is the device-side bridge between the enum-based API (shared with the host)
 
 ## 9. Custom CK Tile Kernel Using Primitives
 
-`runVectorAdd` uses `load_tile`, `sweep_tile_span`, `store_tile` directly instead of the stock `ElementWiseKernel`:
+`run` uses `load_tile`, `sweep_tile_span`, `store_tile` directly instead of the stock `ElementWiseKernel`:
 
 ```cpp
 auto a_tile = ck_tile::load_tile(make_input_window(static_cast<const X*>(args.a)));
@@ -175,27 +177,27 @@ The stock `ElementWiseKernel` default-constructs its functor — no path to pass
 For mixed-type operations, the wider type constrains vector width:
 
 ```
-kVectorM = min(128 / max_type_bits, warp_tile / warp_size)
+kVectorM = min(128 / max_type_bits, wave_tile / wavefront_size)
 ```
 
 FP16+FP32 mixed: `max_type_bits = 32`, so `kVectorM_a = 4` (vs 8 for homogeneous FP16). The constraint comes from the 128-bit vector register width — wider elements mean fewer elements per vector load/store.
 
 This is validated at `consteval` time. A tile configuration that works for FP32 may not work for FP8 (which allows 16 elements per vector but requires larger minimum block tiles).
 
-## 11. thread_block_size = warp_size * block_warps, NOT block_tile
+## 11. workgroup_size = wavefront_size * block_waves, NOT block_tile
 
-Common confusion caught during development. Block tile determines elements per block; threads are determined by warp count:
+Common confusion caught during development. Block tile determines elements per block; threads are determined by wavefront count:
 
 ```
-thread_block_size = warp_size * block_warps    (threads launched per block)
-block_tile        = thread_block_size * kRepeatM * kVectorM  (elements processed per block)
+workgroup_size = wavefront_size * block_waves    (threads launched per block)
+block_tile        = workgroup_size * kRepeatM * kVectorM  (elements processed per block)
 ```
 
-A `block_tile = 1024` with `block_warps = 1` still launches only 64 threads — each warp iterates `kRepeatM` times, processing `kVectorM` elements per iteration.
+A `block_tile = 1024` with `block_waves = 1` still launches only 64 threads — each wavefront iterates `kRepeatM` times, processing `kVectorM` elements per iteration.
 
 ## 12. Variant Registry and Selection
 
-`ALL_VARIANTS[]` is a constexpr table of `{name, kernel}` pairs. `findVariant()` selects at runtime:
+`vector_add_variants[]` is a constexpr table of `{name, spec}` pairs defined in `vector_add_variants.hpp`. `findVariant()` selects at runtime:
 
 1. Filter by matching `in_dtype` and `out_dtype`
 2. Among matches, prefer the largest `block_tile` that divides the problem size evenly (aligned)
@@ -205,7 +207,7 @@ This is a simple but effective model. Production will need more dimensions (arch
 
 ## 13. Archive Metadata Mirrors Source
 
-`pack.py` embeds tuning parameters in the kpack TOC's `variant_metadata` section: block tile, block warps, warp tile, pad flag, input/output dtypes. This enables tooling to inspect archives without source code — a profiler can read the metadata to understand what kernel configuration produced a particular performance result.
+`pack.py` embeds tuning parameters in the kpack TOC's `variant_metadata` section: block tile, block waves, wave tile, pad flag, input/output dtypes. This enables tooling to inspect archives without source code — a profiler can read the metadata to understand what kernel configuration produced a particular performance result.
 
 Basic readers ignore the metadata; advanced tools consume it. The kpack format supports this naturally because MessagePack maps are extensible.
 

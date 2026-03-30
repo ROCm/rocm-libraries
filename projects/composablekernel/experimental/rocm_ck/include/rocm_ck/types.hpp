@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Role: types — index_t, warp_size. No runtime, no CK deps.
+// Role: types — index_t, wavefront_size. No runtime, no CK deps.
 //
 // Shared type definitions for rocm_ck.
 
@@ -19,7 +19,7 @@ using index_t = std::int32_t;
 /// Matches ck_tile::long_index_t.
 using long_index_t = std::int64_t;
 
-/// AMD GCN/CDNA wavefront size.
-constexpr int warp_size = 64;
+/// CDNA wavefront size (64 work-items per wavefront).
+constexpr int wavefront_size = 64;
 
 } // namespace rocm_ck
