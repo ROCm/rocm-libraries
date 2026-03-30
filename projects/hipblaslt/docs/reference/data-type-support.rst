@@ -110,7 +110,7 @@ The hipBLASLt compute modes are listed in the following table.
 
     *
       - ``HIPBLAS_COMPUTE_32F``
-      - 32-bit singple precision floating-point compute mode.
+      - 32-bit single precision floating-point compute mode.
 
     *
       - ``HIPBLAS_COMPUTE_64F``
