@@ -10,9 +10,9 @@ constexpr int blockSize = HIP_PLUGIN_BN_GRP0 * HIP_PLUGIN_BN_GRP1 * HIP_PLUGIN_B
 
 // define types for vectorized loads/stores
 using FLOAT_VEC_TYPE =
-    typename hip_kernel_plugin::mapped_vector_type<FLOAT, HIP_PLUGIN_BN_VEC_SIZE>::type;
+    typename hip_kernel_provider::mapped_vector_type<FLOAT, HIP_PLUGIN_BN_VEC_SIZE>::type;
 using FLOAT_ACCUM_VEC_TYPE =
-    typename hip_kernel_plugin::mapped_vector_type<FLOAT_ACCUM, HIP_PLUGIN_BN_VEC_SIZE>::type;
+    typename hip_kernel_provider::mapped_vector_type<FLOAT_ACCUM, HIP_PLUGIN_BN_VEC_SIZE>::type;
 
 template <unsigned int vecSizeX, unsigned int vecSizeY>
 __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
@@ -51,11 +51,10 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
         {
             inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
             inhat[i] = scale[i] * inhat[i] + bias[i];
-            inhat[i]
-                = hip_kernel_plugin::applyActivation<FLOAT_ACCUM,
-                                                     static_cast<hip_kernel_plugin::ActivationMode>(
-                                                         HIP_PLUGIN_NRN_OP_ID)>(
-                    inhat[i], alpha, beta);
+            inhat[i] = hip_kernel_provider::applyActivation<
+                FLOAT_ACCUM,
+                static_cast<hip_kernel_provider::ActivationMode>(HIP_PLUGIN_NRN_OP_ID)>(
+                inhat[i], alpha, beta);
 
             value[i] = CVT_ACCUM2FLOAT(inhat[i]);
         }
