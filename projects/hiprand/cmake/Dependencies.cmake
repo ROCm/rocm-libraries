@@ -315,8 +315,9 @@ if(BUILD_TEST)
 
   if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
     message(STATUS "GTest not found or force download GTest on. Downloading and building GTest.")
-    download_project(
-      PROJ                googletest
+
+    FetchContent_Declare(
+      googletest
       GIT_REPOSITORY      https://github.com/google/googletest.git
       GIT_TAG             release-1.11.0
       INSTALL_DIR         ${GTEST_ROOT}
@@ -325,9 +326,10 @@ if(BUILD_TEST)
       LOG_CONFIGURE       TRUE
       LOG_BUILD           TRUE
       LOG_INSTALL         TRUE
-      BUILD_PROJECT       TRUE
-      UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
+      UPDATE_DISCONNECTED TRUE
     )
+    FetchContent_MakeAvailable(googletest)
+
     list( APPEND CMAKE_PREFIX_PATH ${GTEST_ROOT} )
     find_package(GTest CONFIG REQUIRED PATHS ${GTEST_ROOT})
   endif()
