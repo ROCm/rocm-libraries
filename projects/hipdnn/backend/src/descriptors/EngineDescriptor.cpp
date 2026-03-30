@@ -3,11 +3,14 @@
 
 #include "EngineDescriptor.hpp"
 #include "BackendEnumStringUtils.hpp"
+#include "DescriptorAttributeUtils.hpp"
 #include "GraphDescriptor.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendFlatbufferData.h"
 #include "HipdnnException.hpp"
+#include "KnobDescriptor.hpp"
 #include "handle/Handle.hpp"
+#include "logging/Logging.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
 
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
@@ -92,6 +95,8 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         getKnobInfo(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINE_KNOB_INFO:
+        getKnobInfoDescriptors(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
     case HIPDNN_ATTR_ENGINE_LAYOUT_INFO:
     case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
@@ -301,6 +306,216 @@ void EngineDescriptor::getKnobInfo(hipdnnBackendAttributeType_t attributeType,
     if(elementCount != nullptr)
     {
         *elementCount = elementsToReturn;
+    }
+}
+
+void EngineDescriptor::getKnobInfoDescriptors(hipdnnBackendAttributeType_t attributeType,
+                                              int64_t requestedElementCount,
+                                              int64_t* elementCount,
+                                              void* arrayOfElements) const
+{
+    checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                 attributeType,
+                 "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_INFO)");
+
+    // Lazily build KnobDescriptor objects from the serialized knob buffers.
+    if(_knobDescriptors.empty() && !_knobSerializedBuffers.empty())
+    {
+        for(const auto& buffer : _knobSerializedBuffers)
+        {
+            auto knobFb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(buffer.data());
+            if(knobFb == nullptr)
+            {
+                continue;
+            }
+            hipdnn_data_sdk::data_objects::KnobT knobNative;
+            knobFb->UnPackTo(&knobNative);
+            auto knobDesc = std::make_shared<KnobDescriptor>();
+
+            // Set knob ID
+            knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_TYPE_EXT,
+                                   HIPDNN_TYPE_CHAR,
+                                   static_cast<int64_t>(knobNative.knob_id.size()),
+                                   knobNative.knob_id.c_str());
+
+            // Set description
+            if(!knobNative.description.empty())
+            {
+                knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT,
+                                       HIPDNN_TYPE_CHAR,
+                                       static_cast<int64_t>(knobNative.description.size()),
+                                       knobNative.description.c_str());
+            }
+
+            // Set deprecated flag
+            knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT,
+                                   HIPDNN_TYPE_BOOLEAN,
+                                   1,
+                                   &knobNative.deprecated);
+
+            // Set default value and matching constraint fields based on type
+            switch(knobNative.default_value.type)
+            {
+            case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+            {
+                auto val = knobNative.default_value.AsIntValue()->value;
+                knobDesc->setAttribute(
+                    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, HIPDNN_TYPE_INT64, 1, &val);
+
+                if(knobNative.constraint.type
+                   == hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint)
+                {
+                    const auto* c = knobNative.constraint.AsIntConstraint();
+                    // Only set range bounds when non-zero: {0,0} is the plugin SDK's
+                    // sentinel meaning "no range constraint" (only valid_values applies).
+                    if(c->min_value != 0 || c->max_value != 0)
+                    {
+                        knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT,
+                                               HIPDNN_TYPE_INT64,
+                                               1,
+                                               &c->min_value);
+                        knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT,
+                                               HIPDNN_TYPE_INT64,
+                                               1,
+                                               &c->max_value);
+                    }
+                    if(c->step > 0)
+                    {
+                        knobDesc->setAttribute(
+                            HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT, HIPDNN_TYPE_INT64, 1, &c->step);
+                    }
+                    if(!c->valid_values.empty())
+                    {
+                        knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT,
+                                               HIPDNN_TYPE_INT64,
+                                               static_cast<int64_t>(c->valid_values.size()),
+                                               c->valid_values.data());
+                    }
+                }
+                break;
+            }
+            case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+            {
+                auto val = knobNative.default_value.AsFloatValue()->value;
+                knobDesc->setAttribute(
+                    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, HIPDNN_TYPE_DOUBLE, 1, &val);
+
+                if(knobNative.constraint.type
+                   == hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint)
+                {
+                    const auto* c = knobNative.constraint.AsFloatConstraint();
+                    // Only set range bounds when non-zero: {0.0,0.0} is the plugin SDK's
+                    // sentinel meaning "no range constraint".
+                    if(c->min_value != 0.0 || c->max_value != 0.0)
+                    {
+                        knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT,
+                                               HIPDNN_TYPE_DOUBLE,
+                                               1,
+                                               &c->min_value);
+                        knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT,
+                                               HIPDNN_TYPE_DOUBLE,
+                                               1,
+                                               &c->max_value);
+                    }
+                }
+                break;
+            }
+            case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+            {
+                const auto& val = knobNative.default_value.AsStringValue()->value;
+                knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT,
+                                       HIPDNN_TYPE_CHAR,
+                                       static_cast<int64_t>(val.size()),
+                                       val.c_str());
+
+                if(knobNative.constraint.type
+                   == hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint)
+                {
+                    const auto* c = knobNative.constraint.AsStringConstraint();
+                    if(c->max_length > 0)
+                    {
+                        auto maxLen = static_cast<int32_t>(c->max_length);
+                        knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT,
+                                               HIPDNN_TYPE_INT32,
+                                               1,
+                                               &maxLen);
+                    }
+                    if(!c->valid_values.empty())
+                    {
+                        // Build null-separated buffer: "str1\0str2\0str3\0"
+                        std::string buf;
+                        for(const auto& s : c->valid_values)
+                        {
+                            buf.append(s);
+                            buf.push_back('\0');
+                        }
+                        knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
+                                               HIPDNN_TYPE_CHAR,
+                                               static_cast<int64_t>(buf.size()),
+                                               buf.data());
+                    }
+                }
+                break;
+            }
+            default:
+                HIPDNN_BACKEND_LOG_WARN(
+                    "EngineDescriptor::getKnobInfoDescriptors: skipping knob '{}' "
+                    "with unknown default value type {}",
+                    knobNative.knob_id,
+                    static_cast<int>(knobNative.default_value.type));
+                continue;
+            }
+
+            knobDesc->finalize();
+            _knobDescriptors.push_back(std::move(knobDesc));
+        }
+    }
+
+    auto count = static_cast<int64_t>(_knobDescriptors.size());
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_INFO): "
+                      "elementCount is null");
+        *elementCount = count;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= count,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_INFO): "
+                   "requestedElementCount < knob count");
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = count;
+    }
+
+    auto outputArray = static_cast<HipdnnBackendDescriptor**>(arrayOfElements);
+
+    std::vector<HipdnnBackendDescriptor*> packed;
+    packed.reserve(_knobDescriptors.size());
+    try
+    {
+        for(const auto& knobDesc : _knobDescriptors)
+        {
+            packed.push_back(HipdnnBackendDescriptor::packDescriptor(knobDesc));
+        }
+    }
+    catch(...)
+    {
+        for(auto* p : packed)
+        {
+            delete p;
+        }
+        throw;
+    }
+
+    for(size_t i = 0; i < packed.size(); ++i)
+    {
+        outputArray[i] = packed[i];
     }
 }
 
