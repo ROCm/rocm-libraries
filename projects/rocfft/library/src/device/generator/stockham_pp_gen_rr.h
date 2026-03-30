@@ -833,7 +833,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                           pre_post_lds_args};
         body += postStore;
 
-        // handle even-length complex to real post-process in lds after full pass
+        // handle even-length real to complex post-process in lds after full pass
         if(ebtype == EmbeddedType::Real2C_POST)
         {
             body += LineBreak{};
