@@ -136,8 +136,6 @@ public:
 
     // 4. Setup Emulator
     Emulator emulator(assembly_, arch_);
-    emulator.setRaceChecks(true);
-    emulator.setProfiling(profiling_);
 
     int argIdx = 0;
 
@@ -183,11 +181,12 @@ public:
     }
 
     // 5. Run Emulator
+    RunConfig config{.raceChecks = true, .profiling = profiling_};
     for (int i = 0; i < nWorkgroups; ++i) {
 
       Dim3d wgId(i, 0, 0);
       Dim3d blockDim(nWavesPerWorkgroup * waveSize_, 1, 1);
-      emulator.run(wgId, blockDim);
+      emulator.run(wgId, blockDim, config);
     }
 
     if (profiling_) {
@@ -790,14 +789,14 @@ TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_CustomKernel) {
   std::string assembly =
       loadKernelFile("gfx1151/tensilelite_custom_f16_wmma_tn_m16n128k4096.s");
   Emulator emulator(assembly, std::make_shared<Gfx1151>());
-  emulator.setRaceChecks(true);
   emulator.addAllKernargs(argBuf.data());
 
   // 4. Run: 4 waves/WG (128 threads, wave32), 2 workgroups
   constexpr int wavesPerWG = 4;
   constexpr WaveSize waveSize{32};
   for (int wg = 0; wg < 2; ++wg) {
-    emulator.run({wg, 0, 0}, {wavesPerWG * waveSize, 1, 1});
+    emulator.run({wg, 0, 0}, {wavesPerWG * waveSize, 1, 1},
+                 {.raceChecks = true});
   }
 
   // 5. Verify against CPU reference

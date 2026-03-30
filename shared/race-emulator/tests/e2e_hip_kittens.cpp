@@ -55,7 +55,6 @@ TEST(Gfx942, MatMul_Kittens) {
   std::string assembly = load_kernel_file("gfx942/kittens_original_smaller.s");
 
   auto emulator = Emulator::createGfx942(assembly);
-  emulator.setRaceChecks(true);
 
   auto emulatorInitialized = std::chrono::high_resolution_clock::now();
 
@@ -131,7 +130,8 @@ TEST(Gfx942, MatMul_Kittens) {
   KittenArg argB = {h_b.data(), 0};
   emulator.addKernarg(1, &argB);
 
-  emulator.run(0, {512, 1, 1}); // 8 waves * 64 threads/wave = 512 threads
+  emulator.run(0, {512, 1, 1},
+              {.raceChecks = true}); // 8 waves * 64 threads/wave = 512 threads
 
   auto endOfEmulatorRun = std::chrono::high_resolution_clock::now();
 

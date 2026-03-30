@@ -103,9 +103,8 @@ protected:
                   std::optional<RaceVerifier> verifier = std::nullopt) {
     Emulator emulator = getBoilerEmulator(assemblyBody, nGlobalBytes);
     try {
-      emulator.setRaceChecks(true);
-      emulator.run(/* wgId= */ 0,
-                   {nWaves * 64, 1, 1}); // nWaves waves * 64 threads/wave
+      emulator.run(/* wgId= */ 0, {nWaves * 64, 1, 1},
+                   {.raceChecks = true}); // nWaves waves * 64 threads/wave
       FAIL() << "Expected RaceConditionException, but simulation completed "
                 "successfully.";
     } catch (const RaceConditionException &e) {
@@ -151,9 +150,8 @@ protected:
   Emulator RunExpectSuccess(const std::string &assemblyBody,
                             int nGlobalBytes = 16, int nWaves = 1) {
     Emulator emulator = getBoilerEmulator(assemblyBody, nGlobalBytes);
-    emulator.setRaceChecks(true);
-    emulator.run(/* wgId= */ 0,
-                 {nWaves * 64, 1, 1}); // nWaves waves * 64 threads/wave
+    emulator.run(/* wgId= */ 0, {nWaves * 64, 1, 1},
+                 {.raceChecks = true}); // nWaves waves * 64 threads/wave
     return emulator;
   }
 
@@ -163,7 +161,6 @@ private:
     std::string combined =
         "foo:\n" + std::string(assembly) + std::string(boiler);
     auto emulator = Emulator::createGfx942(combined);
-    emulator.setRaceChecks(true);
 
     h_data.resize(nGlobalBytes / 4 + 1);
     std::iota(h_data.begin(), h_data.end(), 0);
@@ -628,13 +625,12 @@ TEST(WaveScheduleTest, CrossWaveLdsRaceDetectedForAllSchedules) {
 
   auto runWith = [&](WaveSchedule sched) -> bool {
     auto emulator = Emulator::createGfx942(code);
-    emulator.setRaceChecks(true);
-    emulator.setWaveSchedule(sched);
     std::vector<int> h(2, 0);
     int *p = h.data();
     emulator.addKernarg(0, &p);
     try {
-      emulator.run({0, 0, 0}, {128, 1, 1});
+      emulator.run({0, 0, 0}, {128, 1, 1},
+                   {.raceChecks = true, .waveSchedule = sched});
       return false;
     } catch (...) {
       return true;
@@ -749,12 +745,11 @@ TEST(WaveScheduleTest, CrossWaveLdsRace_ErrorMessageWaves) {
   )ASM" + std::string(boiler);
 
   auto emulator = Emulator::createGfx942(code);
-  emulator.setRaceChecks(true);
   std::vector<int> h(2, 0);
   int *p = h.data();
   emulator.addKernarg(0, &p);
   try {
-    emulator.run({0, 0, 0}, {128, 1, 1});
+    emulator.run({0, 0, 0}, {128, 1, 1}, {.raceChecks = true});
     FAIL() << "Expected race exception";
   } catch (const RaceConditionException &e) {
     std::string msg = e.what();
@@ -784,12 +779,11 @@ TEST(WaveScheduleTest, CrossWaveLdsWriteAfterRead_ErrorMessage) {
   )ASM" + std::string(boiler);
 
   auto emulator = Emulator::createGfx942(code);
-  emulator.setRaceChecks(true);
   std::vector<int> h(2, 0);
   int *p = h.data();
   emulator.addKernarg(0, &p);
   try {
-    emulator.run({0, 0, 0}, {128, 1, 1});
+    emulator.run({0, 0, 0}, {128, 1, 1}, {.raceChecks = true});
     FAIL() << "Expected race exception";
   } catch (const RaceConditionException &e) {
     std::string msg = e.what();

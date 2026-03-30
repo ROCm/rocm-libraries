@@ -97,7 +97,6 @@ TEST(Gfx942, MatMul_IREE_BF16xBF16xF32_32x32x32) {
 
   // Setup emulator
   Emulator emulator(assembly, std::make_shared<Gfx942>());
-  emulator.setRaceChecks(true);
 
   // IREE kernel args: 3 pointers at offsets 0, 8, 16
   uint16_t *aPtr = aBf16.data();
@@ -111,7 +110,7 @@ TEST(Gfx942, MatMul_IREE_BF16xBF16xF32_32x32x32) {
   // Run: 1 workgroup, 256 threads
   Dim3d wgId(0, 0, 0);
   Dim3d blockDim(256, 1, 1);
-  emulator.run(wgId, blockDim);
+  emulator.run(wgId, blockDim, {.raceChecks = true});
 
   // CPU reference (row-major)
   std::vector<float> cRef;
@@ -179,7 +178,6 @@ TEST(Gfx1151, MatMul_IREE_F16xF16xF32_64x128x512) {
   std::vector<float> cGpu(M * N, 0.0f);
 
   Emulator emulator(assembly, std::make_shared<Gfx1151>());
-  emulator.setRaceChecks(true);
 
   uint16_t *aPtr = aF16.data();
   uint16_t *bPtr = bF16.data();
@@ -192,7 +190,7 @@ TEST(Gfx1151, MatMul_IREE_F16xF16xF32_64x128x512) {
   // 8 workgroups, 128 threads each (4 waves of 32)
   Dim3d blockDim(128, 1, 1);
   for (int wgX = 0; wgX < 8; ++wgX) {
-    emulator.run(Dim3d(wgX, 0, 0), blockDim);
+    emulator.run(Dim3d(wgX, 0, 0), blockDim, {.raceChecks = true});
   }
 
   std::vector<float> cRef;
@@ -256,7 +254,6 @@ TEST(Gfx1151, MatMul_IREE_BF16xBF16xF32_32x32x32) {
   std::vector<float> cGpu(M * N, 0.0f);
 
   Emulator emulator(assembly, std::make_shared<Gfx1151>());
-  emulator.setRaceChecks(true);
 
   uint16_t *aPtr = aBf16.data();
   uint16_t *bPtr = bBf16.data();
@@ -269,7 +266,7 @@ TEST(Gfx1151, MatMul_IREE_BF16xBF16xF32_32x32x32) {
   // 1 workgroup, 128 threads (4 waves of 32)
   Dim3d wgId(0, 0, 0);
   Dim3d blockDim(128, 1, 1);
-  emulator.run(wgId, blockDim);
+  emulator.run(wgId, blockDim, {.raceChecks = true});
 
   std::vector<float> cRef;
   cpuGemmRowMajorF32(M, N, K, aF32, bF32, cRef);

@@ -173,10 +173,9 @@ namespace
         emulator.addAllKernargs(kernel.args.data());
         const int  waveSize             = emulator.getArch().getWaveSize();
         const auto numWavesPerWorkGroup = (wgs.x * wgs.y * wgs.z) / waveSize;
-        emulator.setRaceChecks(true);
-        emulator.setCompleteEmulation(false);
         emulator.run({0, 0, 0},
-                     {static_cast<int>(waveSize * numWavesPerWorkGroup), 1, 1});
+                     {static_cast<int>(waveSize * numWavesPerWorkGroup), 1, 1},
+                     {.raceChecks = true, .completeEmulation = false});
         std::cout << "No races detected in kernel: " << kernelName << std::endl;
 
         return true;

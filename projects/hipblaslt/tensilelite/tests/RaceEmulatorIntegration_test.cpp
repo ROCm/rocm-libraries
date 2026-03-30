@@ -77,14 +77,15 @@ static raceemulator::Emulator makeEmulator(const std::string &asmText) {
   static std::vector<int> data(4, 0);
   int *ptr = data.data();
   emulator.addKernarg(0, &ptr);
-  emulator.setRaceChecks(true);
-  emulator.setCompleteEmulation(false);
   return emulator;
 }
 
+static constexpr raceemulator::RunConfig kRaceCheckConfig{
+    .raceChecks = true, .completeEmulation = false};
+
 TEST(RaceEmulatorIntegration, DetectsVgprRaceAcrossLibraryBoundary) {
   auto emulator = makeEmulator(kRaceyAsm);
-  EXPECT_THROW(emulator.run({0, 0, 0}, {64, 1, 1}),
+  EXPECT_THROW(emulator.run({0, 0, 0}, {64, 1, 1}, kRaceCheckConfig),
                raceemulator::RaceConditionException);
 }
 

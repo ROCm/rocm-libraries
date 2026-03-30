@@ -25,8 +25,6 @@ void Emulator::appendStr(std::ostream &os) const {
   parsedAsm->appendTokensStr(os);
 }
 
-void Emulator::setRaceChecks(bool enable) { raceChecks = enable; }
-
 std::string Emulator::getProfileReport(double minPercentage) const {
   return profiler.reportStr(minPercentage);
 }
@@ -112,7 +110,8 @@ Emulator Emulator::createGfx1151(std::string_view assembly) {
   return Emulator(assembly, std::make_shared<Gfx1151>());
 }
 
-void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves) {
+void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves,
+                                const RunConfig &config) {
 
   auto threadsInX = blockDim.x;
   auto threadsInY = blockDim.y;
@@ -186,10 +185,10 @@ void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves) {
   const auto &labels = parsedAsm->labels;
   const auto &macros = parsedAsm->macros;
 
-  workgroup.setRaceChecks(raceChecks);
-  workgroup.setCompleteEmulation(completeEmulation);
+  workgroup.setRaceChecks(config.raceChecks);
+  workgroup.setCompleteEmulation(config.completeEmulation);
   workgroup.setProfiler(&profiler);
-  workgroup.setWaveSchedule(waveSchedule);
+  workgroup.setWaveSchedule(config.waveSchedule);
 
   for (int i = 0; i < nWaves; ++i) {
     workgroup.addWave(Wave(nextFreeVgpr, accumOffset, nextFreeSgpr,
@@ -268,7 +267,7 @@ void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves) {
   }
 }
 
-void Emulator::run(Dim3d wgId, Dim3d blockDim) {
+void Emulator::run(Dim3d wgId, Dim3d blockDim, const RunConfig &config) {
 
   // Validate block dimensions are within hardware limits (10 bits per
   // dimension)
@@ -290,9 +289,11 @@ void Emulator::run(Dim3d wgId, Dim3d blockDim) {
 
   const int nWaves = totalThreads / wavefrontSize;
 
+  profiler.setEnabled(config.profiling);
+
   {
     auto sw = profiler.scopedStopwatch("initializeForRun");
-    initializeForRun(wgId, blockDim, nWaves);
+    initializeForRun(wgId, blockDim, nWaves, config);
   }
 
   auto reportRaceCondition = [&](const RaceConditionException &e,

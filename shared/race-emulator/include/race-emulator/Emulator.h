@@ -40,21 +40,9 @@ public:
   Emulator &operator=(Emulator &&other) = delete;
   ~Emulator();
 
-  /// Enable race condition checks during execution (disabled by default).
-  void setRaceChecks(bool);
-
-  /// When false, no data is copied from the emulator's global memory,
-  /// so kernel argument buffers do not need to be initialized.
-  void setCompleteEmulation(bool enable) { completeEmulation = enable; }
-
-  /// Enable per-instruction profiling. Zero overhead when disabled.
-  void setProfiling(bool enable) { profiler.setEnabled(enable); }
-
   /// Return a formatted profiling report. Entries below minPercentage of
   /// wall-clock time are aggregated into an "other" row.
   std::string getProfileReport(double minPercentage = 1.0) const;
-
-  void setWaveSchedule(WaveSchedule s) { waveSchedule = s; }
 
   /// Write a kernel argument into this emulator's kernarg segment.
   void addKernarg(int argNumber, const void *argValue);
@@ -63,7 +51,7 @@ public:
   void addAllKernargs(const void *args);
 
   /// Run the kernel on a single workgroup.
-  void run(Dim3d wgId, Dim3d blockDim);
+  void run(Dim3d wgId, Dim3d blockDim, const RunConfig &config = {});
 
   std::string getName() const;
   int getKernargSegmentSize() const;
@@ -81,16 +69,14 @@ public:
   std::string str() const;
 
 private:
-  void initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves);
+  void initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves,
+                        const RunConfig &config);
   std::shared_ptr<Architecture> arch;
   std::unique_ptr<ParsedAsm> parsedAsm;
   std::vector<char> kernargSegment;
   std::vector<bool> kernargIsSet;
   Workgroup workgroup;
   Profiler profiler;
-  bool raceChecks{false};
-  bool completeEmulation{true};
-  WaveSchedule waveSchedule{WaveSchedule::Sequential};
 };
 
 } // namespace raceemulator
