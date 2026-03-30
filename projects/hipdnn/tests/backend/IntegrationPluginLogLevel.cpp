@@ -72,28 +72,35 @@ TEST_F(IntegrationPluginLogLevel, PluginCreatesInfoLogs)
 
     loadTestGoodPlugin();
 
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "pluginSetLogLevel"))
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "pluginSetLogLevel level=0"))
         << "Expected plugin to create INFO-level logs. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 }
 
-TEST_F(IntegrationPluginLogLevel, PluginDoesNotCreateInfoLogsWhenLogLevelWarn)
+TEST_F(IntegrationPluginLogLevel, PluginReceivesWarnLevelNotification)
 {
-    registerIsolatedRecorderAsUserCallback(HIPDNN_SEV_INFO);
-
-    ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_WARN), HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
 
     auto recorder
         = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     loadTestGoodPlugin();
 
+    registerIsolatedRecorderAsUserCallback(HIPDNN_SEV_INFO);
+
+    // Change level to WARN — plugin should log "pluginSetLogLevel" at WARN severity
+    ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_WARN), HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "pluginSetLogLevel level=1"))
+        << "Expected plugin to create WARN-level logs. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
+
     EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "pluginSetLogLevel"))
         << "Expected plugin to NOT create INFO-level logs. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 }
 
-TEST_F(IntegrationPluginLogLevel, PluginDoesNotCreateInfoLogsWhenLogLevelOff)
+TEST_F(IntegrationPluginLogLevel, PluginDoesNotCreateLogsWhenLogLevelOff)
 {
     registerIsolatedRecorderAsUserCallback(HIPDNN_SEV_INFO);
 
@@ -104,8 +111,8 @@ TEST_F(IntegrationPluginLogLevel, PluginDoesNotCreateInfoLogsWhenLogLevelOff)
 
     loadTestGoodPlugin();
 
-    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "pluginSetLogLevel"))
-        << "Expected plugin to NOT create INFO-level logs. Captured logs:\n"
+    EXPECT_EQ(recorder.getRecordedLogCount(), 0)
+        << "Expected plugin to NOT create any logs when level is OFF. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 }
 
@@ -120,13 +127,13 @@ TEST_F(IntegrationPluginLogLevel, WarnThenInfoProducesLogs)
 
     loadTestGoodPlugin();
 
-    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "pluginSetLogLevel"))
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, ""))
         << "Expected plugin to NOT create INFO-level logs. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
     ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
 
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "pluginSetLogLevel"))
-        << "Expected plugin to create INFO-level logs. Captured logs:\n"
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "pluginSetLogLevel level=0"))
+        << "Expected plugin to create INFO-level logs after changing to INFO. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 }

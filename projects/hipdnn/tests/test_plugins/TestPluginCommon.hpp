@@ -146,18 +146,36 @@ public:
             hipdnn_plugin_sdk::throwIfNull(callback);
             hipdnn_plugin_sdk::throwIfNull(getInstance());
 
-            hipdnn_data_sdk::logging::registerLoggingCallback(callback);
+            hipdnn_plugin_sdk::logging::initializeCallbackLogging(getInstance()->getPluginName(),
+                                                                  callback);
+
             LOG_API_SUCCESS(apiName, "callback registered");
         });
     }
 
     static hipdnnPluginStatus_t pluginSetLogLevel(hipdnnSeverity_t level)
     {
-        return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        return hipdnn_plugin_sdk::tryCatch([&]() {
             hipdnn_plugin_sdk::throwIfNull(getInstance());
 
-            hipdnn_data_sdk::logging::setLogLevel(level);
-            LOG_API_SUCCESS(apiName, "level=" << level);
+            hipdnn_plugin_sdk::logging::setLogLevel(level);
+
+            // Log at the level being set so tests can positively verify the call
+            // and the level value for each severity
+            switch(level)
+            {
+            case HIPDNN_SEV_INFO:
+                HIPDNN_PLUGIN_LOG_INFO("TEST: pluginSetLogLevel level=" << level);
+                break;
+            case HIPDNN_SEV_WARN:
+                HIPDNN_PLUGIN_LOG_WARN("TEST: pluginSetLogLevel level=" << level);
+                break;
+            case HIPDNN_SEV_ERROR: // Not used by tests
+            case HIPDNN_SEV_FATAL: // Not used by tests
+            case HIPDNN_SEV_OFF:
+            default:
+                break;
+            }
         });
     }
 
