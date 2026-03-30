@@ -256,7 +256,7 @@ INSTANTIATE_TEST_SUITE_P(partial_pass_3D,
                          accuracy_test::TestName);
 
 INSTANTIATE_TEST_SUITE_P(
-#ifdef WIN32
+#ifdef _WIN32
     DISABLED_partial_pass_3D_callback,
 #else
     partial_pass_3D_callback,

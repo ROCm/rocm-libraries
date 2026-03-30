@@ -27,6 +27,7 @@ struct LayernormFpropParams
         const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes,
         const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
         const hipdnn_data_sdk::data_objects::TensorAttributes& biasAttributes,
+        const int64_t normalizedDimCount,
         const hipdnn_data_sdk::data_objects::TensorAttributes* meanAttributes = nullptr,
         const hipdnn_data_sdk::data_objects::TensorAttributes* invVarianceAttributes = nullptr)
         : xTensor(unpackTensorAttributes(xAttributes))
@@ -34,6 +35,7 @@ struct LayernormFpropParams
         , epsilonTensor(unpackTensorAttributes(epsilonAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
         , biasTensor(unpackTensorAttributes(biasAttributes))
+        , normalizedDimCount(normalizedDimCount)
         , meanTensor(meanAttributes != nullptr
                          ? std::make_optional(unpackTensorAttributes(*meanAttributes))
                          : std::nullopt)
@@ -48,6 +50,7 @@ struct LayernormFpropParams
     hipdnn_data_sdk::data_objects::TensorAttributesT epsilonTensor;
     hipdnn_data_sdk::data_objects::TensorAttributesT scaleTensor;
     hipdnn_data_sdk::data_objects::TensorAttributesT biasTensor;
+    int64_t normalizedDimCount;
     std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> meanTensor;
     std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> invVarianceTensor;
 };
@@ -65,6 +68,20 @@ public:
     {
     }
 
+    std::vector<int64_t> getOutputTensorIds() const override
+    {
+        std::vector<int64_t> ids = {_params.yTensor.uid};
+        if(_params.meanTensor.has_value())
+        {
+            ids.push_back(_params.meanTensor.value().uid);
+        }
+        if(_params.invVarianceTensor.has_value())
+        {
+            ids.push_back(_params.invVarianceTensor.value().uid);
+        }
+        return ids;
+    }
+
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
         auto shallowXTensor
@@ -74,7 +91,7 @@ public:
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         // Extract epsilon from pass-by-value tensor (cast to double)
-        double epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+        const double epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
             _params.epsilonTensor, "Epsilon");
 
         // Scale tensor (required)
@@ -107,15 +124,12 @@ public:
             invVariancePtr = invVarianceTensor.get();
         }
 
-        // Determine normalizedDimCount from scale tensor shape
-        auto normalizedDimCount = static_cast<int64_t>(scaleTensor->dims().size());
-
         utilities::CpuFpReferenceLayernorm::fprop(*shallowXTensor,
                                                   scaleTensor.get(),
                                                   biasTensor.get(),
                                                   *shallowYTensor,
                                                   epsilon,
-                                                  normalizedDimCount,
+                                                  _params.normalizedDimCount,
                                                   meanPtr,
                                                   invVariancePtr);
     }
@@ -214,6 +228,7 @@ public:
                                     *tensorMap.at(nodeAttributes->epsilon_tensor_uid()),
                                     *tensorMap.at(nodeAttributes->scale_tensor_uid()),
                                     *tensorMap.at(nodeAttributes->bias_tensor_uid()),
+                                    nodeAttributes->normalized_dim_count(),
                                     mean,
                                     invVariance);
 

@@ -110,6 +110,7 @@ set( hipblas_test_common
   ${BLIS_CPP}
 )
 
+
 if(BUILD_FORTRAN_CLIENTS)
   add_executable( hipblas-test ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} $<TARGET_OBJECTS:hipblas_fortran_client> )
 else()
@@ -120,7 +121,6 @@ target_include_directories( hipblas-test
   PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
 )
-
 target_compile_definitions( hipblas-test PRIVATE GOOGLE_TEST ${BLIS_DEFINES} )
 
 # External header includes included as SYSTEM files
@@ -142,6 +142,14 @@ endif()
 
 # need mf16c flag for float->half convertion
 target_compile_options( hipblas-test PRIVATE -mf16c ) # -Wno-deprecated-declarations )
+
+# Workaround: Clang ASAN emits misaligned asan_globals metadata for
+# compiler-generated .str literals from GTest macros in test TUs.
+# Disable ASAN global instrumentation for the test binary only.
+# The library under test (libhipblas.so) retains full ASAN coverage.
+if(CMAKE_CXX_FLAGS MATCHES "-fsanitize=address")
+  target_compile_options(hipblas-test PRIVATE -mllvm -asan-globals=0)
+endif()
 
 target_compile_options(hipblas-test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}>)
 

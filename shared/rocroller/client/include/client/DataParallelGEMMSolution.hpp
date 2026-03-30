@@ -66,11 +66,32 @@ namespace rocRoller
                         }
                     };
 
+                    auto pretileA = not solutionParams.types.pretileA.empty();
                     auto pretileB = not solutionParams.types.pretileB.empty();
 
-                    m_tagTensorA = command->addOperation(
-                        Operations::Tensor(2, typeA, {}, unitStrides(solutionParams.types.transA)));
-                    m_tagA = command->addOperation(Operations::T_Load_Tiled(m_tagTensorA));
+                    if(pretileA)
+                        AssertFatal(solutionParams.types.pretileA.size() == 2,
+                                    "pretileA must have size 2 (MxK tile dimensions).",
+                                    ShowValue(solutionParams.types.pretileA.size()));
+                    if(pretileB)
+                        AssertFatal(solutionParams.types.pretileB.size() == 2,
+                                    "pretileB must have size 2 (KxN tile dimensions).",
+                                    ShowValue(solutionParams.types.pretileB.size()));
+
+                    auto stridesA = pretileA ? std::vector<size_t>{}
+                                             : unitStrides(solutionParams.types.transA);
+                    m_tagTensorA
+                        = command->addOperation(Operations::Tensor(2, typeA, {}, stridesA));
+
+                    auto loadInputA = m_tagTensorA;
+
+                    if(pretileA)
+                    {
+                        loadInputA = command->addOperation(Operations::SubTileTranspose(
+                            loadInputA, solutionParams.types.pretileA, true));
+                    }
+
+                    m_tagA = command->addOperation(Operations::T_Load_Tiled(loadInputA));
 
                     auto stridesB = pretileB ? std::vector<size_t>{}
                                              : unitStrides(solutionParams.types.transB);
@@ -651,8 +672,34 @@ namespace rocRoller
                                            problemParams.types.transB == TransposeType::T ? "T"
                                                                                           : "N");
 
-                    if(not problemParams.types.pretileB.empty()
-                       && problemParams.types.pretileB.size() == 2)
+                    if(problemParams.types.pretileA.size() == 2)
+                    {
+                        AssertFatal(problemParams.types.transA == TransposeType::T,
+                                    "Pre-tiling A only supported for TransposeType::T");
+
+                        auto const M     = problemParams.m;
+                        auto const K     = problemParams.k;
+                        auto const tileM = problemParams.types.pretileA[0];
+                        auto const tileK = problemParams.types.pretileA[1];
+
+                        AssertFatal(
+                            M % tileM == 0,
+                            "A matrix dimension M must be divisible by pretileA tile size in M.",
+                            ShowValue(M),
+                            ShowValue(tileM));
+                        AssertFatal(
+                            K % tileK == 0,
+                            "A matrix dimension K must be divisible by pretileA tile size in K.",
+                            ShowValue(K),
+                            ShowValue(tileK));
+
+                        descA = TensorDescriptor(fromString<DataType>(problemParams.types.typeA),
+                                                 {M, K},
+                                                 {static_cast<size_t>((K / tileK) * tileM * tileK),
+                                                  static_cast<size_t>(tileM * tileK)});
+                    }
+
+                    if(problemParams.types.pretileB.size() == 2)
                     {
                         AssertFatal(problemParams.types.transB == TransposeType::N,
                                     "Pre-tiling B only supported for TransposeType::N");

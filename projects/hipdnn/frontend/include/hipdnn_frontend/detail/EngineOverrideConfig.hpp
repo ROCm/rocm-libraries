@@ -54,7 +54,7 @@ struct TensorPattern
         {
             const auto& tstride = tensor.get_stride();
             // Nonmatching strides assume wildcard semantics.
-            size_t rank = std::min(stride.size(), tstride.size());
+            const size_t rank = std::min(stride.size(), tstride.size());
             for(size_t i = 0; i < rank; ++i)
             {
                 if(stride[i] != WILDCARD_DIM && stride[i] != tstride[i])
@@ -373,7 +373,7 @@ private:
     {
         for(const auto& p : patterns)
         {
-            for(int64_t d : p.dim)
+            for(const int64_t d : p.dim)
             {
                 if(d == WILDCARD_DIM)
                 {

@@ -50,7 +50,7 @@ TEST_F(IntegrationHandleApi, CreateAndDestroy)
 
 TEST_F(IntegrationHandleApi, CreateWithNullptr)
 {
-    hipdnnStatus_t status = hipdnnCreate(nullptr);
+    const hipdnnStatus_t status = hipdnnCreate(nullptr);
 
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }

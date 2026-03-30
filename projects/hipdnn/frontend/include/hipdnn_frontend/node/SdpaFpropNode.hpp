@@ -8,11 +8,13 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
+#include <hipdnn_frontend/detail/SdpaFpropPacker.hpp>
+#include <hipdnn_frontend/detail/SdpaFpropUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class SdpaFpropNode : public BaseNode<SdpaFpropNode>
+class SdpaFpropNode : public BaseNode<SdpaFpropNode, NodeType::SDPA_FPROP>
 {
 
 public:
@@ -90,25 +92,33 @@ public:
                             "SdpaFpropNode: seq_kv mismatch between K and V: "
                                 + std::to_string(seqKvK) + " vs " + std::to_string(seqKvV));
 
-        // Rule 4: num_kv_heads: K[-3] == V[-3]; num_heads % num_kv_heads == 0 (GQA/MQA)
+        // Rule 4: num_heads % K_heads == 0; num_heads % V_heads == 0 (GQA/MQA)
         const auto numHeads = qDims[1];
-        const auto numKvHeadsK = kDims[1];
-        const auto numKvHeadsV = vDims[1];
-        HIPDNN_RETURN_IF_NE(numKvHeadsK,
-                            numKvHeadsV,
-                            ErrorCode::INVALID_VALUE,
-                            "SdpaFpropNode: num_kv_heads mismatch between K and V: "
-                                + std::to_string(numKvHeadsK) + " vs "
-                                + std::to_string(numKvHeadsV));
-        HIPDNN_RETURN_IF_TRUE(numHeads % numKvHeadsK != 0,
+        const auto numHeadsK = kDims[1];
+        const auto numHeadsV = vDims[1];
+        HIPDNN_RETURN_IF_TRUE(numHeadsK <= 0,
                               ErrorCode::INVALID_VALUE,
-                              "SdpaFpropNode: num_heads must be divisible by num_kv_heads for "
+                              "SdpaFpropNode: num_heads_k must be positive, got "
+                                  + std::to_string(numHeadsK));
+        HIPDNN_RETURN_IF_TRUE(numHeads % numHeadsK != 0,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFpropNode: num_heads must be divisible by num_heads_k for "
                               "GQA/MQA. num_heads="
                                   + std::to_string(numHeads)
-                                  + ", num_kv_heads=" + std::to_string(numKvHeadsK));
+                                  + ", num_heads_k=" + std::to_string(numHeadsK));
+        HIPDNN_RETURN_IF_TRUE(numHeadsV <= 0,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFpropNode: num_heads_v must be positive, got "
+                                  + std::to_string(numHeadsV));
+        HIPDNN_RETURN_IF_TRUE(numHeads % numHeadsV != 0,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFpropNode: num_heads must be divisible by num_heads_v for "
+                              "GQA/MQA. num_heads="
+                                  + std::to_string(numHeads)
+                                  + ", num_heads_v=" + std::to_string(numHeadsV));
 
         // Rule 5: Optional attention mask validation
-        const auto attnMask = attributes.get_attn_mask();
+        const auto attnMask = attributes.get_bias();
         if(attnMask)
         {
             const auto& maskDims = attnMask->get_dim();
@@ -140,7 +150,7 @@ public:
         }
 
         // Rule 6: Optional scale must be a scalar tensor (volume == 1)
-        const auto scale = attributes.get_scale();
+        const auto scale = attributes.get_attn_scale();
         if(scale)
         {
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
@@ -232,6 +242,23 @@ public:
         }
 
         return {};
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        SdpaAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackSdpaFpropOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createSdpaFpropOperation(attributes, tensorDescs, operations);
     }
 
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>

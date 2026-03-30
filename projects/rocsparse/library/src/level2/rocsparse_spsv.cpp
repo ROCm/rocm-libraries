@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -122,8 +122,8 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_analysis_buffer_size(
                     handle, trans, mat, &buffer_size_analysis));
                 size_t buffer_size_solve;
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrsv_solve_buffer_size(handle, trans, mat, &buffer_size_solve));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve_buffer_size(
+                    handle, trans, mat, x, y, &buffer_size_solve));
                 *buffer_size = rocsparse::max(buffer_size_analysis, buffer_size_solve);
                 *buffer_size = rocsparse::max(static_cast<size_t>(4), *buffer_size);
                 return rocsparse_status_success;
@@ -181,8 +181,8 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_analysis_buffer_size(
                     handle, trans, mat, &buffer_size_analysis));
                 size_t buffer_size_solve;
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::coosv_solve_buffer_size(handle, trans, mat, &buffer_size_solve));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_solve_buffer_size(
+                    handle, trans, mat, x, y, &buffer_size_solve));
                 *buffer_size = rocsparse::max(buffer_size_analysis, buffer_size_solve);
                 *buffer_size = rocsparse::max(static_cast<size_t>(4), *buffer_size);
                 return rocsparse_status_success;

@@ -297,7 +297,7 @@ protected:
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
 
         // Create tensor bundle
-        std::vector<int64_t> dims = {2, 3, 14, 14}; // n=2, c=3, h=14, w=14
+        const std::vector<int64_t> dims = {2, 3, 14, 14}; // n=2, c=3, h=14, w=14
         SimpleBatchnorm2DTensorBundle<float, float> tensorBundle(dims);
 
         // Create graph and tensors using the unified function
