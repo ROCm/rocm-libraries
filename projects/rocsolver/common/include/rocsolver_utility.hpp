@@ -148,7 +148,7 @@ namespace formatting
     {
         return fmt::format(std::forward<T>(fmt_string), std::forward<Args>(args)...);
     }
-#endif
+#endif  // USE_FMT_LIB
     template <typename Range>
     std::string join(Range&& r, std::string_view sep)
     {
