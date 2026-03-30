@@ -27,7 +27,7 @@ static void removeFromUnorderedList(std::vector<EventId> &list,
   }
 }
 
-void Workgroup::retireLdsEvent(EventId eventId) {
+void Workgroup::retireEvent(EventId eventId) {
   const auto &info = eventRegistry[eventId.value];
   if (isToLds(info.type)) {
     removeFromUnorderedList(ldsWriteEvents, eventId);

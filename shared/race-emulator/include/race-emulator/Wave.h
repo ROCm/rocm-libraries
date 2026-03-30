@@ -343,8 +343,7 @@ private:
   void retireEventRegisters(EventId);
 
   void resolveWaitCnt(int limit,
-                      std::function<bool(MemoryEventType)> isTargetType,
-                      std::function<void(EventId)> extraCleanup);
+                      std::function<bool(MemoryEventType)> isTargetType);
 
   std::function<int()> compileLine(const std::string &line,
                                    const std::map<std::string, Macro> &macros);

@@ -62,9 +62,9 @@ enum class EventStatus {
 ///   2. s_waitcnt -> markEventWaveComplete() transitions the event to
 ///      WAVE_COMPLETE. The owning wave may now safely access the same
 ///      LDS bytes, but other waves may not.
-///   3. s_barrier (all waves arrived) -> retireLdsEvent() removes the event
+///   3. s_barrier (all waves arrived) -> retireEvent() removes LDS events
 ///      from the live list and decrements per-byte counts, making the LDS
-///      ranges available for cross-wave access.
+///      ranges available for cross-wave access. Non-LDS events are no-ops.
 ///
 /// Race validation uses a two-level approach:
 ///   - Fast path: per-byte counters (byteWriteCounts / byteReadCounts)
@@ -153,13 +153,12 @@ public:
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
 
-  /// Retire an LDS event at s_barrier. Updates two data structures:
+  /// Retire an event at s_barrier. For LDS-touching events, updates:
   ///   1. Removes eventId from ldsWriteEvents or ldsReadEvents (by type).
   ///   2. Decrements per-byte counts (byteWriteCounts or byteReadCounts)
   ///      for each byte in the event's ldsIntervals.
-  /// After retirement, the LDS bytes covered by this event are no longer
-  /// considered in race validation.
-  void retireLdsEvent(EventId);
+  /// Non-LDS events (GLOBAL_TO_VGPR, VGPR_TO_GLOBAL) are no-ops.
+  void retireEvent(EventId);
 
   /// Return the live LDS event IDs (for error reporting).
   const std::vector<EventId> &getLdsWriteEvents() const {

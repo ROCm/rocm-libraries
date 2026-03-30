@@ -493,8 +493,7 @@ void Wave::retireEventRegisters(EventId eventId) {
 
 // The generic 'reverse scan & retire' logic for s_waitcnt.
 void Wave::resolveWaitCnt(int limit,
-                          std::function<bool(MemoryEventType)> isTargetType,
-                          std::function<void(EventId)> extraCleanup) {
+                          std::function<bool(MemoryEventType)> isTargetType) {
   int seen = 0;
   std::vector<int> indicesToRemove;
 
@@ -512,63 +511,33 @@ void Wave::resolveWaitCnt(int limit,
   // 2. Process removals
   for (int idx : indicesToRemove) {
     EventId eventId = waveMemoryEvents[idx];
-
-    // A. Common Cleanup (Unlock Registers)
     retireEventRegisters(eventId);
-
-    // B. Specific Cleanup (Unlock LDS, SGPRs, etc.)
-    if (extraCleanup) {
-      extraCleanup(eventId);
-    }
-
-    // Will completely empty bucket at s_barrier.
-    auto eventType = getWorkgroup().getEventType(eventId);
-    if (eventType == MemoryEventType::VGPR_TO_LDS ||
-        eventType == MemoryEventType::LDS_TO_VGPR ||
-        eventType == MemoryEventType::GLOBAL_TO_LDS) {
-      waveCompleteMemoryEvents.push_back(eventId);
-    }
-
-    // C. Remove from Wave History
+    getWorkgroup().markEventWaveComplete(eventId);
+    waveCompleteMemoryEvents.push_back(eventId);
     waveMemoryEvents.erase(waveMemoryEvents.begin() + idx);
   }
 }
 
 void Wave::sWaitCntVmcnt(int vmcnt) {
-  resolveWaitCnt(
-      vmcnt,
-      [](MemoryEventType type) {
-        return type == MemoryEventType::GLOBAL_TO_VGPR ||
-               type == MemoryEventType::VGPR_TO_GLOBAL ||
-               type == MemoryEventType::GLOBAL_TO_LDS;
-      },
-      [&](EventId eventId) {
-        if (getWorkgroup().getEventType(eventId) ==
-            MemoryEventType::GLOBAL_TO_LDS) {
-          getWorkgroup().markEventWaveComplete(eventId);
-        }
-      });
+  resolveWaitCnt(vmcnt, [](MemoryEventType type) {
+    return type == MemoryEventType::GLOBAL_TO_VGPR ||
+           type == MemoryEventType::VGPR_TO_GLOBAL ||
+           type == MemoryEventType::GLOBAL_TO_LDS;
+  });
 }
 
 void Wave::sWaitCntLgkmcnt(int lgkmcnt) {
-  resolveWaitCnt(
-      lgkmcnt,
-      [](MemoryEventType type) {
-        return type == MemoryEventType::LDS_TO_VGPR ||
-               type == MemoryEventType::VGPR_TO_LDS;
-      },
-      [&](EventId eventId) {
-        if (!getWorkgroup().getEventIntervals(eventId).empty()) {
-          getWorkgroup().markEventWaveComplete(eventId);
-        }
-      });
+  resolveWaitCnt(lgkmcnt, [](MemoryEventType type) {
+    return type == MemoryEventType::LDS_TO_VGPR ||
+           type == MemoryEventType::VGPR_TO_LDS;
+  });
 }
 
 void Wave::flushWaveCompleteMemoryEvents() {
   auto sw = profileScope("removeEvents");
   Workgroup &wg = getWorkgroup();
   for (EventId eventId : waveCompleteMemoryEvents) {
-    wg.retireLdsEvent(eventId);
+    wg.retireEvent(eventId);
   }
   waveCompleteMemoryEvents.clear();
 }
