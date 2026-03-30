@@ -6,7 +6,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 
-namespace test_activation_common
+namespace hip_kernel_provider::test_activation_common
 {
 
 struct ActivTestCase
