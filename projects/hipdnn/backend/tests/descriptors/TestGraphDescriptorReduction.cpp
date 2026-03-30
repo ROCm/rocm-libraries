@@ -45,18 +45,19 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<ReductionOperationDescriptor>();
     auto desc = wrapper->asDescriptor<ReductionOperationDescriptor>();
 
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&xDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_YDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&yDesc));
 
-    auto mode = HIPDNN_REDUCTION_ADD;
-    desc->setAttribute(HIPDNN_ATTR_REDUCTION_MODE_EXT, HIPDNN_TYPE_REDUCTION_MODE, 1, &mode);
-    desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    auto mode = HIPDNN_REDUCE_TENSOR_ADD;
+    desc->setAttribute(
+        HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, 1, &mode);
+    desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     if(isDeterministic)
     {
@@ -253,22 +254,22 @@ TEST_F(TestGraphDescriptorReduction, ReductionAttributesPreserved)
     auto opDesc = wrapper->asDescriptor<ReductionOperationDescriptor>();
 
     HipdnnBackendDescriptor* xPtr = xDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&xPtr));
     HipdnnBackendDescriptor* yPtr = yDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_YDESC,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&yPtr));
 
-    auto mode = HIPDNN_REDUCTION_ADD;
-    opDesc->setAttribute(HIPDNN_ATTR_REDUCTION_MODE_EXT, HIPDNN_TYPE_REDUCTION_MODE, 1, &mode);
+    auto mode = HIPDNN_REDUCE_TENSOR_ADD;
+    opDesc->setAttribute(
+        HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, 1, &mode);
 
     auto computeType = HIPDNN_DATA_FLOAT;
-    opDesc->setAttribute(
-        HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    opDesc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     // Set operation name
     const std::string opName = "test_reduction";

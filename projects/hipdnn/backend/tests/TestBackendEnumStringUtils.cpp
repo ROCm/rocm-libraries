@@ -85,9 +85,8 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
     EXPECT_STREQ(
         hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT),
         "HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT");
-    EXPECT_STREQ(
-        hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT),
-        "HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT");
+    EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR),
+                 "HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR");
 
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
@@ -658,14 +657,14 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT");
 
     // Reduction operation attributes
-    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT),
-                 "HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT");
-    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT),
-                 "HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT");
-    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_REDUCTION_MODE_EXT),
-                 "HIPDNN_ATTR_REDUCTION_MODE_EXT");
-    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT),
-                 "HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC),
+                 "HIPDNN_ATTR_OPERATION_REDUCTION_XDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_REDUCTION_YDESC),
+                 "HIPDNN_ATTR_OPERATION_REDUCTION_YDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_REDUCTION_OPERATOR),
+                 "HIPDNN_ATTR_REDUCTION_OPERATOR");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_REDUCTION_COMP_TYPE),
+                 "HIPDNN_ATTR_REDUCTION_COMP_TYPE");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT),
                  "HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT");
 
@@ -797,8 +796,8 @@ TEST(TestBackendEnumStringUtils, GetAttributeTypeString)
                  "HIPDNN_TYPE_DIAGONAL_ALIGNMENT");
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION),
                  "HIPDNN_TYPE_ATTENTION_IMPLEMENTATION");
-    EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_REDUCTION_MODE),
-                 "HIPDNN_TYPE_REDUCTION_MODE");
+    EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE),
+                 "HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE");
 
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT),
                  "HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT");
@@ -941,21 +940,29 @@ TEST(TestBackendEnumStringUtils, GetPointwiseModeString)
                  "HIPDNN_POINTWISE_UNKNOWN");
 }
 
-TEST(TestBackendEnumStringUtils, GetReductionModeString)
+TEST(TestBackendEnumStringUtils, GetReduceTensorOpString)
 {
-    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_ADD), "HIPDNN_REDUCTION_ADD");
-    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_MUL), "HIPDNN_REDUCTION_MUL");
-    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_MIN), "HIPDNN_REDUCTION_MIN");
-    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_MAX), "HIPDNN_REDUCTION_MAX");
-    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_AMAX), "HIPDNN_REDUCTION_AMAX");
-    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_AVG), "HIPDNN_REDUCTION_AVG");
-    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_NORM1), "HIPDNN_REDUCTION_NORM1");
-    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_NORM2), "HIPDNN_REDUCTION_NORM2");
-    EXPECT_STREQ(hipdnnGetReductionModeString(HIPDNN_REDUCTION_MUL_NO_ZEROS),
-                 "HIPDNN_REDUCTION_MUL_NO_ZEROS");
+    EXPECT_STREQ(hipdnnGetReduceTensorOpString(HIPDNN_REDUCE_TENSOR_ADD),
+                 "HIPDNN_REDUCE_TENSOR_ADD");
+    EXPECT_STREQ(hipdnnGetReduceTensorOpString(HIPDNN_REDUCE_TENSOR_MUL),
+                 "HIPDNN_REDUCE_TENSOR_MUL");
+    EXPECT_STREQ(hipdnnGetReduceTensorOpString(HIPDNN_REDUCE_TENSOR_MIN),
+                 "HIPDNN_REDUCE_TENSOR_MIN");
+    EXPECT_STREQ(hipdnnGetReduceTensorOpString(HIPDNN_REDUCE_TENSOR_MAX),
+                 "HIPDNN_REDUCE_TENSOR_MAX");
+    EXPECT_STREQ(hipdnnGetReduceTensorOpString(HIPDNN_REDUCE_TENSOR_AMAX),
+                 "HIPDNN_REDUCE_TENSOR_AMAX");
+    EXPECT_STREQ(hipdnnGetReduceTensorOpString(HIPDNN_REDUCE_TENSOR_AVG),
+                 "HIPDNN_REDUCE_TENSOR_AVG");
+    EXPECT_STREQ(hipdnnGetReduceTensorOpString(HIPDNN_REDUCE_TENSOR_NORM1),
+                 "HIPDNN_REDUCE_TENSOR_NORM1");
+    EXPECT_STREQ(hipdnnGetReduceTensorOpString(HIPDNN_REDUCE_TENSOR_NORM2),
+                 "HIPDNN_REDUCE_TENSOR_NORM2");
+    EXPECT_STREQ(hipdnnGetReduceTensorOpString(HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS),
+                 "HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS");
 
-    EXPECT_STREQ(hipdnnGetReductionModeString(static_cast<hipdnnReductionMode_t>(-1)),
-                 "HIPDNN_REDUCTION_UNKNOWN");
+    EXPECT_STREQ(hipdnnGetReduceTensorOpString(static_cast<hipdnnReduceTensorOp_t>(-1)),
+                 "HIPDNN_REDUCE_TENSOR_UNKNOWN");
 }
 
 TEST(TestBackendEnumStringUtils, GetNormFwdPhaseString)

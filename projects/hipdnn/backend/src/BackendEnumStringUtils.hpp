@@ -15,7 +15,7 @@
 #include "HipdnnNormFwdPhase.h"
 #include "HipdnnOperationType.h"
 #include "HipdnnPointwiseMode.h"
-#include "HipdnnReductionMode.h"
+#include "HipdnnReduceTensorOp.h"
 #include "HipdnnStatus.h"
 
 namespace hipdnn_backend
@@ -161,8 +161,8 @@ inline const char* hipdnnGetAttributeTypeString(hipdnnBackendAttributeType_t typ
         return "HIPDNN_TYPE_DIAGONAL_ALIGNMENT";
     case HIPDNN_TYPE_ATTENTION_IMPLEMENTATION:
         return "HIPDNN_TYPE_ATTENTION_IMPLEMENTATION";
-    case HIPDNN_TYPE_REDUCTION_MODE:
-        return "HIPDNN_TYPE_REDUCTION_MODE";
+    case HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE:
+        return "HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE";
 
     default:
         return "HIPDNN_ATTRIBUTE_UNKNOWN";
@@ -233,8 +233,8 @@ inline const char* hipdnnGetBackendDescriptorTypeName(hipdnnBackendDescriptorTyp
         return "HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT";
     case HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT:
         return "HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT";
-    case HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT:
-        return "HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT";
+    case HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR:
+        return "HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR";
     default:
         return "UNKNOWN_TYPE";
     }
@@ -791,14 +791,14 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT";
 
     // Reduction operation attributes
-    case HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT:
-        return "HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT";
-    case HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT:
-        return "HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT";
-    case HIPDNN_ATTR_REDUCTION_MODE_EXT:
-        return "HIPDNN_ATTR_REDUCTION_MODE_EXT";
-    case HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT:
-        return "HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT";
+    case HIPDNN_ATTR_OPERATION_REDUCTION_XDESC:
+        return "HIPDNN_ATTR_OPERATION_REDUCTION_XDESC";
+    case HIPDNN_ATTR_OPERATION_REDUCTION_YDESC:
+        return "HIPDNN_ATTR_OPERATION_REDUCTION_YDESC";
+    case HIPDNN_ATTR_REDUCTION_OPERATOR:
+        return "HIPDNN_ATTR_REDUCTION_OPERATOR";
+    case HIPDNN_ATTR_REDUCTION_COMP_TYPE:
+        return "HIPDNN_ATTR_REDUCTION_COMP_TYPE";
     case HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT:
         return "HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT";
 
@@ -1019,30 +1019,30 @@ inline const char* hipdnnGetPointwiseModeString(hipdnnPointwiseMode_t mode)
     }
 }
 
-inline const char* hipdnnGetReductionModeString(hipdnnReductionMode_t mode)
+inline const char* hipdnnGetReduceTensorOpString(hipdnnReduceTensorOp_t mode)
 {
     switch(mode)
     {
-    case HIPDNN_REDUCTION_ADD:
-        return "HIPDNN_REDUCTION_ADD";
-    case HIPDNN_REDUCTION_MUL:
-        return "HIPDNN_REDUCTION_MUL";
-    case HIPDNN_REDUCTION_MIN:
-        return "HIPDNN_REDUCTION_MIN";
-    case HIPDNN_REDUCTION_MAX:
-        return "HIPDNN_REDUCTION_MAX";
-    case HIPDNN_REDUCTION_AMAX:
-        return "HIPDNN_REDUCTION_AMAX";
-    case HIPDNN_REDUCTION_AVG:
-        return "HIPDNN_REDUCTION_AVG";
-    case HIPDNN_REDUCTION_NORM1:
-        return "HIPDNN_REDUCTION_NORM1";
-    case HIPDNN_REDUCTION_NORM2:
-        return "HIPDNN_REDUCTION_NORM2";
-    case HIPDNN_REDUCTION_MUL_NO_ZEROS:
-        return "HIPDNN_REDUCTION_MUL_NO_ZEROS";
+    case HIPDNN_REDUCE_TENSOR_ADD:
+        return "HIPDNN_REDUCE_TENSOR_ADD";
+    case HIPDNN_REDUCE_TENSOR_MUL:
+        return "HIPDNN_REDUCE_TENSOR_MUL";
+    case HIPDNN_REDUCE_TENSOR_MIN:
+        return "HIPDNN_REDUCE_TENSOR_MIN";
+    case HIPDNN_REDUCE_TENSOR_MAX:
+        return "HIPDNN_REDUCE_TENSOR_MAX";
+    case HIPDNN_REDUCE_TENSOR_AMAX:
+        return "HIPDNN_REDUCE_TENSOR_AMAX";
+    case HIPDNN_REDUCE_TENSOR_AVG:
+        return "HIPDNN_REDUCE_TENSOR_AVG";
+    case HIPDNN_REDUCE_TENSOR_NORM1:
+        return "HIPDNN_REDUCE_TENSOR_NORM1";
+    case HIPDNN_REDUCE_TENSOR_NORM2:
+        return "HIPDNN_REDUCE_TENSOR_NORM2";
+    case HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS:
+        return "HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS";
     default:
-        return "HIPDNN_REDUCTION_UNKNOWN";
+        return "HIPDNN_REDUCE_TENSOR_UNKNOWN";
     }
 }
 

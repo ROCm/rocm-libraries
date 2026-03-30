@@ -17,7 +17,7 @@ inline Error createReductionOperation(
     std::vector<ScopedHipdnnBackendDescriptor>& operations)
 {
     // Create operation descriptor
-    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT);
+    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create reduction operation descriptor"};
@@ -25,15 +25,15 @@ inline Error createReductionOperation(
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT,
+                                             HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                                              attributes.get_x(),
                                              tensorDescs,
-                                             "reduction X_EXT"));
+                                             "reduction XDESC"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT,
+                                             HIPDNN_ATTR_OPERATION_REDUCTION_YDESC,
                                              attributes.get_y(),
                                              tensorDescs,
-                                             "reduction Y_EXT"));
+                                             "reduction YDESC"));
 
     // Set reduction parameters
 
@@ -49,8 +49,8 @@ inline Error createReductionOperation(
         return {ErrorCode::INVALID_VALUE, "Unsupported reduction mode"};
     }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               HIPDNN_ATTR_REDUCTION_MODE_EXT,
-                                               HIPDNN_TYPE_REDUCTION_MODE,
+                                               HIPDNN_ATTR_REDUCTION_OPERATOR,
+                                               HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE,
                                                *mode,
                                                "reduction mode"));
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
@@ -60,7 +60,7 @@ inline Error createReductionOperation(
                                                "reduction is_deterministic"));
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT,
+                                                 HIPDNN_ATTR_REDUCTION_COMP_TYPE,
                                                  attributes.compute_data_type,
                                                  "reduction compute data type"));
 

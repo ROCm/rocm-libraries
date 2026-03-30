@@ -744,23 +744,23 @@ TEST(TestTypes, FromHipdnnReductionModeAllValidModes)
 {
     using namespace hipdnn_frontend;
 
-    const std::vector<std::pair<hipdnnReductionMode_t, ReductionMode>> validModes = {
-        {HIPDNN_REDUCTION_ADD, ReductionMode::ADD},
-        {HIPDNN_REDUCTION_MUL, ReductionMode::MUL},
-        {HIPDNN_REDUCTION_MIN, ReductionMode::MIN},
-        {HIPDNN_REDUCTION_MAX, ReductionMode::MAX},
-        {HIPDNN_REDUCTION_AMAX, ReductionMode::AMAX},
-        {HIPDNN_REDUCTION_AVG, ReductionMode::AVG},
-        {HIPDNN_REDUCTION_NORM1, ReductionMode::NORM1},
-        {HIPDNN_REDUCTION_NORM2, ReductionMode::NORM2},
-        {HIPDNN_REDUCTION_MUL_NO_ZEROS, ReductionMode::MUL_NO_ZEROS},
+    const std::vector<std::pair<hipdnnReduceTensorOp_t, ReductionMode>> validModes = {
+        {HIPDNN_REDUCE_TENSOR_ADD, ReductionMode::ADD},
+        {HIPDNN_REDUCE_TENSOR_MUL, ReductionMode::MUL},
+        {HIPDNN_REDUCE_TENSOR_MIN, ReductionMode::MIN},
+        {HIPDNN_REDUCE_TENSOR_MAX, ReductionMode::MAX},
+        {HIPDNN_REDUCE_TENSOR_AMAX, ReductionMode::AMAX},
+        {HIPDNN_REDUCE_TENSOR_AVG, ReductionMode::AVG},
+        {HIPDNN_REDUCE_TENSOR_NORM1, ReductionMode::NORM1},
+        {HIPDNN_REDUCE_TENSOR_NORM2, ReductionMode::NORM2},
+        {HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS, ReductionMode::MUL_NO_ZEROS},
     };
 
     for(const auto& [hipdnnMode, expectedMode] : validModes)
     {
-        auto [mode, err] = fromHipdnnReductionMode(hipdnnMode);
+        auto [mode, err] = fromHipdnnReduceTensorOp(hipdnnMode);
         EXPECT_TRUE(err.is_good())
-            << "fromHipdnnReductionMode failed for mode value " << static_cast<int>(hipdnnMode);
+            << "fromHipdnnReduceTensorOp failed for mode value " << static_cast<int>(hipdnnMode);
         EXPECT_EQ(mode, expectedMode) << "Mismatch for mode value " << static_cast<int>(hipdnnMode);
     }
 }
@@ -769,8 +769,8 @@ TEST(TestTypes, FromHipdnnReductionModeUnknownReturnsError)
 {
     using namespace hipdnn_frontend;
 
-    auto unknownMode = static_cast<hipdnnReductionMode_t>(9999);
-    auto [mode, err] = fromHipdnnReductionMode(unknownMode);
+    auto unknownMode = static_cast<hipdnnReduceTensorOp_t>(9999);
+    auto [mode, err] = fromHipdnnReduceTensorOp(unknownMode);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_EQ(mode, ReductionMode::NOT_SET);
@@ -796,9 +796,16 @@ TEST(TestTypes, FromHipdnnReductionModeRoundTrip)
         auto hipdnnOpt = toBackendReductionMode(mode);
         ASSERT_TRUE(hipdnnOpt.has_value())
             << "toBackendReductionMode failed for mode " << static_cast<int>(mode);
-        auto [roundTripped, err] = fromHipdnnReductionMode(hipdnnOpt.value());
+        auto [roundTripped, err] = fromHipdnnReduceTensorOp(hipdnnOpt.value());
         EXPECT_TRUE(err.is_good())
-            << "fromHipdnnReductionMode failed for mode " << static_cast<int>(mode);
+            << "fromHipdnnReduceTensorOp failed for mode " << static_cast<int>(mode);
         EXPECT_EQ(roundTripped, mode) << "Round-trip mismatch for mode " << static_cast<int>(mode);
     }
+}
+
+TEST(TestTypes, ToBackendReductionModeNotSetReturnsNullopt)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toBackendReductionMode(ReductionMode::NOT_SET), std::nullopt);
 }

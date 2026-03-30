@@ -455,59 +455,59 @@ hipdnnNormFwdPhase_t fromSdkNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdP
     }
 }
 
-hipdnn_data_sdk::data_objects::ReductionMode toSdkReductionMode(hipdnnReductionMode_t mode)
+hipdnn_data_sdk::data_objects::ReductionMode toSdkReductionMode(hipdnnReduceTensorOp_t mode)
 {
     using hipdnn_data_sdk::data_objects::ReductionMode;
 
     switch(mode)
     {
-    case HIPDNN_REDUCTION_ADD:
+    case HIPDNN_REDUCE_TENSOR_ADD:
         return ReductionMode::ADD;
-    case HIPDNN_REDUCTION_MUL:
+    case HIPDNN_REDUCE_TENSOR_MUL:
         return ReductionMode::MUL;
-    case HIPDNN_REDUCTION_MIN:
+    case HIPDNN_REDUCE_TENSOR_MIN:
         return ReductionMode::MIN_OP;
-    case HIPDNN_REDUCTION_MAX:
+    case HIPDNN_REDUCE_TENSOR_MAX:
         return ReductionMode::MAX_OP;
-    case HIPDNN_REDUCTION_AMAX:
+    case HIPDNN_REDUCE_TENSOR_AMAX:
         return ReductionMode::AMAX;
-    case HIPDNN_REDUCTION_AVG:
+    case HIPDNN_REDUCE_TENSOR_AVG:
         return ReductionMode::AVG;
-    case HIPDNN_REDUCTION_NORM1:
+    case HIPDNN_REDUCE_TENSOR_NORM1:
         return ReductionMode::NORM1;
-    case HIPDNN_REDUCTION_NORM2:
+    case HIPDNN_REDUCE_TENSOR_NORM2:
         return ReductionMode::NORM2;
-    case HIPDNN_REDUCTION_MUL_NO_ZEROS:
+    case HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS:
         return ReductionMode::MUL_NO_ZEROS;
     default:
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnReductionMode_t value");
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnReduceTensorOp_t value");
     }
 }
 
-hipdnnReductionMode_t fromSdkReductionMode(hipdnn_data_sdk::data_objects::ReductionMode mode)
+hipdnnReduceTensorOp_t fromSdkReductionMode(hipdnn_data_sdk::data_objects::ReductionMode mode)
 {
     using hipdnn_data_sdk::data_objects::ReductionMode;
 
     switch(mode)
     {
     case ReductionMode::ADD:
-        return HIPDNN_REDUCTION_ADD;
+        return HIPDNN_REDUCE_TENSOR_ADD;
     case ReductionMode::MUL:
-        return HIPDNN_REDUCTION_MUL;
+        return HIPDNN_REDUCE_TENSOR_MUL;
     case ReductionMode::MIN_OP:
-        return HIPDNN_REDUCTION_MIN;
+        return HIPDNN_REDUCE_TENSOR_MIN;
     case ReductionMode::MAX_OP:
-        return HIPDNN_REDUCTION_MAX;
+        return HIPDNN_REDUCE_TENSOR_MAX;
     case ReductionMode::AMAX:
-        return HIPDNN_REDUCTION_AMAX;
+        return HIPDNN_REDUCE_TENSOR_AMAX;
     case ReductionMode::AVG:
-        return HIPDNN_REDUCTION_AVG;
+        return HIPDNN_REDUCE_TENSOR_AVG;
     case ReductionMode::NORM1:
-        return HIPDNN_REDUCTION_NORM1;
+        return HIPDNN_REDUCE_TENSOR_NORM1;
     case ReductionMode::NORM2:
-        return HIPDNN_REDUCTION_NORM2;
+        return HIPDNN_REDUCE_TENSOR_NORM2;
     case ReductionMode::MUL_NO_ZEROS:
-        return HIPDNN_REDUCTION_MUL_NO_ZEROS;
+        return HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK ReductionMode value");
     }

@@ -1071,21 +1071,21 @@ typedef enum
 
     /**
      * @name Reduction Operation Attributes (3200-3299)
-     * Attributes for HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT
+     * Attributes for HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR
      * @{
      */
 
     /** @brief Input tensor (X) for reduction */
-    HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT = 3200,
+    HIPDNN_ATTR_OPERATION_REDUCTION_XDESC = 3200,
 
     /** @brief Output tensor (Y) for reduction */
-    HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT = 3201,
+    HIPDNN_ATTR_OPERATION_REDUCTION_YDESC = 3201,
 
-    /** @brief Reduction mode (hipdnnReductionMode_t) */
-    HIPDNN_ATTR_REDUCTION_MODE_EXT = 3202,
+    /** @brief Reduction operator (hipdnnReduceTensorOp_t) */
+    HIPDNN_ATTR_REDUCTION_OPERATOR = 3202,
 
     /** @brief Compute data type for reduction */
-    HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT = 3203,
+    HIPDNN_ATTR_REDUCTION_COMP_TYPE = 3203,
 
     /** @brief Whether reduction is deterministic (bool) */
     HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT = 3204,

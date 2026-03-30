@@ -11,7 +11,7 @@
 #include "HipdnnNormFwdPhase.h"
 #include "HipdnnOperationType.h"
 #include "HipdnnPointwiseMode.h"
-#include "HipdnnReductionMode.h"
+#include "HipdnnReduceTensorOp.h"
 #include "TensorDescriptor.hpp"
 #include <cstring>
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>

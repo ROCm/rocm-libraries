@@ -45,7 +45,7 @@ void ReductionOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT:
+    case HIPDNN_ATTR_OPERATION_REDUCTION_XDESC:
         setTensorDescriptor(_xDesc,
                             _data.in_tensor_uid,
                             attributeType,
@@ -53,7 +53,7 @@ void ReductionOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                             arrayOfElements,
                             "ReductionOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT:
+    case HIPDNN_ATTR_OPERATION_REDUCTION_YDESC:
         setTensorDescriptor(_yDesc,
                             _data.out_tensor_uid,
                             attributeType,
@@ -61,7 +61,7 @@ void ReductionOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                             arrayOfElements,
                             "ReductionOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_REDUCTION_MODE_EXT:
+    case HIPDNN_ATTR_REDUCTION_OPERATOR:
         setReductionMode(_data.mode,
                          attributeType,
                          elementCount,
@@ -76,7 +76,7 @@ void ReductionOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                   arrayOfElements,
                   "ReductionOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT:
+    case HIPDNN_ATTR_REDUCTION_COMP_TYPE:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -113,7 +113,7 @@ void ReductionOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT:
+    case HIPDNN_ATTR_OPERATION_REDUCTION_XDESC:
         getTensorDescriptor(_xDesc,
                             attributeType,
                             requestedElementCount,
@@ -121,7 +121,7 @@ void ReductionOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                             arrayOfElements,
                             "ReductionOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT:
+    case HIPDNN_ATTR_OPERATION_REDUCTION_YDESC:
         getTensorDescriptor(_yDesc,
                             attributeType,
                             requestedElementCount,
@@ -129,7 +129,7 @@ void ReductionOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                             arrayOfElements,
                             "ReductionOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_REDUCTION_MODE_EXT:
+    case HIPDNN_ATTR_REDUCTION_OPERATOR:
         getReductionMode(_data.mode,
                          attributeType,
                          requestedElementCount,
@@ -146,7 +146,7 @@ void ReductionOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   arrayOfElements,
                   "ReductionOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT:
+    case HIPDNN_ATTR_REDUCTION_COMP_TYPE:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
@@ -199,7 +199,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
 
 hipdnnBackendDescriptorType_t ReductionOperationDescriptor::getStaticType()
 {
-    return HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT;
+    return HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR;
 }
 
 std::string ReductionOperationDescriptor::toString() const

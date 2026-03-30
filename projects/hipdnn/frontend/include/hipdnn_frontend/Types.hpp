@@ -32,7 +32,7 @@
 #include <HipdnnDiagonalAlignment.h>
 #include <HipdnnNormFwdPhase.h>
 #include <HipdnnPointwiseMode.h>
-#include <HipdnnReductionMode.h>
+#include <HipdnnReduceTensorOp.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
@@ -1472,61 +1472,62 @@ inline hipdnn_frontend::ReductionMode
     }
 }
 
-/// @brief Convert frontend ReductionMode to backend C-API hipdnnReductionMode_t
-inline std::optional<hipdnnReductionMode_t> toBackendReductionMode(const ReductionMode& type)
+/// @brief Convert frontend ReductionMode to backend C-API hipdnnReduceTensorOp_t
+inline std::optional<hipdnnReduceTensorOp_t> toBackendReductionMode(const ReductionMode& type)
 {
     switch(type)
     {
     case ReductionMode::ADD:
-        return HIPDNN_REDUCTION_ADD;
+        return HIPDNN_REDUCE_TENSOR_ADD;
     case ReductionMode::MUL:
-        return HIPDNN_REDUCTION_MUL;
+        return HIPDNN_REDUCE_TENSOR_MUL;
     case ReductionMode::MIN:
-        return HIPDNN_REDUCTION_MIN;
+        return HIPDNN_REDUCE_TENSOR_MIN;
     case ReductionMode::MAX:
-        return HIPDNN_REDUCTION_MAX;
+        return HIPDNN_REDUCE_TENSOR_MAX;
     case ReductionMode::AMAX:
-        return HIPDNN_REDUCTION_AMAX;
+        return HIPDNN_REDUCE_TENSOR_AMAX;
     case ReductionMode::AVG:
-        return HIPDNN_REDUCTION_AVG;
+        return HIPDNN_REDUCE_TENSOR_AVG;
     case ReductionMode::NORM1:
-        return HIPDNN_REDUCTION_NORM1;
+        return HIPDNN_REDUCE_TENSOR_NORM1;
     case ReductionMode::NORM2:
-        return HIPDNN_REDUCTION_NORM2;
+        return HIPDNN_REDUCE_TENSOR_NORM2;
     case ReductionMode::MUL_NO_ZEROS:
-        return HIPDNN_REDUCTION_MUL_NO_ZEROS;
+        return HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS;
     default:
         return std::nullopt;
     }
 }
 
-/// @brief Convert backend C-API hipdnnReductionMode_t to frontend ReductionMode
-inline std::pair<ReductionMode, Error> fromHipdnnReductionMode(hipdnnReductionMode_t mode)
+/// @brief Convert backend C-API hipdnnReduceTensorOp_t to frontend ReductionMode
+inline std::pair<ReductionMode, Error> fromHipdnnReduceTensorOp(hipdnnReduceTensorOp_t mode)
 {
     switch(mode)
     {
-    case HIPDNN_REDUCTION_ADD:
+    case HIPDNN_REDUCE_TENSOR_ADD:
         return {ReductionMode::ADD, {}};
-    case HIPDNN_REDUCTION_MUL:
+    case HIPDNN_REDUCE_TENSOR_MUL:
         return {ReductionMode::MUL, {}};
-    case HIPDNN_REDUCTION_MIN:
+    case HIPDNN_REDUCE_TENSOR_MIN:
         return {ReductionMode::MIN, {}};
-    case HIPDNN_REDUCTION_MAX:
+    case HIPDNN_REDUCE_TENSOR_MAX:
         return {ReductionMode::MAX, {}};
-    case HIPDNN_REDUCTION_AMAX:
+    case HIPDNN_REDUCE_TENSOR_AMAX:
         return {ReductionMode::AMAX, {}};
-    case HIPDNN_REDUCTION_AVG:
+    case HIPDNN_REDUCE_TENSOR_AVG:
         return {ReductionMode::AVG, {}};
-    case HIPDNN_REDUCTION_NORM1:
+    case HIPDNN_REDUCE_TENSOR_NORM1:
         return {ReductionMode::NORM1, {}};
-    case HIPDNN_REDUCTION_NORM2:
+    case HIPDNN_REDUCE_TENSOR_NORM2:
         return {ReductionMode::NORM2, {}};
-    case HIPDNN_REDUCTION_MUL_NO_ZEROS:
+    case HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS:
         return {ReductionMode::MUL_NO_ZEROS, {}};
     default:
-        return {ReductionMode::NOT_SET,
-                {ErrorCode::HIPDNN_BACKEND_ERROR,
-                 "Unknown hipdnnReductionMode_t value: " + std::to_string(static_cast<int>(mode))}};
+        return {
+            ReductionMode::NOT_SET,
+            {ErrorCode::HIPDNN_BACKEND_ERROR,
+             "Unknown hipdnnReduceTensorOp_t value: " + std::to_string(static_cast<int>(mode))}};
     }
 }
 

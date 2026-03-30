@@ -21,29 +21,29 @@ namespace hipdnn_frontend::detail
     // Unpack x tensor
     std::shared_ptr<graph::TensorAttributes> xTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT,
+                                               HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                                                tensorMap,
                                                xTensor,
-                                               "reduction X_EXT tensor"));
+                                               "reduction XDESC tensor"));
     attributes.set_x(xTensor);
 
     // Unpack y tensor
     std::shared_ptr<graph::TensorAttributes> yTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT,
+                                               HIPDNN_ATTR_OPERATION_REDUCTION_YDESC,
                                                tensorMap,
                                                yTensor,
-                                               "reduction Y_EXT tensor"));
+                                               "reduction YDESC tensor"));
     attributes.set_y(yTensor);
 
     // Unpack mode
-    hipdnnReductionMode_t mode{};
+    hipdnnReduceTensorOp_t mode{};
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                               HIPDNN_ATTR_REDUCTION_MODE_EXT,
-                                               HIPDNN_TYPE_REDUCTION_MODE,
+                                               HIPDNN_ATTR_REDUCTION_OPERATOR,
+                                               HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE,
                                                mode,
                                                "reduction mode"));
-    auto [modeResult, modeErr] = fromHipdnnReductionMode(mode);
+    auto [modeResult, modeErr] = fromHipdnnReduceTensorOp(mode);
     if(modeErr.is_bad())
     {
         return modeErr;
@@ -67,7 +67,7 @@ namespace hipdnn_frontend::detail
 
     // Unpack compute data type
     auto [dt, dtErr] = unpackGraphDataType(
-        opDesc, HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, "reduction compute data type");
+        opDesc, HIPDNN_ATTR_REDUCTION_COMP_TYPE, "reduction compute data type");
     if(dtErr.is_bad())
     {
         return dtErr;

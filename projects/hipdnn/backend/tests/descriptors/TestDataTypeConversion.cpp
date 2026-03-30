@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "HipdnnReductionMode.h"
+#include "HipdnnReduceTensorOp.h"
 #include "TestMacros.hpp"
 #include "descriptors/DataTypeConversion.hpp"
 #include <gtest/gtest.h>
@@ -334,7 +334,7 @@ TEST(TestPointwiseModeConversionRoundTrip, UnsetSdkModeThrows)
 
 struct ReductionModeConversionParam
 {
-    hipdnnReductionMode_t apiMode;
+    hipdnnReduceTensorOp_t apiMode;
     ReductionMode sdkMode;
     std::string name;
 };
@@ -360,16 +360,16 @@ INSTANTIATE_TEST_SUITE_P(
     ReductionModes,
     TestReductionModeConversionRoundTrip,
     ::testing::Values(
-        ReductionModeConversionParam{HIPDNN_REDUCTION_ADD, ReductionMode::ADD, "Add"},
-        ReductionModeConversionParam{HIPDNN_REDUCTION_MUL, ReductionMode::MUL, "Mul"},
-        ReductionModeConversionParam{HIPDNN_REDUCTION_MIN, ReductionMode::MIN_OP, "Min"},
-        ReductionModeConversionParam{HIPDNN_REDUCTION_MAX, ReductionMode::MAX_OP, "Max"},
-        ReductionModeConversionParam{HIPDNN_REDUCTION_AMAX, ReductionMode::AMAX, "Amax"},
-        ReductionModeConversionParam{HIPDNN_REDUCTION_AVG, ReductionMode::AVG, "Avg"},
-        ReductionModeConversionParam{HIPDNN_REDUCTION_NORM1, ReductionMode::NORM1, "Norm1"},
-        ReductionModeConversionParam{HIPDNN_REDUCTION_NORM2, ReductionMode::NORM2, "Norm2"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_ADD, ReductionMode::ADD, "Add"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_MUL, ReductionMode::MUL, "Mul"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_MIN, ReductionMode::MIN_OP, "Min"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_MAX, ReductionMode::MAX_OP, "Max"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_AMAX, ReductionMode::AMAX, "Amax"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_AVG, ReductionMode::AVG, "Avg"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_NORM1, ReductionMode::NORM1, "Norm1"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_NORM2, ReductionMode::NORM2, "Norm2"},
         ReductionModeConversionParam{
-            HIPDNN_REDUCTION_MUL_NO_ZEROS, ReductionMode::MUL_NO_ZEROS, "MulNoZeros"}),
+            HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS, ReductionMode::MUL_NO_ZEROS, "MulNoZeros"}),
     [](const ::testing::TestParamInfo<ReductionModeConversionParam>& info) {
         return info.param.name;
     });
@@ -380,7 +380,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(TestReductionModeConversionRoundTrip, InvalidEnumThrows)
 {
-    ASSERT_THROW_HIPDNN_STATUS(toSdkReductionMode(static_cast<hipdnnReductionMode_t>(-1)),
+    ASSERT_THROW_HIPDNN_STATUS(toSdkReductionMode(static_cast<hipdnnReduceTensorOp_t>(-1)),
                                HIPDNN_STATUS_BAD_PARAM);
 }
 

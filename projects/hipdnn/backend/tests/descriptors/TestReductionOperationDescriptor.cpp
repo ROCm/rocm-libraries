@@ -40,9 +40,9 @@ public:
     {
         auto desc = getDescriptor();
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+            HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc);
+            HIPDNN_ATTR_OPERATION_REDUCTION_YDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc);
     }
 
     void setRequiredAttributes() const
@@ -50,10 +50,10 @@ public:
         setTensors();
         auto computeType = HIPDNN_DATA_FLOAT;
         getDescriptor()->setAttribute(
-            HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-        auto mode = HIPDNN_REDUCTION_ADD;
+            HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        auto mode = HIPDNN_REDUCE_TENSOR_ADD;
         getDescriptor()->setAttribute(
-            HIPDNN_ATTR_REDUCTION_MODE_EXT, HIPDNN_TYPE_REDUCTION_MODE, 1, &mode);
+            HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, 1, &mode);
     }
 
     void makeFinalized() const
@@ -98,7 +98,7 @@ TEST_F(TestReductionOperationDescriptor, CreateDescriptor)
     auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR);
 }
 
 TEST_F(TestReductionOperationDescriptor, FinalizeWithRequiredAttributes)
@@ -112,7 +112,7 @@ TEST_F(TestReductionOperationDescriptor, FinalizeFailsWithoutXTensor)
 {
     auto desc = getDescriptor();
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc);
+        HIPDNN_ATTR_OPERATION_REDUCTION_YDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc);
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
@@ -121,7 +121,7 @@ TEST_F(TestReductionOperationDescriptor, FinalizeFailsWithoutYTensor)
 {
     auto desc = getDescriptor();
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+        HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
@@ -129,9 +129,9 @@ TEST_F(TestReductionOperationDescriptor, FinalizeFailsWithoutYTensor)
 TEST_F(TestReductionOperationDescriptor, FinalizeFailsWithoutComputeType)
 {
     setTensors();
-    auto mode = HIPDNN_REDUCTION_ADD;
+    auto mode = HIPDNN_REDUCE_TENSOR_ADD;
     getDescriptor()->setAttribute(
-        HIPDNN_ATTR_REDUCTION_MODE_EXT, HIPDNN_TYPE_REDUCTION_MODE, 1, &mode);
+        HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, 1, &mode);
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -140,7 +140,7 @@ TEST_F(TestReductionOperationDescriptor, FinalizeFailsWithoutReductionMode)
     setTensors();
     auto computeType = HIPDNN_DATA_FLOAT;
     getDescriptor()->setAttribute(
-        HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -152,7 +152,7 @@ TEST_F(TestReductionOperationDescriptor, SetTensorDescriptorX)
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc));
+        HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc));
 
     // Verify UID extracted via getData()
     ASSERT_EQ(desc->getData().in_tensor_uid, K_REDUCTION_TENSOR_X_UID);
@@ -163,7 +163,7 @@ TEST_F(TestReductionOperationDescriptor, SetTensorDescriptorY)
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc));
+        HIPDNN_ATTR_OPERATION_REDUCTION_YDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc));
 
     ASSERT_EQ(desc->getData().out_tensor_uid, K_REDUCTION_TENSOR_Y_UID);
     ASSERT_NE(desc->getYDesc(), nullptr);
@@ -172,7 +172,7 @@ TEST_F(TestReductionOperationDescriptor, SetTensorDescriptorY)
 TEST_F(TestReductionOperationDescriptor, SetTensorFailsNotFinalized)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   &_unfinalizedTensor),
@@ -183,7 +183,7 @@ TEST_F(TestReductionOperationDescriptor, SetTensorFailsWrongType)
 {
     auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT, HIPDNN_TYPE_INT64, 1, &_xDesc),
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_INT64, 1, &_xDesc),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -192,7 +192,7 @@ TEST_F(TestReductionOperationDescriptor, SetTensorFailsWrongElementCount)
     auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, &_xDesc),
+            HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, &_xDesc),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -201,7 +201,7 @@ TEST_F(TestReductionOperationDescriptor, SetTensorFailsNullPointer)
     auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr),
+            HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -212,10 +212,10 @@ TEST_F(TestReductionOperationDescriptor, SetTensorFailsNullPointer)
 TEST_F(TestReductionOperationDescriptor, SetReductionMode)
 {
     auto desc = getDescriptor();
-    auto mode = HIPDNN_REDUCTION_ADD;
+    auto mode = HIPDNN_REDUCE_TENSOR_ADD;
 
-    ASSERT_NO_THROW(
-        desc->setAttribute(HIPDNN_ATTR_REDUCTION_MODE_EXT, HIPDNN_TYPE_REDUCTION_MODE, 1, &mode));
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, 1, &mode));
 
     ASSERT_EQ(desc->getData().mode, ReductionMode::ADD);
 }
@@ -223,10 +223,11 @@ TEST_F(TestReductionOperationDescriptor, SetReductionMode)
 TEST_F(TestReductionOperationDescriptor, SetReductionModeWrongElementCount)
 {
     auto desc = getDescriptor();
-    auto mode = HIPDNN_REDUCTION_ADD;
+    auto mode = HIPDNN_REDUCE_TENSOR_ADD;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(HIPDNN_ATTR_REDUCTION_MODE_EXT, HIPDNN_TYPE_REDUCTION_MODE, 2, &mode),
+        desc->setAttribute(
+            HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, 2, &mode),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -236,7 +237,7 @@ TEST_F(TestReductionOperationDescriptor, SetComputeDataType)
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
+        HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
 }
@@ -247,8 +248,7 @@ TEST_F(TestReductionOperationDescriptor, SetComputeDataTypeWrongElementCount)
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(
-            HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
+        desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -276,14 +276,14 @@ TEST_F(TestReductionOperationDescriptor, SetAttributeIsDeterministic)
     auto wrapper2 = createDescriptor<ReductionOperationDescriptor>();
     auto desc2 = wrapper2->asDescriptor<ReductionOperationDescriptor>();
     desc2->setAttribute(
-        HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+        HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
     desc2->setAttribute(
-        HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc);
+        HIPDNN_ATTR_OPERATION_REDUCTION_YDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc);
     auto computeType = HIPDNN_DATA_FLOAT;
+    desc2->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    auto mode = HIPDNN_REDUCE_TENSOR_ADD;
     desc2->setAttribute(
-        HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-    auto mode = HIPDNN_REDUCTION_ADD;
-    desc2->setAttribute(HIPDNN_ATTR_REDUCTION_MODE_EXT, HIPDNN_TYPE_REDUCTION_MODE, 1, &mode);
+        HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, 1, &mode);
     bool trueVal = true;
     desc2->setAttribute(
         HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trueVal);
@@ -325,7 +325,7 @@ TEST_F(TestReductionOperationDescriptor, SetAttributeFailsAfterFinalize)
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc),
+            HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc),
         HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
@@ -350,7 +350,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeTensorDescriptor)
 
     HipdnnBackendDescriptor* retrievedX = nullptr;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
@@ -371,12 +371,12 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeReductionParams)
     auto desc = getDescriptor();
 
     // mode
-    hipdnnReductionMode_t mode = HIPDNN_REDUCTION_ADD;
+    hipdnnReduceTensorOp_t mode = HIPDNN_REDUCE_TENSOR_ADD;
     int64_t modeCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_REDUCTION_MODE_EXT, HIPDNN_TYPE_REDUCTION_MODE, 1, &modeCount, &mode));
+        HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, 1, &modeCount, &mode));
     ASSERT_EQ(modeCount, 1);
-    EXPECT_EQ(mode, HIPDNN_REDUCTION_ADD);
+    EXPECT_EQ(mode, HIPDNN_REDUCE_TENSOR_ADD);
 }
 
 TEST_F(TestReductionOperationDescriptor, GetAttributeComputeType)
@@ -384,13 +384,13 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeComputeType)
     auto desc = getDescriptor();
     setRequiredAttributes();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
+        HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
 
     ASSERT_EQ(retrieved, HIPDNN_DATA_HALF);
     ASSERT_EQ(elementCount, 1);
@@ -406,7 +406,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeFailsBeforeFinalize)
     setRequiredAttributes();
 
     HipdnnBackendDescriptor* dummy = nullptr;
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr,
@@ -419,7 +419,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeFailsNullPointer)
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr,
@@ -448,7 +448,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeTensorXQueryReturnsOne)
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -462,7 +462,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeTensorYQueryReturnsOne)
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_YDESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -476,8 +476,11 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeReductionModeQueryReturnsOn
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_REDUCTION_MODE_EXT, HIPDNN_TYPE_REDUCTION_MODE, 0, &elementCount, nullptr));
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_REDUCTION_OPERATOR,
+                                       HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -488,7 +491,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
+        HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -497,7 +500,7 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeTensorQueryFailsNullElement
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   0,
                                                   nullptr,
@@ -510,10 +513,12 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeReductionModeQueryFailsNull
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        desc->getAttribute(
-            HIPDNN_ATTR_REDUCTION_MODE_EXT, HIPDNN_TYPE_REDUCTION_MODE, 0, nullptr, nullptr),
-        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_REDUCTION_OPERATOR,
+                                                  HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE,
+                                                  0,
+                                                  nullptr,
+                                                  nullptr),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 // =============================================================================
@@ -571,7 +576,7 @@ TEST_F(TestReductionOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
-    desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -592,7 +597,7 @@ TEST_F(TestReductionOperationDescriptor, BuildNodeWithHalfComputeType)
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -607,7 +612,7 @@ TEST_F(TestReductionOperationDescriptor, GetTensorDescriptorsOrderIsXY)
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 2);
-    // Verify ordering: [X_EXT, Y_EXT] matches UIDs [90, 91]
+    // Verify ordering: [XDESC, YDESC] matches UIDs [90, 91]
     EXPECT_EQ(tensors[0], desc->getXDesc());
     EXPECT_EQ(tensors[1], desc->getYDesc());
 }
@@ -717,7 +722,7 @@ TEST_F(TestReductionOperationDescriptor, BuildNodePreservesName)
                        static_cast<int64_t>(opName.size()),
                        opName.c_str());
     auto computeType = HIPDNN_DATA_FLOAT;
-    desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();

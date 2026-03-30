@@ -11,6 +11,7 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
@@ -80,7 +81,7 @@ TEST_F(TestReductionOperationFromNode, CreatesValidFinalizedDescriptor)
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR);
     EXPECT_EQ(desc->getData().in_tensor_uid, K_REDUCTION_TENSOR_X_UID);
 }
 
@@ -255,20 +256,20 @@ TEST_F(TestReductionOperationFromNode, GetAttributeWorksAfterFromNode)
     hipdnnDataType_t computeType = {};
     int64_t dtCount = 0;
     desc->getAttribute(
-        HIPDNN_ATTR_REDUCTION_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
+        HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
     ASSERT_EQ(computeType, HIPDNN_DATA_FLOAT);
 
     // Verify mode
-    hipdnnReductionMode_t mode = {};
+    hipdnnReduceTensorOp_t mode = {};
     int64_t modeCount = 0;
     desc->getAttribute(
-        HIPDNN_ATTR_REDUCTION_MODE_EXT, HIPDNN_TYPE_REDUCTION_MODE, 1, &modeCount, &mode);
-    ASSERT_EQ(mode, HIPDNN_REDUCTION_ADD);
+        HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, 1, &modeCount, &mode);
+    ASSERT_EQ(mode, HIPDNN_REDUCE_TENSOR_ADD);
 
     // Verify x tensor
     hipdnn_backend::ScopedDescriptor xScoped;
     int64_t xCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_X_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &xCount,
@@ -281,7 +282,7 @@ TEST_F(TestReductionOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify y tensor
     hipdnn_backend::ScopedDescriptor yScoped;
     int64_t yCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_Y_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_REDUCTION_YDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &yCount,
@@ -338,4 +339,14 @@ TEST_F(TestReductionOperationFromNode, BuildNodePreservesName)
 
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_build_name");
+}
+
+TEST_F(TestReductionOperationFromNode, FailsWithWrongAttributesType)
+{
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(ConvolutionFwdAttributesT{});
+
+    ASSERT_THROW_HIPDNN_STATUS(ReductionOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_INTERNAL_ERROR);
 }

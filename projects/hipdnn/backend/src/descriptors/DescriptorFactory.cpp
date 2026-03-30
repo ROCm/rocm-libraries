@@ -122,7 +122,7 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     case HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<SdpaBpropOperationDescriptor>();
         break;
-    case HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT:
+    case HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR:
         privateDesc = std::make_shared<ReductionOperationDescriptor>();
         break;
     default:

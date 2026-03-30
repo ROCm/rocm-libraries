@@ -381,11 +381,11 @@ void setReductionMode(hipdnn_data_sdk::data_objects::ReductionMode& target,
                       const void* arrayOfElements,
                       const char* errorPrefix)
 {
-    checkSetArgs(HIPDNN_TYPE_REDUCTION_MODE, attributeType, arrayOfElements, errorPrefix);
+    checkSetArgs(HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
-    hipdnnReductionMode_t tmp;
+    hipdnnReduceTensorOp_t tmp;
     std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
     target = toSdkReductionMode(tmp);
 }
@@ -397,7 +397,7 @@ void getReductionMode(hipdnn_data_sdk::data_objects::ReductionMode source,
                       void* arrayOfElements,
                       const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_REDUCTION_MODE, attributeType, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, attributeType, errorPrefix);
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
