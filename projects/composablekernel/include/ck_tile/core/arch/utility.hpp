@@ -59,6 +59,20 @@ CK_TILE_DEVICE T warp_shuffle_down(const T& v_local, uint32_t lane_delta)
 #endif
 }
 
+// Butterfly min-reduction across all lanes in a wave.
+// Returns the minimum value, broadcast to all lanes as a uniform SGPR value.
+// Used for per-tile SRD rebase: find the min physical page across all threads
+// so the SRD can be rebased to that page with 64-bit pointer arithmetic.
+CK_TILE_DEVICE index_t wave_reduce_min(index_t val)
+{
+    for(index_t offset = 1; offset < get_warp_size(); offset <<= 1)
+    {
+        const index_t other = warp_shuffle_down(val, offset);
+        val                 = min(val, other);
+    }
+    return __builtin_amdgcn_readfirstlane(val);
+}
+
 template <typename T>
 CK_TILE_DEVICE auto warp_shuffle_down_pair(const T& v_local)
 {

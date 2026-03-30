@@ -1319,6 +1319,44 @@ CK_TILE_DEVICE void async_buffer_load_fence(index_t cnt = 0)
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
 }
 
+// Flat async load from global memory to LDS using 64-bit addressing.
+// Uses global_load_lds_dwordx{1,4} which bypasses the SRD's 32-bit offset limit.
+// M0 must already contain the LDS destination offset (set by caller).
+// The data is loaded from global_addr to LDS at [M0].
+//
+// Available on gfx940+ (CDNA3: MI300, MI355, MI350 series).
+template <unsigned num_dwords, bool pre_nop = false>
+CK_TILE_DEVICE void
+async_global_load_lds_dwordxn(void* smem, const void* global_addr, bool_constant<pre_nop> = {})
+{
+// Use inline asm with VGPR pair for 64-bit flat address
+#define CK_TILE_GLOBAL_LOAD_LDS_INSTR(instr)                    \
+    if constexpr(pre_nop)                                       \
+        asm volatile("s_nop 4\n" instr " %1, off offset:0"      \
+                     : "=r"(smem) /*dummy dependency for smem*/ \
+                     : "v"(global_addr)                         \
+                     : "memory");                               \
+    else                                                        \
+        asm volatile(instr " %1, off offset:0"                  \
+                     : "=r"(smem) /*dummy dependency for smem*/ \
+                     : "v"(global_addr)                         \
+                     : "memory");
+
+    if constexpr(num_dwords == 1)
+    {
+        CK_TILE_GLOBAL_LOAD_LDS_INSTR("global_load_lds_dword");
+    }
+    else if constexpr(num_dwords == 4)
+    {
+        CK_TILE_GLOBAL_LOAD_LDS_INSTR("global_load_lds_dwordx4");
+    }
+    else
+    {
+        static_assert(false, "wrong! only dword and dwordx4 supported for global_load_lds");
+    }
+#undef CK_TILE_GLOBAL_LOAD_LDS_INSTR
+}
+
 template <index_t N,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default>
 CK_TILE_DEVICE thread_buffer<int8_t, N>

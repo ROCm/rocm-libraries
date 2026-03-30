@@ -357,6 +357,13 @@ struct tile_scatter_gather
         bottom_tensor_view_.buf_.p_data_ = data;
     }
 
+    // Override buffer size (in elements) for SRD num_records control.
+    // Use to set max range when SRD is rebased per-tile (page_size < kN0 path).
+    CK_TILE_DEVICE constexpr void set_bottom_tensor_view_buffer_size(long_index_t size)
+    {
+        bottom_tensor_view_.buf_.buffer_size_ = size;
+    }
+
     // move thread's window adaptor coordinate and bottom tensor coordinate
     // [p0, p1, ..., y0, y1, ...] ==> [x0, x1, ...] ==> [x0', x1', ...] ==> [offset]
     template <typename ATopIndex>
@@ -705,6 +712,115 @@ struct tile_scatter_gather
                         [&](auto i) { return is_gather_dim(i) ? 0 : idx_diff_ys[i]; },
                         number<NDimY>{});
 
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<NDimP>{}),
+                        forward_step_scatter);
+
+                    move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+
+                    m0_inc_with_memory(size_per_issue);
+                }
+            });
+        });
+    }
+
+    // Flat async load from global memory to LDS using 64-bit addressing.
+    // Replaces async_load_raw for the page_size < kN0 path where SRD-based
+    // buffer_load_dword...lds would overflow its 32-bit offset.
+    //
+    // Instead of using SRD + voffset, computes a 64-bit flat address per element:
+    //   addr = base_ptr + (int64)physical_pages[idx] * page_stride_bytes
+    //          + (coord_offset + within_page_offset) * sizeof(DataType)
+    // Then issues global_load_lds_dwordx{1,4} which takes a 64-bit VGPR address.
+    //
+    // M0 register management is identical to async_load_raw.
+    template <typename LdsTileWindow_,
+              typename PhysicalPagesArray,
+              index_t i_access_unsupport_ = -1,
+              bool pre_nop                = false>
+    CK_TILE_DEVICE auto async_load_raw_flat(LdsTileWindow_&& lds_tile,
+                                            const PhysicalPagesArray& physical_pages,
+                                            long_index_t page_stride_bytes,
+                                            number<i_access_unsupport_> = {},
+                                            bool_constant<pre_nop>      = {}) const
+    {
+        using LdsTileWindow = remove_cvref_t<LdsTileWindow_>;
+        using LdsDataType   = typename LdsTileWindow::DataType;
+        using DataType      = typename BottomTensorView::DataType;
+
+        static_assert(LdsTileWindow::get_num_of_dimension() == 3);
+
+        const index_t size_per_buf =
+            lds_tile.get_bottom_tensor_view().get_tensor_descriptor().calculate_offset(
+                make_tuple(number<0>{}, number<0>{}, number<0>{})) *
+            sizeof(LdsDataType);
+
+        const index_t size_per_wave =
+            lds_tile.get_bottom_tensor_view().get_tensor_descriptor().calculate_offset(
+                make_tuple(number<0>{}, number<1>{}, number<0>{})) *
+                sizeof(LdsDataType) -
+            size_per_buf;
+
+        const index_t size_per_issue =
+            lds_tile.get_bottom_tensor_view().get_tensor_descriptor().calculate_offset(
+                make_tuple(number<1>{}, number<0>{}, number<0>{})) *
+                sizeof(LdsDataType) -
+            size_per_buf;
+
+        const index_t m0_init_value = size_per_buf + size_per_wave * get_warp_id();
+        m0_set_with_memory(amd_wave_read_first_lane(m0_init_value));
+
+        using Traits   = load_store_traits;
+        using vector_t = typename Traits::vector_t;
+        using SFC_Ys   = typename Traits::SFC_Ys;
+
+        LdsDataType* smem = lds_tile.get_bottom_tensor_view().get_buffer_view().p_data_;
+
+        // Base pointer for 64-bit address computation
+        const auto* base_ptr = reinterpret_cast<const char*>(get_bottom_tensor_view().buf_.p_data_);
+
+        // Number of dwords per vector element
+        constexpr index_t vector_size = sizeof(vector_t) / sizeof(uint32_t); // dwords per vector
+
+        static_for<0, NumCoord, 1>{}([&](auto iCoord) {
+            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+
+            static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
+                constexpr auto iAccess  = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                constexpr auto pre_nop_ = [&]() {
+                    if constexpr(pre_nop && iCoord == 0 && iCoordAccess == 0)
+                        return bool_constant<true>{};
+                    else
+                        return bool_constant<false>{};
+                }();
+
+                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
+                constexpr auto idx_gather   = get_gather_index(idx_ys_start);
+
+                // within-page offset from page_idx_ (set by kv_offset_array_transform)
+                const auto within_page_offset = page_idx_[idx_gather];
+                // physical page index
+                const auto physical_page = physical_pages[idx_gather];
+
+                // Compute 64-bit flat address:
+                // base + phys_page * page_stride_bytes
+                //      + (coord_offset + within_page_offset) * sizeof(DataType)
+                const auto coord_offset = bottom_tensor_thread_coord.get_offset();
+                const auto* flat_addr =
+                    base_ptr + static_cast<long_index_t>(physical_page) * page_stride_bytes +
+                    static_cast<long_index_t>(coord_offset + within_page_offset) * sizeof(DataType);
+
+                async_global_load_lds_dwordxn<vector_size>(smem, flat_addr, pre_nop_);
+
+                // move thread coordinate (same as async_load_raw)
+                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
+                {
+                    constexpr auto idx_diff_ys          = SFC_Ys::get_forward_step(iAccess);
+                    constexpr auto forward_step_scatter = generate_tuple(
+                        [&](auto i) { return is_gather_dim(i) ? 0 : idx_diff_ys[i]; },
+                        number<NDimY>{});
                     constexpr auto idx_diff_ps_ys = container_concat(
                         generate_tuple([&](auto) { return number<0>{}; }, number<NDimP>{}),
                         forward_step_scatter);
