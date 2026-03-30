@@ -16,6 +16,14 @@
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_gpu_ref;
 
+namespace
+{
+
+// Alias to avoid verbose braced-init-list issues inside EXPECT_THROW macros
+using Vec = std::vector<int64_t>;
+
+} // namespace
+
 // ============================================================================
 // TestGpuConvFwdRefValidation — validateInput throw paths
 // ============================================================================
@@ -26,7 +34,7 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnInvalidDimCount)
     Tensor<float> w({8, 8});
     Tensor<float> y({8, 8});
 
-    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(x, w, y, {1}, {1}, {0}, {0}),
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(x, w, y, Vec{1}, Vec{1}, Vec{0}, Vec{0}),
                  std::invalid_argument);
 }
 
@@ -36,7 +44,8 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnWeightDimMismatch)
     Tensor<float> w({1, 1, 3});
     Tensor<float> y({1, 1, 2, 2});
 
-    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(x, w, y, {1, 1}, {1, 1}, {0, 0}, {0, 0}),
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
                  std::invalid_argument);
 }
 
@@ -46,7 +55,8 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnOutputDimMismatch)
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2});
 
-    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(x, w, y, {1, 1}, {1, 1}, {0, 0}, {0, 0}),
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
                  std::invalid_argument);
 }
 
@@ -56,8 +66,9 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnStridesSizeMismatch)
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
 
-    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(x, w, y, {1}, {1, 1}, {0, 0}, {0, 0}),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceConvolution::fprop<float>(x, w, y, Vec{1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+        std::invalid_argument);
 }
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnDilationsSizeMismatch)
@@ -66,9 +77,9 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnDilationsSizeMismatch)
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
 
-    EXPECT_THROW(
-        GpuFpReferenceConvolution::fprop<float>(x, w, y, {1, 1}, {1, 1, 1}, {0, 0}, {0, 0}),
-        std::invalid_argument);
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
 }
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnPrePaddingSizeMismatch)
@@ -77,8 +88,9 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnPrePaddingSizeMismatch)
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
 
-    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(x, w, y, {1, 1}, {1, 1}, {0}, {0, 0}),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        GpuFpReferenceConvolution::fprop<float>(x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0}, Vec{0, 0}),
+        std::invalid_argument);
 }
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnPostPaddingSizeMismatch)
@@ -87,9 +99,9 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnPostPaddingSizeMismatch)
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
 
-    EXPECT_THROW(
-        GpuFpReferenceConvolution::fprop<float>(x, w, y, {1, 1}, {1, 1}, {0, 0}, {0, 0, 0}),
-        std::invalid_argument);
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0, 0}),
+                 std::invalid_argument);
 }
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnZeroStride)
@@ -98,7 +110,8 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnZeroStride)
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
 
-    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(x, w, y, {0, 1}, {1, 1}, {0, 0}, {0, 0}),
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{0, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
                  std::invalid_argument);
 }
 
@@ -108,7 +121,8 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnNegativeDilation)
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
 
-    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(x, w, y, {1, 1}, {1, -1}, {0, 0}, {0, 0}),
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, -1}, Vec{0, 0}, Vec{0, 0}),
                  std::invalid_argument);
 }
 
@@ -118,7 +132,8 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnNegativePrePadding)
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
 
-    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(x, w, y, {1, 1}, {1, 1}, {-1, 0}, {0, 0}),
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{-1, 0}, Vec{0, 0}),
                  std::invalid_argument);
 }
 
@@ -128,7 +143,8 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnNegativePostPadding)
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
 
-    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(x, w, y, {1, 1}, {1, 1}, {0, 0}, {0, -1}),
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, -1}),
                  std::invalid_argument);
 }
 
@@ -140,7 +156,8 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnOutputDimValueMismatch)
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 3, 3});
 
-    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(x, w, y, {1, 1}, {1, 1}, {0, 0}, {0, 0}),
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
                  std::invalid_argument);
 }
 
@@ -187,4 +204,9 @@ TEST(GpuTestKernelCompiler, ThrowsOnInvalidFunctionName)
             {"-DX_TYPE=float", "-DW_TYPE=float", "-DY_TYPE=float", "-DCOMPUTE_TYPE=double"},
             "nonExistentFunction"),
         std::runtime_error);
+
+    // Clear the HIP error state left by the failed hipModuleGetFunction call,
+    // so the global HipErrorHandler listener doesn't flag it after this test.
+    static_cast<void>(hipGetLastError());
+    static_cast<void>(hipExtGetLastError());
 }
