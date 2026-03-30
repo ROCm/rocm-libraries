@@ -33,6 +33,14 @@ target_link_libraries(
 # make it so tests inside folders can find files without having to use a relative path.
 target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+if(ENABLE_ASM_SDPA_ENGINE)
+    target_sources(hip_kernel_provider_tests PRIVATE
+        engines/asm_sdpa_engine/TestAsmSdpaEngine.cpp
+        engines/asm_sdpa_engine/TestSdpaFwdPlanBuilder.cpp
+        engines/asm_sdpa_engine/TestAsmSdpaFwdKernelArgs.cpp
+    )
+endif()
+
 clang_tidy_check(hip_kernel_provider_tests)
 
 add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
