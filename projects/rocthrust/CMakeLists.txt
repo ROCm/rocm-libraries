@@ -213,6 +213,7 @@ endif()
 
 # Address Sanitizer
 if(BUILD_ADDRESS_SANITIZER)
+  add_compile_definitions(ADDRESS_SANITIZER_BUILD)
   list(APPEND COMPILE_OPTIONS -fsanitize=address -shared-libasan)
   add_link_options(-fuse-ld=lld)
 endif()
