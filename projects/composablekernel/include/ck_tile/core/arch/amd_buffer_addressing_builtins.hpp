@@ -18,6 +18,10 @@
 #include "ck_tile/core/utility/ignore.hpp"
 #include "ck_tile/core/arch/amd_buffer_coherence.hpp"
 
+#define HAS_GLOBAL_ATOMIC_PK_ADD_BUILTIN                        \
+    __has_builtin(__builtin_amdgcn_global_atomic_fadd_v2f16) && \
+        __has_builtin(__builtin_amdgcn_global_atomic_fadd_v2bf16)
+
 using as3_uint32_ptr = uint32_t __attribute__((address_space(3)))*;
 
 namespace ck_tile {
@@ -2150,16 +2154,8 @@ CK_TILE_DEVICE void amd_global_atomic_add_impl(const thread_buffer<T, N>& src_th
                       (std::is_same<T, ck_tile::fp16_t>::value && (N == 2 || N == 4 || N == 8)),
                   "wrong! not implemented");
 
-    if constexpr(std::is_same<T, ck_tile::fp16_t>::value)
-    {
-        static_for<0, N / 2, 1>{}([&](auto i) {
-            __builtin_amdgcn_global_atomic_fadd_v2f16(
-                bit_cast<ck_tile::fp16x2_t*>(addr) + i,
-                src_thread_data.template get_as<ck_tile::fp16x2_t>()[i]);
-        });
-    }
-#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx12__)
-    else if constexpr(std::is_same<T, ck_tile::bf16_t>::value)
+#if HAS_GLOBAL_ATOMIC_PK_ADD_BUILTIN
+    if constexpr(std::is_same<T, ck_tile::bf16_t>::value)
     {
         static_for<0, N / 2, 1>{}([&](auto i) {
             __builtin_amdgcn_global_atomic_fadd_v2bf16(
