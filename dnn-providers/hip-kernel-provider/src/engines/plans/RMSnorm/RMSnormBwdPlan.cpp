@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "RMSNormBwdPlan.hpp"
-#include "RMSNormApplicabilityChecks.hpp"
+#include "RMSnormBwdPlan.hpp"
+#include "RMSnormApplicabilityChecks.hpp"
 
 #include "HipKernelUtils.hpp"
 #include "hip/IKernelCompiler.hpp"

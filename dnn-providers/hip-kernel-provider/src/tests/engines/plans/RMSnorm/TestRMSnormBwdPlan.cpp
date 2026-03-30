@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "engines/plans/rmsnorm/RMSNormBwdPlan.hpp"
+#include "engines/plans/RMSnorm/RMSnormBwdPlan.hpp"
 
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>

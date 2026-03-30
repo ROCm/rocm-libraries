@@ -25,8 +25,8 @@ add_executable(
     engines/plans/TestPlanUtils.cpp
     engines/plans/RMSnorm/TestRMSnormPlanBuilder.cpp
     engines/plans/RMSnorm/TestRMSnormFwdPlan.cpp
-    engines/plans/RMSNorm/TestRMSNormBwdPlanBuilder.cpp
-    engines/plans/RMSNorm/TestRMSNormBwdPlan.cpp
+    engines/plans/RMSnorm/TestRMSnormBwdPlanBuilder.cpp
+    engines/plans/RMSnorm/TestRMSnormBwdPlan.cpp
     hip/TestHipProgramAndKernel.cpp
 )
 

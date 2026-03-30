@@ -14,17 +14,17 @@
 
 namespace hip_kernel_provider
 {
-class RMSNormBwdPlanBuilder
+class RMSnormBwdPlanBuilder
     : public hipdnn_plugin_sdk::IPlanBuilder<HipKernelHandle, HipKernelSettings, HipKernelContext>
 {
 public:
-    RMSNormBwdPlanBuilder(const IKernelCompiler& kernelCompiler,
+    RMSnormBwdPlanBuilder(const IKernelCompiler& kernelCompiler,
                           const IDevicePropertyProvider& devicePropertyProvider);
-    ~RMSNormBwdPlanBuilder() override = default;
+    ~RMSnormBwdPlanBuilder() override = default;
 
     // Disallow copy and assignment
-    RMSNormBwdPlanBuilder(const RMSNormBwdPlanBuilder&) = delete;
-    RMSNormBwdPlanBuilder& operator=(const RMSNormBwdPlanBuilder&) = delete;
+    RMSnormBwdPlanBuilder(const RMSnormBwdPlanBuilder&) = delete;
+    RMSnormBwdPlanBuilder& operator=(const RMSnormBwdPlanBuilder&) = delete;
 
     bool isApplicable(const HipKernelHandle& handle,
                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
