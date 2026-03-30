@@ -45,11 +45,11 @@ endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 
+include(GNUInstallDirs)
 include(ClangTidy)
 include(ClangCheck)
 include(Sanitizers)
-
-findandcheckllvmsymbolizer()
+include(Tests)
 
 list(
     PREPEND
@@ -111,7 +111,18 @@ target_compile_options(hipdnn_integration_tests PRIVATE ${INTEGRATION_TESTS_WARN
 
 clang_tidy_check(hipdnn_integration_tests)
 
-include(GNUInstallDirs)
+add_subdirectory(tests)
+
+# Finalize test targets with prefix to avoid collisions in superbuild mode
+# Keep this after all build folders have been added so they have a chance to register their tests
+# using add_*_test_target()
+finalize_test_targets("${PROJECT_NAME}")
+
+# For standalone builds we need to install the ctest files
+if(NOT ROCM_LIBS_SUPERBUILD)
+    install_integration_tests_ctest_files()
+endif()
+
 include(CMakePackageConfigHelpers)
 
 set(HIPDNN_INTEGRATION_TESTS_VERSION "0.1.0")
@@ -125,7 +136,7 @@ set_target_properties(
         BUILD_RPATH_USE_ORIGIN TRUE
 )
 
-# Install the executable with an export set
+# Install the executables with an export set
 install(TARGETS hipdnn_integration_tests
     EXPORT hipdnn_integration_tests_targets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -166,22 +177,6 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_integration_testsConfigVersion.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipdnnIntegrationTestHelpers.cmake"
     DESTINATION lib/cmake/hipdnn_integration_tests
-)
-
-enable_testing()
-add_test(NAME hipdnn_integration_tests COMMAND hipdnn_integration_tests)
-if(DEFINED TEST_ENVIRONMENT)
-    set_tests_properties(hipdnn_integration_tests PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
-endif()
-
-# Generate CTestTestfile for installed tests (used by CI test runners).
-# We manually create this file with relative paths - CMake's CTest module
-# generates files with absolute paths which don't work for relocated installs.
-set(_INSTALLED_CTEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install")
-file(WRITE "${_INSTALLED_CTEST_FILE}"
-    "# CTestTestfile for installed hipdnn-integration-tests\n"
-    "# Used by CI test runners to execute tests from the installed location\n\n"
-    "add_test(hipdnn_integration_tests \"../hipdnn_integration_tests\")\n"
 )
 
 add_clang_tidy_custom_target()

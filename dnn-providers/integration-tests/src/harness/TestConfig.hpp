@@ -72,12 +72,21 @@ public:
     // Get the engine ID from the engine name
     int64_t getEngineId() const
     {
+        if(!_initialized)
+        {
+            throw std::runtime_error("TestConfig not initialized");
+        }
         return hipdnn_data_sdk::utilities::engineNameToId(_engineName);
     }
 
     // Get tolerance mode (always DEFAULT since only one mode exists)
-    static ToleranceMode getToleranceMode([[maybe_unused]] std::string_view engineName)
+    ToleranceMode getToleranceMode() const
     {
+        if(!_initialized)
+        {
+            throw std::runtime_error("TestConfig not initialized");
+        }
+
         return ToleranceMode::DEFAULT;
     }
 

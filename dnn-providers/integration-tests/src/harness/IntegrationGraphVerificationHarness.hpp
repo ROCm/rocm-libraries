@@ -58,7 +58,7 @@ protected:
                        const hipdnn_frontend::graph::Graph& graph,
                        const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& output)
     {
-        ToleranceMode mode = TestConfig::getToleranceMode(TestConfig::get().getEngineName());
+        ToleranceMode mode = TestConfig::get().getToleranceMode();
 
         if(mode == ToleranceMode::DEFAULT)
         {
