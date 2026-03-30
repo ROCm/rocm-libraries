@@ -5,8 +5,11 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <limits>
+#include <vector>
 
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesCommon.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -289,4 +292,82 @@ TEST(TestValidateToleranceRange, AtExactMaxNoThrow)
 {
     auto halfMax = static_cast<double>(std::numeric_limits<half>::max());
     EXPECT_NO_THROW((validateToleranceRange<half>(halfMax)));
+}
+
+// =================================================================================================
+// TestComputeMatrixInfNorm
+// =================================================================================================
+
+namespace
+{
+// Helper to create a tensor and fill it element-by-element from a flat vector of values.
+// Values are stored in row-major order.
+template <typename T>
+hipdnn_data_sdk::utilities::Tensor<T> createTensorFromFlatValues(const std::vector<int64_t>& dims,
+                                                                 const std::vector<double>& values)
+{
+    using hipdnn_data_sdk::utilities::iterateAlongDimensions;
+
+    hipdnn_data_sdk::utilities::Tensor<T> tensor(dims);
+
+    size_t idx = 0;
+    iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
+        tensor.setHostValue(static_cast<T>(values[idx++]), indices);
+    });
+
+    return tensor;
+}
+} // namespace
+
+TEST(TestComputeMatrixInfNorm, IdentityMatrix2x2)
+{
+    // [[1, 0], [0, 1]] -> row sums: 1, 1 -> inf-norm = 1.0
+    auto tensor = createTensorFromFlatValues<float>({2, 2}, {1.0, 0.0, 0.0, 1.0});
+    EXPECT_DOUBLE_EQ(computeMatrixInfNorm<float>(tensor), 1.0);
+}
+
+TEST(TestComputeMatrixInfNorm, AsymmetricRows)
+{
+    // [[1, 2, 3], [4, 5, 6]] -> row sums: 6, 15 -> inf-norm = 15.0
+    auto tensor = createTensorFromFlatValues<float>({2, 3}, {1.0, 2.0, 3.0, 4.0, 5.0, 6.0});
+    EXPECT_DOUBLE_EQ(computeMatrixInfNorm<float>(tensor), 15.0);
+}
+
+TEST(TestComputeMatrixInfNorm, NegativeValues)
+{
+    // [[-3, 2], [1, -1]] -> row sums: |−3|+|2|=5, |1|+|−1|=2 -> inf-norm = 5.0
+    auto tensor = createTensorFromFlatValues<float>({2, 2}, {-3.0, 2.0, 1.0, -1.0});
+    EXPECT_DOUBLE_EQ(computeMatrixInfNorm<float>(tensor), 5.0);
+}
+
+TEST(TestComputeMatrixInfNorm, SingleElement)
+{
+    // [[7]] -> inf-norm = 7.0
+    auto tensor = createTensorFromFlatValues<float>({1, 1}, {7.0});
+    EXPECT_DOUBLE_EQ(computeMatrixInfNorm<float>(tensor), 7.0);
+}
+
+TEST(TestComputeMatrixInfNorm, SingleRow)
+{
+    // [[2, 3, 5]] -> row sum: 10 -> inf-norm = 10.0
+    auto tensor = createTensorFromFlatValues<float>({1, 3}, {2.0, 3.0, 5.0});
+    EXPECT_DOUBLE_EQ(computeMatrixInfNorm<float>(tensor), 10.0);
+}
+
+TEST(TestComputeMatrixInfNorm, BatchedTensor)
+{
+    // Batch of 2 matrices, each 2x2:
+    // Batch 0: [[1, 2], [3, 4]] -> row sums: 3, 7
+    // Batch 1: [[5, 5], [1, 1]] -> row sums: 10, 2
+    // inf-norm = max(3, 7, 10, 2) = 10.0
+    auto tensor
+        = createTensorFromFlatValues<float>({2, 2, 2}, {1.0, 2.0, 3.0, 4.0, 5.0, 5.0, 1.0, 1.0});
+    EXPECT_DOUBLE_EQ(computeMatrixInfNorm<float>(tensor), 10.0);
+}
+
+TEST(TestComputeMatrixInfNorm, HalfPrecision)
+{
+    // [[1, 2], [3, 4]] -> row sums: 3, 7 -> inf-norm = 7.0
+    auto tensor = createTensorFromFlatValues<half>({2, 2}, {1.0, 2.0, 3.0, 4.0});
+    EXPECT_DOUBLE_EQ(computeMatrixInfNorm<half>(tensor), 7.0);
 }
