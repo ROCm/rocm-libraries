@@ -117,7 +117,6 @@ namespace formatting
     template <class... Args>
     void print(std::ostream& stream, std::format_string<Args...> fmt_string, Args&&... args)
     {
-        printf("printed with std::print (actually format) \n");
         stream << std::format(fmt_string, std::forward<Args>(args)...);
     }
 
@@ -143,7 +142,6 @@ namespace formatting
     template <class T, class... Args>
     void print(std::ostream& stream, T&& fmt_string, Args&&... args)
     {
-        printf("printed with fmt::print \n");
         fmt::print(stream, std::forward<T>(fmt_string), std::forward<Args>(args)...);
     }
 
