@@ -178,6 +178,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     const KernelType& kernelType, const RocblasltContractionProblem& prob, int requestedAlgoCount)
 {
     std::vector<SolutionIndexParameters> params;
+    std::vector<SolutionIndexParameters> lastParams;
 
     std::vector<origami::config_t> origami_config_list = getTileListForKernelType(kernelType);
 
@@ -271,12 +272,12 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 
             bool useTailLoops = true;
 
-            params.push_back({wgt, true, false, useTailLoops});
+            
 
-
+            bool useWorkgroupMapping = true;
             if(prob.k < USE_WORKGROUP_MAPPING_K_SIZE)
             {
-                params.back().workgroupMapping = false;
+                useWorkgroupMapping = false;
             }
 
             // Enable StreamK when:
@@ -286,6 +287,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             //    MinItersPerCU (8) applied to the smallest useful split factor (2).
             // 3. Data type is not f6 (unsupported) or large f8 (register pressure).
             // 4. Not the 256x256x256 FP4 pre-swizzled tile.
+            bool useStreamK = false;
             size_t numTilesM    = prob.m / wgt.m;
             size_t numTilesN    = prob.n / wgt.n;
             size_t numTiles     = numTilesM * numTilesN * prob.batch_count;
@@ -299,13 +301,33 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                 || kernelType.typeB == rocRoller::DataType::FP8
                 || kernelType.typeB == rocRoller::DataType::BF8)
                && wgt.m + wgt.n > 256);
-            if(numTiles < analytical_hardware.N_CU && itersPerTile >= 16
+            int cu_multiplier = 1;
+            if(kernelType.swizzleA)
+                cu_multiplier = 4;
+            if(numTiles * cu_multiplier < analytical_hardware.N_CU && itersPerTile >= 16
                && !isF6 && !isLargeF8 && !is256Tile)
             {
-                params.back().streamK = true;
+                useStreamK = true;
             }
+
+            // Heuristics:
+            // 64x256 performs poorly for StreamK
+            if(useStreamK && wgt.m == 64 && wgt.n == 256)
+                continue;
+
+            // Prefer assembly kernels for swizzleA
+            if(kernelType.swizzleA && !useStreamK && ((wgt.m == 32 && wgt.n == 32) ||
+                                                      (wgt.m == 64 && wgt.n == 32) ||
+                                                      (wgt.m == 64 && wgt.n == 64) ||
+                                                      (wgt.m == 128 && wgt.n == 32)))
+                lastParams.push_back({wgt, useWorkgroupMapping, useStreamK, useTailLoops});
+            else
+                params.push_back({wgt, useWorkgroupMapping, useStreamK, useTailLoops});
         }
     }
+
+    // Append lastParams to params so that assembly kernel tile sizes are included as fallback options
+    params.insert(params.end(), lastParams.begin(), lastParams.end());
 
     return params;
 }
