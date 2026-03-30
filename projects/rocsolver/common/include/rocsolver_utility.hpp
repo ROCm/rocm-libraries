@@ -123,7 +123,7 @@ namespace formatting
     {
         return std::format(fmt_string, std::forward<Args>(args)...);
     }
-#else
+#else  // USE_FMT_LIB
 
     template <class T, class... Args>
     void print(T&& fmt_string, Args&&... args)
