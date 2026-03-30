@@ -129,7 +129,10 @@ namespace rocisa
             //the size of s_add_pc_i64 (target_label - temp_label) is 8 + 4 bytes, so you will need to do -12 as well
 
             //TODO: remove hardcore "-.-12" when compiler update for label value calculation
-            module->addT<SAddPCI64_SIMM>(labelName + "-.-12", "Add PC to " + labelName + ", the constant correction is dependent on the current assembler behavior.");
+            module->addT<SAddPCI64_SIMM>(
+                labelName + "-.-12",
+                "Add PC to " + labelName
+                    + ", the constant correction is dependent on the current assembler behavior.");
         }
         else
         {
@@ -383,9 +386,10 @@ namespace rocisa
         {
             if(instance.getArchCaps()["NoSDWA"])
             {
-                auto vop3     = VOP3PModifiers();
+                auto vop3 = VOP3PModifiers();
                 vop3.op_sel.push_back(vi % 2);
-                return std::make_shared<PVCvtBF16toFP32>(dst, src, std::nullopt, vop3, "cvt bf16 to f32");
+                return std::make_shared<PVCvtBF16toFP32>(
+                    dst, src, std::nullopt, vop3, "cvt bf16 to fp32. " + comment);
             }
             else
             {
@@ -396,7 +400,8 @@ namespace rocisa
                 }
                 auto sdwa     = SDWAModifiers();
                 sdwa.src0_sel = select_bit;
-                return std::make_shared<PVCvtBF16toFP32>(dst, src, sdwa, std::nullopt, "cvt bf16 to f32");
+                return std::make_shared<PVCvtBF16toFP32>(
+                    dst, src, sdwa, std::nullopt, "cvt bf16 to fp32. " + comment);
             }
         }
         else

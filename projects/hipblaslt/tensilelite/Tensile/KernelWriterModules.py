@@ -29,25 +29,6 @@ from rocisa.functions import BranchIfNotZero
 
 from Tensile.Common.DataType import DataType
 
-def allocPostLoopSrdSuppressRaw(ch: str, chAddress: str, labelStr: str, sgprLength) -> Module:
-    module = Module("allocPostLoopSrdSuppress")
-    label  = Label("%sAddrValid"%labelStr, "")
-    label2 = Label("%sAddrValid_End"%labelStr, "")
-    # Buffer-load uses one base read pointer stored in the SRD - set it here:
-    module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%chAddress, 2), comment="init SRD base address" ))
-    module.add(SMovB32(dst=sgpr("Srd%s+3"%ch), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
-    module.add(BranchIfNotZero("Address%s"%chAddress, DataType('int64').toEnum(), label))
-    module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src=0))
-    module.add(SBranch(label2.getLabelName()))
-    module.add(label)
-    module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src=sgprLength))
-    module.add(label2)
-    module.addSpaceLine()
-    return module
-
-def allocPostLoopSrdSuppress(ch: str, labelStr: str, sgprLength) -> Module:
-    return allocPostLoopSrdSuppressRaw(ch, ch, labelStr, sgprLength)
-
 def tdmWait(states, kernel, tPA, tPB, tensorcnt: int, comment: str) -> Module:
   #TODO: refactor this
   skipGR = tensorcnt > -1
