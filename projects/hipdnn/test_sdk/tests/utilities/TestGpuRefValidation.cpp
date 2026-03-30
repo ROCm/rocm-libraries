@@ -176,10 +176,10 @@ TEST(TestGpuRefHipError, NoThrowOnSuccess)
 }
 
 // ============================================================================
-// GpuTestKernelCompiler — compiler error path coverage
+// TestGpuRefKernelCompiler — compiler error path coverage
 // ============================================================================
 
-TEST(GpuTestKernelCompiler, ThrowsOnCompilationFailure)
+TEST(TestGpuRefKernelCompiler, ThrowsOnCompilationFailure)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -191,7 +191,7 @@ TEST(GpuTestKernelCompiler, ThrowsOnCompilationFailure)
         std::runtime_error);
 }
 
-TEST(GpuTestKernelCompiler, ThrowsOnInvalidFunctionName)
+TEST(TestGpuRefKernelCompiler, ThrowsOnInvalidFunctionName)
 {
     SKIP_IF_NO_DEVICES();
 

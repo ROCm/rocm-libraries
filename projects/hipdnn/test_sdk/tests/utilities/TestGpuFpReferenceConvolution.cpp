@@ -71,7 +71,10 @@ void compareGpuVsCpuConvFwd(Tensor<XDataType>& xTensor,
 // each output element accumulates cPerGroup * Kh * Kw products, so
 // max output ≈ numMACs * fillRange². Keep numMACs * fillRange² < type max.
 
-// Asymmetric padding with explicit layout
+// Asymmetric padding with optional layout.
+// When layout is non-null, input/output tensors use channel-last strides (e.g. NHWC, NDHWC)
+// generated via Tensor(dims, layout). Weights always use default packed (KCRS) strides.
+// When layout is null, all tensors use default packed strides (NCHW/NCDHW).
 template <typename DataType, typename ComputeDataType = double>
 void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         const std::vector<int64_t>& wDims,
@@ -81,14 +84,13 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         const std::vector<int64_t>& prePadding,
                         const std::vector<int64_t>& postPadding,
                         float tolerance,
-                        const TensorLayout& xLayout,
-                        const TensorLayout& yLayout,
+                        const TensorLayout* layout = nullptr,
                         float fillRange = 1.0f)
 {
-    Tensor<DataType> xTensor(xDims, xLayout);
-    Tensor<DataType> wTensor(wDims);
-    Tensor<DataType> yCpu(yDims, yLayout);
-    Tensor<DataType> yGpu(yDims, yLayout);
+    auto xTensor = layout != nullptr ? Tensor<DataType>(xDims, *layout) : Tensor<DataType>(xDims);
+    auto wTensor = Tensor<DataType>(wDims);
+    auto yCpu = layout != nullptr ? Tensor<DataType>(yDims, *layout) : Tensor<DataType>(yDims);
+    auto yGpu = layout != nullptr ? Tensor<DataType>(yDims, *layout) : Tensor<DataType>(yDims);
 
     compareGpuVsCpuConvFwd<DataType, DataType, DataType, ComputeDataType>(xTensor,
                                                                           wTensor,
@@ -100,76 +102,6 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                                                                           postPadding,
                                                                           tolerance,
                                                                           fillRange);
-}
-
-// Asymmetric padding with packed strides (works for any dimensionality including 1D)
-template <typename DataType, typename ComputeDataType = double>
-void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
-                        const std::vector<int64_t>& wDims,
-                        const std::vector<int64_t>& yDims,
-                        const std::vector<int64_t>& strides,
-                        const std::vector<int64_t>& dilations,
-                        const std::vector<int64_t>& prePadding,
-                        const std::vector<int64_t>& postPadding,
-                        float tolerance,
-                        float fillRange = 1.0f)
-{
-    Tensor<DataType> xTensor(xDims);
-    Tensor<DataType> wTensor(wDims);
-    Tensor<DataType> yCpu(yDims);
-    Tensor<DataType> yGpu(yDims);
-
-    compareGpuVsCpuConvFwd<DataType, DataType, DataType, ComputeDataType>(xTensor,
-                                                                          wTensor,
-                                                                          yCpu,
-                                                                          yGpu,
-                                                                          strides,
-                                                                          dilations,
-                                                                          prePadding,
-                                                                          postPadding,
-                                                                          tolerance,
-                                                                          fillRange);
-}
-
-// Uniform padding with explicit layout
-template <typename DataType, typename ComputeDataType = double>
-void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
-                        const std::vector<int64_t>& wDims,
-                        const std::vector<int64_t>& yDims,
-                        const std::vector<int64_t>& strides,
-                        const std::vector<int64_t>& dilations,
-                        const std::vector<int64_t>& padding,
-                        float tolerance,
-                        const TensorLayout& xLayout,
-                        const TensorLayout& yLayout,
-                        float fillRange = 1.0f)
-{
-    runGpuVsCpuConvFwd<DataType, ComputeDataType>(xDims,
-                                                  wDims,
-                                                  yDims,
-                                                  strides,
-                                                  dilations,
-                                                  padding,
-                                                  padding,
-                                                  tolerance,
-                                                  xLayout,
-                                                  yLayout,
-                                                  fillRange);
-}
-
-// Uniform padding with packed strides (works for any dimensionality including 1D)
-template <typename DataType, typename ComputeDataType = double>
-void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
-                        const std::vector<int64_t>& wDims,
-                        const std::vector<int64_t>& yDims,
-                        const std::vector<int64_t>& strides,
-                        const std::vector<int64_t>& dilations,
-                        const std::vector<int64_t>& padding,
-                        float tolerance,
-                        float fillRange = 1.0f)
-{
-    runGpuVsCpuConvFwd<DataType, ComputeDataType>(
-        xDims, wDims, yDims, strides, dilations, padding, padding, tolerance, fillRange);
 }
 
 // ============================================================================
@@ -185,6 +117,11 @@ struct ConvFwdShapeCase
     std::vector<int64_t> padding;
     int64_t groups = 1;
     std::string tag;
+
+    // When non-null, input/output tensors use this channel-last layout (NHWC/NDHWC).
+    // Weights always use default packed (KCRS) strides regardless.
+    // When null, all tensors use default packed strides (NCHW/NCDHW).
+    const TensorLayout* layout = nullptr;
 
     std::vector<int64_t> computeOutputDims() const
     {
@@ -206,6 +143,18 @@ struct ConvFwdShapeCase
         return os << tc.tag;
     }
 };
+
+// Returns copies of the given cases with channel-last layout set.
+// Uses NHWC for 4D (2D conv) and NDHWC for 5D (3D conv).
+// Points to the static TensorLayout constants which have program lifetime.
+std::vector<ConvFwdShapeCase> withChannelLastLayout(std::vector<ConvFwdShapeCase> cases)
+{
+    for(auto& tc : cases)
+    {
+        tc.layout = (tc.xDims.size() == 5) ? &TensorLayout::NDHWC : &TensorLayout::NHWC;
+    }
+    return cases;
+}
 
 // ============================================================================
 // Shape Catalog — centralized convolution shapes, categorized by size
@@ -348,6 +297,17 @@ std::vector<ConvFwdShapeCase> getMedium3dConvCases()
 } // namespace
 
 // ============================================================================
+// Standalone tests (TEST, not TEST_P)
+// These test features with unique verification logic that doesn't fit the
+// shape-catalog pattern (fill → run GPU + CPU → compare). Each suite exercises
+// a different code path: asymmetric padding, alpha/beta scaling, non-packed
+// strides, integer types, TF32 truncation, mixed input/weight types, and timing.
+// All use default packed strides (NCHW). The features tested here (scaling,
+// truncation, type conversion, padding) are layout-independent — NHWC/NDHWC
+// correctness is covered by the parameterized shape catalog below.
+// ============================================================================
+
+// ============================================================================
 // TestGpuConvFwdRefAsymPad — asymmetric (pre != post) padding tests
 // ============================================================================
 
@@ -370,24 +330,6 @@ TEST(TestGpuConvFwdRefAsymPadBfp16, MatchesCpuRef)
     SKIP_IF_NO_DEVICES();
     runGpuVsCpuConvFwd<bfloat16>(
         {1, 1, 3, 3}, {1, 1, 3, 3}, {1, 1, 2, 2}, {1, 1}, {1, 1}, {1, 0}, {0, 1}, 0.1f);
-}
-
-// ============================================================================
-// TestGpuConvFwdRef3dFp32 — 3D layout-specific tests (shapes covered by catalog)
-// ============================================================================
-
-TEST(TestGpuConvFwdRef3dFp32, Ndhwc)
-{
-    SKIP_IF_NO_DEVICES();
-    runGpuVsCpuConvFwd<float>({1, 3, 4, 4, 4},
-                              {2, 3, 3, 3, 3},
-                              {1, 2, 2, 2, 2},
-                              {1, 1, 1},
-                              {1, 1, 1},
-                              {0, 0, 0},
-                              1e-4f,
-                              TensorLayout::NDHWC,
-                              TensorLayout::NDHWC);
 }
 
 // ============================================================================
@@ -888,8 +830,15 @@ protected:
         SKIP_IF_NO_DEVICES();
         const auto& tc = GetParam();
         auto yDims = tc.computeOutputDims();
-        runGpuVsCpuConvFwd<DataType>(
-            tc.xDims, tc.wDims, yDims, tc.strides, tc.dilations, tc.padding, tolerance(tc));
+        runGpuVsCpuConvFwd<DataType>(tc.xDims,
+                                     tc.wDims,
+                                     yDims,
+                                     tc.strides,
+                                     tc.dilations,
+                                     tc.padding,
+                                     tc.padding,
+                                     tolerance(tc),
+                                     tc.layout);
     }
 };
 
@@ -910,7 +859,11 @@ TEST_P(TestGpuConvFwdRefShapesBfp16, MatchesCpuRef)
     this->runConvFwdShapeTest();
 }
 
-// fp32: all sizes (small + medium + large 2D, small + medium 3D)
+// ============================================================================
+// Default layout (NCHW/NCDHW/NCW) instantiations — packed strides, no layout set.
+// ============================================================================
+
+// fp32 NCHW/NCDHW: all sizes (small + medium + large 2D, small + medium 3D, small 1D)
 INSTANTIATE_TEST_SUITE_P(Small2d,
                          TestGpuConvFwdRefShapesFp32,
                          ::testing::ValuesIn(getSmall2dConvCases()),
@@ -942,7 +895,7 @@ INSTANTIATE_TEST_SUITE_P(Medium3d,
                              return info.param.tag;
                          });
 
-// fp32: 1D shapes
+// fp32 NCW: 1D shapes
 INSTANTIATE_TEST_SUITE_P(Small1d,
                          TestGpuConvFwdRefShapesFp32,
                          ::testing::ValuesIn(getSmall1dConvCases()),
@@ -950,7 +903,7 @@ INSTANTIATE_TEST_SUITE_P(Small1d,
                              return info.param.tag;
                          });
 
-// fp16: small + medium 2D, small 1D, small 3D
+// fp16 NCHW/NCDHW/NCW: small + medium 2D, small 1D, small 3D
 INSTANTIATE_TEST_SUITE_P(Small2d,
                          TestGpuConvFwdRefShapesFp16,
                          ::testing::ValuesIn(getSmall2dConvCases()),
@@ -976,7 +929,7 @@ INSTANTIATE_TEST_SUITE_P(Small3d,
                              return info.param.tag;
                          });
 
-// bfp16: small + medium 2D, small 1D, small 3D
+// bfp16 NCHW/NCDHW/NCW: small + medium 2D, small 1D, small 3D
 INSTANTIATE_TEST_SUITE_P(Small2d,
                          TestGpuConvFwdRefShapesBfp16,
                          ::testing::ValuesIn(getSmall2dConvCases()),
@@ -1003,70 +956,81 @@ INSTANTIATE_TEST_SUITE_P(Small3d,
                          });
 
 // ============================================================================
-// TestGpuConvFwdRefNhwcShapes — NHWC layout coverage from shape catalog
+// Channel-last (NHWC/NDHWC) instantiations — same suites, same catalog,
+// but withChannelLastLayout() sets tc.layout so the fixture uses channel-last
+// strides on input/output tensors. Weights always stay packed (KCRS).
+// TensorLayout controls stride generation via generateStrides(dims, strideOrder);
+// e.g. NHWC with dims {1,3,8,8} produces strides {192,1,24,3} (C=1 is innermost).
 // ============================================================================
 
-template <typename DataType>
-class ConvFwdNhwcShapeSuite : public ::testing::TestWithParam<ConvFwdShapeCase>
-{
-protected:
-    static float tolerance(const ConvFwdShapeCase& tc)
-    {
-        constexpr double FILL_RANGE = 1.0;
-        return hipdnn_test_sdk::utilities::conv::
-            calculateConvFpropTolerance<DataType, DataType, double>(
-                -FILL_RANGE, FILL_RANGE, -FILL_RANGE, FILL_RANGE, tc.wDims);
-    }
-
-    void runConvFwdNhwcShapeTest()
-    {
-        SKIP_IF_NO_DEVICES();
-        const auto& tc = GetParam();
-        auto yDims = tc.computeOutputDims();
-        runGpuVsCpuConvFwd<DataType>(tc.xDims,
-                                     tc.wDims,
-                                     yDims,
-                                     tc.strides,
-                                     tc.dilations,
-                                     tc.padding,
-                                     tolerance(tc),
-                                     TensorLayout::NHWC,
-                                     TensorLayout::NHWC);
-    }
-};
-
-using TestGpuConvFwdRefNhwcShapesFp32 = ConvFwdNhwcShapeSuite<float>;
-using TestGpuConvFwdRefNhwcShapesFp16 = ConvFwdNhwcShapeSuite<half>;
-using TestGpuConvFwdRefNhwcShapesBfp16 = ConvFwdNhwcShapeSuite<bfloat16>;
-
-TEST_P(TestGpuConvFwdRefNhwcShapesFp32, MatchesCpuRef)
-{
-    this->runConvFwdNhwcShapeTest();
-}
-TEST_P(TestGpuConvFwdRefNhwcShapesFp16, MatchesCpuRef)
-{
-    this->runConvFwdNhwcShapeTest();
-}
-TEST_P(TestGpuConvFwdRefNhwcShapesBfp16, MatchesCpuRef)
-{
-    this->runConvFwdNhwcShapeTest();
-}
-
-INSTANTIATE_TEST_SUITE_P(Small2dNhwc,
-                         TestGpuConvFwdRefNhwcShapesFp32,
-                         ::testing::ValuesIn(getSmall2dConvCases()),
+// fp32 NHWC/NDHWC: all sizes (small + medium + large 2D, small + medium 3D)
+INSTANTIATE_TEST_SUITE_P(Nhwc2dSmall,
+                         TestGpuConvFwdRefShapesFp32,
+                         ::testing::ValuesIn(withChannelLastLayout(getSmall2dConvCases())),
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Small2dNhwc,
-                         TestGpuConvFwdRefNhwcShapesFp16,
-                         ::testing::ValuesIn(getSmall2dConvCases()),
+INSTANTIATE_TEST_SUITE_P(Nhwc2dMedium,
+                         TestGpuConvFwdRefShapesFp32,
+                         ::testing::ValuesIn(withChannelLastLayout(getMedium2dConvCases())),
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
                              return info.param.tag;
                          });
-INSTANTIATE_TEST_SUITE_P(Small2dNhwc,
-                         TestGpuConvFwdRefNhwcShapesBfp16,
-                         ::testing::ValuesIn(getSmall2dConvCases()),
+INSTANTIATE_TEST_SUITE_P(Nhwc2dLarge,
+                         TestGpuConvFwdRefShapesFp32,
+                         ::testing::ValuesIn(withChannelLastLayout(getLarge2dConvCases())),
+                         [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
+                             return info.param.tag;
+                         });
+INSTANTIATE_TEST_SUITE_P(Ndhwc3dSmall,
+                         TestGpuConvFwdRefShapesFp32,
+                         ::testing::ValuesIn(withChannelLastLayout(getSmall3dConvCases())),
+                         [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
+                             return info.param.tag;
+                         });
+INSTANTIATE_TEST_SUITE_P(Ndhwc3dMedium,
+                         TestGpuConvFwdRefShapesFp32,
+                         ::testing::ValuesIn(withChannelLastLayout(getMedium3dConvCases())),
+                         [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
+                             return info.param.tag;
+                         });
+
+// fp16 NHWC/NDHWC: small + medium 2D, small 3D
+INSTANTIATE_TEST_SUITE_P(Nhwc2dSmall,
+                         TestGpuConvFwdRefShapesFp16,
+                         ::testing::ValuesIn(withChannelLastLayout(getSmall2dConvCases())),
+                         [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
+                             return info.param.tag;
+                         });
+INSTANTIATE_TEST_SUITE_P(Nhwc2dMedium,
+                         TestGpuConvFwdRefShapesFp16,
+                         ::testing::ValuesIn(withChannelLastLayout(getMedium2dConvCases())),
+                         [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
+                             return info.param.tag;
+                         });
+INSTANTIATE_TEST_SUITE_P(Ndhwc3dSmall,
+                         TestGpuConvFwdRefShapesFp16,
+                         ::testing::ValuesIn(withChannelLastLayout(getSmall3dConvCases())),
+                         [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
+                             return info.param.tag;
+                         });
+
+// bfp16 NHWC/NDHWC: small + medium 2D, small 3D
+INSTANTIATE_TEST_SUITE_P(Nhwc2dSmall,
+                         TestGpuConvFwdRefShapesBfp16,
+                         ::testing::ValuesIn(withChannelLastLayout(getSmall2dConvCases())),
+                         [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
+                             return info.param.tag;
+                         });
+INSTANTIATE_TEST_SUITE_P(Nhwc2dMedium,
+                         TestGpuConvFwdRefShapesBfp16,
+                         ::testing::ValuesIn(withChannelLastLayout(getMedium2dConvCases())),
+                         [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
+                             return info.param.tag;
+                         });
+INSTANTIATE_TEST_SUITE_P(Ndhwc3dSmall,
+                         TestGpuConvFwdRefShapesBfp16,
+                         ::testing::ValuesIn(withChannelLastLayout(getSmall3dConvCases())),
                          [](const ::testing::TestParamInfo<ConvFwdShapeCase>& info) {
                              return info.param.tag;
                          });
