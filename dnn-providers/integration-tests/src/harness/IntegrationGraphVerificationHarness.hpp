@@ -45,18 +45,6 @@ protected:
     {
         SKIP_IF_NO_DEVICES();
 
-        // Skip tests that are listed as expected failures in the config
-        auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
-        if(testInfo != nullptr)
-        {
-            std::string fullName
-                = std::string(testInfo->test_suite_name()) + "." + std::string(testInfo->name());
-            if(TestConfig::get().isExpectedFailure(fullName))
-            {
-                GTEST_SKIP() << "Expected failure (XFAIL)";
-            }
-        }
-
         // Initialize HIP
         ASSERT_EQ(hipInit(0), hipSuccess);
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
@@ -66,11 +54,11 @@ protected:
 
     // Determine tolerance for an output tensor based on the graph and
     // configured tolerance mode for the engine.
-    float getTolerance(int64_t engineId,
+    float getTolerance([[maybe_unused]] int64_t engineId,
                        const hipdnn_frontend::graph::Graph& graph,
                        const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& output)
     {
-        ToleranceMode mode = TestConfig::get().getToleranceMode(engineId);
+        ToleranceMode mode = TestConfig::get().getToleranceMode();
 
         if(mode == ToleranceMode::DEFAULT)
         {
@@ -109,6 +97,20 @@ protected:
 
         auto result = graph.build(getSharedHandle());
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        // Check if the target engine supports this graph
+        std::vector<int64_t> engineIds;
+        auto status = graph.get_ranked_engine_ids(engineIds);
+        int64_t targetEngineId = TestConfig::get().getEngineId();
+
+        if(status.is_bad()
+           || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
+        {
+            GTEST_SKIP() << "Engine " << TestConfig::get().getEngineName()
+                         << " does not support this graph";
+        }
+
+        graph.set_preferred_engine_id_ext(targetEngineId);
 
         generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
 

@@ -225,6 +225,21 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     if(NOT ROCM_LIBS_SUPERBUILD)
         install_miopen_plugin_ctest_files()
     endif()
+
+    find_package(hipdnn_integration_tests CONFIG QUIET)
+    if(hipdnn_integration_tests_FOUND)
+        add_external_integration_test_target(
+            TARGET_NAME   ${PROJECT_NAME}-external-integration-check
+            PLUGIN_TARGET miopen_plugin
+            ENGINE_NAME   MIOPEN_ENGINE
+            GTEST_FILTER
+                *IsSupported*
+                *ConvFwd*
+        )
+        message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
+    else()
+        message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
+    endif()
 endif()
 
 install(TARGETS miopen_plugin EXPORT miopen-plugin
