@@ -79,7 +79,7 @@ namespace PrefetchScaleTest
         graph = transform<AddPrefetch>(graph, params, context.get());
         graph = transform<PrefetchScale>(graph, params, context.get());
 
-        auto findLoop = [&](std::string const& name) {
+        auto findLoop = [&](std::string const& name) -> std::optional<int> {
             auto const rootTag = graph.control.roots().only().value();
             for(auto const loop : filter(graph.control.isElemType<ForLoopOp>(),
                                          graph.control.depthFirstVisit(rootTag)))
@@ -89,10 +89,11 @@ namespace PrefetchScaleTest
                     return loop;
             }
             FAIL("Loop '" + name + "' not found");
-            return -1;
+            return std::nullopt;
         };
 
-        int kLoopTag = findLoop(KLOOP);
+        auto kLoopTag = findLoop(KLOOP);
+        REQUIRE(kLoopTag.has_value());
 
         SECTION("Exchange nodes are placed inside the K loop body")
         {
@@ -102,24 +103,17 @@ namespace PrefetchScaleTest
             int exchangesOutsideK = 0;
             int totalExchanges    = 0;
 
-            std::optional<int> kLoopTailTag;
-            for(auto const loop :
-                filter(graph.control.isElemType<ForLoopOp>(),
-                       graph.control.depthFirstVisit(graph.control.roots().only().value())))
-            {
-                auto forloop = graph.control.get<ForLoopOp>(loop).value();
-                if(forloop.loopName == KLOOPTAIL)
-                    kLoopTailTag = loop;
-            }
+            std::optional<int> kLoopTailTag = findLoop(KLOOPTAIL);
 
             for(auto exchangeTag : graph.control.getNodes().filter(isExchange))
             {
                 totalExchanges++;
-                auto stack       = controlStack(exchangeTag, graph);
-                bool insideKLoop = std::find(stack.begin(), stack.end(), kLoopTag) != stack.end();
+                auto stack = controlStack(exchangeTag, graph);
+                bool insideKLoop
+                    = std::find(stack.begin(), stack.end(), kLoopTag.value()) != stack.end();
                 bool insideKLoopTail
-                    = kLoopTailTag
-                      && std::find(stack.begin(), stack.end(), *kLoopTailTag) != stack.end();
+                    = kLoopTailTag.has_value()
+                      && std::find(stack.begin(), stack.end(), kLoopTailTag.value()) != stack.end();
                 if(insideKLoop && !insideKLoopTail)
                     exchangesInKLoop++;
                 else
