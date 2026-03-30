@@ -40,6 +40,8 @@ hipdnn_data_sdk::data_objects::DataType toSdkDataType(hipdnnDataType_t type)
         return DataType::FP6_E2M3;
     case HIPDNN_DATA_FP6_E3M2:
         return DataType::FP6_E3M2;
+    case HIPDNN_DATA_INT64:
+        return DataType::INT64;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnDataType_t value");
     }
@@ -79,6 +81,8 @@ hipdnnDataType_t fromSdkDataType(hipdnn_data_sdk::data_objects::DataType type)
         return HIPDNN_DATA_FP6_E2M3;
     case DataType::FP6_E3M2:
         return HIPDNN_DATA_FP6_E3M2;
+    case DataType::INT64:
+        return HIPDNN_DATA_INT64;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK DataType");
     }
@@ -103,6 +107,8 @@ int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type)
     case DataType::FP8_E4M3:
     case DataType::FP8_E5M2:
         return 1;
+    case DataType::INT64:
+        return 8;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported DataType for byte size");
     }
