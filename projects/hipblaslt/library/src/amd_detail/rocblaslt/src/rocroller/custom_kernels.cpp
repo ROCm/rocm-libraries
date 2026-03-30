@@ -91,8 +91,6 @@ void preloadCustomKernels(SolutionCache& cache)
 
         mxfp4Kernel.swizzleA = true;
 
-        params.streamK = false;
-
         // 32xN kernels
         params.workgroupTile    = {32, 128, 256};
         cache.addKernel(
@@ -445,6 +443,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     mxfp4Kernel,
                     params.workgroupTile,
                     getCoPath() / "rr_custom_kernels.co"));
+            mxfp4Kernel.swizzleA    = true;
         }
     }
 }
