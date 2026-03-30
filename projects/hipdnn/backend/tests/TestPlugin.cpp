@@ -433,7 +433,7 @@ TEST(TestPluginCore, GetApiVersionUndefinedFunction)
     EXPECT_EQ(plugin.apiVersion(), "0.0.0");
 }
 
-TEST(TestPluginCore, SetLogLevel_PluginReceivesNewLevel)
+TEST(TestPluginCore, SetLogLevelPluginReceivesNewLevel)
 {
     const Plugin plugin{plugin::SharedLibrary{PLUGIN_PATH1}};
 
