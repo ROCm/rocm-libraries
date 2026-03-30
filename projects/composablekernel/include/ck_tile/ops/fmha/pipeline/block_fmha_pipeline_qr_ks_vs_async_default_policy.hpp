@@ -15,4 +15,10 @@ using BlockFmhaPipelineQRKSVSAsyncDefaultPolicy =
                                         /* NumPrefetchK = */ 3,
                                         /* NumPrefetchV = */ 3>;
 
+// NEW alias — qr_async pipeline only (intrinsic-based loads, 2D LDS descriptors)
+using BlockFmhaPipelineQRKSVSAsyncIntrinsicPolicy =
+    BlockFmhaPipelineQXKSVSAsyncPolicy</* QLoadOnce = */ true,
+                                       /* NumPrefetchK = */ 3,
+                                       /* NumPrefetchV = */ 3>;
+
 } // namespace ck_tile

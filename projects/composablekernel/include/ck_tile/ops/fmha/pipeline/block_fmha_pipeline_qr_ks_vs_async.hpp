@@ -13,7 +13,7 @@
 namespace ck_tile {
 
 // a variation of qr/ks/vs, where we use async copy to load k (potentially v in the future)
-template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSAsyncDefaultPolicy>
+template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSAsyncIntrinsicPolicy>
 struct BlockFmhaPipelineQRKSVSAsync
 {
     using Problem               = remove_cvref_t<Problem_>;
@@ -225,32 +225,43 @@ struct BlockFmhaPipelineQRKSVSAsync
 
         constexpr auto LdsSeq = Policy::template GetLdsBufferSequence<Problem>();
 
-        // K tile in LDS
-        auto k_lds_ptr   = reinterpret_cast<KDataType*>(smem_ptr);
+        // K tile in LDS — per-buffer typed pointer windows
+        constexpr auto single_buf_size = Policy::template GetSingleSmemElementSpaceSize<Problem>();
+        auto k_lds_ptr                 = reinterpret_cast<KDataType*>(smem_ptr);
+
         auto k_lds_store = generate_tuple(
             [&](auto i_buf) {
                 return make_tile_window(
                     make_tensor_view<address_space_enum::lds>(
-                        k_lds_ptr, Policy::template MakeKLdsStoreBlockDescriptor<Problem>(i_buf)),
-                    Policy::template MakeKLdsStoreBlockDescriptor<Problem>(i_buf).get_lengths(),
-                    {0, 0, 0});
+                        k_lds_ptr + i_buf * single_buf_size,
+                        Policy::template MakeKLdsStoreBlockDescriptor<Problem>()),
+                    Policy::template MakeKLdsStoreBlockDescriptor<Problem>().get_lengths(),
+                    {0, 0});
             },
             number<Policy::NumKVLdsBuffers>{});
 
-        auto k_lds_Load_view = make_tensor_view<address_space_enum::lds>(
-            k_lds_ptr, Policy::template MakeKLdsLoadBlockDescriptor<Problem>());
+        auto k_lds_load = generate_tuple(
+            [&](auto i_buf) {
+                return make_tile_window(
+                    make_tensor_view<address_space_enum::lds>(
+                        k_lds_ptr + i_buf * single_buf_size,
+                        Policy::template MakeKLdsLoadBlockDescriptor<Problem>()),
+                    Policy::template MakeKLdsLoadBlockDescriptor<Problem>().get_lengths(),
+                    {0, 0});
+            },
+            number<Policy::NumKVLdsBuffers>{});
 
-        auto k_lds_load =
-            make_tile_window(k_lds_Load_view,
-                             Policy::template MakeKLdsLoadBlockDescriptor<Problem>().get_lengths(),
-                             {0, 0});
-
-        // V tile in LDS
-        auto v_lds = make_tensor_view<address_space_enum::lds>(
-            reinterpret_cast<VDataType*>(smem_ptr),
-            Policy::template MakeVLdsBlockDescriptor<Problem>());
-        auto v_lds_window = make_tile_window(
-            v_lds, Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
+        // V tile in LDS — per-buffer typed pointer windows
+        auto v_lds = generate_tuple(
+            [&](auto i_buf) {
+                return make_tile_window(
+                    make_tensor_view<address_space_enum::lds>(
+                        reinterpret_cast<VDataType*>(k_lds_ptr + i_buf * single_buf_size),
+                        Policy::template MakeVLdsBlockDescriptor<Problem>()),
+                    Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(),
+                    {0, 0});
+            },
+            number<Policy::NumKVLdsBuffers>{});
 
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
@@ -260,15 +271,8 @@ struct BlockFmhaPipelineQRKSVSAsync
                                               q_dram_block_window_tmp.get_window_lengths(),
                                               q_dram_block_window_tmp.get_window_origin(),
                                               Policy::template MakeQRegTileDistribution<Problem>());
-        q_dram_window.init_raw();
 
-        // TODO: we use async Copy for K, which is inline asm
-        // a side effect is we have to use inline asm for q as well
-        auto q = decltype(load_tile(q_dram_window)){};
-        // TODO: start from rocm-6.2, compiler will have problem if manually set clear of q.
-        // however, q would be cleared in the constructor of static distributed tensor
-        // set_tile(q, number<0>{}); // use per-dword clear to avoid scratch
-        load_tile_raw(q, q_dram_window);
+        auto q = load_tile(q_dram_window);
         __builtin_amdgcn_sched_barrier(0);
 
         using SaccBlockTileType = decltype(gemm_0.MakeCBlockTile());
@@ -337,8 +341,8 @@ struct BlockFmhaPipelineQRKSVSAsync
         {
             if(num_total_loop <= 0)
             {
-                buffer_load_fence(0); // rocm-7.1.1, if whole tile is masked out, need to fence(0)
-                                      // otherwise will have compute error(maybe compiler bug?)
+                s_waitcnt<0>(); // rocm-7.1.1, if whole tile is masked out, need to fence(0)
+                                // otherwise will have compute error(maybe compiler bug?)
                 if constexpr(kStoreLSE)
                 {
                     auto lse =
@@ -364,16 +368,7 @@ struct BlockFmhaPipelineQRKSVSAsync
             k_dram_block_window.get_window_origin(),
             Policy::template MakeKDramTileDistribution<Problem>()); // K DRAM tile window for
                                                                     // load
-        k_dram_window.init_raw();
         constexpr auto k_oob_ck = bool_constant<true>{};
-        constexpr auto k_pre_np = [&]() {
-            if constexpr(kPadSeqLenK &&
-                         (BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                          (BiasEnum != BlockAttentionBiasEnum::NO_BIAS && kHasDropout)))
-                return bool_constant<true>{};
-            else
-                return bool_constant<false>{};
-        }();
 
         const auto bias_origin = bias_dram_block_window_tmp.get_window_origin();
         auto bias_dram_window =
@@ -392,12 +387,11 @@ struct BlockFmhaPipelineQRKSVSAsync
                              Policy::template MakeVDramTileDistribution<Problem>());
 
         // prefetch K tile
-        async_load_tile_raw(
-            k_lds_store(LdsSeq.at(number<0>{})), k_dram_window, number<-1>{}, k_oob_ck, k_pre_np);
+        async_load_tile(k_lds_store(LdsSeq.at(number<0>{})), k_dram_window, number<-1>{}, k_oob_ck);
         move_tile_window(k_dram_window, {0, kK0});
         __builtin_amdgcn_sched_barrier(0);
 
-        buffer_load_fence(k_dram_window.get_num_of_access(), q.get_thread_buffer());
+        s_waitcnt<k_dram_window.get_num_of_access()>();
         (void)q_element_func; // ??? rocm-6.x if use q element func will have scratch on hdim=64/32
         // auto q_tile = q;      // tile_elementwise_in(q_element_func, q);
 
@@ -422,23 +416,20 @@ struct BlockFmhaPipelineQRKSVSAsync
             if constexpr(k0_loops > 1)
             {
                 static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
-                    async_load_tile_raw(k_lds_store(number<LdsSeq.at(number<i_k0 + 1>{})>{}),
-                                        k_dram_window,
-                                        number<-1>{},
-                                        k_oob_ck,
-                                        k_pre_np);
+                    async_load_tile(k_lds_store(number<LdsSeq.at(number<i_k0 + 1>{})>{}),
+                                    k_dram_window,
+                                    number<-1>{},
+                                    k_oob_ck);
                     if constexpr(i_k0 < k0_loops - 1)
                         move_tile_window(k_dram_window, {0, kK0});
 
-                    async_load_fence(k_dram_window.get_num_of_access());
+                    s_waitcnt<k_dram_window.get_num_of_access()>();
                     __builtin_amdgcn_s_barrier();
                     __builtin_amdgcn_sched_barrier(0);
                     gemm_0(s_acc,
                            get_slice_tile(
                                q, sequence<0, i_k0 * kK0>{}, sequence<kM0, (i_k0 + 1) * kK0>{}),
-                           get_slice_tile(k_lds_load,
-                                          sequence<(LdsSeq.at(number<i_k0>{})) * kN0, 0>{},
-                                          sequence<(LdsSeq.at(number<i_k0>{}) + 1) * kN0, kK0>{}));
+                           k_lds_load(LdsSeq.at(number<i_k0>{})));
                 });
             }
 
@@ -447,20 +438,17 @@ struct BlockFmhaPipelineQRKSVSAsync
             if constexpr(k0_loops <= 2)
                 __builtin_amdgcn_sched_barrier(0);
 
-            async_load_fence();
+            s_waitcnt<0>();
             __builtin_amdgcn_s_barrier();
 
             const auto bias_tile = load_tile(bias_dram_window); // load bias tile
             auto v_buf           = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
             __builtin_amdgcn_sched_barrier(0);
             { // tail
-                gemm_0(
-                    s_acc,
-                    get_slice_tile(
-                        q, sequence<0, (k0_loops - 1) * kK0>{}, sequence<kM0, k0_loops * kK0>{}),
-                    get_slice_tile(k_lds_load,
-                                   sequence<(LdsSeq.at(number<k0_loops - 1>{})) * kN0, 0>{},
-                                   sequence<(LdsSeq.at(number<k0_loops - 1>{}) + 1) * kN0, kK0>{}));
+                gemm_0(s_acc,
+                       get_slice_tile(
+                           q, sequence<0, (k0_loops - 1) * kK0>{}, sequence<kM0, k0_loops * kK0>{}),
+                       k_lds_load(LdsSeq.at(number<k0_loops - 1>{})));
             }
             __builtin_amdgcn_sched_barrier(1);
             // dequant
@@ -610,22 +598,13 @@ struct BlockFmhaPipelineQRKSVSAsync
                     Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
                 shuffle_tile(v_shuffle_tmp, v_buf);
 
-                auto v_lds_window_tmp =
-                    get_slice_tile(v_lds_window,
-                                   sequence<(LdsSeq.at(number<k0_loops>{})) * kN1, 0>{},
-                                   sequence<(LdsSeq.at(number<k0_loops>{}) + 1) * kN1, kK1>{});
-
                 store_tile(
-                    v_lds_window_tmp,
+                    v_lds(LdsSeq.at(number<k0_loops>{})),
                     tile_elementwise_in(v_element_func, v_shuffle_tmp)); // store the prefetch
             }
             else
             {
-                auto v_lds_window_tmp =
-                    get_slice_tile(v_lds_window,
-                                   sequence<(LdsSeq.at(number<k0_loops>{})) * kN1, 0>{},
-                                   sequence<(LdsSeq.at(number<k0_loops>{}) + 1) * kN1, kK1>{});
-                store_tile(v_lds_window_tmp,
+                store_tile(v_lds(LdsSeq.at(number<k0_loops>{})),
                            tile_elementwise_in(v_element_func, v_buf)); // store the prefetch
             }
 
@@ -811,31 +790,20 @@ struct BlockFmhaPipelineQRKSVSAsync
                     gemm_1(o_acc_,
                            get_slice_tile(
                                p, sequence<0, i_k1 * kK1>{}, sequence<kM0, (i_k1 + 1) * kK1>{}),
-                           get_slice_tile(
-                               v_lds_window,
-                               sequence<(LdsSeq.at(number<k0_loops + i_k1>{})) * kN1, 0>{},
-                               sequence<(LdsSeq.at(number<k0_loops + i_k1>{}) + 1) * kN1, kK1>{}));
+                           v_lds(LdsSeq.at(number<k0_loops + i_k1>{})));
 
                     if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
                     {
                         auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
                             Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
                         shuffle_tile(v_shuffle_tmp, v_buf);
-                        auto v_lds_window_tmp = get_slice_tile(
-                            v_lds_window,
-                            sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{})) * kN1, 0>{},
-                            sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1, kK1>{});
-                        store_tile(v_lds_window_tmp,
+                        store_tile(v_lds(LdsSeq.at(number<k0_loops + i_k1 + 1>{})),
                                    tile_elementwise_in(v_element_func,
                                                        v_shuffle_tmp)); // store the prefetch
                     }
                     else
                     {
-                        auto v_lds_window_tmp = get_slice_tile(
-                            v_lds_window,
-                            sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{})) * kN1, 0>{},
-                            sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1, kK1>{});
-                        store_tile(v_lds_window_tmp,
+                        store_tile(v_lds(LdsSeq.at(number<k0_loops + i_k1 + 1>{})),
                                    tile_elementwise_in(v_element_func, v_buf)); // store next v_buf
                     }
                     if constexpr(i_k1 < k1_loops - 1)
@@ -860,23 +828,16 @@ struct BlockFmhaPipelineQRKSVSAsync
                 if constexpr(k1_loops >= 2 &&
                              LdsSeq.at(number<0>{}) == LdsSeq.at(number<k0_loops + k1_loops - 2>{}))
                     __builtin_amdgcn_s_barrier();
-                async_load_tile_raw(k_lds_store(LdsSeq.at(number<0>{})),
-                                    k_dram_window,
-                                    number<-1>{},
-                                    k_oob_ck,
-                                    k_pre_np);
+                async_load_tile(
+                    k_lds_store(LdsSeq.at(number<0>{})), k_dram_window, number<-1>{}, k_oob_ck);
                 move_tile_window(k_dram_window, {0, kK0});
             }
             // tail
             {
                 block_sync_lds();
-                gemm_1(
-                    o_acc_,
-                    get_slice_tile(p, sequence<0, (k1_loops - 1) * kK1>{}, sequence<kM0, kN0>{}),
-                    get_slice_tile(
-                        v_lds_window,
-                        sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{})) * kN1, 0>{},
-                        sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{}) + 1) * kN1, kK1>{}));
+                gemm_1(o_acc_,
+                       get_slice_tile(p, sequence<0, (k1_loops - 1) * kK1>{}, sequence<kM0, kN0>{}),
+                       v_lds(LdsSeq.at(number<k0_loops + k1_loops - 1>{})));
             }
 
             if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
