@@ -528,8 +528,8 @@ rocblaslt_status
             }
         }
 
-        auto existingSolution
-            = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameter);
+        auto existingSolution = rocroller_handle->cache.getKernel(
+            kernelType, solutionIndexParameter, ProblemDims{prob.m, prob.n, prob.k});
         std::shared_ptr<GemmKernel> kernel;
         // If kernel doesn't already exist, generate it
         if(!existingSolution)
@@ -626,7 +626,8 @@ rocblaslt_status getKernelFromAlgo(rocblaslt_handle                   handle,
     auto             kernelType       = genKernelType(prob);
 
     auto solutionIndexParameters = indexToParameters(*solutionIndex);
-    auto existingKernel = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameters);
+    auto existingKernel          = rocroller_handle->cache.getKernel(
+        kernelType, solutionIndexParameters, ProblemDims{prob.m, prob.n, prob.k});
     if(existingKernel)
     {
         kernel = *existingKernel;
@@ -728,8 +729,26 @@ rocblaslt_status runRocRollerContractionProblem(rocblaslt_handle                
                            hotIterations);
     }
 
-    if(kernel->isCustomKernel())
-        return runCustomKernel(kernel, prob);
+    auto& wgt = kernel->params->workgroupTile;
 
+    if(kernel->isCustomKernel())
+    {
+        std::string kernelName = kernel->module->getKernelName();
+        std::string source = (kernelName.find("wave") == 0) ? "wave" : "aiter";
+        std::cerr << "[KERNEL_SOURCE] m=" << prob.m
+                  << " n=" << prob.n
+                  << " k=" << prob.k
+                  << " source=" << source
+                  << " tile=" << wgt.m << "x" << wgt.n << "x" << wgt.k
+                  << " kernel=" << kernelName << std::endl;
+        return runCustomKernel(kernel, prob);
+    }
+
+    std::cerr << "[KERNEL_SOURCE] m=" << prob.m
+              << " n=" << prob.n
+              << " k=" << prob.k
+              << " source=rocroller"
+              << " tile=" << wgt.m << "x" << wgt.n << "x" << wgt.k
+              << std::endl;
     return runGemmKernel(kernel, prob);
 }
