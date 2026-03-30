@@ -120,6 +120,14 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
             tensorMap, attributes.next_running_variance_tensor_uid().value()));
         _hasRunningStats = true;
     }
+
+    // Validate that activation input matches batchnorm output
+    if(pointwiseAttributes.in_0_tensor_uid() != attributes.y_tensor_uid())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "BatchnormFwdTrainingParams: Activation input must match batchnorm output");
+    }
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::x() const
