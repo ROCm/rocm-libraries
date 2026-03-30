@@ -5,7 +5,7 @@ operation:
   fbs_generated_header: "reduction_attributes_generated.h"
 
   descriptor_type:
-    enum_name: "HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR"
+    enum_name: "HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR_EXT"
 
   operation_attr_prefix: "HIPDNN_ATTR_OPERATION_REDUCTION"
 
@@ -43,39 +43,40 @@ operation:
   tensor_fields:
     - name: "x"
       fbs_field: "in_tensor_uid"
-      attr_suffix: "XDESC"
+      attr_suffix: "X_EXT"
       required: true
       frontend_getter: "get_x()"
 
     - name: "y"
       fbs_field: "out_tensor_uid"
-      attr_suffix: "YDESC"
+      attr_suffix: "Y_EXT"
       required: true
       frontend_getter: "get_y()"
 
   data_fields:
     - name: "mode"
       fbs_field: "mode"
-      attr_name: "HIPDNN_ATTR_REDUCTION_OPERATOR"
+      attr_name: "HIPDNN_ATTR_REDUCTION_MODE_EXT"
       type: "mode"
       cpp_enum: "hipdnn_data_sdk::data_objects::ReductionMode"
       frontend_type: "ReductionMode"
       required: true
       default_value: "ReductionMode::NOT_SET"
       frontend_getter: "get_mode()"
+      frontend_getter_returns_optional: true
       backend_setter: "setReductionMode"
       backend_getter: "getReductionMode"
       backend_converter: "toBackendReductionMode"
-      frontend_inverse_converter: "fromHipdnnReduceTensorOp"
-      backend_type_name: "HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE"
+      frontend_inverse_converter: "fromHipdnnReductionMode"
+      backend_type_name: "HIPDNN_TYPE_REDUCTION_MODE"
       test_enum_value: "ADD"
       test_alt_enum_value: "AMAX"
-      test_backend_value: "HIPDNN_REDUCE_TENSOR_ADD"
-      test_c_type: "hipdnnReduceTensorOp_t"
-      test_default_value: "HIPDNN_REDUCE_TENSOR_ADD"
+      test_backend_value: "HIPDNN_REDUCTION_ADD"
+      test_c_type: "hipdnnReductionMode_t"
+      test_default_value: "HIPDNN_REDUCTION_ADD"
       enum_def:
-        backend_header: "HipdnnReduceTensorOp.h"
-        backend_prefix: "HIPDNN_REDUCE_TENSOR_"
+        backend_header: "HipdnnReductionMode.h"
+        backend_prefix: "HIPDNN_REDUCTION_"
         values:
           - { name: "NOT_SET", value: 0, sentinel: true }
           - { name: "ADD", value: 1, description: "Sum reduction" }
@@ -98,7 +99,7 @@ operation:
   tensor_array_fields: []
 
   has_compute_data_type: true
-  compute_data_type_attr: "HIPDNN_ATTR_REDUCTION_COMP_TYPE"
+  compute_data_type_attr: "HIPDNN_ATTR_REDUCTION_MATH_PREC_EXT"
 
   operation_type_enum: "HIPDNN_OPERATION_TYPE_REDUCTION"
 
