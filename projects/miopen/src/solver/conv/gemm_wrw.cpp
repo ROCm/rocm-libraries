@@ -353,10 +353,9 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
                          conv.group_count;
 
     // For bf16: extra workspace for fp32 accumulation buffer (same shape as dw)
-    const auto xDesc  = problem.GetOut();
-    const auto in_n   = xDesc.GetLengths()[0];
-    const auto need_fp32_accum =
-        (dyDesc.GetType() == miopenBFloat16) && (in_n > 1);
+    const auto xDesc           = problem.GetOut();
+    const auto in_n            = xDesc.GetLengths()[0];
+    const auto need_fp32_accum = (dyDesc.GetType() == miopenBFloat16) && (in_n > 1);
     const auto fp32_accum_size =
         need_fp32_accum ? GetTypeSize(miopenFloat) * dwDesc.GetElementSize() : std::size_t{0};
     // Use padded layout: im2col buffer at offset 0, fp32 accum buffer at offset ws_size
@@ -367,7 +366,7 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
     if(total_ws_size > handle.GetMaxMemoryAllocSize())
     {
         MIOPEN_LOG_I2("GemmWrwUniversal: " << total_ws_size << " > "
-                                            << handle.GetMaxMemoryAllocSize());
+                                           << handle.GetMaxMemoryAllocSize());
         return 0;
     }
     return total_ws_size;
@@ -469,13 +468,13 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
     const auto wei_k          = dwDesc.GetLengths()[0];
 
     // bf16: accumulate in fp32 workspace when batch_size > 1
-    const auto data_type       = dyDesc.GetType();
-    const auto use_fp32_accum  = (data_type == miopenBFloat16) && (in_n > 1);
-    const auto lowp_quant      = conv.lowp_quant;
-    const auto dw_lengths      = dwDesc.GetLengths();
-    const auto dw_strides      = dwDesc.GetStrides();
+    const auto data_type      = dyDesc.GetType();
+    const auto use_fp32_accum = (data_type == miopenBFloat16) && (in_n > 1);
+    const auto lowp_quant     = conv.lowp_quant;
+    const auto dw_lengths     = dwDesc.GetLengths();
+    const auto dw_strides     = dwDesc.GetStrides();
     // im2col workspace size (before padding/alignment)
-    const auto im2col_ws_size  = [&]() {
+    const auto im2col_ws_size = [&]() {
         const auto wei_c = dwDesc.GetLengths()[1];
         const auto out_sp =
             dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dims);
@@ -553,8 +552,7 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
             Data_t accum_buf = dw;
             if(use_fp32_accum)
             {
-                accum_buf = static_cast<Data_t>(
-                    static_cast<char*>(workspace) + fp32_accum_offset);
+                accum_buf = static_cast<Data_t>(static_cast<char*>(workspace) + fp32_accum_offset);
                 TensorDescriptor fp32Desc(miopenFloat, dw_lengths, dw_strides);
                 SetTensor(handle, fp32Desc, accum_buf, &zero);
             }

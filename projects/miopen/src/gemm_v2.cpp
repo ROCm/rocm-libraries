@@ -968,8 +968,7 @@ miopenStatus_t CallGemm(const Handle& handle,
         {
             ProfilingRecordStart(handle, start, stop);
         }
-        rocblas_atomics_mode cur_mode =
-            rocblas_atomics_mode::rocblas_atomics_allowed;
+        rocblas_atomics_mode cur_mode = rocblas_atomics_mode::rocblas_atomics_allowed;
         if(gemm_desc.deterministic)
             cur_mode = DisableRocblasAtomics(handle);
 
@@ -1370,8 +1369,7 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
         {
             ProfilingRecordStart(handle, start, stop);
         }
-        rocblas_atomics_mode cur_mode =
-            rocblas_atomics_mode::rocblas_atomics_allowed;
+        rocblas_atomics_mode cur_mode = rocblas_atomics_mode::rocblas_atomics_allowed;
         if(gemm_desc.deterministic)
             cur_mode = DisableRocblasAtomics(handle);
 
@@ -1416,8 +1414,9 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
         }
         else
         {
-            MIOPEN_THROW(miopenStatusInternalError,
-                         "CallGemmStridedBatched with cType: unsupported dataType/cType combination");
+            MIOPEN_THROW(
+                miopenStatusInternalError,
+                "CallGemmStridedBatched with cType: unsupported dataType/cType combination");
         }
 
         if(handle.IsProfilingEnabled())
