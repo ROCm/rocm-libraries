@@ -44,8 +44,7 @@ namespace {
 
 // Fused shape for one case only
 //    B,C_in,C_out,D,H,W = 1,512,512,61,45,80; kernel (3,5,5); pad (0,2,2);
-//     groups = C_out)
-//   - miopen_conv3d_depthwise_fwd.cpp: BLOCK_H/W, KD/KH/KW, PaddingD/H/W.
+//     groups = C_out
 constexpr std::size_t kCase3Batch    = 1;
 constexpr std::size_t kCase3Channels = 512;
 constexpr std::size_t kCase3InD      = 61;
@@ -101,23 +100,19 @@ bool ConvDepthwiseFwd3D::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     return problem.GetBatchSize() == kCase3Batch && problem.GetInChannels() == kCase3Channels &&
-           problem.GetOutChannels() == kCase3Channels &&
-           problem.GetInDepth() == kCase3InD     // --in_d 61
-           && problem.GetInHeight() == kCase3InH // -H 45
-           && problem.GetInWidth() == kCase3InW  // -W 80
-           && problem.GetOutDepth() == kCase3OutD && problem.GetOutHeight() == kCase3OutH &&
+           problem.GetOutChannels() == kCase3Channels && problem.GetInDepth() == kCase3InD &&
+           problem.GetInHeight() == kCase3InH && problem.GetInWidth() == kCase3InW &&
+           problem.GetOutDepth() == kCase3OutD && problem.GetOutHeight() == kCase3OutH &&
            problem.GetOutWidth() == kCase3OutW &&
-           static_cast<int>(problem.GetWeightsDepth()) == kCase3Kd     // --fil_d 3
-           && static_cast<int>(problem.GetWeightsHeight()) == kCase3Kh // -y 5
-           && static_cast<int>(problem.GetWeightsWidth()) == kCase3Kw  // -x 5
-           && problem.GetPadD() == kCase3PadD                          // --pad_d 0
-           && problem.GetPadH() == kCase3PadH                          // -p 2
-           && problem.GetPadW() == kCase3PadW                          // -q 2
-           && problem.GetKernelStrideD() == kCase3Stride &&
+           static_cast<int>(problem.GetWeightsDepth()) == kCase3Kd &&
+           static_cast<int>(problem.GetWeightsHeight()) == kCase3Kh &&
+           static_cast<int>(problem.GetWeightsWidth()) == kCase3Kw &&
+           problem.GetPadD() == kCase3PadD && problem.GetPadH() == kCase3PadH &&
+           problem.GetPadW() == kCase3PadW && problem.GetKernelStrideD() == kCase3Stride &&
            problem.GetKernelStrideH() == kCase3Stride &&
            problem.GetKernelStrideW() == kCase3Stride && problem.GetDilationD() == kCase3Dilation &&
            problem.GetDilationH() == kCase3Dilation && problem.GetDilationW() == kCase3Dilation &&
-           static_cast<std::size_t>(problem.GetGroupCount()) == kCase3Group; // -g 512, depthwise
+           static_cast<std::size_t>(problem.GetGroupCount()) == kCase3Group; // depthwise
 }
 
 ConvSolution ConvDepthwiseFwd3D::GetSolution(const ExecutionContext&,
@@ -127,9 +122,7 @@ ConvSolution ConvDepthwiseFwd3D::GetSolution(const ExecutionContext&,
     KernelInfo kernel;
     kernel.kernel_file = "miopen_conv3d_depthwise_fwd.cpp";
     kernel.kernel_name = "miopen_conv3d_depthwise_fwd";
-    // hipExtModuleLaunchKernel global dims = gridDim * blockDim per axis (see conv_wino /
-    // hipoc_kernel). Grid [B, C_out, D_out] = [1, 512, 59], block [256, 1, 1] → global {256, 512,
-    // 59}.
+
     kernel.l_wk.push_back(256);
     kernel.l_wk.push_back(1);
     kernel.l_wk.push_back(1);
@@ -140,7 +133,7 @@ ConvSolution ConvDepthwiseFwd3D::GetSolution(const ExecutionContext&,
     if(problem.IsFp16())
         kernel.comp_options = std::string(" -DIO_DTYPE=__half");
     else
-        kernel.comp_options = std::string(" -DIO_DTYPE=__hip_bfloat16"); // IsApplicable: BFP16
+        kernel.comp_options = std::string(" -DIO_DTYPE=__hip_bfloat16");
 
     result.invoker_factory = [](const std::vector<Kernel>& kernels) {
         const auto kern = kernels[0];
