@@ -156,6 +156,7 @@ def executeStepsInConfig(
                     debugConfig.printIndexAssignmentInfo,
                     isaInfoMap,
                 )
+            flush_timing_buffer()
             print1("")
         else:
             print1("# LibraryLogic already done.")
@@ -179,6 +180,7 @@ def executeStepsInConfig(
                 deviceId,
                 gfxName,
             )
+        flush_timing_buffer()
         print1("")
 
 

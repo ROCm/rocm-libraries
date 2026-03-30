@@ -8,7 +8,6 @@
 #include <cstring>
 #include <iostream>
 #include <string>
-#include <variant>
 #include <vector>
 
 namespace TensileLite
@@ -36,21 +35,30 @@ namespace TensileLite
             double      durationMs;
         };
 
-        struct ContextRec
+        // Context buffers: separate from the main timing buffer.
+        // posInTimingBuffer records g_timingBuffer.size() at push time so that
+        // flushTimingBuffer() can merge context lines into the correct position.
+        struct ContextEntry
         {
+            size_t      posInTimingBuffer;
             size_t      M, N, K, batchCount;
             std::string typeA, typeD;
         };
 
-        struct GroupedContextRec
+        struct GroupedContextEntry
         {
+            size_t      posInTimingBuffer;
             size_t      index, totalGemms;
             size_t      M, N, K, batchCount;
             std::string typeA, typeD;
         };
 
-        using TimingRecord = std::variant<TimingRec, ContextRec, GroupedContextRec>;
-        inline std::vector<TimingRecord> g_timingBuffer;
+        // Main buffer: timing records only (hot path, ~2.5M entries, 16 bytes each).
+        inline std::vector<TimingRec> g_timingBuffer;
+
+        // Context buffers: cold path, few thousand entries each.
+        inline std::vector<ContextEntry>        g_contextBuffer;
+        inline std::vector<GroupedContextEntry>  g_groupedContextBuffer;
 
         // Reserve buffer capacity upfront. Real workloads produce ~2M+ records.
         // Only allocates when timing is enabled to avoid penalizing normal runs.
@@ -101,38 +109,66 @@ namespace TensileLite
             std::clog.write(buf, p - buf);
         }
 
-        // Format and write all buffered records, then clear the buffer.
+        // Format and write all buffered records, then clear the buffers.
+        // Context entries are merged into the output at their recorded positions
+        // to preserve the interleaving expected by analyze_timing.py.
         inline void flushTimingBuffer()
         {
             // Emit calibrated instrumentation overhead as a timing record.
+            // g_timingBuffer.size() now correctly counts only TimingRec entries.
             if(g_timingInstrumentationEnabled && g_calibratedPerCallOverheadMs > 0)
             {
                 double overheadMs = g_calibratedPerCallOverheadMs * g_timingBuffer.size();
                 g_timingBuffer.push_back(TimingRec{"timing_overhead", overheadMs});
             }
 
-            for(auto& rec : g_timingBuffer)
+            // Two-pointer merge: emit context lines at their recorded positions.
+            size_t ctxIdx = 0;
+            size_t grpIdx = 0;
+            for(size_t i = 0; i < g_timingBuffer.size(); i++)
             {
-                std::visit(
-                    [](auto& r)
-                    {
-                        using T = std::decay_t<decltype(r)>;
-                        if constexpr(std::is_same_v<T, TimingRec>)
-                            writeLine("TIMING:", r.category, ":", r.durationMs);
-                        else if constexpr(std::is_same_v<T, ContextRec>)
-                            writeLine("TIMING_CONTEXT:M=", r.M, ",N=", r.N, ",K=", r.K,
-                                      ",batch=", r.batchCount,
-                                      ",typeA=", r.typeA, ",typeD=", r.typeD);
-                        else
-                            writeLine("TIMING_CONTEXT_GROUPED:index=", r.index,
-                                      ",total=", r.totalGemms,
-                                      ",M=", r.M, ",N=", r.N, ",K=", r.K,
-                                      ",batch=", r.batchCount,
-                                      ",typeA=", r.typeA, ",typeD=", r.typeD);
-                    },
-                    rec);
+                while(ctxIdx < g_contextBuffer.size()
+                      && g_contextBuffer[ctxIdx].posInTimingBuffer <= i)
+                {
+                    auto& c = g_contextBuffer[ctxIdx++];
+                    writeLine("TIMING_CONTEXT:M=", c.M, ",N=", c.N, ",K=", c.K,
+                              ",batch=", c.batchCount,
+                              ",typeA=", c.typeA, ",typeD=", c.typeD);
+                }
+                while(grpIdx < g_groupedContextBuffer.size()
+                      && g_groupedContextBuffer[grpIdx].posInTimingBuffer <= i)
+                {
+                    auto& g = g_groupedContextBuffer[grpIdx++];
+                    writeLine("TIMING_CONTEXT_GROUPED:index=", g.index,
+                              ",total=", g.totalGemms,
+                              ",M=", g.M, ",N=", g.N, ",K=", g.K,
+                              ",batch=", g.batchCount,
+                              ",typeA=", g.typeA, ",typeD=", g.typeD);
+                }
+                writeLine("TIMING:", g_timingBuffer[i].category, ":",
+                          g_timingBuffer[i].durationMs);
             }
+            // Emit any trailing context entries (after all timing records).
+            while(ctxIdx < g_contextBuffer.size())
+            {
+                auto& c = g_contextBuffer[ctxIdx++];
+                writeLine("TIMING_CONTEXT:M=", c.M, ",N=", c.N, ",K=", c.K,
+                          ",batch=", c.batchCount,
+                          ",typeA=", c.typeA, ",typeD=", c.typeD);
+            }
+            while(grpIdx < g_groupedContextBuffer.size())
+            {
+                auto& g = g_groupedContextBuffer[grpIdx++];
+                writeLine("TIMING_CONTEXT_GROUPED:index=", g.index,
+                          ",total=", g.totalGemms,
+                          ",M=", g.M, ",N=", g.N, ",K=", g.K,
+                          ",batch=", g.batchCount,
+                          ",typeA=", g.typeA, ",typeD=", g.typeD);
+            }
+
             g_timingBuffer.clear();
+            g_contextBuffer.clear();
+            g_groupedContextBuffer.clear();
             std::clog.flush();
         }
 
@@ -188,6 +224,14 @@ namespace TensileLite
         {
             if(!g_timingInstrumentationEnabled)
                 return;
+
+            // Pre-touch all reserved pages so calibration runs on faulted memory,
+            // matching the conditions of real workloads.
+            size_t cap = g_timingBuffer.capacity();
+            for(size_t i = 0; i < cap; i++)
+                g_timingBuffer.push_back(TimingRec{"_warmup", 0});
+            g_timingBuffer.clear();
+
             constexpr int kWarmup = 1000;
             constexpr int kIter   = 100000;
             for(int i = 0; i < kWarmup; i++)
@@ -211,25 +255,28 @@ namespace TensileLite
             }
         }
 
-        // Report problem context for correlation (single GEMM)
+        // Report problem context for correlation (single GEMM).
+        // Buffered separately from timing records; merged during flush.
         inline void reportProblemContext(size_t M, size_t N, size_t K, size_t batchCount,
                                          const std::string& typeA, const std::string& typeD)
         {
             if(g_timingInstrumentationEnabled)
             {
-                g_timingBuffer.push_back(ContextRec{M, N, K, batchCount, typeA, typeD});
+                g_contextBuffer.push_back(
+                    ContextEntry{g_timingBuffer.size(), M, N, K, batchCount, typeA, typeD});
             }
         }
 
-        // Report problem context for grouped GEMM (multiple GEMMs batched together)
+        // Report problem context for grouped GEMM (multiple GEMMs batched together).
+        // Buffered separately from timing records; merged during flush.
         inline void reportGroupedProblemContext(size_t index, size_t totalGemms,
                                                 size_t M, size_t N, size_t K, size_t batchCount,
                                                 const std::string& typeA, const std::string& typeD)
         {
             if(g_timingInstrumentationEnabled)
             {
-                g_timingBuffer.push_back(
-                    GroupedContextRec{index, totalGemms, M, N, K, batchCount, typeA, typeD});
+                g_groupedContextBuffer.push_back(GroupedContextEntry{
+                    g_timingBuffer.size(), index, totalGemms, M, N, K, batchCount, typeA, typeD});
             }
         }
 
