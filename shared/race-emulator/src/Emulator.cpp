@@ -12,7 +12,6 @@
 #include <iostream>
 #include <map>
 #include <memory>
-#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -151,7 +150,6 @@ void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves) {
     }
   }
 
-  waves.clear();
   workgroup.clear();
 
   int nextFreeVgpr{-1};
@@ -189,13 +187,12 @@ void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves) {
   const auto &macros = parsedAsm->macros;
 
   for (int i = 0; i < nWaves; ++i) {
-
-    waves.push_back(Wave(nextFreeVgpr, accumOffset, nextFreeSgpr,
-                         parsedAsm->wavefrontSize, WaveId{i}, workgroup,
-                         &labels, &macros));
-    waves.back().setProfiler(&profiler);
+    workgroup.addWave(Wave(nextFreeVgpr, accumOffset, nextFreeSgpr,
+                           parsedAsm->wavefrontSize, WaveId{i}, workgroup,
+                           &labels, &macros));
+    workgroup.getWave(i).setProfiler(&profiler);
     if (raceChecks) {
-      waves.back().setRaceChecks(true);
+      workgroup.getWave(i).setRaceChecks(true);
     }
   }
 
@@ -203,7 +200,11 @@ void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves) {
     workgroup.setRaceChecks(true);
   }
 
-  for (auto &r : waves) {
+  workgroup.setProfiler(&profiler);
+  workgroup.setWaveSchedule(waveSchedule);
+
+  for (int i = 0; i < nWaves; ++i) {
+    auto &r = workgroup.getWave(i);
     for (const auto &[key, mapping] :
          parsedAsm->initialRegisterAllocation.registers) {
       if (key == ".amdhsa_user_sgpr_kernarg_segment_ptr") {
@@ -228,11 +229,12 @@ void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves) {
   if (parsedAsm->kernargPreloadLength > 0) {
     auto *srcPtr = reinterpret_cast<const uint32_t *>(
         kernargSegment.data() + parsedAsm->kernargPreloadOffset);
-    for (auto &r : waves) {
-      for (int i = 0; i < parsedAsm->kernargPreloadLength; ++i) {
+    for (int i = 0; i < nWaves; ++i) {
+      auto &r = workgroup.getWave(i);
+      for (int j = 0; j < parsedAsm->kernargPreloadLength; ++j) {
         // Preloaded SGPRs start at s[2] (right after the kernarg pointer
         // s[0:1]).
-        r.setSgpr(2 + i, srcPtr[i]);
+        r.setSgpr(2 + j, srcPtr[j]);
       }
     }
   }
@@ -241,7 +243,8 @@ void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves) {
   // This packing is inferred from hipcc output (see tests/asm/test_3d.s), and
   // may need verification for architectures other than gfx942.
   int threadId = {0};
-  for (auto &r : waves) {
+  for (int i = 0; i < nWaves; ++i) {
+    auto &r = workgroup.getWave(i);
     for (int lane = 0; lane < r.getWaveSize(); ++lane) {
       // Calculate 3D coordinates from flat thread ID
       int tid_x = threadId % blockDim.x;
@@ -267,7 +270,7 @@ void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves) {
   int labelIndex = start->second;
 
   for (int i = 0; i < nWaves; ++i) {
-    waves[i].setPc(labelIndex);
+    workgroup.getWave(i).setPc(labelIndex);
   }
 }
 
@@ -298,239 +301,135 @@ void Emulator::run(Dim3d wgId, Dim3d blockDim) {
     initializeForRun(wgId, blockDim, nWaves);
   }
 
-  std::vector<bool> waveActive(nWaves, true);
-  int nActiveWaves = nWaves;
+  auto reportRaceCondition = [&](const RaceConditionException &e,
+                                 int waveId, int pc) -> std::string {
+    auto &regs = workgroup.getWave(waveId);
+    auto getAllVgprEvents = [&](const RaceConditionException &e) {
+      assert(e.space == RaceConditionException::Space::VGPR);
+      return regs.getVgprMemoryEvents(e.index);
+    };
 
-  std::vector<bool> waveIsWaiting(nWaves, false);
-  int nWaitingWaves = 0;
-
-  std::vector<int> prefenceOrder(nWaves, 0);
-  std::iota(prefenceOrder.begin(), prefenceOrder.end(), 0);
-
-  auto getNextWaveToRun = [&]() -> int {
-    for (int waveId : prefenceOrder) {
-      if (waveActive[waveId] && !waveIsWaiting[waveId]) {
-        return waveId;
-      }
-    }
-    throw std::runtime_error(
-        "didn't expect to fail to get wave in this function");
-  };
-
-  bool roundRobin = (waveSchedule == WaveSchedule::RoundRobin);
-
-  // If all the active waves are waiting at an s_barrier (not necessarily the
-  // same s_barrier!), then flush all waves' WAVE_COMPLETE events and release.
-  auto tryReleaseBarrier = [&]() {
-    if (nWaitingWaves == nActiveWaves) {
-      auto sw = profiler.scopedStopwatch("tryReleaseBarrier");
-      for (int w = 0; w < nWaves; ++w) {
-        if (waveIsWaiting[w]) {
-          waves[w].flushWaveCompleteMemoryEvents();
-          waveIsWaiting[w] = false;
-        }
-      }
-      nWaitingWaves = 0;
-    }
-  };
-
-  // while there exists a wave that has not terminated
-  while (nActiveWaves != 0) {
-    auto waveId = getNextWaveToRun();
-
-    // TODO: add to token field for 'isEndPgm' and 'isBarrier' to avoid
-    // reparsing again.
-    const auto &token = parsedAsm->tokens[waves[waveId].getPc()];
-    std::string_view trimmedAndCommentFree = trim(token.commentFreeLine);
-
-    if (trimmedAndCommentFree == "s_endpgm") {
-      waveActive[waveId] = false;
-      nActiveWaves--;
-      tryReleaseBarrier();
-    }
-
-    if (trimmedAndCommentFree == "s_barrier") {
-      waveIsWaiting[waveId] = true;
-      nWaitingWaves++;
-      tryReleaseBarrier();
-    }
-
-    std::string_view line = token.originalLine;
-
-    auto reportRaceCondition = [&](const RaceConditionException &e,
-                                   int pc) -> std::string {
-      auto &regs = waves[waveId];
-      auto getAllVgprEvents = [&](const RaceConditionException &e) {
-        assert(e.space == RaceConditionException::Space::VGPR);
-        return regs.getVgprMemoryEvents(e.index);
-      };
-
-      // Find event info for each event ID at a given LDS byte.
-      struct LdsEventInfo {
-        WaveId waveId;
-        EventId eventId;
-      };
-      auto getAllLdsEvents = [&](const RaceConditionException &e) {
-        assert(e.space == RaceConditionException::Space::LDS);
-        std::vector<LdsEventInfo> result;
-        auto scanEvents = [&](const std::vector<EventId> &events) {
-          for (EventId eventId : events) {
-            if (workgroup.getEventIntervals(eventId).contains(e.index)) {
-              WaveId evWaveId = workgroup.getEventWaveId(eventId);
-              result.push_back({evWaveId, eventId});
-            }
-          }
-        };
-        scanEvents(workgroup.getLdsWriteEvents());
-        scanEvents(workgroup.getLdsReadEvents());
-        return result;
-      };
-
-      const int nBefore = 1;
-      const int nAfter = 1;
-
-      auto printCodeBlock = [&](std::ostringstream &oss, int startLine,
-                                int endLine,
-                                const std::vector<int> &arrowLines) {
-        for (int i = startLine; i <= endLine; ++i) {
-          if (i < 0 || i >= static_cast<int>(parsedAsm->tokens.size())) {
-            continue;
-          }
-          const auto &t = parsedAsm->tokens[i];
-
-          // Check if the current line 'i' is in our list of lines that need an
-          // arrow
-          bool isArrowLine = std::find(arrowLines.begin(), arrowLines.end(),
-                                       i) != arrowLines.end();
-
-          if (isArrowLine) {
-            oss << i << " --> | " << t.originalLine << "\n";
-          } else {
-            oss << i << "     | " << t.originalLine << "\n";
+    struct LdsEventInfo {
+      WaveId waveId;
+      EventId eventId;
+    };
+    auto getAllLdsEvents = [&](const RaceConditionException &e) {
+      assert(e.space == RaceConditionException::Space::LDS);
+      std::vector<LdsEventInfo> result;
+      auto scanEvents = [&](const std::vector<EventId> &events) {
+        for (EventId eventId : events) {
+          if (workgroup.getEventIntervals(eventId).contains(e.index)) {
+            WaveId evWaveId = workgroup.getEventWaveId(eventId);
+            result.push_back({evWaveId, eventId});
           }
         }
       };
+      scanEvents(workgroup.getLdsWriteEvents());
+      scanEvents(workgroup.getLdsReadEvents());
+      return result;
+    };
 
-      if (e.space == RaceConditionException::Space::VGPR) {
-        std::ostringstream oss;
-        oss << "\nVGPR race detected on line " << pc << " (wave " << e.wave
-            << ", lane " << e.lane << "). Conflicting events:\n\n";
+    const int nBefore = 1;
+    const int nAfter = 1;
 
-        std::vector<int> eventPcs{pc};
-        auto vgprEvents = getAllVgprEvents(e);
-        for (EventId evtId : vgprEvents) {
-          eventPcs.push_back(workgroup.getEventPc(evtId));
+    auto printCodeBlock = [&](std::ostringstream &oss, int startLine,
+                              int endLine,
+                              const std::vector<int> &arrowLines) {
+      for (int i = startLine; i <= endLine; ++i) {
+        if (i < 0 || i >= static_cast<int>(parsedAsm->tokens.size())) {
+          continue;
         }
-        std::sort(eventPcs.begin(), eventPcs.end());
-
-        if (!eventPcs.empty()) {
-          int currentBlockStart = eventPcs[0] - nBefore;
-          int currentBlockEnd = eventPcs[0] + nAfter;
-          std::vector<int> currentArrows = {eventPcs[0]};
-
-          for (size_t i = 1; i < eventPcs.size(); ++i) {
-            int nextStart = eventPcs[i] - nBefore;
-            int nextEnd = eventPcs[i] + nAfter;
-
-            // Check if ranges overlap or touch.
-            if (nextStart <= currentBlockEnd + 1) {
-              currentBlockEnd = std::max(currentBlockEnd, nextEnd);
-              currentArrows.push_back(eventPcs[i]);
-            } else {
-              // NO OVERLAP: Print the accumulated block and start a new one
-              printCodeBlock(oss, currentBlockStart, currentBlockEnd,
-                             currentArrows);
-              oss << "\n";
-              // Reset for next block
-              currentBlockStart = nextStart;
-              currentBlockEnd = nextEnd;
-              currentArrows = {eventPcs[i]};
-            }
-          }
-          // Print the final remaining block
-          printCodeBlock(oss, currentBlockStart, currentBlockEnd,
-                         currentArrows);
-          oss << "\n";
+        const auto &t = parsedAsm->tokens[i];
+        bool isArrowLine = std::find(arrowLines.begin(), arrowLines.end(),
+                                     i) != arrowLines.end();
+        if (isArrowLine) {
+          oss << i << " --> | " << t.originalLine << "\n";
+        } else {
+          oss << i << "     | " << t.originalLine << "\n";
         }
-        return oss.str();
-      }
-
-      else if (e.space == RaceConditionException::Space::LDS) {
-        std::ostringstream oss;
-        oss << "\nLDS race in byte " << e.index
-            << " detected. Race between a pair in:\n\n";
-
-        // lane = -1 means unknown (older event from registry).
-        std::vector<std::tuple<int, int, int>> pcWaveLane{{pc, e.wave, e.lane}};
-        auto ldsEvents = getAllLdsEvents(e);
-        for (const auto &evt : ldsEvents) {
-          pcWaveLane.push_back(
-              {workgroup.getEventPc(evt.eventId), evt.waveId.value, -1});
-        }
-        std::sort(pcWaveLane.begin(), pcWaveLane.end());
-
-        for (auto [localPc, waveId, lane] : pcWaveLane) {
-          oss << "Wave " << waveId;
-          if (lane >= 0) {
-            oss << " Lane " << lane;
-          }
-          oss << ":\n";
-          printCodeBlock(oss, localPc - nBefore, localPc + nAfter, {localPc});
-          oss << "\n";
-        }
-        return oss.str();
-      } else {
-        std::ostringstream oss;
-        oss << "\nRace detector for SGPR coming soon" << "\n";
-        return oss.str();
       }
     };
 
-    try {
-      auto l = token.commentFreeLine;
+    if (e.space == RaceConditionException::Space::VGPR) {
+      std::ostringstream oss;
+      oss << "\nVGPR race detected on line " << pc << " (wave " << e.wave
+          << ", lane " << e.lane << "). Conflicting events:\n\n";
 
-      auto sw = [&]() -> Profiler::ScopedStopwatch {
-        if (trimmedAndCommentFree.empty()) {
-          return {};
-        }
-        // trimmedAndCommentFree is already trimmed, so the first word starts
-        // at index 0. The returned string_view points into parsedAsm->tokens
-        // which outlives this scope.
-        return profiler.scopedStopwatch([&]() -> std::string_view {
-          auto space = trimmedAndCommentFree.find(' ');
-          auto mnemonic = trimmedAndCommentFree.substr(0, space);
-          // Strip _e32/_e64 encoding suffixes.
-          if (auto pos = mnemonic.find("_e32"); pos != std::string_view::npos) {
-            mnemonic = mnemonic.substr(0, pos);
-          } else if (auto pos = mnemonic.find("_e64");
-                     pos != std::string_view::npos) {
-            mnemonic = mnemonic.substr(0, pos);
+      std::vector<int> eventPcs{pc};
+      auto vgprEvents = getAllVgprEvents(e);
+      for (EventId evtId : vgprEvents) {
+        eventPcs.push_back(workgroup.getEventPc(evtId));
+      }
+      std::sort(eventPcs.begin(), eventPcs.end());
+
+      if (!eventPcs.empty()) {
+        int currentBlockStart = eventPcs[0] - nBefore;
+        int currentBlockEnd = eventPcs[0] + nAfter;
+        std::vector<int> currentArrows = {eventPcs[0]};
+
+        for (size_t i = 1; i < eventPcs.size(); ++i) {
+          int nextStart = eventPcs[i] - nBefore;
+          int nextEnd = eventPcs[i] + nAfter;
+          if (nextStart <= currentBlockEnd + 1) {
+            currentBlockEnd = std::max(currentBlockEnd, nextEnd);
+            currentArrows.push_back(eventPcs[i]);
+          } else {
+            printCodeBlock(oss, currentBlockStart, currentBlockEnd,
+                           currentArrows);
+            oss << "\n";
+            currentBlockStart = nextStart;
+            currentBlockEnd = nextEnd;
+            currentArrows = {eventPcs[i]};
           }
-          return mnemonic;
-        });
-      }();
-      waves[waveId].tryExecute(l, true);
+        }
+        printCodeBlock(oss, currentBlockStart, currentBlockEnd, currentArrows);
+        oss << "\n";
+      }
+      return oss.str();
     }
 
-    catch (RaceConditionException &e) {
-      auto newMessage = reportRaceCondition(e, waves[waveId].getPc());
-      RaceConditionException updated = RaceConditionException(
-          newMessage, e.space, e.index, e.wave, e.lane, e.isWrite);
+    if (e.space == RaceConditionException::Space::LDS) {
+      std::ostringstream oss;
+      oss << "\nLDS race in byte " << e.index
+          << " detected. Race between a pair in:\n\n";
 
-      // TODO: throwing exceptions across libraries flunks, why?
-      std::cerr << updated.what() << std::endl;
-      throw std::move(updated);
-    } catch (const EmulatorException &e) {
-      std::cerr << "\nRuntime Error at PC " << waves[waveId].getPc() << ": "
-                << line << "\n";
-      std::cerr << "  " << e.what() << "\n\n";
-      throw;
+      std::vector<std::tuple<int, int, int>> pcWaveLane{{pc, e.wave, e.lane}};
+      auto ldsEvents = getAllLdsEvents(e);
+      for (const auto &evt : ldsEvents) {
+        pcWaveLane.push_back(
+            {workgroup.getEventPc(evt.eventId), evt.waveId.value, -1});
+      }
+      std::sort(pcWaveLane.begin(), pcWaveLane.end());
+
+      for (auto [localPc, localWaveId, lane] : pcWaveLane) {
+        oss << "Wave " << localWaveId;
+        if (lane >= 0) {
+          oss << " Lane " << lane;
+        }
+        oss << ":\n";
+        printCodeBlock(oss, localPc - nBefore, localPc + nAfter, {localPc});
+        oss << "\n";
+      }
+      return oss.str();
     }
 
-    if (roundRobin && prefenceOrder.size() > 1) {
-      std::rotate(prefenceOrder.begin(), prefenceOrder.begin() + 1,
-                  prefenceOrder.end());
-    }
+    std::ostringstream oss;
+    oss << "\nRace detector for SGPR coming soon\n";
+    return oss.str();
+  };
+
+  try {
+    workgroup.run(parsedAsm->tokens);
+  } catch (RaceConditionException &e) {
+    int pc = workgroup.getWave(e.wave).getPc();
+    auto newMessage = reportRaceCondition(e, e.wave, pc);
+    RaceConditionException updated = RaceConditionException(
+        newMessage, e.space, e.index, e.wave, e.lane, e.isWrite);
+    std::cerr << updated.what() << std::endl;
+    throw std::move(updated);
+  } catch (const EmulatorException &e) {
+    std::cerr << "\nRuntime Error: " << e.what() << "\n\n";
+    throw;
   }
 }
 

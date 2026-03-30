@@ -87,9 +87,7 @@ public:
     assert(partitioned.size() == 1);
 
     return [&wave]() {
-      // Note: flushWaveCompleteMemoryEvents is not called here.
-      // It is called in Emulator::run when all waves have reached
-      // the barrier (tryReleaseBarrier), not when each wave arrives.
+      wave.setWaiting(true);
       return wave.getPc() + 1;
     };
   }
@@ -201,7 +199,19 @@ public:
   }
 };
 
-// SOPP: No operation (s_nop, s_endpgm)
+// SOPP: End program (s_endpgm)
+class SOPP_EndPgm : public Instruction {
+public:
+  std::function<int()> getExecutor(Wave &wave,
+                                   std::string_view /*line*/) const final {
+    return [&wave]() {
+      wave.deactivate();
+      return wave.getPc() + 1;
+    };
+  }
+};
+
+// SOPP: No operation (s_nop, etc.)
 class SOPP_NoOp : public Instruction {
 public:
   std::function<int()> getExecutor(Wave &wave,
@@ -321,7 +331,7 @@ const Register<SOPP_SetPc> s_setpc("s_setpc_b64");
 const Register<SOPP_SwapPc> s_swappc("s_swappc_b64");
 const Register<SOPP_NoOp> s_nop("s_nop");
 const Register<SOPP_NoOp> s_setprio("s_setprio");
-const Register<SOPP_NoOp> s_endpgm("s_endpgm");
+const Register<SOPP_EndPgm> s_endpgm("s_endpgm");
 const Register<SOPP_NoOp> s_clause("s_clause");
 const Register<SOPP_NoOp> s_delay_alu("s_delay_alu");
 const Register<SOPP_NoOp> s_sendmsg("s_sendmsg");

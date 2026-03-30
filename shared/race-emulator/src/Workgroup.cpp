@@ -1,12 +1,18 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Workgroup implementation: hybrid LDS race validation.
-// Per-byte counts provide O(1) fast-path checks. When counts are non-zero,
-// falls back to scanning live event intervals with binary search.
+// Workgroup implementation: wave execution loop, barrier synchronization,
+// and hybrid LDS race validation. Per-byte counts provide O(1) fast-path
+// checks. When counts are non-zero, falls back to scanning live event
+// intervals with binary search.
 
 #include "race-emulator/Workgroup.h"
+#include "race-emulator/Parsing.h"
+#include "race-emulator/Profiler.h"
+#include "race-emulator/Util.h"
+#include <algorithm>
 #include <cassert>
+#include <numeric>
 
 namespace raceemulator {
 
@@ -80,6 +86,84 @@ void Workgroup::validateWrite(int addr, WaveId wave, int lane,
   }
 }
 
+void Workgroup::addWave(Wave &&wave) { waves.push_back(std::move(wave)); }
+
+void Workgroup::run(const std::vector<ParsedLine> &tokens) {
+  int nWaves = static_cast<int>(waves.size());
+  int nActiveWaves = nWaves;
+  int nWaitingWaves = 0;
+
+  std::vector<int> preferenceOrder(nWaves);
+  std::iota(preferenceOrder.begin(), preferenceOrder.end(), 0);
+
+  auto getNextWaveToRun = [&]() -> int {
+    for (int waveId : preferenceOrder) {
+      if (waves[waveId].isActive() && !waves[waveId].isWaiting()) {
+        return waveId;
+      }
+    }
+    throw std::runtime_error(
+        "didn't expect to fail to get wave in this function");
+  };
+
+  auto tryReleaseBarrier = [&]() {
+    if (nWaitingWaves == nActiveWaves) {
+      auto sw = profiler ? profiler->scopedStopwatch("tryReleaseBarrier")
+                         : Profiler::ScopedStopwatch{};
+      for (auto &wave : waves) {
+        if (wave.isWaiting()) {
+          wave.flushWaveCompleteMemoryEvents();
+          wave.setWaiting(false);
+        }
+      }
+      nWaitingWaves = 0;
+    }
+  };
+
+  bool roundRobin = (waveSchedule == WaveSchedule::RoundRobin);
+
+  while (nActiveWaves != 0) {
+    int waveId = getNextWaveToRun();
+    auto &wave = waves[waveId];
+
+    const auto &token = tokens[wave.getPc()];
+    std::string_view trimmedAndCommentFree = trim(token.commentFreeLine);
+
+    auto sw = [&]() -> Profiler::ScopedStopwatch {
+      if (!profiler || trimmedAndCommentFree.empty()) {
+        return {};
+      }
+      return profiler->scopedStopwatch([&]() -> std::string_view {
+        auto space = trimmedAndCommentFree.find(' ');
+        auto mnemonic = trimmedAndCommentFree.substr(0, space);
+        if (auto pos = mnemonic.find("_e32"); pos != std::string_view::npos) {
+          mnemonic = mnemonic.substr(0, pos);
+        } else if (auto pos = mnemonic.find("_e64");
+                   pos != std::string_view::npos) {
+          mnemonic = mnemonic.substr(0, pos);
+        }
+        return mnemonic;
+      });
+    }();
+
+    wave.tryExecute(token.commentFreeLine, true);
+
+    // Check if the instruction changed wave state (s_endpgm / s_barrier).
+    if (!wave.isActive()) {
+      nActiveWaves--;
+      tryReleaseBarrier();
+    } else if (wave.isWaiting()) {
+      nWaitingWaves++;
+      tryReleaseBarrier();
+    }
+
+    if (roundRobin && preferenceOrder.size() > 1) {
+      std::rotate(preferenceOrder.begin(), preferenceOrder.begin() + 1,
+                  preferenceOrder.end());
+    }
+  }
+}
+
 void Workgroup::resizeLds(int size) {
   lds.resize(size);
   byteWriteCounts.resize(size, 0);
@@ -87,6 +171,7 @@ void Workgroup::resizeLds(int size) {
 }
 
 void Workgroup::clear() {
+  waves.clear();
   lds.clear();
   ldsWriteEvents.clear();
   ldsReadEvents.clear();

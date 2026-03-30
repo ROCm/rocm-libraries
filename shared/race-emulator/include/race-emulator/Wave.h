@@ -229,6 +229,11 @@ public:
   void setDsPreserve(bool preserve) { dsPreserve = preserve; }
   bool getDsPreserve() const { return dsPreserve; }
 
+  void deactivate() { active = false; }
+  void setWaiting(bool w) { waiting = w; }
+  bool isActive() const { return active; }
+  bool isWaiting() const { return waiting; }
+
 private:
   // When a macro is called, its arguments are stored here. E.g., for
   // `.macro FOO arg0:req, arg1:req` called as `FOO 14, 17`, the map
@@ -280,6 +285,12 @@ private:
   int agprOffset;
   int sgprCount;
   WaveSize waveSize;
+
+  /// Whether this wave is still executing (false after s_endpgm).
+  bool active{true};
+
+  /// Whether this wave is waiting at an s_barrier.
+  bool waiting{false};
 
   /// D16 LDS reads: whether to preserve the non-targeted half of the VGPR.
   /// RDNA (wave-32) preserves, CDNA (wave-64) does not (hardware-verified).

@@ -7,6 +7,7 @@
 #include "IntervalSet.h"
 #include "LDS.h"
 #include "Types.h"
+#include "Wave.h"
 #include <cassert>
 #include <cstdint>
 #include <string>
@@ -14,9 +15,12 @@
 
 namespace raceemulator {
 
-/// Workgroup-scoped state: owns LDS memory, the event registry, and race
-/// detection logic. Waves hold a reference to a Workgroup and use it for
-/// all memory event tracking and validated LDS access.
+class Profiler;
+struct ParsedLine;
+
+/// Per-workgroup state: owns waves, LDS memory, the event registry, the
+/// execution loop, and race detection logic. Mirrors the GPU hardware model
+/// where a workgroup is a self-contained unit of execution.
 ///
 /// Event lifecycle:
 ///   1. Wave issues a memory instruction -> allocateEventId() allocates an
@@ -132,6 +136,18 @@ public:
 
   void setRaceChecks(bool enable) { raceChecks = enable; }
 
+  // --- Wave management ---
+
+  void addWave(Wave &&wave);
+  void run(const std::vector<ParsedLine> &tokens);
+
+  const Wave &getWave(int waveId) const { return waves.at(waveId); }
+  Wave &getWave(int waveId) { return waves.at(waveId); }
+  int getNumWaves() const { return static_cast<int>(waves.size()); }
+
+  void setProfiler(Profiler *p) { profiler = p; }
+  void setWaveSchedule(WaveSchedule s) { waveSchedule = s; }
+
   // --- Event registry ---
 
   /// Allocate a workgroup-global event ID and record its metadata.
@@ -211,6 +227,10 @@ public:
   }
 
 private:
+  std::vector<Wave> waves;
+  Profiler *profiler = nullptr;
+  WaveSchedule waveSchedule{WaveSchedule::Sequential};
+
   static void adjustByteCounts(const IntervalSet &ivs, std::vector<int> &counts,
                                int delta) {
     for (const auto &iv : ivs) {
