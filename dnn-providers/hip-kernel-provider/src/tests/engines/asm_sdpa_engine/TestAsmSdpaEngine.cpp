@@ -18,7 +18,7 @@ namespace
 class TestAsmSdpaEngine : public ::testing::Test
 {
 protected:
-    AsmSdpaEngine _engine{AsmSdpaEngine::staticId()};
+    AsmSdpaEngine _engine;
     HipKernelHandle _handle;
 
     void SetUp() override

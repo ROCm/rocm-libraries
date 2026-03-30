@@ -148,34 +148,35 @@ void SdpaFwdPlanBuilder::buildPlan(
         attnScale = scaleValue.value();
     }
 
-    // Create plan with all metadata
-    executionContext.setPlan(std::make_unique<SdpaFwdPlan>(module,
-                                                           function,
-                                                           qUid,
-                                                           kUid,
-                                                           vUid,
-                                                           oUid,
-                                                           batchSize,
-                                                           numHeadsQ,
-                                                           numHeadsKv,
-                                                           seqLenQ,
-                                                           seqLenKv,
-                                                           headDimQk,
-                                                           headDimV,
-                                                           qStrideSeq,
-                                                           qStrideRow,
-                                                           qStrideHead,
-                                                           qStrideBatch,
-                                                           kStrideSeq,
-                                                           kStrideHead,
-                                                           kStrideBatch,
-                                                           vStrideSeq,
-                                                           vStrideHead,
-                                                           vStrideBatch,
-                                                           oStrideSeq,
-                                                           oStrideHead,
-                                                           oStrideBatch,
-                                                           attnScale));
+    // Create params struct with all metadata
+    SdpaFwdParams params{};
+    params.qUid = qUid;
+    params.kUid = kUid;
+    params.vUid = vUid;
+    params.oUid = oUid;
+    params.batchSize = batchSize;
+    params.numHeadsQ = numHeadsQ;
+    params.numHeadsKv = numHeadsKv;
+    params.seqLenQ = seqLenQ;
+    params.seqLenKv = seqLenKv;
+    params.headDimQk = headDimQk;
+    params.headDimV = headDimV;
+    params.qStrideSeq = qStrideSeq;
+    params.qStrideRow = qStrideRow;
+    params.qStrideHead = qStrideHead;
+    params.qStrideBatch = qStrideBatch;
+    params.kStrideSeq = kStrideSeq;
+    params.kStrideHead = kStrideHead;
+    params.kStrideBatch = kStrideBatch;
+    params.vStrideSeq = vStrideSeq;
+    params.vStrideHead = vStrideHead;
+    params.vStrideBatch = vStrideBatch;
+    params.oStrideSeq = oStrideSeq;
+    params.oStrideHead = oStrideHead;
+    params.oStrideBatch = oStrideBatch;
+    params.attnScale = attnScale;
+
+    executionContext.setPlan(std::make_unique<SdpaFwdPlan>(module, function, std::move(params)));
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> SdpaFwdPlanBuilder::getCustomKnobs(

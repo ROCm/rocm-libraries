@@ -45,8 +45,7 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
             const IDevicePropertyProvider& /*devicePropertyProvider*/)
              -> std::unique_ptr<
                  hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>> {
-             auto engine = std::make_unique<asm_sdpa_engine::AsmSdpaEngine>(
-                 asm_sdpa_engine::AsmSdpaEngine::staticId());
+             auto engine = std::make_unique<asm_sdpa_engine::AsmSdpaEngine>();
              engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
              return engine;
          }},

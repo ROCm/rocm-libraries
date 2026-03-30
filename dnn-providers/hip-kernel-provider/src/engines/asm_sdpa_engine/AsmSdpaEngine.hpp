@@ -21,7 +21,7 @@ class AsmSdpaEngine
     : public hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>
 {
 public:
-    explicit AsmSdpaEngine(int64_t id);
+    AsmSdpaEngine();
 
     void addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder);
 
@@ -56,7 +56,6 @@ public:
         HipKernelContext& executionContext) const override;
 
 private:
-    int64_t _id;
     std::vector<std::unique_ptr<IPlanBuilder>> _planBuilders;
 };
 

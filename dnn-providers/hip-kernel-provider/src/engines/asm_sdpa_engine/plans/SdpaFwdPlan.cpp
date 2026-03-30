@@ -10,60 +10,10 @@
 namespace asm_sdpa_engine
 {
 
-SdpaFwdPlan::SdpaFwdPlan(hipModule_t kernelModule,
-                         hipFunction_t function,
-                         int64_t qUid,
-                         int64_t kUid,
-                         int64_t vUid,
-                         int64_t oUid,
-                         unsigned int batchSize,
-                         unsigned int numHeadsQ,
-                         unsigned int numHeadsKv,
-                         unsigned int seqLenQ,
-                         unsigned int seqLenKv,
-                         unsigned int headDimQk,
-                         unsigned int headDimV,
-                         unsigned int qStrideSeq,
-                         unsigned int qStrideRow,
-                         unsigned int qStrideHead,
-                         unsigned int qStrideBatch,
-                         unsigned int kStrideSeq,
-                         unsigned int kStrideHead,
-                         unsigned int kStrideBatch,
-                         unsigned int vStrideSeq,
-                         unsigned int vStrideHead,
-                         unsigned int vStrideBatch,
-                         unsigned int oStrideSeq,
-                         unsigned int oStrideHead,
-                         unsigned int oStrideBatch,
-                         float attnScale)
+SdpaFwdPlan::SdpaFwdPlan(hipModule_t kernelModule, hipFunction_t function, SdpaFwdParams params)
     : _module(kernelModule)
     , _function(function)
-    , _qUid(qUid)
-    , _kUid(kUid)
-    , _vUid(vUid)
-    , _oUid(oUid)
-    , _batchSize(batchSize)
-    , _numHeadsQ(numHeadsQ)
-    , _numHeadsKv(numHeadsKv)
-    , _seqLenQ(seqLenQ)
-    , _seqLenKv(seqLenKv)
-    , _headDimQk(headDimQk)
-    , _headDimV(headDimV)
-    , _qStrideSeq(qStrideSeq)
-    , _qStrideRow(qStrideRow)
-    , _qStrideHead(qStrideHead)
-    , _qStrideBatch(qStrideBatch)
-    , _kStrideSeq(kStrideSeq)
-    , _kStrideHead(kStrideHead)
-    , _kStrideBatch(kStrideBatch)
-    , _vStrideSeq(vStrideSeq)
-    , _vStrideHead(vStrideHead)
-    , _vStrideBatch(vStrideBatch)
-    , _oStrideSeq(oStrideSeq)
-    , _oStrideHead(oStrideHead)
-    , _oStrideBatch(oStrideBatch)
-    , _attnScale(attnScale)
+    , _params(std::move(params))
 {
 }
 
@@ -83,31 +33,7 @@ SdpaFwdPlan::~SdpaFwdPlan()
 SdpaFwdPlan::SdpaFwdPlan(SdpaFwdPlan&& other) noexcept
     : _module(other._module)
     , _function(other._function)
-    , _qUid(other._qUid)
-    , _kUid(other._kUid)
-    , _vUid(other._vUid)
-    , _oUid(other._oUid)
-    , _batchSize(other._batchSize)
-    , _numHeadsQ(other._numHeadsQ)
-    , _numHeadsKv(other._numHeadsKv)
-    , _seqLenQ(other._seqLenQ)
-    , _seqLenKv(other._seqLenKv)
-    , _headDimQk(other._headDimQk)
-    , _headDimV(other._headDimV)
-    , _qStrideSeq(other._qStrideSeq)
-    , _qStrideRow(other._qStrideRow)
-    , _qStrideHead(other._qStrideHead)
-    , _qStrideBatch(other._qStrideBatch)
-    , _kStrideSeq(other._kStrideSeq)
-    , _kStrideHead(other._kStrideHead)
-    , _kStrideBatch(other._kStrideBatch)
-    , _vStrideSeq(other._vStrideSeq)
-    , _vStrideHead(other._vStrideHead)
-    , _vStrideBatch(other._vStrideBatch)
-    , _oStrideSeq(other._oStrideSeq)
-    , _oStrideHead(other._oStrideHead)
-    , _oStrideBatch(other._oStrideBatch)
-    , _attnScale(other._attnScale)
+    , _params(std::move(other._params))
 {
     // Transfer ownership - set source to nullptr to prevent double-free
     other._module = nullptr;
@@ -133,31 +59,7 @@ SdpaFwdPlan& SdpaFwdPlan::operator=(SdpaFwdPlan&& other) noexcept
         // Transfer ownership
         _module = other._module;
         _function = other._function;
-        _qUid = other._qUid;
-        _kUid = other._kUid;
-        _vUid = other._vUid;
-        _oUid = other._oUid;
-        _batchSize = other._batchSize;
-        _numHeadsQ = other._numHeadsQ;
-        _numHeadsKv = other._numHeadsKv;
-        _seqLenQ = other._seqLenQ;
-        _seqLenKv = other._seqLenKv;
-        _headDimQk = other._headDimQk;
-        _headDimV = other._headDimV;
-        _qStrideSeq = other._qStrideSeq;
-        _qStrideRow = other._qStrideRow;
-        _qStrideHead = other._qStrideHead;
-        _qStrideBatch = other._qStrideBatch;
-        _kStrideSeq = other._kStrideSeq;
-        _kStrideHead = other._kStrideHead;
-        _kStrideBatch = other._kStrideBatch;
-        _vStrideSeq = other._vStrideSeq;
-        _vStrideHead = other._vStrideHead;
-        _vStrideBatch = other._vStrideBatch;
-        _oStrideSeq = other._oStrideSeq;
-        _oStrideHead = other._oStrideHead;
-        _oStrideBatch = other._oStrideBatch;
-        _attnScale = other._attnScale;
+        _params = std::move(other._params);
 
         // Set source to nullptr to prevent double-free
         other._module = nullptr;
@@ -177,7 +79,7 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
                           uint32_t numDeviceBuffers,
                           void* /*workspace*/) const
 {
-    // Build UID→ptr map from device buffers
+    // Build UID->ptr map from device buffers
     std::unordered_map<int64_t, void*> uidToPtrMap;
     for(uint32_t i = 0; i < numDeviceBuffers; ++i)
     {
@@ -185,10 +87,10 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
     }
 
     // Get tensor pointers
-    void* qPtr = uidToPtrMap.at(_qUid);
-    void* kPtr = uidToPtrMap.at(_kUid);
-    void* vPtr = uidToPtrMap.at(_vUid);
-    void* oPtr = uidToPtrMap.at(_oUid);
+    void* qPtr = uidToPtrMap.at(_params.qUid);
+    void* kPtr = uidToPtrMap.at(_params.kUid);
+    void* vPtr = uidToPtrMap.at(_params.vUid);
+    void* oPtr = uidToPtrMap.at(_params.oUid);
 
     // Populate kernel args struct
     fmha_fwd_v3_args args{};
@@ -201,43 +103,43 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
     args.ptr_lse = nullptr; // POC: no LSE output (withStats = false)
 
     // Attention scale
-    args.scalar = _attnScale;
+    args.scalar = _params.attnScale;
 
     // Q dimensions and strides (convert to bytes: stride * sizeof(bfloat16))
     constexpr unsigned int K_BF16_SIZE = 2;
-    args.s_seq_len = _seqLenQ;
-    args.s_Seqs = _qStrideSeq * K_BF16_SIZE;
-    args.s_Ts = _qStrideRow * K_BF16_SIZE;
-    args.s_Hs = _qStrideHead * K_BF16_SIZE;
-    args.s_Bs = _qStrideBatch * K_BF16_SIZE;
+    args.s_seq_len = _params.seqLenQ;
+    args.s_Seqs = _params.qStrideSeq * K_BF16_SIZE;
+    args.s_Ts = _params.qStrideRow * K_BF16_SIZE;
+    args.s_Hs = _params.qStrideHead * K_BF16_SIZE;
+    args.s_Bs = _params.qStrideBatch * K_BF16_SIZE;
 
     // GQA ratio
-    args.s_gqa = _numHeadsQ / _numHeadsKv;
+    args.s_gqa = _params.numHeadsQ / _params.numHeadsKv;
 
     // K strides (in bytes)
-    args.s_k_Seqs = _kStrideSeq * K_BF16_SIZE;
-    args.s_k_Hs = _kStrideHead * K_BF16_SIZE;
-    args.s_k_Bs = _kStrideBatch * K_BF16_SIZE;
+    args.s_k_Seqs = _params.kStrideSeq * K_BF16_SIZE;
+    args.s_k_Hs = _params.kStrideHead * K_BF16_SIZE;
+    args.s_k_Bs = _params.kStrideBatch * K_BF16_SIZE;
 
     // Options
     args.s_opt = 0; // Default: no special options (RTNE rounding)
     args.s_lse = 0; // POC: don't compute LSE
 
     // KV dimensions
-    args.s_kv_seq_len = _seqLenKv;
-    args.s_qk_head_dim = _headDimQk;
-    args.s_v_head_dim = _headDimV;
-    args.s_q_head_num = _numHeadsQ;
+    args.s_kv_seq_len = _params.seqLenKv;
+    args.s_qk_head_dim = _params.headDimQk;
+    args.s_v_head_dim = _params.headDimV;
+    args.s_q_head_num = _params.numHeadsQ;
 
     // V strides (in bytes)
-    args.s_v_Seqs = _vStrideSeq * K_BF16_SIZE;
-    args.s_v_Hs = _vStrideHead * K_BF16_SIZE;
-    args.s_v_Bs = _vStrideBatch * K_BF16_SIZE;
+    args.s_v_Seqs = _params.vStrideSeq * K_BF16_SIZE;
+    args.s_v_Hs = _params.vStrideHead * K_BF16_SIZE;
+    args.s_v_Bs = _params.vStrideBatch * K_BF16_SIZE;
 
     // O strides (in bytes)
-    args.s_o_Seqs = _oStrideSeq * K_BF16_SIZE;
-    args.s_o_Hs = _oStrideHead * K_BF16_SIZE;
-    args.s_o_Bs = _oStrideBatch * K_BF16_SIZE;
+    args.s_o_Seqs = _params.oStrideSeq * K_BF16_SIZE;
+    args.s_o_Hs = _params.oStrideHead * K_BF16_SIZE;
+    args.s_o_Bs = _params.oStrideBatch * K_BF16_SIZE;
 
     // Variable-length sequence pointers (nullptr for batch mode)
     args.ptr_qseq = nullptr;
@@ -266,9 +168,9 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
     // Compute grid dimensions
     // From AITER: gdx = (S_q + ts_qo - 1) / ts_qo, where ts_qo = 256
     constexpr unsigned int K_TS_QO = 256;
-    unsigned int gridDimX = (_seqLenQ + K_TS_QO - 1) / K_TS_QO;
-    unsigned int gridDimY = _numHeadsQ;
-    unsigned int gridDimZ = _batchSize;
+    unsigned int gridDimX = (_params.seqLenQ + K_TS_QO - 1) / K_TS_QO;
+    unsigned int gridDimY = _params.numHeadsQ;
+    unsigned int gridDimZ = _params.batchSize;
 
     // Block dimensions (fixed for this kernel)
     constexpr unsigned int K_BLOCK_DIM_X = 512;

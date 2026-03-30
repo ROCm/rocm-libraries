@@ -9,10 +9,7 @@
 namespace asm_sdpa_engine
 {
 
-AsmSdpaEngine::AsmSdpaEngine(int64_t id)
-    : _id(id)
-{
-}
+AsmSdpaEngine::AsmSdpaEngine() = default;
 
 void AsmSdpaEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder)
 {
@@ -21,7 +18,7 @@ void AsmSdpaEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder)
 
 int64_t AsmSdpaEngine::id() const
 {
-    return _id;
+    return staticId();
 }
 
 int64_t AsmSdpaEngine::staticId()
