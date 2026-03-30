@@ -34,25 +34,29 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
                                const std::vector<std::string>& compileDefines,
                                const std::string& functionName)
 {
-    // Get the kernel source by name
-    auto kernelSrc = hipdnn_gpu_ref::getGpuRefKernelSrc(sourceName.c_str());
+    // Get the kernel source by name — convert to std::string for null-terminated c_str(),
+    // since hiprtcCreateProgram requires null-terminated C strings.
+    auto kernelSrc = std::string(hipdnn_gpu_ref::getGpuRefKernelSrc(sourceName.c_str()));
 
-    // Get include headers
+    // Get include headers — likewise convert string_views to strings for null termination.
     std::vector<std::string_view> includeTexts;
     std::vector<const char*> includeNames;
     hipdnn_gpu_ref::getGpuRefKernelIncList(includeTexts, includeNames);
 
+    std::vector<std::string> includeStrings;
     std::vector<const char*> headersData;
+    includeStrings.reserve(includeTexts.size());
     headersData.reserve(includeTexts.size());
     for(const auto& h : includeTexts)
     {
-        headersData.emplace_back(h.data());
+        includeStrings.emplace_back(h);
+        headersData.emplace_back(includeStrings.back().c_str());
     }
 
     // Create program
     hiprtcProgram prog;
     GPU_REF_RTC_CHECK(hiprtcCreateProgram(&prog,
-                                          kernelSrc.data(),
+                                          kernelSrc.c_str(),
                                           sourceName.c_str(),
                                           static_cast<int>(headersData.size()),
                                           headersData.data(),
@@ -133,7 +137,7 @@ const CompiledKernel&
     }
     key += "::" + functionName;
 
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::lock_guard<std::mutex> lock(_mutex);
     auto it = _cache.find(key);
     if(it != _cache.end())
     {
