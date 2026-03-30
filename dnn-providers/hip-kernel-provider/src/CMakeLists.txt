@@ -14,7 +14,11 @@ add_library(
     ${KERNEL_GENERATED_SOURCES}
     engines/plans/BatchnormPlanBuilder.cpp
     engines/plans/BatchnormFwdInferencePlan.cpp
+    engines/plans/BatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/BatchnormApplicabilityChecks.cpp
+    engines/plans/RMSnorm/RMSnormPlanBuilder.cpp
+    engines/plans/RMSnorm/RMSnormFwdPlan.cpp
+    engines/plans/RMSnorm/RMSnormApplicabilityChecks.cpp
 )
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}

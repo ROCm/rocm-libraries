@@ -87,6 +87,12 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& te
             return static_cast<TargetType>(val->value());
         }
         break;
+    case data_objects::DataType::INT64:
+        if(auto val = tensorAttr.value.AsInt64Value())
+        {
+            return static_cast<TargetType>(val->value());
+        }
+        break;
     case data_objects::DataType::UINT8:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
