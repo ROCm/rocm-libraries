@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "plans/SdpaFwdPlan.hpp"
-#include "asm/AsmSdpaFwdKernelArgs.hpp"
+#include "asm/SdpaFwdKernelArgs.hpp"
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <unordered_map>

@@ -40,7 +40,7 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
          }},
 #ifdef HIPDNN_ENGINE_ASM_SDPA
         // ASM_SDPA_ENGINE
-        {asm_sdpa_engine::AsmSdpaEngine::staticId(),
+        {ASM_SDPA_ENGINE_ID,
          [](const IKernelCompiler& /*kernelCompiler*/,
             const IDevicePropertyProvider& /*devicePropertyProvider*/)
              -> std::unique_ptr<

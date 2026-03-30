@@ -23,13 +23,13 @@ struct SdpaFwdParams
     int64_t oUid;
 
     // Tensor dimensions
-    unsigned int batchSize;   // B
-    unsigned int numHeadsQ;   // H_q
-    unsigned int numHeadsKv;  // H_kv
-    unsigned int seqLenQ;     // S_q
-    unsigned int seqLenKv;    // S_kv
-    unsigned int headDimQk;   // D_qk (128 for POC)
-    unsigned int headDimV;    // D_v
+    unsigned int batchSize; // B
+    unsigned int numHeadsQ; // H_q
+    unsigned int numHeadsKv; // H_kv
+    unsigned int seqLenQ; // S_q
+    unsigned int seqLenKv; // S_kv
+    unsigned int headDimQk; // D_qk (128 for POC)
+    unsigned int headDimV; // D_v
 
     // Q tensor strides (in elements)
     unsigned int qStrideSeq;

@@ -5,7 +5,7 @@
 
 #include <gtest/gtest.h>
 
-#include "engines/asm_sdpa_engine/asm/AsmSdpaFwdKernelArgs.hpp"
+#include "engines/asm_sdpa_engine/asm/SdpaFwdKernelArgs.hpp"
 
 using asm_sdpa_engine::fmha_fwd_v3_args;
 
@@ -13,12 +13,12 @@ using asm_sdpa_engine::fmha_fwd_v3_args;
 // pre-compiled ASM kernel.  Each field must sit at the byte offset that
 // the GPU kernel reads from.
 
-TEST(TestAsmSdpaFwdKernelArgs, TotalSizeMatches)
+TEST(TestSdpaFwdKernelArgs, TotalSizeMatches)
 {
     EXPECT_EQ(sizeof(fmha_fwd_v3_args), 656u);
 }
 
-TEST(TestAsmSdpaFwdKernelArgs, PointerFieldOffsets)
+TEST(TestSdpaFwdKernelArgs, PointerFieldOffsets)
 {
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, ptr_o), 0u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, ptr_q), 16u);
@@ -27,12 +27,12 @@ TEST(TestAsmSdpaFwdKernelArgs, PointerFieldOffsets)
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, ptr_lse), 64u);
 }
 
-TEST(TestAsmSdpaFwdKernelArgs, ScalarFieldOffset)
+TEST(TestSdpaFwdKernelArgs, ScalarFieldOffset)
 {
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, scalar), 80u);
 }
 
-TEST(TestAsmSdpaFwdKernelArgs, QueryStrideFieldOffsets)
+TEST(TestSdpaFwdKernelArgs, QueryStrideFieldOffsets)
 {
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_seq_len), 96u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_Seqs), 112u);
@@ -41,7 +41,7 @@ TEST(TestAsmSdpaFwdKernelArgs, QueryStrideFieldOffsets)
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_Bs), 160u);
 }
 
-TEST(TestAsmSdpaFwdKernelArgs, GqaAndKeyStrideFieldOffsets)
+TEST(TestSdpaFwdKernelArgs, GqaAndKeyStrideFieldOffsets)
 {
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_gqa), 176u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_k_Seqs), 192u);
@@ -49,13 +49,13 @@ TEST(TestAsmSdpaFwdKernelArgs, GqaAndKeyStrideFieldOffsets)
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_k_Bs), 224u);
 }
 
-TEST(TestAsmSdpaFwdKernelArgs, OptionAndFlagFieldOffsets)
+TEST(TestSdpaFwdKernelArgs, OptionAndFlagFieldOffsets)
 {
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_opt), 240u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_lse), 256u);
 }
 
-TEST(TestAsmSdpaFwdKernelArgs, DimensionFieldOffsets)
+TEST(TestSdpaFwdKernelArgs, DimensionFieldOffsets)
 {
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_kv_seq_len), 272u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_qk_head_dim), 288u);
@@ -63,41 +63,41 @@ TEST(TestAsmSdpaFwdKernelArgs, DimensionFieldOffsets)
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_q_head_num), 320u);
 }
 
-TEST(TestAsmSdpaFwdKernelArgs, ValueStrideFieldOffsets)
+TEST(TestSdpaFwdKernelArgs, ValueStrideFieldOffsets)
 {
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_v_Seqs), 336u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_v_Hs), 352u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_v_Bs), 368u);
 }
 
-TEST(TestAsmSdpaFwdKernelArgs, OutputStrideFieldOffsets)
+TEST(TestSdpaFwdKernelArgs, OutputStrideFieldOffsets)
 {
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_o_Seqs), 384u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_o_Hs), 400u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_o_Bs), 416u);
 }
 
-TEST(TestAsmSdpaFwdKernelArgs, SequencePointerFieldOffsets)
+TEST(TestSdpaFwdKernelArgs, SequencePointerFieldOffsets)
 {
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, ptr_qseq), 432u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, ptr_kseq), 448u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_lse_Hs), 464u);
 }
 
-TEST(TestAsmSdpaFwdKernelArgs, PaddingSequencePointerFieldOffsets)
+TEST(TestSdpaFwdKernelArgs, PaddingSequencePointerFieldOffsets)
 {
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, ptr_qseq_padding), 480u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, ptr_kseq_padding), 496u);
 }
 
-TEST(TestAsmSdpaFwdKernelArgs, DescalePointerFieldOffsets)
+TEST(TestSdpaFwdKernelArgs, DescalePointerFieldOffsets)
 {
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, ptr_q_descale), 512u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, ptr_k_descale), 528u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, ptr_v_descale), 544u);
 }
 
-TEST(TestAsmSdpaFwdKernelArgs, DescaleStrideFieldOffsets)
+TEST(TestSdpaFwdKernelArgs, DescaleStrideFieldOffsets)
 {
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_descale_q_Bs), 560u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_descale_q_Hs), 576u);

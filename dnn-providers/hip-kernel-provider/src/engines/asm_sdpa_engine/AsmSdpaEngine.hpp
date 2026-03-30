@@ -10,6 +10,8 @@
 #include "HipKernelHandle.hpp"
 #include "HipKernelSettings.hpp"
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+
 namespace asm_sdpa_engine
 {
 
@@ -27,9 +29,9 @@ public:
 
     static int64_t staticId();
 
-    static constexpr const char* engineName()
+    static const char* engineName()
     {
-        return "AsmSdpaEngine";
+        return hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME;
     }
 
     int64_t id() const override;

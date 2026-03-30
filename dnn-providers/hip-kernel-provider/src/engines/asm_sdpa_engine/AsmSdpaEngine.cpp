@@ -23,8 +23,7 @@ int64_t AsmSdpaEngine::id() const
 
 int64_t AsmSdpaEngine::staticId()
 {
-    static int64_t s_cachedId = hipdnn_data_sdk::utilities::engineNameToId(engineName());
-    return s_cachedId;
+    return hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID;
 }
 
 bool AsmSdpaEngine::isApplicable(HipKernelHandle& handle,
