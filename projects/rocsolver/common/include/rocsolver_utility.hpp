@@ -12,7 +12,6 @@
 #include <format>
 #include <iostream>
 #include <ostream>
-#include <ranges>
 #endif
 
 // Aliased printing
@@ -27,15 +26,15 @@ struct joinable_range
 template <typename Range, typename CharT>
 struct std::formatter<joinable_range<Range>, CharT>
 {
-    constexpr auto parse(std::format_parse_context& ctx)
+    constexpr auto parse(std::basic_format_parse_context<CharT>& ctx)
     {
         auto it = ctx.begin();
-        auto end = ctx.end();
 
         if(it != ctx.end() && *it != '}')
             throw std::format_error(
-                "Invalid format args provided for rocsolver::formatting::join. The format string '{}' must be used. \n \
-					The joinable_range type should be privately used by rocsolver::formatting::join.");
+                "Invalid format args provided for rocsolver::formatting::join. "
+                "The format string '{}' must be used. "
+                "The joinable_range type should be privately used by rocsolver::formatting::join.");
 
         return it;
     }
@@ -66,15 +65,15 @@ struct std::formatter<joinable_range<Range>, CharT>
 template <typename... T, typename CharT>
 struct std::formatter<joinable_range<std::tuple<T...>>, CharT>
 {
-    constexpr auto parse(std::format_parse_context& ctx)
+    constexpr auto parse(std::basic_format_parse_context<CharT>& ctx)
     {
         auto it = ctx.begin();
-        auto end = ctx.end();
 
         if(it != ctx.end() && *it != '}')
             throw std::format_error(
-                "Invalid format args provided for rocsolver::formatting::join. The format string '{}' must be used. \n \
-					The joinable_range type should be privately used by rocsolver::formatting::join.");
+                "Invalid format args provided for rocsolver::formatting::join. "
+                "The format string '{}' must be used. "
+                "The joinable_range type should be privately used by rocsolver::formatting::join.");
 
         return it;
     }
@@ -91,7 +90,6 @@ struct std::formatter<joinable_range<std::tuple<T...>>, CharT>
                  ...);
             },
             jr.range);
-        result += "";
         return std::format_to(ctx.out(), "{}", result);
     }
 };
