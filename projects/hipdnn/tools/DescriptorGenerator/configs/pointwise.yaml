@@ -208,6 +208,7 @@ operation:
   operation_type_enum: "HIPDNN_OPERATION_TYPE_POINTWISE"
 
   test_data:
+    constants_include: "PointwiseConstants"
     tensor_uids: { in_0: 40, out_0: 41, in_1: 3, in_2: 4 }
     tensor_configs:
       in_0: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }

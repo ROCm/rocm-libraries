@@ -29,6 +29,8 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
+    using Graph::deserialize_via_backend;
+    using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
     const std::vector<std::shared_ptr<INode>>& getSubNodes() const

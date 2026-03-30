@@ -181,6 +181,7 @@ enum class DataType
     INT4 = 12, ///< 4-bit signed integer
     FP6_E2M3 = 13, ///< 6-bit floating point (2 exponent, 3 mantissa bits)
     FP6_E3M2 = 14, ///< 6-bit floating point (3 exponent, 2 mantissa bits)
+    INT64 = 15, ///< 64-bit signed integer
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -319,6 +320,10 @@ DataType getDataTypeEnumFromType()
     {
         return DataType::INT32;
     }
+    else if constexpr(std::is_same_v<T, int64_t>)
+    {
+        return DataType::INT64;
+    }
     else if constexpr(std::is_same_v<T, int8_t>)
     {
         return DataType::INT8;
@@ -441,6 +446,59 @@ inline hipdnnAttentionImplementation_t
         return HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
     default:
         return HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnDiagonalAlignment_t to frontend DiagonalAlignment
+ *
+ * Maps the backend C API diagonal alignment enum to the frontend DiagonalAlignment enum.
+ *
+ * @param alignment The backend hipdnnDiagonalAlignment_t value
+ * @return A pair of DiagonalAlignment and Error; error is set for unknown values
+ */
+inline std::pair<DiagonalAlignment, Error>
+    fromHipdnnDiagonalAlignment(hipdnnDiagonalAlignment_t alignment)
+{
+    switch(alignment)
+    {
+    case HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT:
+        return {DiagonalAlignment::TOP_LEFT, {}};
+    case HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT:
+        return {DiagonalAlignment::BOTTOM_RIGHT, {}};
+    default:
+        return {DiagonalAlignment::TOP_LEFT,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnDiagonalAlignment_t value: "
+                     + std::to_string(static_cast<int>(alignment))}};
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnAttentionImplementation_t to frontend AttentionImplementation
+ *
+ * Maps the backend C API attention implementation enum to the frontend
+ * AttentionImplementation enum.
+ *
+ * @param impl The backend hipdnnAttentionImplementation_t value
+ * @return A pair of AttentionImplementation and Error; error is set for unknown values
+ */
+inline std::pair<AttentionImplementation, Error>
+    fromHipdnnAttentionImplementation(hipdnnAttentionImplementation_t impl)
+{
+    switch(impl)
+    {
+    case HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT:
+        return {AttentionImplementation::AUTO, {}};
+    case HIPDNN_ATTENTION_IMPLEMENTATION_COMPOSITE_EXT:
+        return {AttentionImplementation::COMPOSITE, {}};
+    case HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT:
+        return {AttentionImplementation::UNIFIED, {}};
+    default:
+        return {AttentionImplementation::AUTO,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnAttentionImplementation_t value: "
+                     + std::to_string(static_cast<int>(impl))}};
     }
 }
 
@@ -649,6 +707,8 @@ inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
         return hipdnn_data_sdk::data_objects::DataType::FP6_E2M3;
     case DataType::FP6_E3M2:
         return hipdnn_data_sdk::data_objects::DataType::FP6_E3M2;
+    case DataType::INT64:
+        return hipdnn_data_sdk::data_objects::DataType::INT64;
     default:
         return hipdnn_data_sdk::data_objects::DataType::UNSET;
     }
@@ -687,6 +747,8 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::FP6_E2M3;
     case hipdnn_data_sdk::data_objects::DataType::FP6_E3M2:
         return hipdnn_frontend::DataType::FP6_E3M2;
+    case hipdnn_data_sdk::data_objects::DataType::INT64:
+        return hipdnn_frontend::DataType::INT64;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -793,6 +855,8 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
         return HIPDNN_DATA_FP6_E2M3;
     case DataType::FP6_E3M2:
         return HIPDNN_DATA_FP6_E3M2;
+    case DataType::INT64:
+        return HIPDNN_DATA_INT64;
     case DataType::NOT_SET:
     default:
         return std::nullopt;
@@ -839,6 +903,8 @@ inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
         return {DataType::FP6_E2M3, {}};
     case HIPDNN_DATA_FP6_E3M2:
         return {DataType::FP6_E3M2, {}};
+    case HIPDNN_DATA_INT64:
+        return {DataType::INT64, {}};
     default:
         return {DataType::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -1233,6 +1299,8 @@ inline const char* to_string(const DataType& type)
         return "fp6_e2m3";
     case DataType::FP6_E3M2:
         return "fp6_e3m2";
+    case DataType::INT64:
+        return "int64";
     default:
         return "unknown";
     }
