@@ -80,7 +80,9 @@ TEST_F(IntegrationCustomOpDescriptorLowering, CustomOpGraphRoundTrip)
 
     // Build CustomOp attributes
     CustomOpAttributes attrs;
-    attrs.set_custom_op_id(K_CUSTOM_OP_ID).set_data(K_CUSTOM_OP_OPAQUE_DATA);
+    attrs.set_custom_op_id(K_CUSTOM_OP_ID)
+        .set_data(K_CUSTOM_OP_OPAQUE_DATA)
+        .set_name("test_custom_op");
 
     auto outputs = graph->custom_op({input0, input1}, 1, attrs);
     ASSERT_EQ(outputs.size(), 1);
@@ -148,6 +150,7 @@ TEST_F(IntegrationCustomOpDescriptorLowering, CustomOpGraphRoundTrip)
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(node->name, "test_custom_op");
     EXPECT_EQ(node->attributes.type, NodeAttrType::CustomOpAttributes);
 
     auto* customOp = node->attributes.AsCustomOpAttributes();
@@ -295,6 +298,57 @@ TEST_F(IntegrationCustomOpDescriptorLowering, AutoAssignedUidsPreservedInRoundTr
     nodeUids.insert(customOp->input_tensor_uids.begin(), customOp->input_tensor_uids.end());
     nodeUids.insert(customOp->output_tensor_uids.begin(), customOp->output_tensor_uids.end());
     EXPECT_EQ(nodeUids.size(), 3u) << "CustomOp node tensor UIDs are not distinct";
+}
+
+// Verifies that a custom op with zero inputs and zero outputs can be lowered
+// through the descriptor path (e.g. a side-effect-only custom op).
+TEST_F(IntegrationCustomOpDescriptorLowering, ZeroInputZeroOutputCustomOpRoundTrip)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("ZeroIOCustomOpGraph")
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
+
+    CustomOpAttributes attrs;
+    attrs.set_custom_op_id("test.zero_io").set_name("zero_io_op");
+
+    auto outputs = graph->custom_op({}, 0, attrs);
+    ASSERT_EQ(outputs.size(), 0u);
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph_via_descriptors(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Retrieve and deserialize
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    size_t serializedSize = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+
+    std::vector<uint8_t> serializedData(serializedSize);
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
+                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
+              HIPDNN_STATUS_SUCCESS);
+
+    hipdnn_data_sdk::data_objects::GraphT graphT;
+    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+
+    ASSERT_EQ(graphT.tensors.size(), 0u);
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+
+    auto& node = graphT.nodes[0];
+    EXPECT_EQ(node->name, "zero_io_op");
+    EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
+
+    auto* customOp = node->attributes.AsCustomOpAttributes();
+    ASSERT_NE(customOp, nullptr);
+
+    EXPECT_EQ(customOp->custom_op_id, "test.zero_io");
+    EXPECT_TRUE(customOp->input_tensor_uids.empty());
+    EXPECT_TRUE(customOp->output_tensor_uids.empty());
 }
 
 } // namespace

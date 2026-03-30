@@ -16,6 +16,7 @@ add_executable(
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
     IntegrationBatchnormInferenceDescriptorLifting.cpp
     IntegrationBatchnormInferenceDescriptorLowering.cpp
+    IntegrationBatchnormInferenceNodeVarianceExtDescriptorLifting.cpp
     IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
     IntegrationBlockScaleDequantize.cpp
     IntegrationBlockScaleDequantizeDescriptorLifting.cpp
@@ -35,6 +36,7 @@ add_executable(
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationCustomOpDescriptorLifting.cpp
     IntegrationCustomOpDescriptorLowering.cpp
     IntegrationGraphLifting.cpp
     IntegrationGraphSupportCheck.cpp

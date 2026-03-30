@@ -22,8 +22,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return BatchnormBackwardOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::BatchnormInferenceAttributes:
         return BatchnormInferenceOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
-    //     return BatchnormInferenceVarianceExtOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+        return BatchnormInferenceVarianceExtOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::BlockScaleDequantizeAttributes:
         return BlockScaleDequantizeOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::BlockScaleQuantizeAttributes:
@@ -34,8 +34,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return ConvolutionFwdOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::ConvolutionWrwAttributes:
         return ConvolutionWrwOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::CustomOpAttributes:
-    //     return CustomOpOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::CustomOpAttributes:
+        return CustomOpOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::LayernormAttributes:
         return LayernormOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::MatmulAttributes:
