@@ -6,7 +6,6 @@
 // falls back to scanning live event intervals with binary search.
 
 #include "race-emulator/Workgroup.h"
-#include <algorithm>
 #include <cassert>
 
 namespace raceemulator {
@@ -16,15 +15,6 @@ void Workgroup::markEventWaveComplete(EventId eventId) {
          eventId.value < static_cast<int64_t>(eventRegistry.size()));
   assert(eventRegistry[eventId.value].status == EventStatus::ACTIVE);
   eventRegistry[eventId.value].status = EventStatus::WAVE_COMPLETE;
-}
-
-static void removeFromUnorderedList(std::vector<EventId> &list,
-                                    EventId eventId) {
-  auto it = std::find(list.begin(), list.end(), eventId);
-  if (it != list.end()) {
-    std::swap(*it, list.back());
-    list.pop_back();
-  }
 }
 
 void Workgroup::retireEvent(EventId eventId) {

@@ -475,19 +475,7 @@ void Wave::retireEventRegisters(EventId eventId) {
   auto eventType = wg.getEventType(eventId);
   for (uint32_t regId : wg.getEventRegisters(eventId)) {
     auto &eventsForReg = getVgprMemoryEvents(regId);
-
-    auto it = std::find(eventsForReg.begin(), eventsForReg.end(), eventId);
-
-    if (it == eventsForReg.end()) {
-      throw std::runtime_error(
-          "Memory Tracker Inconsistency: Event ID " +
-          std::to_string(eventId.value) + ", Register v" +
-          std::to_string(regId) +
-          ": Event retired by s_waitcnt but not found on register");
-    }
-
-    std::swap(*it, eventsForReg.back());
-    eventsForReg.pop_back();
+    removeFromUnorderedList(eventsForReg, eventId);
     regEventCountDec(eventType, regId);
   }
 }

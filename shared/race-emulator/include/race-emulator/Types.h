@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <algorithm>
+#include <vector>
+
 namespace raceemulator {
 
 /// Identifies a wave (SIMD execution unit) within a workgroup. Wave 0 runs
@@ -35,6 +38,15 @@ struct EventId {
   bool operator!=(EventId o) const { return value != o.value; }
   bool operator<(EventId o) const { return value < o.value; }
 };
+
+static inline void removeFromUnorderedList(std::vector<EventId> &list,
+                                           EventId eventId) {
+  auto it = std::find(list.begin(), list.end(), eventId);
+  if (it != list.end()) {
+    std::swap(*it, list.back());
+    list.pop_back();
+  }
+}
 
 /// Status of a memory event in the race detection lifecycle.
 enum class EventStatus {
