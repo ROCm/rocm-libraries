@@ -2148,7 +2148,9 @@ CK_TILE_DEVICE void amd_buffer_store_raw_impl(const thread_buffer<T, N>& dst_thr
 }
 
 template <typename T, index_t N>
-CK_TILE_DEVICE void amd_global_atomic_add_impl(const thread_buffer<T, N>& src_thread_data, T* addr)
+CK_TILE_DEVICE void
+amd_global_atomic_add_impl([[maybe_unused]] const thread_buffer<T, N>& src_thread_data,
+                           [[maybe_unused]] T* addr)
 {
     static_assert((std::is_same<T, ck_tile::bf16_t>::value && (N == 2 || N == 4 || N == 8)) ||
                       (std::is_same<T, ck_tile::fp16_t>::value && (N == 2 || N == 4 || N == 8)),
