@@ -21,6 +21,7 @@ Usage:
     )
 """
 
+import gzip
 import json
 from pathlib import Path
 from typing import Optional
@@ -67,12 +68,26 @@ class Predictor:
             self._feature_engine = GemmUniversalFeatureEngine()
 
     def _load_model(self, target: str) -> Optional[lgb.Booster]:
-        """Lazy-load a model for the given target."""
+        """Lazy-load a model for the given target.
+
+        Automatically decompresses .lgbm.gz files if the .lgbm file doesn't exist.
+        The decompressed file is cached to disk for subsequent loads.
+        """
         if target in self._models:
             return self._models[target]
+
         path = self._model_dir / f"model_{target}.lgbm"
+        gz_path = self._model_dir / f"model_{target}.lgbm.gz"
+
+        # Auto-decompress if needed
+        if not path.exists() and gz_path.exists():
+            with gzip.open(gz_path, 'rb') as f_in:
+                with open(path, 'wb') as f_out:
+                    f_out.write(f_in.read())
+
         if not path.exists():
             return None
+
         model = lgb.Booster(model_file=str(path))
         self._models[target] = model
         return model

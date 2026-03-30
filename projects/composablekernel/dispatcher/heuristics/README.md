@@ -60,6 +60,8 @@ python3 train.py \
     --op gemm_universal --dtype fp8 --arch gfx950
 ```
 
+**Note**: Trained models are automatically compressed to `.lgbm.gz` format to save space (~67% reduction). The Python tools automatically decompress them on first use and cache the decompressed version. For warm-start training, decompression happens automatically.
+
 ### 3. Evaluate
 
 ```bash
@@ -84,6 +86,24 @@ python3 search.py \
     --m 128 --n 1536 --k 7168 \
     --strategy random --budget 500 --top_k 10
 ```
+
+### 6. Using models in C++ (requires decompression)
+
+C++ code uses the LightGBM C API which requires uncompressed `.lgbm` files. If you have compressed models (`.lgbm.gz`), decompress them first:
+
+```bash
+cd models/gemm_universal_fp16_gfx950
+gunzip model_tflops.lgbm.gz
+```
+
+Then use in C++ examples:
+
+```bash
+cd dispatcher/build
+./gemm_09_ml_heuristic --model ../heuristics/models/gemm_universal_fp16_gfx950/model_tflops.lgbm
+```
+
+**Note**: Python tools automatically decompress `.lgbm.gz` files on first use, so you can run Python scripts first to trigger decompression, then use the same models in C++.
 
 ## Architecture
 

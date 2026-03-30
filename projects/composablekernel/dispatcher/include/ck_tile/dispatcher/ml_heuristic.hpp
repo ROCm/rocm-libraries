@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -307,6 +308,17 @@ class MLHeuristic
         if(LGBM_BoosterCreateFromModelfile(path.c_str(), &iters, &b_) != 0 || !b_)
         {
             std::cerr << "MLHeuristic: Failed to load " << path << std::endl;
+
+            // Check if a compressed .gz version exists
+            std::string gz_path = path + ".gz";
+            std::ifstream gz_check(gz_path);
+            if(gz_check.good())
+            {
+                std::cerr << "MLHeuristic: Found compressed model at " << gz_path << std::endl;
+                std::cerr << "MLHeuristic: Please decompress it first:" << std::endl;
+                std::cerr << "  gunzip " << gz_path << std::endl;
+            }
+
             b_ = nullptr;
         }
         else

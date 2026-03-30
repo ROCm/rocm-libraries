@@ -498,6 +498,7 @@ python3 examples/gemm/python/10_advanced_benchmark.py \
 The dispatcher includes ML heuristics for automated kernel selection using trained LightGBM models.
 
 **Prerequisites:** Install ML dependencies first:
+
 ```bash
 pip install -r requirements-ml.txt  # ~500 MB (LightGBM, pandas, pyarrow, scikit-learn)
 ```
@@ -512,6 +513,18 @@ pip install -r requirements-ml.txt  # ~500 MB (LightGBM, pandas, pyarrow, scikit
 ```bash
 python3 examples/gemm/python/09_ml_heuristic.py      # ML-based kernel selection
 python3 examples/gemm/python/10_rank_kernels.py      # Kernel ranking
+```
+
+**Model Compression:** Trained models are stored in compressed `.lgbm.gz` format to save space (~67% size reduction). Python tools automatically decompress models on first use. For C++ examples, decompress manually:
+
+```bash
+# If you have compressed models
+cd heuristics/models/gemm_universal_fp16_gfx950
+gunzip model_tflops.lgbm.gz
+
+# Then use in C++ example
+cd ../../../build
+./gemm_09_ml_heuristic --model ../heuristics/models/gemm_universal_fp16_gfx950/model_tflops.lgbm
 ```
 
 ---

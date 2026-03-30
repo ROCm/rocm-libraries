@@ -113,12 +113,26 @@ def check_feature_compatibility(
 def load_warm_start_model(prev_model_dir: Path, target: str) -> str | None:
     """Load the path to a previous model file for warm-start, or None if absent.
 
+    Automatically decompresses .lgbm.gz files if the .lgbm file doesn't exist.
+    The decompressed file is cached to disk for subsequent loads.
+
     Returns the string path (what LightGBM's init_model expects) rather than
     a loaded Booster, because LGBMRegressor.fit(init_model=...) accepts both
     path strings and Booster objects and path strings avoid keeping the old
     model in memory.
     """
+    import gzip
+
     model_path = prev_model_dir / f"model_{target}.lgbm"
+    gz_path = prev_model_dir / f"model_{target}.lgbm.gz"
+
+    # Auto-decompress if needed
+    if not model_path.exists() and gz_path.exists():
+        print(f"  Decompressing {gz_path.name}...")
+        with gzip.open(gz_path, "rb") as f_in:
+            with open(model_path, "wb") as f_out:
+                f_out.write(f_in.read())
+
     if not model_path.exists():
         return None
     return str(model_path)
