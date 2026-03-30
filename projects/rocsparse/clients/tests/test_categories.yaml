@@ -42,7 +42,7 @@ test_categories:
       - "quick"
       - "pre-commit"
 
-  pre_checkin:
+  standard:
     description: "Pre-checkin validation (target: < 30 min)"
     test_patterns:
       - "quick/*"
@@ -50,9 +50,10 @@ test_categories:
     exclude:
       - "*known_bug*"
     labels:
-      - "pre_checkin"
+      - "standard"
+      - "pr"
 
-  nightly:
+  comprehensive:
     description: "Nightly comprehensive tests (target: < 4 hours)"
     test_patterns:
       - "quick/*"
@@ -61,16 +62,21 @@ test_categories:
     exclude:
       - "*known_bug*"
     labels:
+      - "comprehensive"
       - "nightly"
 
-  stress:
-    description: "Stress tests with large matrices"
+  full:
+    description: "Test full suite including stress tests"
     test_patterns:
+      - "quick/*"
+      - "pre_checkin/*"
+      - "nightly/*"
       - "stress/*"
     exclude:
       - "*known_bug*"
     labels:
-      - "stress"
+      - "full"
+      - "weekly"
 
 # Uncomment and populate to exclude specific tests on certain GPU architectures.
 # exclude_gpu:
@@ -95,6 +101,6 @@ execution_settings:
   timeout_multiplier: 1
   category_timeouts:
     quick: 300
-    pre_checkin: 1800
-    nightly: 14400
-    stress: 28800
+    standard: 1800
+    comprehensive: 14400
+    full: 28800
