@@ -98,7 +98,7 @@ public:
             hipblaslt_cout << "allocated capacity: " << allocated_capacity << std::endl;
             // In the windows system, the host memory(pinned memory)'s capacity is the half of the physical memory
             unsigned long long host_max_capacity = 0;
-            if(memStatus.ullTotalPhys <= (32 << 30))
+            if(memStatus.ullTotalPhys <= (32ULL << 30))
             {
                 host_max_capacity = memStatus.ullTotalPhys / 3.0;
             }
@@ -109,10 +109,10 @@ public:
             if(allocated_capacity > host_max_capacity)
                 return 0;
             size_t available_host_memory = static_cast<size_t>(host_max_capacity - allocated_capacity);
-            unsigned long long host_real_capacity = memStatus.ullAvailPhys;
+            size_t host_real_capacity = memStatus.ullAvailPhys / 3.5;
             hipblaslt_cout << "host_real_capacity: " << host_real_capacity << std::endl;
             hipblaslt_cout << "available_host_memory: " << available_host_memory << std::endl;
-            return std::min(available_host_memory, host_real_capacity / 3.5);
+            return std::min(available_host_memory, host_real_capacity);
         }
         else
         {
