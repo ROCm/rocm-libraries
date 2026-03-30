@@ -64,7 +64,7 @@ args:
      -qscale    n or 0, no scaling (default:n)
                 pt or 1, per-tensor scale
                 bs or 2, block scale
-                kvbs or 3, Q per-tensor, K/V per-page block scale
+                only in bath_prefill, kvbs or 3, Q per-tensor, K/V per-page block scale
                 mx or 4, microscaling (exclusively for mxfp8/mxfp4)
       -iperm    permute input (default:1)
                 if true, will be b*h*s*d, else b*s*h*d
