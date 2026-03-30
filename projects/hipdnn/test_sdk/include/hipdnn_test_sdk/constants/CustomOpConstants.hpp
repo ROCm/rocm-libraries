@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -20,5 +21,8 @@ constexpr int64_t K_CUSTOM_OP_OUTPUT_UID_1 = 803;
 
 inline const std::string K_CUSTOM_OP_ID = "test.op";
 inline const std::vector<uint8_t> K_CUSTOM_OP_OPAQUE_DATA = {0xDE, 0xAD};
+
+inline const std::array<int64_t, 2> K_CUSTOM_OP_TENSOR_DIMS = {2, 3};
+inline const std::array<int64_t, 2> K_CUSTOM_OP_TENSOR_STRIDES = {3, 1};
 
 } // namespace hipdnn_tests::constants

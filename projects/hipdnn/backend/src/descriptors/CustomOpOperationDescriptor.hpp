@@ -7,9 +7,11 @@
 #include "IGraphOperation.hpp"
 #include "TensorDescriptor.hpp"
 #include <hipdnn_data_sdk/data_objects/custom_op_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace hipdnn_backend
@@ -56,6 +58,13 @@ public:
     std::vector<std::shared_ptr<TensorDescriptor>> getTensorDescriptors() const override;
     std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT> buildNode() const override;
 
+    // Creates a finalized CustomOpOperationDescriptor directly from a FlatBuffer NodeT.
+    // Casts nodeT.attributes to CustomOpAttributesT internally, then directly assigns
+    // the data struct, looks up tensor descriptors from the tensor map, and calls finalize().
+    static std::shared_ptr<CustomOpOperationDescriptor>
+        fromNode(const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+                 const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap);
+
     static hipdnnBackendDescriptorType_t getStaticType();
 
     std::string toString() const override;
@@ -68,6 +77,8 @@ private:
 
     hipdnn_data_sdk::data_objects::DataType _computeDataType
         = hipdnn_data_sdk::data_objects::DataType::UNSET;
+
+    std::string _name;
 };
 
 } // namespace hipdnn_backend

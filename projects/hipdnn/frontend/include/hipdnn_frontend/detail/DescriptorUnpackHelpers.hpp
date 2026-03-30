@@ -584,4 +584,49 @@ template <typename T>
     return {};
 }
 
+/// Unpacks a byte array attribute (HIPDNN_TYPE_CHAR) from a backend descriptor.
+/// Returns an empty vector if the attribute is not supported or has no elements.
+[[nodiscard]] inline Error getDescriptorAttrByteArray(hipdnnBackendDescriptor_t desc,
+                                                      hipdnnBackendAttributeName_t attrName,
+                                                      std::vector<uint8_t>& value,
+                                                      const std::string& errorContext)
+{
+    int64_t count = 0;
+    auto countStatus = hipdnnBackend()->backendGetAttribute(
+        desc, attrName, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
+    if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED)
+    {
+        value.clear();
+        return {};
+    }
+    if(countStatus != HIPDNN_STATUS_SUCCESS)
+    {
+        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
+        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Failed to get count for " + errorContext
+                    + " Backend error: " + backendErrMsg.data()};
+    }
+    if(count <= 0)
+    {
+        value.clear();
+        return {};
+    }
+
+    value.resize(static_cast<size_t>(count));
+    int64_t actualCount = 0;
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendGetAttribute(
+            desc, attrName, HIPDNN_TYPE_CHAR, count, &actualCount, value.data()),
+        "Failed to get " + errorContext);
+    if(actualCount != count)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Element count mismatch for " + errorContext + ": expected " + std::to_string(count)
+                    + " but got " + std::to_string(actualCount)};
+    }
+
+    return {};
+}
+
 } // namespace hipdnn_frontend::detail

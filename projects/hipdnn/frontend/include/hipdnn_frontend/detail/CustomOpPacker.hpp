@@ -22,19 +22,25 @@ inline Error
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create custom op operation descriptor"};
     }
 
-    // Set input tensor array
-    HIPDNN_CHECK_ERROR(ensureAndSetTensorArrayRef(opDesc.get(),
-                                                  HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
-                                                  attributes.get_inputs(),
-                                                  tensorDescs,
-                                                  "custom op inputs"));
+    // Set input tensor array (skip if empty — zero-input custom ops are valid)
+    if(!attributes.get_inputs().empty())
+    {
+        HIPDNN_CHECK_ERROR(ensureAndSetTensorArrayRef(opDesc.get(),
+                                                      HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
+                                                      attributes.get_inputs(),
+                                                      tensorDescs,
+                                                      "custom op inputs"));
+    }
 
-    // Set output tensor array
-    HIPDNN_CHECK_ERROR(ensureAndSetTensorArrayRef(opDesc.get(),
-                                                  HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT,
-                                                  attributes.get_outputs(),
-                                                  tensorDescs,
-                                                  "custom op outputs"));
+    // Set output tensor array (skip if empty — zero-output custom ops are valid)
+    if(!attributes.get_outputs().empty())
+    {
+        HIPDNN_CHECK_ERROR(ensureAndSetTensorArrayRef(opDesc.get(),
+                                                      HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT,
+                                                      attributes.get_outputs(),
+                                                      tensorDescs,
+                                                      "custom op outputs"));
+    }
 
     // Set custom_op_id string
     HIPDNN_CHECK_ERROR(setDescriptorAttrString(opDesc.get(),
@@ -57,6 +63,14 @@ inline Error
                                                  HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT,
                                                  attributes.compute_data_type,
                                                  "custom op compute data type"));
+
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(
+            opDesc.get(), HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "custom op operation name"));
+    }
 
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "custom op operation descriptor"));

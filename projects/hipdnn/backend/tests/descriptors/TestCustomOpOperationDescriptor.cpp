@@ -137,16 +137,16 @@ TEST_F(TestCustomOpOperationDescriptor, FinalizeWithRequiredAttributes)
     ASSERT_TRUE(getDescriptor()->isFinalized());
 }
 
-TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithoutInputs)
+TEST_F(TestCustomOpOperationDescriptor, FinalizeSucceedsWithoutInputs)
 {
     setAllAttributesExcept({HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT});
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_NO_THROW(getDescriptor()->finalize());
 }
 
-TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithoutOutputs)
+TEST_F(TestCustomOpOperationDescriptor, FinalizeSucceedsWithoutOutputs)
 {
     setAllAttributesExcept({HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT});
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_NO_THROW(getDescriptor()->finalize());
 }
 
 TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithoutCustomOpId)

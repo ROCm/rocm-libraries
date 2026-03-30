@@ -8,6 +8,7 @@
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/CustomOpPacker.hpp>
+#include <hipdnn_frontend/detail/CustomOpUnpacker.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -20,6 +21,16 @@ public:
         : INode(graphAttrs)
         , attributes(std::move(customOpAttributes))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        CustomOpAttributes customOpAttr;
+        HIPDNN_CHECK_ERROR(detail::unpackCustomOpOperation(opDesc, tensorMap, customOpAttr));
+        attributes = std::move(customOpAttr);
+        return {};
     }
 
     NodeType getNodeType() const override

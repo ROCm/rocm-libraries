@@ -36,6 +36,7 @@ add_executable(
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationCustomOpDescriptorLifting.cpp
     IntegrationCustomOpDescriptorLowering.cpp
     IntegrationGraphLifting.cpp
     IntegrationGraphSupportCheck.cpp
