@@ -105,22 +105,6 @@ set( MIOpen_Source
     getitem_api.cpp
     glu/problem_description.cpp
     glu_api.cpp
-    graphapi/convolution.cpp
-    graphapi/conv_bias_res_add_activ_forward_executor.cpp
-    graphapi/engine.cpp
-    graphapi/enginecfg.cpp
-    graphapi/engineheur.cpp
-    graphapi/execution_plan.cpp
-    graphapi/find_engine.cpp
-    graphapi/graphapi.cpp
-    graphapi/matmul.cpp
-    graphapi/opgraph.cpp
-    graphapi/pointwise.cpp
-    graphapi/reduction.cpp
-    graphapi/reshape.cpp
-    graphapi/rng.cpp
-    graphapi/tensor.cpp
-    graphapi/variant_pack.cpp
     groupnorm_api.cpp
     groupnorm/problem_description.cpp
     handle_api.cpp
