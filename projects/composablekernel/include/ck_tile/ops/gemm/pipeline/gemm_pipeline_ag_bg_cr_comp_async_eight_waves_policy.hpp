@@ -21,6 +21,8 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     static constexpr auto I1 = number<1>{};
     static constexpr auto I2 = number<2>{};
 
+    static constexpr index_t kDramLoadPackBytes = 128;
+
     using ALayout          = remove_cvref_t<typename Problem::ALayout>;
     using BLayout          = remove_cvref_t<typename Problem::BLayout>;
     using ADataType        = remove_cvref_t<typename Problem::ADataType>;
@@ -33,14 +35,17 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
                   "ALayout must be RowMajor!");
     static_assert(std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::ColumnMajor>,
                   "BLayout must be ColumnMajor!");
-    static_assert(is_any_of<AComputeDataType, fp8_t, bf8_t, pk_fp4_t, pk_fp6x16_t>::value);
-    static_assert(is_any_of<BComputeDataType, fp8_t, bf8_t, pk_fp4_t, pk_fp6x16_t>::value);
+    static_assert(
+        is_any_of<AComputeDataType, fp8_t, bf8_t, pk_fp4_t, pk_fp6x16_t, fp16_t, bf16_t>::value);
+    static_assert(
+        is_any_of<BComputeDataType, fp8_t, bf8_t, pk_fp4_t, pk_fp6x16_t, fp16_t, bf16_t>::value);
     static_assert(std::is_same_v<AComputeDataType, BComputeDataType>);
     static_assert(std::is_same_v<CDataType, float>);
 
-    static constexpr auto WGAccess   = std::is_same_v<ComputeDataType, fp8_t>
-                                           ? WGAttrNumAccessEnum::Double
-                                           : WGAttrNumAccessEnum::Single;
+    static constexpr auto WGAccess =
+        std::is_same_v<ComputeDataType, fp8_t> || std::is_same_v<ComputeDataType, bf8_t>
+            ? WGAttrNumAccessEnum::Double
+            : WGAttrNumAccessEnum::Single;
     static constexpr auto PackedSize = numeric_traits<ComputeDataType>::PackedSize;
 
     using BlockGemmShape = typename Problem::BlockGemmShape;
@@ -92,10 +97,8 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     static constexpr index_t KWarps       = BlockWarps::at(I2);
     static constexpr index_t MIterPerWarp = MWarpTiles / MWarps;
     static constexpr index_t NIterPerWarp = NWarpTiles / NWarps;
-    static constexpr index_t KPerWarp     = KPerBlock / KWarps;
     static constexpr index_t NPerWarp     = NPerBlock / NWarps;
     static_assert(NWarps == 2, "NWarps == 2 for ping-pong!");
-    static_assert(KWarpTiles == KWarps, "Wrong!");
 
     static constexpr index_t warp_size = get_warp_size();
     static constexpr index_t warp_num  = BlockSize / warp_size;
@@ -103,27 +106,30 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     static_assert(warp_num * warp_size == BlockSize, "Wrong!");
 
     static_assert(sizeof(ADataType) == sizeof(BDataType), "Wrong!");
-    static constexpr index_t ElementSize = sizeof(ADataType);
-    static constexpr index_t K2          = Problem::VectorLoadSize / ElementSize * PackedSize; // 16
-    static constexpr index_t K1          = WarpTile::at(I2) / K2;                              // 8
-    static constexpr index_t K0          = KPerWarp / (K1 * K2);
-    static_assert(K0 * K1 * K2 == KPerWarp, "Wrong!");
-    static_assert(K0 == 1, "Wrong!");
+    static constexpr index_t ElementSize    = sizeof(ADataType);
+    static constexpr index_t K2             = Problem::VectorLoadSize / ElementSize * PackedSize;
+    static constexpr index_t PacksPerLdsRow = std::is_same_v<ADataType, pk_fp6x16_t>
+                                                  ? kDramLoadPackBytes / K2
+                                                  : (kDramLoadPackBytes / sizeof(ADataType)) / K2;
+    static constexpr index_t K1             = PacksPerLdsRow;
+    static constexpr index_t K0             = KPerBlock / (K1 * K2);
+    static_assert(K0 * K1 * K2 == KPerBlock, "Wrong!");
+
+    static constexpr index_t SwizzleFactor = WarpTileK / static_cast<index_t>(WGAccess) / K2;
 
     CK_TILE_DEVICE static constexpr bool IsPreshuffle() { return Preshuffle; }
 
     CK_TILE_DEVICE static constexpr auto MakeADramTileDistribution()
     {
-        constexpr index_t M2 = warp_size / K1; // 8
-        constexpr index_t M1 = warp_num;       // 8
+        constexpr index_t M2 = warp_size / K1;
+        constexpr index_t M1 = warp_num;
         constexpr index_t M0 = MPerBlock / M1 / M2;
         static_assert(M0 * M1 * M2 == MPerBlock, "wrong!");
 
         return make_static_tile_distribution(
             ck_tile::tile_distribution_encoding<
                 ck_tile::sequence<>,
-                ck_tile::tuple<ck_tile::sequence<M0, M1, M2>,                  // [123] 8 8
-                               ck_tile::sequence<K0, K1, K2>>,                 // 1 8 16
+                ck_tile::tuple<ck_tile::sequence<M0, M1, M2>, ck_tile::sequence<K0, K1, K2>>,
                 ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>, // M0 M2,K1
                 ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<2, 1>>,
                 ck_tile::sequence<1, 2, 2>, // M0,K0,K2
@@ -134,36 +140,33 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     {
         if constexpr(Preshuffle)
         {
-            constexpr index_t K1_ = warp_size;                        // 64
-            constexpr index_t K0_ = KPerBlock * WarpTileN / K1_ / K2; // 2
+            constexpr index_t K1_ = warp_size;
+            constexpr index_t K0_ = KPerBlock * WarpTileN / K1_ / K2;
             static_assert(K0_ * K1_ * K2 == KPerBlock * WarpTileN, "wrong!");
 
-            constexpr index_t N1 = warp_num / NWarps / K0_;             // 2
-            constexpr index_t N0 = NPerBlock / WarpTileN / N1 / NWarps; // 4
+            constexpr index_t N1 = warp_num / NWarps / K0_;
+            constexpr index_t N0 = NPerBlock / WarpTileN / N1 / NWarps;
             static_assert(NWarps * N0 * N1 == NPerBlock / WarpTileN, "wrong!");
 
             return make_static_tile_distribution(
-                tile_distribution_encoding< //
-                    sequence<>,
-                    tuple<sequence<NWarps, N0, N1>,        // 2 [4] 2
-                          sequence<K0_, K1_, K2>>,         // 2 64 16
-                    tuple<sequence<1, 1, 2>, sequence<2>>, // NWarps,N1,K0 K1
-                    tuple<sequence<0, 2, 0>, sequence<1>>,
-                    sequence<1, 2>, // N0,K2
-                    sequence<1, 2>>{});
+                tile_distribution_encoding<sequence<>,
+                                           tuple<sequence<NWarps, N0, N1>, sequence<K0_, K1_, K2>>,
+                                           tuple<sequence<1, 1, 2>, sequence<2>>, // NWarps,N1,K0 K1
+                                           tuple<sequence<0, 2, 0>, sequence<1>>,
+                                           sequence<1, 2>, // N0,K2
+                                           sequence<1, 2>>{});
         }
         else
         {
-            constexpr index_t N2 = warp_size / K1;               // 8
-            constexpr index_t N1 = warp_num / NWarps;            // 4
-            constexpr index_t N0 = NPerBlock / N1 / N2 / NWarps; // 4
+            constexpr index_t N2 = warp_size / K1;
+            constexpr index_t N1 = warp_num / NWarps;
+            constexpr index_t N0 = NPerBlock / N1 / N2 / NWarps;
             static_assert(NWarps * N0 * N1 * N2 == NPerBlock, "wrong!");
 
             return make_static_tile_distribution(
-                tile_distribution_encoding< //
+                tile_distribution_encoding<
                     sequence<>,
-                    tuple<sequence<NWarps, N0, N1, N2>,    // 2 [4] 4 8
-                          sequence<K0, K1, K2>>,           // 1 8 16
+                    tuple<sequence<NWarps, N0, N1, N2>, sequence<K0, K1, K2>>,
                     tuple<sequence<1, 1>, sequence<1, 2>>, // NWarps,N1 N2,K1
                     tuple<sequence<0, 2>, sequence<3, 1>>,
                     sequence<1, 2, 2>, // N0,K0,K2
@@ -182,7 +185,7 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
         const index_t k_tiles = cols / (KWarps * K1 * K2);
         const auto col_lens   = make_tuple(k_tiles, number<KWarps>{}, number<K1>{}, number<K2>{});
 
-        constexpr index_t M1 = warp_size / static_cast<index_t>(WGAccess) / K1; // 4
+        constexpr index_t M1 = SwizzleFactor;
         const index_t M0     = integer_divide_ceil(rows, M1);
         const auto row_lens  = make_tuple(M0, number<M1>{});
 
@@ -233,9 +236,9 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     template <index_t MNPerBlock, index_t warp_groups_>
     CK_TILE_DEVICE static constexpr auto MakeABLdsBlockDescriptor_()
     {
-        constexpr index_t M4 = warp_size / static_cast<index_t>(WGAccess) / K1; // 4
-        constexpr index_t M3 = static_cast<index_t>(WGAccess);                  // 2
-        constexpr index_t M2 = WarpTileM / M4 / M3;                             // 2
+        constexpr index_t M4 = SwizzleFactor;
+        constexpr index_t M3 = warp_size / (M4 * K1);
+        constexpr index_t M2 = WarpTileM / M4 / M3;
         constexpr index_t M1 = (warp_num / warp_groups_) / M2;
         constexpr index_t M0 = MNPerBlock / M1 / M2 / M3 / M4;
 
@@ -317,8 +320,8 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
         else
         {
             constexpr index_t K1_ = warp_size / WarpTileN; // 4
-            constexpr index_t K0_ = KPerWarp / K1_ / K2;   // 2
-            static_assert(K0_ * K1_ * K2 == KPerWarp, "wrong!");
+            constexpr index_t K0_ = KPerBlock / K1_ / K2;  // 2
+            static_assert(K0_ * K1_ * K2 == KPerBlock, "wrong!");
 
             constexpr index_t N2 = warp_size / K1_;              // 16
             constexpr index_t N1 = warp_num / NWarps / K0_;      // 2
