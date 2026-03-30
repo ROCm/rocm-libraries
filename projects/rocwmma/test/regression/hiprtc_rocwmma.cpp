@@ -41,6 +41,8 @@
 #include "regression/reg_common.hpp"
 #include "reference.hpp"
 
+static std::string binary_name;
+
 // ============================================================================
 // Kernel Sources
 // ============================================================================
@@ -247,7 +249,10 @@ TEST_F(HipRTC_rocWMMA, RocwmmaBasicIncludeTest)
     ASSERT_HIPRTC_SUCCESS(hiprtcCreateProgram(&prog, vectorAddSourceRocwmmaInclude, nullptr, 0, nullptr, nullptr));
 
     // Build compile options
-    auto options    = buildCompileOptions();
+    auto        includeDirArg = getIncludeDirArg(binary_name);
+    auto        options       = buildCompileOptions();
+    if(!includeDirArg.empty())
+        options.push_back(includeDirArg.c_str());
     int  numOptions = options.size();
 
     // Compile the program
@@ -383,7 +388,10 @@ TEST_F(HipRTC_rocWMMA, RocwmmaGemmTest)
     ASSERT_HIPRTC_SUCCESS(hiprtcCreateProgram(&prog, basicRocwmmaGemmSource, nullptr, 0, nullptr, nullptr));
 
     // Build compile options
-    auto options    = buildCompileOptions();
+    auto        includeDirArg = getIncludeDirArg(binary_name);
+    auto        options       = buildCompileOptions();
+    if(!includeDirArg.empty())
+        options.push_back(includeDirArg.c_str());
     int  numOptions = options.size();
 
     // Compile the program
@@ -559,4 +567,10 @@ TEST_F(HipRTC_rocWMMA, RocwmmaGemmTest)
 
     CHECK_HIP_ERROR(hipModuleUnload(module));
     ASSERT_HIPRTC_SUCCESS(hiprtcDestroyProgram(&prog));
+}
+
+int main(int argc, char **argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    binary_name = std::string(argv[0]);
+    return RUN_ALL_TESTS();
 }
