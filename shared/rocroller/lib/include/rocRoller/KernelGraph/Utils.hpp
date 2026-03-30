@@ -803,15 +803,19 @@ namespace rocRoller
 
         /**
          * Yields all of the nodes that are body parents of `control` in order from the node
-         * up to the root of the graph.
+         * up to the root of the graph, paired with the containing edge connecting the parent
+         * to the child (e.g. Body, Else, Initialize, ForLoopIncrement).
          */
-        Generator<int> bodyParents(int control, KernelGraph const& graph);
+        Generator<std::pair<int, ControlGraph::ControlEdge>> bodyParents(int                control,
+                                                                          KernelGraph const& graph);
 
         /**
          * Yields all of the nodes that are body parents of `control` in order from the node
-         * up to the root of the graph.
+         * up to the root of the graph, paired with the containing edge connecting the parent
+         * to the child (e.g. Body, Else, Initialize, ForLoopIncrement).
          */
-        Generator<int> bodyParents(int control, ControlGraph::ControlGraph const& graph);
+        Generator<std::pair<int, ControlGraph::ControlEdge>>
+            bodyParents(int control, ControlGraph::ControlGraph const& graph);
 
         /**
          * Returns all of the nodes that contain `control` with a body
