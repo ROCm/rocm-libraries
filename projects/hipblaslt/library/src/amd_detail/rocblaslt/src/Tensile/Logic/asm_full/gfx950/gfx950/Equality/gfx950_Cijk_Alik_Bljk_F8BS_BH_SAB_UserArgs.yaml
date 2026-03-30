@@ -100,7 +100,7 @@
     CustomKernelName: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_UserArgs_shortname0_gfx950
     DebugStreamK: 0
     DepthU: 128
-    DirectToLds: true
+    DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
     DirectToVgprA: false
@@ -110,10 +110,10 @@
     EnableF32XEmulationLds: false
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -236,7 +236,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 0
     SolutionNameMin: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_UserArgs_shortname0_gfx950
-    SourceSwap: 1
+    SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 1
     StaggerUStride: 128
@@ -259,13 +259,13 @@
     ThreadTileA: 32
     ThreadTileB: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -323,7 +323,7 @@
     CustomKernelName: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
     DebugStreamK: 0
     DepthU: 128
-    DirectToLds: true
+    DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
     DirectToVgprA: false
@@ -333,10 +333,10 @@
     EnableF32XEmulationLds: false
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -459,7 +459,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 1
     SolutionNameMin: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
-    SourceSwap: 1
+    SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 1
     StaggerUStride: 128
@@ -482,13 +482,13 @@
     ThreadTileA: 32
     ThreadTileB: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -546,7 +546,7 @@
     CustomKernelName: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
     DebugStreamK: 0
     DepthU: 128
-    DirectToLds: true
+    DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
     DirectToVgprA: false
@@ -556,10 +556,10 @@
     EnableF32XEmulationLds: false
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -682,7 +682,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 2
     SolutionNameMin: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
-    SourceSwap: 1
+    SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 1
     StaggerUStride: 128
@@ -705,13 +705,13 @@
     ThreadTileA: 32
     ThreadTileB: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -769,7 +769,7 @@
     CustomKernelName: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_NTD_UserArgs_shortname1_gfx950
     DebugStreamK: 0
     DepthU: 128
-    DirectToLds: true
+    DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
     DirectToVgprA: false
@@ -779,10 +779,10 @@
     EnableF32XEmulationLds: false
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -905,7 +905,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 3
     SolutionNameMin: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_NTD_UserArgs_shortname1_gfx950
-    SourceSwap: 1
+    SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 1
     StaggerUStride: 128
@@ -928,13 +928,13 @@
     ThreadTileA: 32
     ThreadTileB: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -992,7 +992,7 @@
     CustomKernelName: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
     DebugStreamK: 0
     DepthU: 128
-    DirectToLds: true
+    DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
     DirectToVgprA: false
@@ -1002,10 +1002,10 @@
     EnableF32XEmulationLds: false
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -1128,7 +1128,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 4
     SolutionNameMin: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
-    SourceSwap: 1
+    SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 1
     StaggerUStride: 128
@@ -1151,13 +1151,13 @@
     ThreadTileA: 32
     ThreadTileB: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0

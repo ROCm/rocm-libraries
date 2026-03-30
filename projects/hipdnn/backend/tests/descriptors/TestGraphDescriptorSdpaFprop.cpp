@@ -6,6 +6,7 @@
 #include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/GraphDescriptor.hpp"
+#include "descriptors/NodeFactory.hpp"
 #include "descriptors/SdpaFpropOperationDescriptor.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
@@ -63,7 +64,8 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                HipdnnBackendDescriptor* rngDumpDesc,
                                HipdnnBackendDescriptor* amaxSDesc,
                                HipdnnBackendDescriptor* amaxODesc,
-                               hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
+                               hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
+                               const std::string& name = "")
 {
     auto wrapper = createDescriptor<SdpaFpropOperationDescriptor>();
     auto desc = wrapper->asDescriptor<SdpaFpropOperationDescriptor>();
@@ -183,6 +185,14 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     desc->setAttribute(
         HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
+    if(!name.empty())
+    {
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                           HIPDNN_TYPE_CHAR,
+                           static_cast<int64_t>(name.size()),
+                           name.c_str());
+    }
+
     desc->finalize();
     return wrapper;
 }
@@ -192,7 +202,8 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                            HipdnnBackendDescriptor* kDesc,
                                            HipdnnBackendDescriptor* vDesc,
                                            HipdnnBackendDescriptor* oDesc,
-                                           hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
+                                           hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
+                                           const std::string& name = "")
 {
     auto wrapper = createDescriptor<SdpaFpropOperationDescriptor>();
     auto desc = wrapper->asDescriptor<SdpaFpropOperationDescriptor>();
@@ -215,6 +226,14 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        static_cast<const void*>(&oDesc));
     desc->setAttribute(
         HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+
+    if(!name.empty())
+    {
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                           HIPDNN_TYPE_CHAR,
+                           static_cast<int64_t>(name.size()),
+                           name.c_str());
+    }
 
     desc->finalize();
     return wrapper;
@@ -553,6 +572,82 @@ TEST_F(TestGraphDescriptorSdpaFprop, BuildFromRequiredTensorsOnly)
     EXPECT_EQ(attrs->causal_mask_bottom_right, false);
 
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::FLOAT);
+}
+
+TEST_F(TestGraphDescriptorSdpaFprop, OperationNamePreservedInSerialization)
+{
+    auto qDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
+    auto kDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_K_UID, toVec(K_SDPA_TENSOR_K_DIMS), toVec(K_SDPA_TENSOR_K_STRIDES));
+    auto vDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
+    auto oDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
+
+    auto opDesc = createFinalizedSdpaFpropOpRequiredOnly(
+        qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get(), HIPDNN_DATA_FLOAT, "my_sdpa_op");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1);
+    EXPECT_EQ(graphT->nodes[0]->name, "my_sdpa_op");
+}
+
+TEST_F(TestGraphDescriptorSdpaFprop, OperationNameRoundTripThroughLifting)
+{
+    auto qDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
+    auto kDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_K_UID, toVec(K_SDPA_TENSOR_K_DIMS), toVec(K_SDPA_TENSOR_K_STRIDES));
+    auto vDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
+    auto oDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
+
+    auto opDesc = createFinalizedSdpaFpropOpRequiredOnly(
+        qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get(), HIPDNN_DATA_FLOAT, "round_trip_name");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    // Serialize and deserialize via FlatBuffer
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized.ptr);
+
+    // Rebuild from the deserialized graph using NodeFactory
+    auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
+    ASSERT_EQ(graphT->nodes.size(), 1);
+
+    auto rebuilt = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
+    ASSERT_NE(rebuilt, nullptr);
+
+    auto* graphOp = rebuilt->asGraphOperation();
+    ASSERT_NE(graphOp, nullptr);
+
+    // Verify the name survived the round-trip by building a node from the rebuilt operation
+    auto rebuiltNode = graphOp->buildNode();
+    ASSERT_NE(rebuiltNode, nullptr);
+    EXPECT_EQ(rebuiltNode->name, "round_trip_name");
+    ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaAttributes);
 }
 
 } // namespace

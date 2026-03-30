@@ -39,6 +39,8 @@ struct TensorLayout
     std::string name; ///< Human-readable layout name (e.g., "NCHW", "NHWC")
     std::vector<int64_t> strideOrder; ///< Stride priority per dimension (lower = tighter packing)
 
+    static const TensorLayout NCL; ///< 3D channel-first layout
+    static const TensorLayout NLC; ///< 3D channel-last layout
     static const TensorLayout NCHW; ///< 4D channel-first layout
     static const TensorLayout NHWC; ///< 4D channel-last layout
     static const TensorLayout NCDHW; ///< 5D channel-first layout
@@ -46,6 +48,8 @@ struct TensorLayout
 };
 
 // NOLINTBEGIN(bugprone-throwing-static-initialization) fixed-size layout constants
+inline const TensorLayout TensorLayout::NCL{"NCL", {2, 1, 0}};
+inline const TensorLayout TensorLayout::NLC{"NLC", strideOrderNhwc(3)};
 inline const TensorLayout TensorLayout::NCHW{"NCHW", {3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NHWC{"NHWC", strideOrderNhwc(4)};
 inline const TensorLayout TensorLayout::NCDHW{"NCDHW", {4, 3, 2, 1, 0}};
@@ -318,6 +322,7 @@ public:
     virtual void
         fillTensorWithRandomValues(float min, float max, unsigned int seed = std::random_device{}())
         = 0;
+    virtual void fillWithSentinelValue() = 0;
     virtual size_t fillWithData(const void* data, size_t bytesCopied) = 0;
 
     template <typename... Args>
@@ -404,6 +409,18 @@ public:
                                     unsigned int seed = std::random_device{}()) override
     {
         fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
+    }
+
+    void fillWithSentinelValue() override
+    {
+        if constexpr(std::numeric_limits<T>::has_quiet_NaN)
+        {
+            fillWithValue(std::numeric_limits<T>::quiet_NaN());
+        }
+        else
+        {
+            fillWithValue(std::numeric_limits<T>::max());
+        }
     }
 
     virtual MigratableMemoryBase<T>& memory() = 0;
