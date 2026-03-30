@@ -12,7 +12,7 @@
 #include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
 #include "ConvolutionWrwOperationDescriptor.hpp"
-// #include "CustomOpOperationDescriptor.hpp"
+#include "CustomOpOperationDescriptor.hpp"
 #include "IGraphOperation.hpp"
 #include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
