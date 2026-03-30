@@ -15,6 +15,7 @@
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
+#include <hipdnn_test_sdk/constants/ConvDgradConstants.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -34,21 +35,7 @@ public:
     using Graph::get_raw_graph_descriptor;
 };
 
-// -- Test constants for ConvDgradGraphRoundTrip --
-
-constexpr int64_t K_TENSOR_DY_UID = 30;
-constexpr int64_t K_TENSOR_W_UID = 31;
-constexpr int64_t K_TENSOR_DX_UID = 32;
-
-constexpr std::array<int64_t, 4> K_TENSOR_DY_DIMS = {2, 8, 7, 7};
-constexpr std::array<int64_t, 4> K_TENSOR_DY_STRIDES = {392, 49, 7, 1};
-constexpr std::array<int64_t, 4> K_TENSOR_W_DIMS = {8, 3, 3, 3};
-constexpr std::array<int64_t, 4> K_TENSOR_W_STRIDES = {27, 9, 3, 1};
-
-constexpr std::array<int64_t, 2> K_CONV_PRE_PADDING = {1, 1};
-constexpr std::array<int64_t, 2> K_CONV_POST_PADDING = {1, 1};
-constexpr std::array<int64_t, 2> K_CONV_STRIDE = {2, 2};
-constexpr std::array<int64_t, 2> K_CONV_DILATION = {1, 1};
+using namespace hipdnn_tests::constants::dgrad::integration;
 
 // -- Test constants for AutoAssignedUidsPreservedInRoundTrip --
 

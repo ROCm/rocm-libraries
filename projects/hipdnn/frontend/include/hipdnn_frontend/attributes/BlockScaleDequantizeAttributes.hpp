@@ -57,6 +57,8 @@ namespace hipdnn_frontend::graph
 class BlockScaleDequantizeAttributes : public Attributes<BlockScaleDequantizeAttributes>
 {
 public:
+    BlockScaleDequantizeAttributes() = default;
+
     enum class InputNames
     {
         X = 0,

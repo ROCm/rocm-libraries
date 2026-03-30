@@ -35,25 +35,25 @@ extern "C" {
 *  The temporary storage buffer must be allocated by the user.
 *
 *  @param[in]
-*  handle             handle to the hipsparse library context queue.
+*  handle             handle to the hipSPARSE library context queue.
 *  @param[in]
 *  algo               algorithm to solve the linear system.
 *  @param[in]
 *  m                  size of the pentadiagonal linear system.
 *  @param[in]
-*  ds                 lower diagonal (distance 2) of pentadiagonal system. First two entries
+*  ds                 lower diagonal (distance 2) of the pentadiagonal system. The first two entries
 *                     must be zero.
 *  @param[in]
-*  dl                 lower diagonal of pentadiagonal system. First entry must be zero.
+*  dl                 lower diagonal of the pentadiagonal system. The first entry must be zero.
 *  @param[in]
-*  d                  main diagonal of pentadiagonal system.
+*  d                  main diagonal of the pentadiagonal system.
 *  @param[in]
-*  du                 upper diagonal of pentadiagonal system. Last entry must be zero.
+*  du                 upper diagonal of the pentadiagonal system. The last entry must be zero.
 *  @param[in]
-*  dw                 upper diagonal (distance 2) of pentadiagonal system. Last two entries
+*  dw                 upper diagonal (distance 2) of the pentadiagonal system. The last two entries
 *                     must be zero.
 *  @param[in]
-*  x                  Dense array of right-hand-sides with dimension \p batchCount by \p m.
+*  x                  Dense array of right-hand sides with dimension \p batchCount by \p m.
 *  @param[in]
 *  batchCount         The number of systems to solve.
 *  @param[out]
@@ -61,7 +61,7 @@ extern "C" {
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p alg, \p batchCount, \p ds, \p dl,
-*              \p d, \p du, \p dw, \p x or \p pBufferSizeInBytes pointer is invalid.
+*              \p d, \p du, \p dw, \p x, or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 /**@{*/
@@ -120,7 +120,7 @@ hipsparseStatus_t hipsparseZgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 /**@}*/
 
 /*! \ingroup precond_module
-*  \brief Interleaved Batch pentadiagonal solver
+*  \brief Interleaved batch pentadiagonal solver
 *
 *  \details
 *  \p hipsparseXgpsvInterleavedBatch solves a batch of pentadiagonal linear systems
@@ -131,17 +131,17 @@ hipsparseStatus_t hipsparseZgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  \f$x^{i}\f$ is a dense right-hand side vector. All of the pentadiagonal matrices, \f$P^{i}\f$, are
 *  packed in an interleaved fashion into five vectors: \p ds for the lowest diagonals, \p dl for the lower
 *  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest digaonals.
-*  See below for a description of what this interleaved memory pattern looks like.
+*  See below for a description of the interleaved memory pattern.
 *
 *  Solving the batched pentadiagonal system involves two steps. First, the user calls
 *  \ref hipsparseSgpsvInterleavedBatch_bufferSizeExt "hipsparseSgpsvInterleavedBatch_bufferSizeExt()"
-*  in order to determine the size of the required temporary storage buffer. Once determined, the user allocates
+*  to determine the size of the required temporary storage buffer. Once determined, the user allocates
 *  this buffer and passes it to \ref hipsparseSgpsvInterleavedBatch "hipsparseXgpsvInterleavedBatch()"
 *  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are
 *  overwritten with the solution after the call to
 *  \ref hipsparseSgpsvInterleavedBatch "hipsparseXgpsvInterleavedBatch()".
 *
-*  Unlike the strided batch routines which write each batch matrix one after the other in memory, the interleaved
+*  Unlike the strided batch routines, which write each batch matrix one after the other in memory, the interleaved
 *  routines write the batch matrices such that each element from each matrix is written consecutively one after
 *  the other. For example, consider the following batch matrices:
 *
@@ -173,30 +173,30 @@ hipsparseStatus_t hipsparseZgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *    \text{highest} &= \begin{bmatrix} t^{0}_{02} & t^{1}_{02} & t^{2}_{02} & 0 & 0 & 0 & 0 & 0 & 0 \end{bmatrix} \\
 *    \end{align}
 *  \f]
-*  For the lowest array, the first \p 2*batchCount entries are zero, for the lower array, the first \p batchCount entries are zero,
-*  for the upper array the last \p batchCount entries are zero, and for the highest array, the last \p 2*batchCount entries are zero.
+*  For the lowest array, the first \p 2*batchCount entries are zero, and for the lower array, the first \p batchCount entries are zero.
+*  For the upper array, the last \p batchCount entries are zero, and for the highest array, the last \p 2*batchCount entries are zero.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  algo        algorithm to solve the linear system.
 *  @param[in]
 *  m           size of the pentadiagonal linear system.
 *  @param[inout]
-*  ds          lower diagonal (distance 2) of pentadiagonal system. First two entries
+*  ds          lower diagonal (distance 2) of the pentadiagonal system. The first two entries
 *              must be zero.
 *  @param[inout]
-*  dl          lower diagonal of pentadiagonal system. First entry must be zero.
+*  dl          lower diagonal of the pentadiagonal system. The first entry must be zero.
 *  @param[inout]
-*  d           main diagonal of pentadiagonal system.
+*  d           main diagonal of the pentadiagonal system.
 *  @param[inout]
-*  du          upper diagonal of pentadiagonal system. Last entry must be zero.
+*  du          upper diagonal of the pentadiagonal system. The last entry must be zero.
 *  @param[inout]
-*  dw          upper diagonal (distance 2) of pentadiagonal system. Last two entries
+*  dw          upper diagonal (distance 2) of the pentadiagonal system. The last two entries
 *              must be zero.
 *  @param[inout]
 *  x           Dense array of right-hand-sides with dimension \p batchCount by \p m.
@@ -207,7 +207,7 @@ hipsparseStatus_t hipsparseZgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p alg, \p batchCount, \p ds,
-*              \p dl, \p d, \p du, \p dw, \p x or \p pBuffer pointer is invalid.
+*              \p dl, \p d, \p du, \p dw, \p x, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 /**@{*/
