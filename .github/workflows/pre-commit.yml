@@ -1,11 +1,23 @@
 name: pre-commit
 
 on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
   pull_request:
     branches: [develop]
 
 permissions:
   contents: read
+
+concurrency:
+  # For PRs, group by PR number so a new commit cancels any in-progress run
+  # for the same PR. For postsubmits, group by commit SHA (unique per commit)
+  # so runs never cancel each other. The workflow name is prepended to avoid
+  # conflicts between different workflows.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
 
 jobs:
   pre-commit:
