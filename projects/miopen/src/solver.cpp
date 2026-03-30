@@ -700,11 +700,10 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
 
     RegisterWithSolver(registry, ++id, conv::ConvDepthwiseFwd2D{}, miopenConvolutionAlgoDirect);
 
-    RegisterWithSolver(registry, ++id, conv::Conv3dDepthwiseFwd{}, miopenConvolutionAlgoDirect);
- 
+    RegisterWithSolver(registry, ++id, conv::ConvDepthwiseFwd3D{}, miopenConvolutionAlgoDirect);
+
     // IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
     // space between this comment and the newly registered solver(s)!
-
 }
 
 } // namespace solver

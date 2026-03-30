@@ -54,43 +54,42 @@ const auto& GetTestParams()
 
 } // namespace
 
-using GPU_UnitTestConvSolver3dDepthwiseFwd_FP16 = GPU_UnitTestConvSolverFwd_FP16;
-using GPU_UnitTestConvSolver3dDepthwiseFwd_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
+using GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16  = GPU_UnitTestConvSolverFwd_FP16;
+using GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
 
-using CPU_UnitTestConvSolver3dDepthwiseFwdDevApplicabilityFwd_NONE =
+using CPU_UnitTestConvSolverConvDepthwiseFwd3DDevApplicabilityFwd_NONE =
     CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
 
-TEST_P(GPU_UnitTestConvSolver3dDepthwiseFwd_FP16, Conv3dDepthwiseFwd)
+TEST_P(GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16, ConvDepthwiseFwd3D)
 {
-    this->RunTest(miopen::solver::conv::Conv3dDepthwiseFwd{});
+    this->RunTest(miopen::solver::conv::ConvDepthwiseFwd3D{});
 }
 
-TEST_P(GPU_UnitTestConvSolver3dDepthwiseFwd_BFP16, Conv3dDepthwiseFwd)
+TEST_P(GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16, ConvDepthwiseFwd3D)
 {
-    this->RunTest(miopen::solver::conv::Conv3dDepthwiseFwd{});
+    this->RunTest(miopen::solver::conv::ConvDepthwiseFwd3D{});
 }
 
-TEST_P(CPU_UnitTestConvSolver3dDepthwiseFwdDevApplicabilityFwd_NONE, Conv3dDepthwiseFwd)
+TEST_P(CPU_UnitTestConvSolverConvDepthwiseFwd3DDevApplicabilityFwd_NONE, ConvDepthwiseFwd3D)
 {
-    this->RunTest(miopen::solver::conv::Conv3dDepthwiseFwd{});
+    this->RunTest(miopen::solver::conv::ConvDepthwiseFwd3D{});
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolver3dDepthwiseFwd_FP16,
+                         GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolver3dDepthwiseFwd_BFP16,
+                         GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    CPU_UnitTestConvSolver3dDepthwiseFwdDevApplicabilityFwd_NONE,
-    testing::Combine(testing::Values(GetTestParams()),
-                     testing::Values(GetConvTestCases(miopenHalf)[0])));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         CPU_UnitTestConvSolverConvDepthwiseFwd3DDevApplicabilityFwd_NONE,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(GetConvTestCases(miopenHalf)[0])));
 
 #endif // MIOPEN_BACKEND_HIP

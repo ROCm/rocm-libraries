@@ -32,7 +32,7 @@
 
 #include <string>
 
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_3D_DEPTHWISE_FWD)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DEPTHWISE_FWD_3D)
 
 namespace miopen {
 namespace solver {
@@ -42,7 +42,7 @@ namespace conv {
 
 namespace {
 
-// Fused shape for one case only 
+// Fused shape for one case only
 //    B,C_in,C_out,D,H,W = 1,512,512,61,45,80; kernel (3,5,5); pad (0,2,2);
 //     groups = C_out)
 //   - miopen_conv3d_depthwise_fwd.cpp: BLOCK_H/W, KD/KH/KW, PaddingD/H/W.
@@ -66,10 +66,10 @@ constexpr std::size_t kCase3Group    = 512;
 
 } // namespace
 
-bool Conv3dDepthwiseFwd::IsApplicable(const ExecutionContext& ctx,
+bool ConvDepthwiseFwd3D::IsApplicable(const ExecutionContext& ctx,
                                       const miopen::conv::ProblemDescription& problem) const
 {
-    if(env::disabled(MIOPEN_DEBUG_CONV_3D_DEPTHWISE_FWD))
+    if(env::disabled(MIOPEN_DEBUG_CONV_DEPTHWISE_FWD_3D))
         return false;
     if(!ctx.use_hip_kernels)
         return false;
@@ -100,32 +100,27 @@ bool Conv3dDepthwiseFwd::IsApplicable(const ExecutionContext& ctx,
     if(g == 0 || problem.GetInChannels() != g || problem.GetOutChannels() != g)
         return false;
 
-
-    return problem.GetBatchSize() == kCase3Batch
-        && problem.GetInChannels() == kCase3Channels
-        && problem.GetOutChannels() == kCase3Channels
-        && problem.GetInDepth() == kCase3InD      // --in_d 61
-        && problem.GetInHeight() == kCase3InH     // -H 45
-        && problem.GetInWidth() == kCase3InW      // -W 80
-        && problem.GetOutDepth() == kCase3OutD
-        && problem.GetOutHeight() == kCase3OutH
-        && problem.GetOutWidth() == kCase3OutW
-        && static_cast<int>(problem.GetWeightsDepth()) == kCase3Kd   // --fil_d 3
-        && static_cast<int>(problem.GetWeightsHeight()) == kCase3Kh   // -y 5
-        && static_cast<int>(problem.GetWeightsWidth()) == kCase3Kw    // -x 5
-        && problem.GetPadD() == kCase3PadD       // --pad_d 0
-        && problem.GetPadH() == kCase3PadH        // -p 2
-        && problem.GetPadW() == kCase3PadW        // -q 2
-        && problem.GetKernelStrideD() == kCase3Stride
-        && problem.GetKernelStrideH() == kCase3Stride
-        && problem.GetKernelStrideW() == kCase3Stride
-        && problem.GetDilationD() == kCase3Dilation
-        && problem.GetDilationH() == kCase3Dilation
-        && problem.GetDilationW() == kCase3Dilation
-        && static_cast<std::size_t>(problem.GetGroupCount()) == kCase3Group; // -g 512, depthwise
+    return problem.GetBatchSize() == kCase3Batch && problem.GetInChannels() == kCase3Channels &&
+           problem.GetOutChannels() == kCase3Channels &&
+           problem.GetInDepth() == kCase3InD     // --in_d 61
+           && problem.GetInHeight() == kCase3InH // -H 45
+           && problem.GetInWidth() == kCase3InW  // -W 80
+           && problem.GetOutDepth() == kCase3OutD && problem.GetOutHeight() == kCase3OutH &&
+           problem.GetOutWidth() == kCase3OutW &&
+           static_cast<int>(problem.GetWeightsDepth()) == kCase3Kd     // --fil_d 3
+           && static_cast<int>(problem.GetWeightsHeight()) == kCase3Kh // -y 5
+           && static_cast<int>(problem.GetWeightsWidth()) == kCase3Kw  // -x 5
+           && problem.GetPadD() == kCase3PadD                          // --pad_d 0
+           && problem.GetPadH() == kCase3PadH                          // -p 2
+           && problem.GetPadW() == kCase3PadW                          // -q 2
+           && problem.GetKernelStrideD() == kCase3Stride &&
+           problem.GetKernelStrideH() == kCase3Stride &&
+           problem.GetKernelStrideW() == kCase3Stride && problem.GetDilationD() == kCase3Dilation &&
+           problem.GetDilationH() == kCase3Dilation && problem.GetDilationW() == kCase3Dilation &&
+           static_cast<std::size_t>(problem.GetGroupCount()) == kCase3Group; // -g 512, depthwise
 }
 
-ConvSolution Conv3dDepthwiseFwd::GetSolution(const ExecutionContext&,
+ConvSolution ConvDepthwiseFwd3D::GetSolution(const ExecutionContext&,
                                              const miopen::conv::ProblemDescription& problem) const
 {
     ConvSolution result;
@@ -173,13 +168,13 @@ ConvSolution Conv3dDepthwiseFwd::GetSolution(const ExecutionContext&,
 
 #else
 
-bool Conv3dDepthwiseFwd::IsApplicable(const ExecutionContext&,
+bool ConvDepthwiseFwd3D::IsApplicable(const ExecutionContext&,
                                       const miopen::conv::ProblemDescription&) const
 {
     return false;
 }
 
-ConvSolution Conv3dDepthwiseFwd::GetSolution(const ExecutionContext&,
+ConvSolution ConvDepthwiseFwd3D::GetSolution(const ExecutionContext&,
                                              const miopen::conv::ProblemDescription&) const
 {
     return ConvSolution{miopenStatusNotImplemented};
