@@ -69,8 +69,6 @@ Handle::WriteTo(const void* /* data */, Allocator::ManageDataPtr& ddata, std::si
     return ddata;
 }
 
-void Handle::WriteTo(const void*, Data_t, std::size_t) const {}
-
 void Handle::ReadTo(void* /* data */,
                     const Allocator::ManageDataPtr& /* ddata */,
                     std::size_t /* sz */) const
