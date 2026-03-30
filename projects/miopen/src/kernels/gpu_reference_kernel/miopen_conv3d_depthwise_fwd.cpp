@@ -26,7 +26,6 @@
 
 //   FP16: -DIO_DTYPE=__half
 //   BF16: -DIO_DTYPE=__hip_bfloat16
-// If the macro is already set by the compiler, the #ifndef branch is skipped.
 #ifndef IO_DTYPE
 #define IO_DTYPE __hip_bfloat16
 #endif
@@ -42,11 +41,6 @@
 /*
 https://docs.pytorch.org/docs/stable/generated/torch.nn.Conv3d.html
 
-
-When groups == in_channels and out_channels == K * in_channels, where K is a positive integer,
-this operation is also known as a “depthwise convolution”
-here we assume K==1
-
 compile time constant:
     block-size
     kernel-size
@@ -57,7 +51,6 @@ compile time constant:
 #include <hip/hip_fp16.h>
 #include <hip/hip_bf16.h>
 
-// HIPRTC JIT does not pull in <cstdint>; use fixed-width aliases without std headers.
 using u32 = unsigned int;
 using u16 = unsigned short;
 
@@ -78,10 +71,10 @@ constexpr T div_up(T a, T b)
 // budget is fixed accordingly.
 // Targets gfx942 / gfx950: per-workgroup LDS limit is sufficient for 32 KiB here with occupancy
 // headroom.
-constexpr int LDS_SIZE = 32 * 1024;
+constexpr int LDS_SIZE       = 32 * 1024;
 constexpr int weight_size    = KD * KH * KW; // in unit of IO_DTYPE
 constexpr int max_input_size = LDS_SIZE / sizeof(IO_DTYPE) - (weight_size + 31) / 32 * 32;
-// __half and __hip_bfloat16 are both 2 bytes here → same LDS footprint for FP16 vs BF16 builds.
+// only support __half and __hip_bfloat16
 static_assert(sizeof(IO_DTYPE) == 2, "LDS math assumes 16-bit elements");
 
 static_assert(PaddingD == 0);
@@ -124,7 +117,6 @@ __device__ __inline__ u32 ds_read_b32(IO_DTYPE* psrc, int imm_offset = 0)
 
 __device__ __inline__ void v_fmac_f32(float& vdst, float src0, float vsrc1)
 {
-    // The + modifier implies the operand appears in both input and output lists implicitly
     asm volatile("v_fmac_f32 %[vdst], %[src0], %[vsrc1]"
                  : [vdst] "+v"(vdst)
                  : [src0] "v"(src0), [vsrc1] "v"(vsrc1));
@@ -144,7 +136,6 @@ __device__ __inline__ void set_m0(void* base)
 
 __device__ __inline__ void global_load_lds_dword(int vaddr, const void* saddr, int imm_offset = 0)
 {
-    // void * saddr = __builtin_amdgcn_readfirstlane(_saddr);
     asm volatile("global_load_lds_dword %[vaddr], %[saddr] offset:%[offset]" ::[vaddr] "v"(vaddr),
                  [saddr] "s"(saddr),
                  [offset] "i"(imm_offset)
@@ -160,7 +151,7 @@ extern "C" __global__ void __launch_bounds__(256, 1)
                                 int iD,
                                 int iH,
                                 int iW,
-                                int oC, // out_channels = channel_multiplier * in_channels
+                                int oC,
                                 int oD,
                                 int oH,
                                 int oW)
@@ -180,7 +171,6 @@ extern "C" __global__ void __launch_bounds__(256, 1)
     input += blk_in * iH * iW;
     output += blk_out * oH * oW;
 
-    // clear s_input with zero-padding
     constexpr int padded_H = PaddingH * 2 + BLOCK_H;
     constexpr int padded_W = PaddingW * 2 + BLOCK_W;
     constexpr int input_size_dw4 =
@@ -188,7 +178,7 @@ extern "C" __global__ void __launch_bounds__(256, 1)
     constexpr int32x4_t vzero = {0};
     for(int i = threadIdx.x; i < KD * padded_H * padded_W; i += blockDim.x)
     {
-        s_input[i] = 0.0f; // vzero;
+        s_input[i] = 0.0f;
     }
     __syncthreads();
 
@@ -198,7 +188,6 @@ extern "C" __global__ void __launch_bounds__(256, 1)
     const int warp_id          = __builtin_amdgcn_readfirstlane(threadIdx.x >> 6);
     const int lane_id          = threadIdx.x & (warp_size - 1);
 
-    // load input
     for(int d = 0; d < KD; d++)
     {
         for(int h = warp_id; h < BLOCK_H; h += num_warps)
@@ -241,7 +230,6 @@ extern "C" __global__ void __launch_bounds__(256, 1)
     constexpr int KWR         = div_up(KW, KW_PACK);
     static_assert(BLOCK_W % 2 == 0);
 
-    // load inputs from LDS into regs
     IO_DTYPE input_reg[KD][KH][KWR][KW_PACK];
 
     for(int oi = KW_PACK * threadIdx.x; oi < num_outputs; oi += KW_PACK * blockDim.x)
