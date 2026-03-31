@@ -17,20 +17,25 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
 
+// SDPA-specific runner: iterates over data types with BHSD layout only.
+// BSHD (batch, seq_len, heads, head_dim) is another common layout but is not
+// demonstrated here. Both are controlled via strides on TensorAttributes.
+template <typename F>
+bool runSdpa(F&& f)
+{
+    bool allPassed = true;
+    allPassed &= f.template operator()<float, float>(TensorLayout::BHSD);
+    allPassed &= f.template operator()<half, float>(TensorLayout::BHSD);
+    allPassed &= f.template operator()<bfloat16, float>(TensorLayout::BHSD);
+    allPassed &= f.template operator()<float, float>(TensorLayout::BSHD);
+    allPassed &= f.template operator()<half, float>(TensorLayout::BSHD);
+    allPassed &= f.template operator()<bfloat16, float>(TensorLayout::BSHD);
+    return allPassed;
+}
+
 template <typename InputType, typename IntermediateType>
 bool SampleRunner::operator()(const TensorLayout& layout)
 {
-    // SDPA tensors use BHSD (batch, heads, seq_len, head_dim) row-major layout.
-    // BSHD (batch, seq_len, heads, head_dim) is another common layout but is not
-    // demonstrated here. Both are controlled via strides on TensorAttributes.
-    // Skip NHWC to avoid duplicate runs since layout variation does not apply.
-    if(layout != TensorLayout::NCHW)
-    {
-        std::cout << "Skipping SDPA forward for BSHD layout"
-                  << " (this sample only demonstrates BHSD).\n\n";
-        return true;
-    }
-
     const auto inputType = getDataTypeEnumFromType<InputType>();
 
     std::cout << "Running SDPA forward graph " << inputType
@@ -145,7 +150,7 @@ int main(int argc, char* argv[])
     auto [handle, handleError] = createHipdnnHandle();
     HIPDNN_FE_CHECK(handleError);
 
-    bool allPassed = run(SampleRunner{*handle, config});
+    bool allPassed = runSdpa(SampleRunner{*handle, config});
 
     if(allPassed)
     {
