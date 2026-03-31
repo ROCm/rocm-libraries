@@ -107,7 +107,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     std::string psd0        = " --pads_strides_dilations 0 0 1 1 1 1";
     std::string psd1        = " --pads_strides_dilations 1 1 1 1 1 1";
 
-    return std::vector<std::string>{
+    return {
         // clang-format off
     {precision + fwd + " --input 256 128  28 28 --weights 128  128  3 3" + output_int8 + layout + psd1},
     {precision + fwd + " --input 128 512  7  7  --weights 512  512  3 3" + output_int8 + layout + psd1},

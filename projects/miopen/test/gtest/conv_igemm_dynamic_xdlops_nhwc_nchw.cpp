@@ -126,7 +126,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     const std::string out_nhwc      = " --out_layout NHWC";
     const std::string args_nhwc_wrw = dis_fwd + dis_bk_data + in_nhwc + fil_nhwc + out_nhwc;
 
-    return std::vector<std::string>{
+    return {
         // clang-format off
     //nhwc_fwd
     {flags + "  --input  64 256  7  7 --weights 128 256 1 1 --pads_strides_dilations 0 0 1 1 1 1" + dis_bk_data + dis_bk_wei + in_nhwc + fil_nhwc + out_nhwc},

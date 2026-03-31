@@ -111,7 +111,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
 {
     std::string flags = precision + " --disable-validation --verbose ";
 
-    return std::vector<std::string>{
+    return {
         // clang-format off
     {flags + "--input 128 128 28 28 --weights 128 128 3 3 --pads_strides_dilations 1 1 1 1 1 1"},
     {flags + "--input 128 256 56 56 --weights 512 256 1 1 --pads_strides_dilations 0 0 2 2 1 1"},

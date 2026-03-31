@@ -115,7 +115,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     std::string gc_8  = " --group-count 8";
     std::string gc_32 = " --group-count 32";
 
-    return std::vector<std::string>{
+    return {
         // clang-format off
     {flags + "--input	8	128	28	28	--weights	128	128	1	1" + psd0 + cmode_t + pmode_d},
     {flags + "--input	8	256	28	28	--weights	256	256	1	1" + psd0 + cmode_t + pmode_s},
