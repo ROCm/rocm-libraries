@@ -451,7 +451,7 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
         problem.SetupComputeType(tmp);
-        return tmp;
+        return std::move(tmp);
     }();
 
     auto device_name = ctx.GetStream().GetDeviceName();
@@ -585,7 +585,7 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
         problem.SetupComputeType(tmp);
-        return tmp;
+        return std::move(tmp);
     }();
 
     if(!solv.IsApplicable(ctx, problem))
@@ -711,7 +711,7 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
         problem.SetupComputeType(tmp);
-        return tmp;
+        return std::move(tmp);
     }();
 
     if(!solv.IsApplicable(ctx, problem))
