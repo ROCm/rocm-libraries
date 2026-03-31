@@ -1,0 +1,9 @@
+{
+  "variant": "bwd_weight",
+  "trait_config": {
+    "data_type": {"values": ["fp16", "bf16"]},
+    "pipeline": {"values": ["compv3", "mem"]},
+    "scheduler": {"values": ["intrawave"]},
+    "ndim_spatial": {"values": [2]}
+  }
+}
