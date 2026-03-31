@@ -120,7 +120,7 @@ def start_shard(
     # Set environment variables
     env = os.environ.copy()
 
-    # Parallelizaion
+    # Parallelization
     env["OPENBLAS_NUM_THREADS"] = "2"
     env["OMP_NUM_THREADS"] = "2"
 
