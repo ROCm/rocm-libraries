@@ -253,74 +253,65 @@ __forceinline__ __device__ void layernormfwd(const T* __restrict__ x,
     __shared__ FLOAT_ACCUM ltmp1[LOCAL_SIZE_X];
     __shared__ FLOAT_ACCUM ltmp2[LOCAL_SIZE_X];
     FLOAT_ACCUM prstd;
-    if constexpr(LOCAL_SIZE_Y > 1)
+    if constexpr(LOCAL_SIZE_X > 1)
     {
-        for(unsigned int j = 0; j < STRIDE; ++j)
+        if constexpr(LOCAL_SIZE_Y > 1)
         {
-            if(j == s)
+            for(unsigned int j = 0; j < STRIDE; ++j)
             {
-                ltmp1[lid] = pmean;
-                ltmp2[lid] = pvar;
+                if(j == s)
+                {
+                    ltmp1[lid] = pmean;
+                    ltmp2[lid] = pvar;
+                }
+                __syncthreads();
+                for(unsigned int k = LOCAL_SIZE_X >> 1; k > 0; k >>= 1)
+                {
+                    if(j == s && lid < k)
+                    {
+                        ltmp1[lid] += ltmp1[lid + k];
+                        ltmp2[lid] += ltmp2[lid + k];
+                    }
+                    __syncthreads();
+                }
+                if(j == s)
+                {
+                    pmean = ltmp1[0];
+                    pvar  = ltmp2[0];
+                }
+                __syncthreads();
             }
+        }
+        else
+        {
+            ltmp1[lid] = pmean;
+            ltmp2[lid] = pvar;
             __syncthreads();
             for(unsigned int k = LOCAL_SIZE_X >> 1; k > 0; k >>= 1)
             {
-                if(j == s && lid < k)
+                if(lid < k)
                 {
                     ltmp1[lid] += ltmp1[lid + k];
                     ltmp2[lid] += ltmp2[lid + k];
                 }
                 __syncthreads();
             }
-            if(j == s)
-            {
-                pmean = ltmp1[0] * CVT_FP32_2ACCUM(1.0f / INNER_SIZE);
-                pvar  = ltmp2[0] * CVT_FP32_2ACCUM(1.0f / INNER_SIZE) - pmean * pmean;
-                prstd = rsqrtf(pvar + CVT_FP32_2ACCUM(epsilon));
-
-                if(lid == 0)
-                {
-                    if(mean)
-                    {
-                        mean[gid] = CVT_ACCUM2FLOAT(pmean);
-                    }
-                    if(rstd)
-                    {
-                        rstd[gid] = CVT_ACCUM2FLOAT(prstd);
-                    }
-                }
-            }
-            __syncthreads();
+            pmean = ltmp1[0];
+            pvar  = ltmp2[0];
         }
     }
-    else
+    pmean = pmean * CVT_FP32_2ACCUM(1.0f / INNER_SIZE);
+    pvar  = pvar * CVT_FP32_2ACCUM(1.0f / INNER_SIZE) - pmean * pmean;
+    prstd = rsqrtf(pvar + CVT_FP32_2ACCUM(epsilon));
+    if(lid == 0)
     {
-        ltmp1[lid] = pmean;
-        ltmp2[lid] = pvar;
-        __syncthreads();
-        for(unsigned int k = LOCAL_SIZE_X >> 1; k > 0; k >>= 1)
+        if(mean)
         {
-            if(lid < k)
-            {
-                ltmp1[lid] += ltmp1[lid + k];
-                ltmp2[lid] += ltmp2[lid + k];
-            }
-            __syncthreads();
+            mean[gid] = CVT_ACCUM2FLOAT(pmean);
         }
-        pmean = ltmp1[0] * CVT_FP32_2ACCUM(1.0f / INNER_SIZE);
-        pvar  = ltmp2[0] * CVT_FP32_2ACCUM(1.0f / INNER_SIZE) - pmean * pmean;
-        prstd = rsqrtf(pvar + CVT_FP32_2ACCUM(epsilon));
-
-        if(lid == 0)
+        if(rstd)
         {
-            if(mean)
-            {
-                mean[gid] = CVT_ACCUM2FLOAT(pmean);
-            }
-            if(rstd)
-            {
-                rstd[gid] = CVT_ACCUM2FLOAT(prstd);
-            }
+            rstd[gid] = CVT_ACCUM2FLOAT(prstd);
         }
     }
 
@@ -464,49 +455,52 @@ __forceinline__ __device__ void layernormbwd(const T* __restrict__ dy,
 
     __shared__ FLOAT_ACCUM ltmp1[LOCAL_SIZE_X];
     __shared__ FLOAT_ACCUM ltmp2[LOCAL_SIZE_X];
-    if constexpr(LOCAL_SIZE_Y > 1)
+    if constexpr(LOCAL_SIZE_X > 1)
     {
-        for(unsigned int j = 0; j < STRIDE; ++j)
+        if constexpr(LOCAL_SIZE_Y > 1)
         {
-            if(j == s)
+            for(unsigned int j = 0; j < STRIDE; ++j)
             {
-                ltmp1[lid] = sum_dy_weight;
-                ltmp2[lid] = sum_dy_weight_x;
+                if(j == s)
+                {
+                    ltmp1[lid] = sum_dy_weight;
+                    ltmp2[lid] = sum_dy_weight_x;
+                }
+                __syncthreads();
+                for(unsigned int k = LOCAL_SIZE_X >> 1; k > 0; k >>= 1)
+                {
+                    if(j == s && lid < k)
+                    {
+                        ltmp1[lid] += ltmp1[lid + k];
+                        ltmp2[lid] += ltmp2[lid + k];
+                    }
+                    __syncthreads();
+                }
+                if(j == s)
+                {
+                    sum_dy_weight   = ltmp1[0];
+                    sum_dy_weight_x = ltmp2[0];
+                }
+                __syncthreads();
             }
+        }
+        else
+        {
+            ltmp1[lid] = sum_dy_weight;
+            ltmp2[lid] = sum_dy_weight_x;
             __syncthreads();
             for(unsigned int k = LOCAL_SIZE_X >> 1; k > 0; k >>= 1)
             {
-                if(j == s && lid < k)
+                if(lid < k)
                 {
                     ltmp1[lid] += ltmp1[lid + k];
                     ltmp2[lid] += ltmp2[lid + k];
                 }
                 __syncthreads();
             }
-            if(j == s)
-            {
-                sum_dy_weight   = ltmp1[0];
-                sum_dy_weight_x = ltmp2[0];
-            }
-            __syncthreads();
+            sum_dy_weight   = ltmp1[0];
+            sum_dy_weight_x = ltmp2[0];
         }
-    }
-    else
-    {
-        ltmp1[lid] = sum_dy_weight;
-        ltmp2[lid] = sum_dy_weight_x;
-        __syncthreads();
-        for(unsigned int k = LOCAL_SIZE_X >> 1; k > 0; k >>= 1)
-        {
-            if(lid < k)
-            {
-                ltmp1[lid] += ltmp1[lid + k];
-                ltmp2[lid] += ltmp2[lid + k];
-            }
-            __syncthreads();
-        }
-        sum_dy_weight   = ltmp1[0];
-        sum_dy_weight_x = ltmp2[0];
     }
 
     constexpr FLOAT_ACCUM scale = CVT_FP32_2ACCUM(1.0f / INNER_SIZE);
@@ -569,8 +563,8 @@ __forceinline__ __device__ void layernormbwd(const T* __restrict__ dy,
 
             FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(x[idx]);
             FLOAT_ACCUM pdy     = CVT_FLOAT2ACCUM(dy[idx]);
-            FLOAT_ACCUM pweight = (MODE == MIOPEN_ELEMENTWISE_AFFINE) ? CVT_FP32_2ACCUM(1.0f)
-                                                                      : CVT_FLOAT2ACCUM(weight[i]);
+            FLOAT_ACCUM pweight = MODE == MIOPEN_ELEMENTWISE_AFFINE ? CVT_FP32_2ACCUM(1.0f)
+                                                                    : CVT_FLOAT2ACCUM(weight[i]);
 
             dx[idx] = CVT_ACCUM2FLOAT(prstd * pdy * pweight - a * px - b);
         }

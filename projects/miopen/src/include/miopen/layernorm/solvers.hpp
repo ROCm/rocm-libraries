@@ -98,7 +98,7 @@ public:
         switch(problem.GetDirection())
         {
         case miopen::layernorm::Direction::Forward: return false;
-        case miopen::layernorm::Direction::Backward: return true;
+        case miopen::layernorm::Direction::Backward: return problem.stride == 1;
         }
     };
     static constexpr auto start_vectorized             = false;
