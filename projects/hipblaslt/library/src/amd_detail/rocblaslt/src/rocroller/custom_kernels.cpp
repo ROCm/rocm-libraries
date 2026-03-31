@@ -83,228 +83,230 @@ void preloadCustomKernels(SolutionCache& cache)
 
     SolutionIndexParameters params;
    
-    for (bool streamK : {false, true})
+    for (bool workgroupMapping : {false, true})
     {
-        for (bool workgroupMapping : {false, true})
+        params.streamK = false;
+        params.tailLoops = true;
+        params.workgroupMapping = workgroupMapping;
+
+        mxfp4Kernel.swizzleA = true;
+
+        // 32xN kernels
+        params.workgroupTile    = {32, 128, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {32, 256, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x256E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {32, 384, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {32, 512, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x512E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {32, 640, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x640E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {32, 768, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x768E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {32, 896, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x896E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {32, 1024, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_32x1024E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {64, 256, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x256E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {64, 384, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x384E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {64, 512, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x512E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {64, 640, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x640E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {64, 768, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x768E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {64, 896, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x896E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {64, 1024, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_64x1024E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        // 96xN kernels
+        params.workgroupTile    = {96, 128, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x128E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {96, 256, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x256E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {96, 384, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x384E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {96, 512, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x512E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        params.workgroupTile    = {96, 640, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x640E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        // 128xN kernels
+        params.workgroupTile    = {128, 128, 256};
+        cache.addKernel(
+            mxfp4Kernel,
+            params,
+            createCustomGemmKernel(
+                "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_128x128E",
+                mxfp4Kernel,
+                params.workgroupTile,
+                getCoPath() / "rr_custom_kernels.co"));
+
+        for (bool streamK : {false, true})
         {
             params.streamK = streamK;
-            params.tailLoops = true;
-            params.workgroupMapping = workgroupMapping;
-
-            mxfp4Kernel.swizzleA = true;
-
-            // 32xN kernels
-            params.workgroupTile    = {32, 128, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {32, 256, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x256E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {32, 384, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {32, 512, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x512E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {32, 640, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x640E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {32, 768, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x768E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {32, 896, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x896E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {32, 1024, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_32x1024E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {64, 256, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x256E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {64, 384, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x384E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {64, 512, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x512E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {64, 640, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x640E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {64, 768, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x768E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {64, 896, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x896E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {64, 1024, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_64x1024E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            // 96xN kernels
-            params.workgroupTile    = {96, 128, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x128E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {96, 256, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x256E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {96, 384, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x384E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {96, 512, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x512E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile    = {96, 640, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x640E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
-
-            // 128xN kernels
-            params.workgroupTile    = {128, 128, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel(
-                    "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_128x128E",
-                    mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
 
             params.workgroupTile    = {128, 256, 256};
             cache.addKernel(
@@ -441,6 +443,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     mxfp4Kernel,
                     params.workgroupTile,
                     getCoPath() / "rr_custom_kernels.co"));
+            mxfp4Kernel.swizzleA    = true;
         }
     }
 }

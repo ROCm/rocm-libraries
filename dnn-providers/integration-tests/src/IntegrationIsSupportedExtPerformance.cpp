@@ -20,25 +20,56 @@ constexpr int K_ITERATIONS = 1000;
 class IntegrationIsSupportedExtPerformance : public ::testing::Test
 {
 protected:
-    static Graph createSimplePointwiseGraph()
+    static Graph createSimpleBatchnormGraph()
     {
+        // NCHW tensor: [N=2, C=3, H=4, W=4]
         const std::vector<int64_t> dims = {2, 3, 4, 4};
+        const std::vector<int64_t> strides
+            = {dims[1] * dims[2] * dims[3], dims[2] * dims[3], dims[3], 1};
+        // Per-channel: [1, C, 1, 1]
+        const std::vector<int64_t> channelDims = {1, dims[1], 1, 1};
+        const std::vector<int64_t> channelStrides = {dims[1], 1, 1, 1};
 
         Graph graph;
-        graph.set_compute_data_type(DataType::FLOAT).set_io_data_type(DataType::FLOAT);
+        graph.set_compute_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_io_data_type(DataType::FLOAT);
 
         auto x = std::make_shared<TensorAttributes>();
-        x->set_name("X")
-            .set_uid(1)
-            .set_dim(dims)
-            .set_stride({dims[1] * dims[2] * dims[3], dims[2] * dims[3], dims[3], 1})
+        x->set_name("X").set_uid(1).set_dim(dims).set_stride(strides).set_data_type(
+            DataType::FLOAT);
+
+        auto mean = std::make_shared<TensorAttributes>();
+        mean->set_name("mean")
+            .set_uid(2)
+            .set_dim(channelDims)
+            .set_stride(channelStrides)
             .set_data_type(DataType::FLOAT);
 
-        PointwiseAttributes attrs;
-        attrs.set_mode(PointwiseMode::RELU_FWD);
+        auto invVar = std::make_shared<TensorAttributes>();
+        invVar->set_name("inv_variance")
+            .set_uid(3)
+            .set_dim(channelDims)
+            .set_stride(channelStrides)
+            .set_data_type(DataType::FLOAT);
 
-        auto y = graph.pointwise(x, attrs);
-        y->set_name("Y").set_uid(2).set_data_type(DataType::FLOAT).set_output(true);
+        auto scale = std::make_shared<TensorAttributes>();
+        scale->set_name("scale")
+            .set_uid(4)
+            .set_dim(channelDims)
+            .set_stride(channelStrides)
+            .set_data_type(DataType::FLOAT);
+
+        auto bias = std::make_shared<TensorAttributes>();
+        bias->set_name("bias")
+            .set_uid(5)
+            .set_dim(channelDims)
+            .set_stride(channelStrides)
+            .set_data_type(DataType::FLOAT);
+
+        const BatchnormInferenceAttributes bnAttrs;
+        auto y = graph.batchnorm_inference(x, mean, invVar, scale, bias, bnAttrs);
+        y->set_name("Y").set_uid(6).set_data_type(DataType::FLOAT).set_output(true);
 
         return graph;
     }
@@ -46,19 +77,13 @@ protected:
     hipdnnHandle_t _handle = hipdnn_integration_tests::getSharedHandle();
 };
 
-// TODO: Remove this once the integration tests are easily runnable
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunreachable-code"
-
 TEST_F(IntegrationIsSupportedExtPerformance, ColdCallCompletesWithinThreshold)
 {
-    GTEST_SKIP() << "Skipping until we can add an easier test run mechanism";
-
     const auto start = std::chrono::steady_clock::now();
 
     for(int i = 0; i < K_ITERATIONS; ++i)
     {
-        Graph graph = createSimplePointwiseGraph();
+        Graph graph = createSimpleBatchnormGraph();
         auto result = graph.is_supported_ext(_handle);
         ASSERT_TRUE(result.is_good()) << "Iteration " << i << ": " << result.get_message();
     }
@@ -68,7 +93,7 @@ TEST_F(IntegrationIsSupportedExtPerformance, ColdCallCompletesWithinThreshold)
     const auto avgUs
         = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / K_ITERATIONS;
 
-    std::cout << "[  PERF   ] Cold is_supported_ext: " << elapsed.count() << "s total, " << avgUs
+    std::cout << "[  PERF    ] Cold is_supported_ext: " << elapsed.count() << "s total, " << avgUs
               << "us avg per call (" << K_ITERATIONS << " iterations)" << '\n';
 
     EXPECT_LT(elapsed.count(), 10.0) << "Cold is_supported_ext took " << elapsed.count() << "s for "
@@ -77,9 +102,7 @@ TEST_F(IntegrationIsSupportedExtPerformance, ColdCallCompletesWithinThreshold)
 
 TEST_F(IntegrationIsSupportedExtPerformance, HotCallCompletesWithinThreshold)
 {
-    GTEST_SKIP() << "Skipping until we can add an easier test run mechanism";
-
-    Graph graph = createSimplePointwiseGraph();
+    Graph graph = createSimpleBatchnormGraph();
 
     auto result = graph.validate();
     ASSERT_TRUE(result.is_good()) << result.get_message();
@@ -100,13 +123,11 @@ TEST_F(IntegrationIsSupportedExtPerformance, HotCallCompletesWithinThreshold)
     const auto avgNs
         = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / K_ITERATIONS;
 
-    std::cout << "[  PERF   ] Hot is_supported_ext: " << elapsed.count() << "s total, " << avgNs
+    std::cout << "[  PERF    ] Hot is_supported_ext: " << elapsed.count() << "s total, " << avgNs
               << "ns avg per call (" << K_ITERATIONS << " iterations)" << '\n';
 
     EXPECT_LT(elapsed.count(), 1.0) << "Hot is_supported_ext took " << elapsed.count() << "s for "
                                     << K_ITERATIONS << " iterations (threshold: 1s)";
 }
-
-#pragma clang diagnostic pop
 
 } // namespace
