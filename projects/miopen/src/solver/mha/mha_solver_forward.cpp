@@ -247,14 +247,14 @@ ConvSolution MhaForward::GetSolution(const ExecutionContext& context,
                  fp32_ws,
                  true);
 
-            decltype(auto) scale_reduce_kernel = handle_.Run(kernels.back());
-            scale_reduce_kernel(fp32_ws,
-                                dataFwd.oData,
-                                dataFwd.amaxOData,
-                                dataFwd.descaleSData,
-                                dataFwd.descaleVData,
-                                dataFwd.scaleOData,
-                                nhsd);
+            decltype(auto) scale_reduce_kernel_ = handle_.Run(kernels.back());
+            scale_reduce_kernel_(fp32_ws,
+                                 dataFwd.oData,
+                                 dataFwd.amaxOData,
+                                 dataFwd.descaleSData,
+                                 dataFwd.descaleVData,
+                                 dataFwd.scaleOData,
+                                 nhsd);
 
             if(profiling)
             {
