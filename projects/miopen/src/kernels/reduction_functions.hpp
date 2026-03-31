@@ -282,7 +282,7 @@ __forceinline__ __device__ void dpp_interleaved_reduction_welford(volatile Float
             /*16 */ "v_nop\n"/* NOPs necessary because the next instr needs %4 and has DPP, dependency between 14 and 1 */\
             
     __asm__ volatile(
-        "s_nop 4\n"
+        "s_nop 4\n" /* necessary because it's not guaranteed that the compiler puts a VALU instruction that writes EXEC */
         REDUCTION_STEP("row_shr:1 bound_ctrl:0")
         REDUCTION_STEP("row_shr:2 bound_ctrl:0")
         REDUCTION_STEP("row_shr:4 bank_mask:0xe")
@@ -321,29 +321,33 @@ __forceinline__ __device__ void gcn_reduce2_welford(FloatAccum& mean,
 
     __syncthreads();
 
-    mean     = lcl_data_mean[0];
-    variance = lcl_data_variance[0];
-    count    = lcl_data_count[0];
-
-    // This could be changed to clang loop unroll(full), because the size is small
-    // static_unroll_count<unsigned int, 1, SizeLclData, 1, 0>{[&](unsigned int i) {
-    //     x += lcl_data_x[i];
-    //     y += lcl_data_y[i];
-    // }};
-    for(unsigned int i = 1; i < SizeLclData; i++)
+    // The reduction here merges partitions together in a tree-like fashion. Otherwise,
+    // precision is lost in both the mean and variance
+    for(unsigned int red = detail::next_power_of_2(SizeLclData) >> 1; red > 0; red >>= 1)
     {
-        FloatAccum delta = lcl_data_mean[i] - mean;
-        FloatAccum n_a   = count;
-        FloatAccum n_b   = lcl_data_count[i];
-        FloatAccum n_new = n_a + n_b;
-        FloatAccum n_rcp = n_new != 0.0f ? (__builtin_amdgcn_rcpf(n_new)) : 0.0f;
-        mean             = (mean * n_a + lcl_data_mean[i] * n_b) * (n_rcp);
-        variance         = variance + lcl_data_variance[i] + (delta * delta * (n_a * n_b)) * n_rcp;
-        count            = n_new;
+        if(lid < red && lid + red < SizeLclData)
+        {
+            FloatAccum delta = lcl_data_mean[lid + red] - lcl_data_mean[lid];
+            FloatAccum n_a   = lcl_data_count[lid];
+            FloatAccum n_b   = lcl_data_count[lid + red];
+            FloatAccum n_new = n_a + n_b;
+            FloatAccum n_new_rcp =
+                n_new != 0.0f ? __builtin_amdgcn_rcpf(n_new)
+                              : 0.f; // Calculates 1 / n_new; Done to handle the case where some of
+                                     // the partitions of mean/variance calculation are zero
+            lcl_data_mean[lid] =
+                (lcl_data_mean[lid] * n_a + lcl_data_mean[lid + red] * n_b) * n_new_rcp;
+            lcl_data_variance[lid] = lcl_data_variance[lid] + lcl_data_variance[lid + red] +
+                                     delta * delta * (n_a * n_b * n_new_rcp);
+            lcl_data_count[lid] = n_new;
+        }
+        __syncthreads();
     }
+
     // No scaling of the mean, that is already kept to scale as a requirement of Welford's variance
     // calculation
-    variance *= scale;
+    mean     = lcl_data_mean[0];
+    variance = lcl_data_variance[0] * scale;
 }
 
 } // namespace reduction
