@@ -25,6 +25,7 @@
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
+#include "ReductionOperationDescriptor.hpp"
 #include "SdpaBpropOperationDescriptor.hpp"
 #include "SdpaFpropOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
@@ -120,6 +121,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<SdpaBpropOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR:
+        privateDesc = std::make_shared<ReductionOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
