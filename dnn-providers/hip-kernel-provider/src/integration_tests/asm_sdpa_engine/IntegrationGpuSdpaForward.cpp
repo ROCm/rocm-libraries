@@ -12,7 +12,7 @@
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "IntegrationGraphVerificationHarness.hpp"
+#include "../IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
