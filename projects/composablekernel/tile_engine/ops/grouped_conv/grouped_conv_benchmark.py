@@ -248,14 +248,15 @@ def main():
     )
     jit_t0 = time.perf_counter()
 
-    setups = setup_multiple_grouped_conv_dispatchers(
+    # Returns library paths WITHOUT loading them (avoids GPU context during compilation)
+    lib_paths = setup_multiple_grouped_conv_dispatchers(
         all_configs,
         verbose=True,
         max_workers=args.workers,
     )
 
     jit_time = time.perf_counter() - jit_t0
-    built = sum(1 for s in setups if s is not None)
+    built = sum(1 for p in lib_paths if p is not None)
     failed = len(all_configs) - built
     print(f"\n  Built {built}/{len(all_configs)} in {jit_time:.0f}s ({failed} failed)")
 
@@ -315,17 +316,19 @@ def main():
         )
         print(f"  {'-' * 95}")
 
-        for config, lib in zip(all_configs, setups):
-            if lib is None:
+        for config, lib_path in zip(all_configs, lib_paths):
+            if lib_path is None:
                 continue
 
-            # Create runner from lib
+            # Create runner from library path
+            # GPU context is initialized lazily on first run() call
             from grouped_conv_utils import GpuGroupedConvRunner
-            runner = GpuGroupedConvRunner(lib_path=str(lib.path))
-            if not runner.is_available():
-                continue
+            runner = GpuGroupedConvRunner(lib_path=str(lib_path))
 
+            # First run() call triggers lazy GPU initialization
             result = runner.run(input_data, weight_data, prob)
+            if not runner.is_available() or not result.success:
+                continue
             if not result.success:
                 continue
 

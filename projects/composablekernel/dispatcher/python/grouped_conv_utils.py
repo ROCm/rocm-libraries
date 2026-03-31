@@ -591,20 +591,36 @@ class GpuGroupedConvRunner:
     HIP_MEMCPY_D2H = 2
 
     def __init__(self, lib_path: Optional[str] = None):
+        """Initialize runner WITHOUT loading GPU libraries.
+
+        GPU context is created lazily on first run() call, avoiding fork() issues
+        during parallel compilation. This mirrors FMHA design.
+
+        Args:
+            lib_path: Path to dispatcher .so file (or None to auto-detect)
+        """
+        self._lib_path = lib_path
         self._dispatch_lib: Optional[GroupedConvDispatcherLib] = None
         self._hip = None
         self._initialized = False
 
+    def _ensure_initialized(self):
+        """Lazy initialization - only load GPU libraries when actually needed."""
+        if self._initialized:
+            return
+
         try:
-            if lib_path:
-                lib = ctypes.CDLL(lib_path)
-                self._dispatch_lib = GroupedConvDispatcherLib(lib, Path(lib_path))
+            # Load dispatcher library
+            if self._lib_path:
+                lib = ctypes.CDLL(self._lib_path)
+                self._dispatch_lib = GroupedConvDispatcherLib(lib, Path(self._lib_path))
             else:
                 self._dispatch_lib = GroupedConvDispatcherLib.find()
 
             if self._dispatch_lib is None:
                 return
 
+            # Load HIP library - THIS creates GPU context
             self._hip = ctypes.CDLL("libamdhip64.so")
             self._hip.hipMalloc.argtypes = [
                 ctypes.POINTER(ctypes.c_void_p),
@@ -623,6 +639,7 @@ class GpuGroupedConvRunner:
             self._hip.hipDeviceSynchronize.argtypes = []
             self._hip.hipDeviceSynchronize.restype = ctypes.c_int
 
+            # Initialize dispatcher
             self._dispatch_lib.initialize()
             self._initialized = True
         except Exception:
@@ -659,6 +676,9 @@ class GpuGroupedConvRunner:
         Returns:
             GroupedConvResult with success, time_ms, tflops, output.
         """
+        # Lazy initialization - load GPU libraries only on first run
+        self._ensure_initialized()
+
         if not self.is_available():
             return GroupedConvResult(error="GPU not available")
 
@@ -1477,14 +1497,13 @@ class GroupedConvCodegenRunner:
             gen_jobs.append({"cmd": cmd, "output_dir": str(cfg_dir)})
 
         generated_headers: List[Optional[Path]] = [None] * len(configs)
-        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {
-                executor.submit(_run_conv_codegen_subprocess, job): idx
-                for idx, job in enumerate(gen_jobs)
-            }
-            for future in as_completed(futures):
-                idx = futures[future]
-                ok, header_path, err = future.result()
+
+        # CRITICAL FIX: When max_workers=1, run codegen serially in main process
+        # to avoid ProcessPoolExecutor fork() + GPU context issues
+        if self.max_workers == 1:
+            # Serial codegen in main process (no fork)
+            for idx, job in enumerate(gen_jobs):
+                ok, header_path, err = _run_conv_codegen_subprocess(job)
                 if ok and header_path:
                     generated_headers[idx] = Path(header_path)
                     if verbose:
@@ -1492,6 +1511,23 @@ class GroupedConvCodegenRunner:
                 else:
                     if verbose:
                         print(f"  FAIL [{idx}] codegen: {err}")
+        else:
+            # Parallel codegen with ProcessPoolExecutor (original code)
+            with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = {
+                    executor.submit(_run_conv_codegen_subprocess, job): idx
+                    for idx, job in enumerate(gen_jobs)
+                }
+                for future in as_completed(futures):
+                    idx = futures[future]
+                    ok, header_path, err = future.result()
+                    if ok and header_path:
+                        generated_headers[idx] = Path(header_path)
+                        if verbose:
+                            print(f"  OK [{idx}] codegen: {Path(header_path).name}")
+                    else:
+                        if verbose:
+                            print(f"  FAIL [{idx}] codegen: {err}")
 
         if verbose:
             compile_count = sum(1 for h in generated_headers if h is not None)
@@ -1563,15 +1599,14 @@ class GroupedConvCodegenRunner:
             )
 
         results_map: Dict[int, Optional[Path]] = {i: None for i in range(len(configs))}
-        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {
-                executor.submit(_run_hipcc_subprocess, job): j
-                for j, job in enumerate(compile_jobs)
-            }
-            for future in as_completed(futures):
-                job_idx = futures[future]
-                idx = compile_to_input_index[job_idx]
-                success, lib_path, err = future.result()
+
+        # CRITICAL FIX: When max_workers=1, compile serially in main process to avoid
+        # ProcessPoolExecutor fork() + GPU context issues that cause memory access faults
+        if self.max_workers == 1:
+            # Serial compilation in main process (no fork, no GPU context issues)
+            for j, job in enumerate(compile_jobs):
+                idx = compile_to_input_index[j]
+                success, lib_path, err = _run_hipcc_subprocess(job)
                 if success and lib_path:
                     results_map[idx] = Path(lib_path)
                 if verbose:
@@ -1579,9 +1614,30 @@ class GroupedConvCodegenRunner:
                     name = (
                         Path(lib_path).name
                         if success and lib_path
-                        else compile_jobs[job_idx]["config_name"]
+                        else compile_jobs[j]["config_name"]
                     )
                     print(f"  {status} {name}")
+        else:
+            # Parallel compilation with ProcessPoolExecutor (original code)
+            with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = {
+                    executor.submit(_run_hipcc_subprocess, job): j
+                    for j, job in enumerate(compile_jobs)
+                }
+                for future in as_completed(futures):
+                    job_idx = futures[future]
+                    idx = compile_to_input_index[job_idx]
+                    success, lib_path, err = future.result()
+                    if success and lib_path:
+                        results_map[idx] = Path(lib_path)
+                    if verbose:
+                        status = "OK" if success else f"FAIL ({err})"
+                        name = (
+                            Path(lib_path).name
+                            if success and lib_path
+                            else compile_jobs[job_idx]["config_name"]
+                        )
+                        print(f"  {status} {name}")
 
         return [results_map.get(i) for i in range(len(configs))]
 
@@ -1659,15 +1715,22 @@ def setup_multiple_grouped_conv_dispatchers(
     configs: List[GroupedConvKernelConfig],
     verbose: bool = True,
     max_workers: Optional[int] = None,
-) -> List[Optional[GroupedConvDispatcherLib]]:
+) -> List[Optional[Path]]:
     """
     Setup multiple grouped-conv dispatchers in parallel.
 
-    This keeps architecture filtering strict:
+    Returns library paths WITHOUT loading them, to avoid GPU context during compilation.
+    This mirrors FMHA design: keep GPU context out of JIT phase entirely.
+
+    Architecture filtering workflow:
       1. Validate + auto-correct each requested config
       2. Query codegen's arch-valid config set for each (arch, dtype, variant, ndim)
       3. Map each request to nearest valid config
       4. Parallel codegen + parallel compile
+      5. Return paths (NOT loaded libraries)
+
+    Returns:
+        List of paths to compiled .so files (or None for failed configs)
     """
     if not configs:
         return []
@@ -1761,33 +1824,32 @@ def setup_multiple_grouped_conv_dispatchers(
         unique_configs, verbose=verbose
     )
 
-    libs: List[Optional[GroupedConvDispatcherLib]] = []
-    loaded_cache: Dict[int, Optional[GroupedConvDispatcherLib]] = {}
+    # Map unique lib paths back to input order
+    # DO NOT load libraries here - just return paths
+    lib_paths: List[Optional[Path]] = []
+    path_cache: Dict[int, Optional[Path]] = {}
     for input_idx, unique_idx in enumerate(input_to_unique):
         if unique_idx is None:
-            libs.append(None)
+            lib_paths.append(None)
             continue
 
-        if unique_idx in loaded_cache:
-            libs.append(loaded_cache[unique_idx])
+        if unique_idx in path_cache:
+            lib_paths.append(path_cache[unique_idx])
             continue
 
         path = (
             unique_lib_paths[unique_idx] if unique_idx < len(unique_lib_paths) else None
         )
-        disp: Optional[GroupedConvDispatcherLib] = None
-        if path and path.exists():
-            try:
-                lib = ctypes.CDLL(str(path))
-                disp = GroupedConvDispatcherLib(lib, path)
-                disp.initialize()
-            except Exception as e:
-                if verbose:
-                    print(f"  FAIL [{input_idx}] failed to load {path}: {e}")
-        loaded_cache[unique_idx] = disp
-        libs.append(disp)
+        # Validate path exists but don't load it
+        if path and not path.exists():
+            if verbose:
+                print(f"  FAIL [{input_idx}] library not found: {path}")
+            path = None
 
-    return libs
+        path_cache[unique_idx] = path
+        lib_paths.append(path)
+
+    return lib_paths
 
 
 def detect_gpu_arch() -> str:

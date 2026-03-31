@@ -1,0 +1,9 @@
+{
+  "variant": "forward",
+  "trait_config": {
+    "data_type": {"values": ["bf16"]},
+    "pipeline": {"values": ["compv3", "compv4"]},
+    "scheduler": {"values": ["intrawave"]},
+    "ndim_spatial": {"values": [2]}
+  }
+}
