@@ -97,7 +97,6 @@ KNOWN_TOKENS = [
     ("Tree", "tree"),
     ("CompV3", "compv3"),
     ("Pipelines", "pipelines"),
-    ("Mem", "mem"),
 ]
 
 

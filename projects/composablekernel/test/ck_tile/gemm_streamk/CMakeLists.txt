@@ -93,10 +93,19 @@ if(GPU_TARGETS MATCHES "gfx90a|gfx942|gfx950")
         list(APPEND CK_TILE_GEMM_STREAMK_TEST_TARGETS ${EXEC_NAME})
     endforeach()
 
+    # Add python unit tests to validate the code gen logic in generate_test_files.py
+    add_test(
+        NAME test_ck_tile_streamk_generate_test_files
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_generate_test_files.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+    )
+
     # Label all ck_tile gemm_streamk tests with CK_TILE_GEMM_STREAMK_TESTS for selective execution
     foreach(test_target ${CK_TILE_GEMM_STREAMK_TEST_TARGETS})
         set_tests_properties(${test_target} PROPERTIES LABELS "CK_TILE_GEMM_STREAMK_TESTS")
     endforeach()
+    # Also label the Python test
+    set_tests_properties(test_ck_tile_streamk_generate_test_files PROPERTIES LABELS "CK_TILE_GEMM_STREAMK_TESTS")
 
     # Umbrella target to build and run all ck_tile gemm_streamk tests
     # Usage: ninja ck_tile_gemm_streamk_tests
