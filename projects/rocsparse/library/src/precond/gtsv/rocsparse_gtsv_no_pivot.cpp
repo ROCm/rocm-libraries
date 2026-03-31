@@ -31,6 +31,13 @@
 
 #include <map>
 
+// LCOV_EXCL_START
+static constexpr int determine_spike_solver_blocksize()
+{
+    return 256;
+}
+// LCOV_EXCL_STOP
+
 template <typename T>
 rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle handle,
                                                                rocsparse_int    m,
@@ -91,7 +98,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
         *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // du_modified
         *buffer_size += ((sizeof(T) * m * n - 1) / 256 + 1) * 256; // B_modified
 
-        constexpr int BLOCKSIZE  = 256;
+        constexpr int BLOCKSIZE  = determine_spike_solver_blocksize();
         const int     nblocks    = ((m - 1) / BLOCKSIZE + 1);
         const int     num_spikes = 2 * nblocks;
 
@@ -602,7 +609,7 @@ namespace rocsparse
         T* B_modified = reinterpret_cast<T*>(ptr);
         ptr += ((sizeof(T) * m * n - 1) / 256 + 1) * 256;
 
-        constexpr int BLOCKSIZE  = 256;
+        constexpr int BLOCKSIZE  = determine_spike_solver_blocksize();
         const int     nblocks    = ((m - 1) / BLOCKSIZE + 1);
         const int     num_spikes = 2 * nblocks;
 
