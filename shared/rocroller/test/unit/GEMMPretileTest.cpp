@@ -18,8 +18,8 @@ namespace GEMMTests
     // GEMMPretileTestSuite
     // ========================================================================
 
-    // Params are: pretileScaleA, pretileScaleB, pretileB
-    class GEMMPretileTestSuite : public BaseGEMMContextFixture<bool, bool, bool>
+    // Params are: pretileScaleA, pretileScaleB, pretileA, pretileB
+    class GEMMPretileTestSuite : public BaseGEMMContextFixture<bool, bool, bool, bool>
     {
     };
 
@@ -28,7 +28,7 @@ namespace GEMMTests
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
-        auto [arch, pretileScaleA, pretileScaleB, pretileB] = GetParam();
+        auto [arch, pretileScaleA, pretileScaleB, pretileA, pretileB] = GetParam();
 
         auto gemm           = GEMMProblemF8F6F4{32, 32, 64};
         gemm.transA         = "T";
@@ -58,6 +58,8 @@ namespace GEMMTests
             gemm.scalePretileA = {256, 4};
         if(pretileScaleB)
             gemm.scalePretileB = {4, 256};
+        if(pretileA)
+            gemm.pretileA = {64, 64};
         if(pretileB)
             gemm.pretileB = {64, 64};
 
@@ -67,6 +69,7 @@ namespace GEMMTests
     INSTANTIATE_TEST_SUITE_P(GEMMPretileTest,
                              GEMMPretileTestSuite,
                              ::testing::Combine(currentGPUISA(),
+                                                ::testing::Bool(),
                                                 ::testing::Bool(),
                                                 ::testing::Bool(),
                                                 ::testing::Bool()));

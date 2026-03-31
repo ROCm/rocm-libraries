@@ -155,6 +155,7 @@ concept TileOptimizationsDescriptor = requires(T t) {
     { t.num_groups_to_merge } -> std::convertible_to<int>;
     { t.split_image } -> std::convertible_to<bool>;
     { t.explicit_gemm } -> std::convertible_to<bool>;
+    { t.two_stage } -> std::convertible_to<bool>;
 };
 
 // Base requirement for all ConvAlgorithm concepts, i.e., all conv algorithm concepts must meet this
@@ -295,6 +296,7 @@ concept SpecifiesTileOptimizations = requires {
     { T::optimizations.num_groups_to_merge } -> std::convertible_to<int>;
     { T::optimizations.split_image } -> std::convertible_to<bool>;
     { T::optimizations.explicit_gemm } -> std::convertible_to<bool>;
+    { T::optimizations.two_stage } -> std::convertible_to<bool>;
 };
 
 template <typename T>
@@ -466,6 +468,19 @@ concept SpecifiesDlBwdBlockTransfer = requires {
 template <typename T>
 concept SpecifiesDlEpilogue = requires {
     { T::transfer.c } -> DlEpilogueDescriptor;
+};
+
+// Concept to detect StreamK configuration in a tile algorithm descriptor.
+template <typename T>
+concept StreamKDescriptor = requires(T t) {
+    { t.reduction_strategy } -> std::convertible_to<StreamKReductionStrategy>;
+    { t.persistent } -> std::convertible_to<bool>;
+};
+
+// Concept to check if a tile algorithm specifies StreamK work distribution.
+template <typename T>
+concept SpecifiesStreamK = requires {
+    { T::streamk } -> StreamKDescriptor;
 };
 
 } // namespace ck_tile::builder

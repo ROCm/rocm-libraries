@@ -6,6 +6,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -13,6 +14,20 @@
 
 namespace hipdnn_data_sdk::utilities
 {
+
+/// Convert std::optional<T> to flatbuffers::Optional<T>.
+template <typename T>
+flatbuffers::Optional<T> toFlatbufferOptional(const std::optional<T>& opt)
+{
+    return opt.has_value() ? flatbuffers::Optional<T>(*opt) : flatbuffers::nullopt;
+}
+
+/// Convert flatbuffers::Optional<T> to std::optional<T>.
+template <typename T>
+std::optional<T> toStdOptional(const flatbuffers::Optional<T>& opt)
+{
+    return opt.has_value() ? std::optional<T>(opt.value()) : std::nullopt;
+}
 
 template <typename T>
 inline std::vector<T> convertFlatBufferVectorToStdVector(const flatbuffers::Vector<T>* in)
@@ -68,6 +83,12 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& te
         break;
     case data_objects::DataType::INT32:
         if(auto val = tensorAttr.value.AsInt32Value())
+        {
+            return static_cast<TargetType>(val->value());
+        }
+        break;
+    case data_objects::DataType::INT64:
+        if(auto val = tensorAttr.value.AsInt64Value())
         {
             return static_cast<TargetType>(val->value());
         }

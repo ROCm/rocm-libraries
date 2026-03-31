@@ -375,7 +375,7 @@ struct tensile_params_t {
   bool swizzle_b = false;
 
   /// Workgroup mapping XCC parameters
-  int workgroup_mapping_xcc = 0;
+  int workgroup_mapping_xcc = 1;
   int workgroup_mapping_xcc_group = 0;
   bool global_split_u_coalesced = false;
   bool global_split_u_wgm_round_robin = false;
@@ -452,6 +452,9 @@ struct config_t {
   target_t target = target_t::tensilelite;
   /// Grid selection algorithm.
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
+
+  /// Index of config, not used by Origami but can be used by the user
+  std::size_t index = 0;
 
   /// Global read vector width for matrix A (elements per load)
   std::size_t grvw_a = 1;

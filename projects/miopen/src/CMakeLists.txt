@@ -105,22 +105,6 @@ set( MIOpen_Source
     getitem_api.cpp
     glu/problem_description.cpp
     glu_api.cpp
-    graphapi/convolution.cpp
-    graphapi/conv_bias_res_add_activ_forward_executor.cpp
-    graphapi/engine.cpp
-    graphapi/enginecfg.cpp
-    graphapi/engineheur.cpp
-    graphapi/execution_plan.cpp
-    graphapi/find_engine.cpp
-    graphapi/graphapi.cpp
-    graphapi/matmul.cpp
-    graphapi/opgraph.cpp
-    graphapi/pointwise.cpp
-    graphapi/reduction.cpp
-    graphapi/reshape.cpp
-    graphapi/rng.cpp
-    graphapi/tensor.cpp
-    graphapi/variant_pack.cpp
     groupnorm_api.cpp
     groupnorm/problem_description.cpp
     handle_api.cpp
@@ -574,8 +558,8 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenGetitem.cpp
         kernels/MIOpenKthvalue.cpp
         kernels/MIOpenLayerNorm.cpp
-        kernels/MIOpenLRNBwd.cl
-        kernels/MIOpenLRNFwd.cl
+        kernels/MIOpenLRNBwd.cpp
+        kernels/MIOpenLRNFwd.cpp
         kernels/MIOpenMultiMarginLoss.cpp
         kernels/MIOpenNeuron.cpp
         kernels/MIOpenPReLU.cpp
@@ -939,8 +923,6 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
         
         if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
-            add_subdirectory(kernels/ck_builder)
-            list(APPEND MIOPEN_CK_LINK_FLAGS ck_builder)
             add_definitions(-DCK_EXPERIMENTAL_BUILDER)
         endif()
     endif()
