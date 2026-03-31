@@ -1320,3 +1320,10 @@ TEST(TestKnob, UnconstrainedKnobValidatesAnyValue)
     EXPECT_EQ(knob.validate(KnobSetting("test", static_cast<int64_t>(0))).code, ErrorCode::OK);
     EXPECT_EQ(knob.validate(KnobSetting("test", static_cast<int64_t>(999999))).code, ErrorCode::OK);
 }
+
+TEST(TestKnob, TryCreateRejectsEmptyKnobId)
+{
+    auto [error, knob] = Knob::tryCreate("", "description", static_cast<int64_t>(0), false);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("empty"), std::string::npos);
+}

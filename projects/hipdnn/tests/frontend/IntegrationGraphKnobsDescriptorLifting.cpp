@@ -13,9 +13,17 @@ using namespace hipdnn_frontend::graph;
 namespace
 {
 
+/// Exposes the descriptor-based knob lifting path for direct testing.
+class TestableGraph : public Graph
+{
+public:
+    using Graph::build_operation_graph;
+    using Graph::get_knobs_for_engine_via_descriptors;
+};
+
 /// Integration tests for the descriptor-based knob lifting path.
-/// Run with HIPDNN_USE_DESCRIPTOR_API=1 to exercise the descriptor C-API path
-/// in get_knobs_for_engine (detail::unpackKnobsFromDescriptors).
+/// Tests exercise detail::unpackKnobsFromDescriptors via
+/// TestableGraph::get_knobs_for_engine_via_descriptors().
 class IntegrationGraphKnobsDescriptorLifting : public ::testing::Test
 {
 protected:
@@ -41,9 +49,9 @@ protected:
         }
     }
 
-    Graph createAndBuildSimpleGraph()
+    TestableGraph createAndBuildSimpleGraph()
     {
-        Graph graph;
+        TestableGraph graph;
         graph.set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
@@ -82,7 +90,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, KnobsPluginHasExpectedKnobs)
     auto graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(engineId, knobs);
+    auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     ASSERT_EQ(knobs.size(), 5u);
@@ -172,7 +180,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, EngineBKnobs)
     auto graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(engineId, knobs);
+    auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     {
@@ -226,7 +234,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, EngineWithNoKnobs)
     auto graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(engineId, knobs);
+    auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_TRUE(knobs.empty()) << "GoodPlugin should have no knobs";
@@ -239,7 +247,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, IntConstraintWithZeroMin)
     auto graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(engineId, knobs);
+    auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     // test.int_knob has min=0, max=100, step=10
@@ -261,7 +269,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, FloatConstraintWithZeroMin)
     auto graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(engineId, knobs);
+    auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     // test.float_knob has min=0.0, max=1.0

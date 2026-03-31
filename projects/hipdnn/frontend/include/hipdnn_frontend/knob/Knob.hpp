@@ -211,7 +211,7 @@ private:
     std::string _knobId; ///< Unique knob identifier
     std::string _description; ///< Human-readable description
     KnobValueVariant _defaultValue; ///< Default value
-    bool _deprecated; ///< Whether this knob is deprecated
+    bool _deprecated = false; ///< Whether this knob is deprecated
 
     std::shared_ptr<IConstraint> _constraint; ///< Optional constraint
 };
@@ -222,6 +222,11 @@ inline std::pair<Error, Knob> Knob::tryCreate(std::string knobIdStr,
                                               bool deprecated,
                                               std::shared_ptr<IConstraint> constraint)
 {
+    if(knobIdStr.empty())
+    {
+        return {{ErrorCode::INVALID_VALUE, "Knob ID must not be empty"}, {}};
+    }
+
     Knob knob(std::move(knobIdStr), std::move(description), std::move(defaultValue), deprecated);
     knob._constraint
         = constraint != nullptr ? std::move(constraint) : std::make_shared<EmptyConstraint>();
