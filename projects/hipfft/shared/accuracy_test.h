@@ -67,37 +67,24 @@ template <class Tparams>
 inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
 {
 
-    size_t vram_avail = 0;
-
-    if(vramgb == 0)
+    int  dev_id     = hipInvalidDeviceId;
+    auto hip_status = hipGetDevice(&dev_id);
+    if(hip_status != hipSuccess || dev_id == hipInvalidDeviceId)
     {
-        // Check free and total available memory:
-        size_t free       = 0;
-        size_t total      = 0;
-        auto   hip_status = hipMemGetInfo(&free, &total);
-        if(hip_status != hipSuccess || total == 0)
+        ++n_hip_failures;
+        std::stringstream ss;
+        ss << "hipGetDevice failed with error code " << hip_status << " reporting device ID "
+           << dev_id;
+        if(skip_runtime_fails)
         {
-            ++n_hip_failures;
-            std::stringstream ss;
-            if(total == 0)
-                ss << "hipMemGetInfo claims there there isn't any vram";
-            else
-                ss << "hipMemGetInfo failure with error " << hip_status;
-            if(skip_runtime_fails)
-            {
-                throw ROCFFT_SKIP{ss.str()};
-            }
-            else
-            {
-                throw ROCFFT_FAIL{ss.str()};
-            }
+            throw ROCFFT_SKIP{ss.str()};
         }
-        vram_avail = total;
+        else
+        {
+            throw ROCFFT_FAIL{ss.str()};
+        }
     }
-    else
-    {
-        vram_avail = vramgb * ONE_GiB;
-    }
+    const auto vram_avail = device_memory_accountant::singleton().get_usable_bytes(dev_id);
 
     // First try a quick estimation of vram footprint, to speed up skipping tests
     // that are too large to fit in the gpu (no plan created with the rocFFT backend)

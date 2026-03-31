@@ -1987,6 +1987,10 @@ namespace
             {
                 GTEST_SKIP() << e.what();
             }
+            catch(const DEVICEBUF_MEM_USAGE& e)
+            {
+                GTEST_SKIP() << e.what();
+            }
             catch(const std::bad_alloc&)
             {
                 GTEST_SKIP() << "host memory allocation failure";
@@ -2740,6 +2744,10 @@ namespace
                     GTEST_FAIL() << e.what() << "\nError code: " << e.hip_error << ".";
             }
             catch(const HOSTBUF_MEM_USAGE& e)
+            {
+                GTEST_SKIP() << e.what();
+            }
+            catch(const DEVICEBUF_MEM_USAGE& e)
             {
                 GTEST_SKIP() << e.what();
             }

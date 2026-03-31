@@ -490,7 +490,7 @@ int main(int argc, char* argv[])
         "--version",
         "Print queryable version information from the hipfft library's backend (and return)");
     app.add_option("--R", ramgb, "RAM limit in GiB for tests")
-        ->default_val(host_memory::singleton().get_total_gbytes());
+        ->default_val(system_memory::singleton().get_total_gbytes());
     app.add_option("--V", vramgb, "VRAM limit in GiB for tests")->default_val(0);
     app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);
     app.add_option("--single_epsilon", single_epsilon)->default_val(3.75e-5);
@@ -634,12 +634,10 @@ int main(int argc, char* argv[])
     fftwf_plan_with_nthreads(rocfft_concurrency());
 #endif
 
-    // Set host memory limit from command-line options (if more restrictive)
-    const auto usable_bytes = host_memory::singleton().get_usable_bytes();
-    if(ramgb * ONE_GiB < usable_bytes)
-        host_memory::singleton().set_limit_gbytes(ramgb);
-    std::cout << "Usable host memory: " << bytes_to_GiB(host_memory::singleton().get_usable_bytes())
-              << " GiB" << std::endl;
+    system_memory::singleton().set_limit_bytes(ramgb * ONE_GiB);
+    std::cout << "Refraining from using more than "
+              << byte_size_to_str(system_memory::singleton().get_limit_bytes())
+              << " of system memory." << std::endl;
 
     if(use_fftw_wisdom)
     {
