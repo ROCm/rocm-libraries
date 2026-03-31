@@ -110,7 +110,7 @@ The hipBLASLt compute modes are listed in the following table.
 
     *
       - ``HIPBLAS_COMPUTE_32F``
-      - 32-bit singple precision floating-point compute mode.
+      - 32-bit single precision floating-point compute mode.
 
     *
       - ``HIPBLAS_COMPUTE_64F``
@@ -118,15 +118,21 @@ The hipBLASLt compute modes are listed in the following table.
 
     *
       - ``HIPBLAS_COMPUTE_32F_FAST_16F``
-      - Enables the library to utilize Tensor Cores with 32-bit float computation for matrices with 16-bit half precision input and output.
+      - Enables the library to utilize Tensor Cores with automatic down-conversion and 16-bit half-precision computation for 32-bit float-precision input and output matrices.
 
     *
       - ``HIPBLAS_COMPUTE_32F_FAST_16BF``
-      - Enables the library to utilize Tensor Cores with 32-bit float computation for matrices with 16-bit bfloat16 precision input and output.
+      - Enables the library to utilize Tensor Cores with automatic down-conversion and 16-bit bfloat16-precision computation for 32-bit float-precision input and output matrices.
 
     *
       - ``HIPBLAS_COMPUTE_32F_FAST_TF32``
-      - Enables the library to utilize Tensor Cores with TF32 computation for matrices with 32-bit input and output.
+      - Enables the library to utilize Tensor Cores with TF32 computation (on the gfx942 and gfx950 platforms)
+        or emulated TF32 computation (on the gfx950 platform) for matrices with 32-bit input and output.
+
+.. note::
+   
+   For information on how to override certain compute types,
+   see the :ref:`environmental variables <env-type_overrides>` documentation.
 
 Data type combinations
 ======================
