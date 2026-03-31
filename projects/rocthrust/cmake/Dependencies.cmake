@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 # ###########################
@@ -10,7 +10,6 @@
 # when VerifyCompiler.cmake is included.
 
 # For downloading, building, and installing required dependencies
-include(cmake/DownloadProject.cmake)
 include(FetchContent)
 
 # Suppress ROCMChecks WARNING on third-party dependencies that modify CMAKE_CXX_FLAGS
@@ -387,9 +386,6 @@ if(BUILD_BENCHMARK)
 
   if(NOT benchmark_FOUND)
     message(STATUS "Google Benchmark not found or force download Google Benchmark on. Downloading and building Google Benchmark.")
-    if(CMAKE_CONFIGURATION_TYPES)
-      message(FATAL_ERROR "DownloadProject.cmake doesn't support multi-configuration generators.")
-    endif()
     set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/googlebenchmark CACHE PATH "")
     if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
       if(WIN32)
