@@ -242,8 +242,7 @@ std::shared_ptr<KnobDescriptor>
     case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
     {
         auto val = knobNative.default_value.AsIntValue()->value;
-        knobDesc->setAttribute(
-            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, HIPDNN_TYPE_INT64, 1, &val);
+        knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, HIPDNN_TYPE_INT64, 1, &val);
 
         if(knobNative.constraint.type
            == hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint)
@@ -287,14 +286,10 @@ std::shared_ptr<KnobDescriptor>
             // sentinel meaning "no range constraint".
             if(c->min_value != 0.0 || c->max_value != 0.0)
             {
-                knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT,
-                                       HIPDNN_TYPE_DOUBLE,
-                                       1,
-                                       &c->min_value);
-                knobDesc->setAttribute(HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT,
-                                       HIPDNN_TYPE_DOUBLE,
-                                       1,
-                                       &c->max_value);
+                knobDesc->setAttribute(
+                    HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT, HIPDNN_TYPE_DOUBLE, 1, &c->min_value);
+                knobDesc->setAttribute(
+                    HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT, HIPDNN_TYPE_DOUBLE, 1, &c->max_value);
             }
         }
         break;

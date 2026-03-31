@@ -117,9 +117,9 @@ protected:
     }
 
     /// Finds a knob descriptor by its knob ID string.
-    static hipdnnBackendDescriptor_t findKnobDescriptorById(
-        const std::vector<hipdnn_backend::ScopedDescriptor>& knobDescs,
-        const std::string& targetId)
+    static hipdnnBackendDescriptor_t
+        findKnobDescriptorById(const std::vector<hipdnn_backend::ScopedDescriptor>& knobDescs,
+                               const std::string& targetId)
     {
         for(const auto& desc : knobDescs)
         {
@@ -1067,13 +1067,10 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateIntKnob)
     // Verify stride
     int64_t stride = 0;
     int64_t strideCount = 0;
-    EXPECT_EQ(hipdnnBackendGetAttribute(intKnob,
-                                        HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT,
-                                        HIPDNN_TYPE_INT64,
-                                        1,
-                                        &strideCount,
-                                        &stride),
-              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(
+        hipdnnBackendGetAttribute(
+            intKnob, HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT, HIPDNN_TYPE_INT64, 1, &strideCount, &stride),
+        HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(stride, 10);
 }
 
