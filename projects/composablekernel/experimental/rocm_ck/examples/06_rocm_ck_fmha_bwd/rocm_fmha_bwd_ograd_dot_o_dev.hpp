@@ -9,10 +9,20 @@
 // no ABI matching required.
 //
 // Uses C++20 struct NTTPs: template <FmhaBwdOGradDotOKernel K>.
+//
+// Compilation boundary:
+//   _spec.hpp — consteval factory + slot constants (both passes)
+//   _api.hpp  — host-only helpers: grid_size (host pass only, #error on device)
+//   _dev.hpp (this) — CK Tile bridge + __device__ code (device pass only, #error on host)
 
 #pragma once
 
-#include "rocm_fmha_bwd_ograd_dot_o_api.hpp"
+#ifndef __HIP_DEVICE_COMPILE__
+#error "rocm_fmha_bwd_ograd_dot_o_dev.hpp requires device compilation." \
+       " Host code should include rocm_fmha_bwd_ograd_dot_o_api.hpp."
+#endif
+
+#include "rocm_fmha_bwd_ograd_dot_o_spec.hpp"
 
 #include <rocm_ck/args.hpp>
 #include <rocm_ck/ck_type_map.hpp>

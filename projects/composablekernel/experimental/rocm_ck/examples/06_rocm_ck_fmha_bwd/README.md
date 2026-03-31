@@ -115,13 +115,16 @@ FmhaBwdConvertQGradKernel<Pipeline>
 
 ```
 rocm_fmha_bwd_common.hpp              — Shared types: FmhaMode, FmhaBiasType, padding docs
-rocm_fmha_bwd_ograd_dot_o_api.hpp     — OGradDotO: Signature/Algorithm/slots/make_kernel
-rocm_fmha_bwd_dqdkdv_api.hpp          — DqDkDv: Signature/Algorithm/slots/make_kernel
-rocm_fmha_bwd_convert_dq_api.hpp      — ConvertDQ: Signature/Algorithm/slots/make_kernel
-rocm_fmha_bwd_api.hpp                 — Unified include-all (no own code)
-rocm_fmha_bwd_ograd_dot_o_dev.hpp     — OGradDotO device bridge (CK Tile dependency)
-rocm_fmha_bwd_dqdkdv_dev.hpp          — DqDkDv device bridge (CK Tile dependency)
-rocm_fmha_bwd_convert_dq_dev.hpp      — ConvertDQ device bridge (CK Tile dependency)
+rocm_fmha_bwd_ograd_dot_o_spec.hpp    — OGradDotO: Signature/Algorithm/slots/make_kernel (SHARED)
+rocm_fmha_bwd_dqdkdv_spec.hpp         — DqDkDv: Signature/Algorithm/slots/make_kernel (SHARED)
+rocm_fmha_bwd_convert_dq_spec.hpp     — ConvertDQ: Signature/Algorithm/slots/make_kernel (SHARED)
+rocm_fmha_bwd_ograd_dot_o_api.hpp     — OGradDotO: grid_size helper (HOST ONLY)
+rocm_fmha_bwd_dqdkdv_api.hpp          — DqDkDv: grid_size helper (HOST ONLY)
+rocm_fmha_bwd_convert_dq_api.hpp      — ConvertDQ: grid_size helper (HOST ONLY)
+rocm_fmha_bwd_api.hpp                 — Unified include-all for host code (HOST ONLY)
+rocm_fmha_bwd_ograd_dot_o_dev.hpp     — OGradDotO device bridge (DEVICE ONLY, CK Tile dep)
+rocm_fmha_bwd_dqdkdv_dev.hpp          — DqDkDv device bridge (DEVICE ONLY, CK Tile dep)
+rocm_fmha_bwd_convert_dq_dev.hpp      — ConvertDQ device bridge (DEVICE ONLY, CK Tile dep)
 rocm_fmha_bwd_registry.hpp            — 3 variant arrays + 3 findVariant() overloads
 fmha_bwd_ograd_dot_o_*.hip            — 5 OGradDotO variant instantiations
 fmha_bwd_dqdkdv_*.hip                 — 5 DqDkDv variant instantiations
