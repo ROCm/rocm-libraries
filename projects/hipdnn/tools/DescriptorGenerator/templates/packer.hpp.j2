@@ -50,6 +50,24 @@ inline Error {{ op.frontend.packer_function }}(
                                             attributes.{{ df.frontend_getter }},
                                             "{{ op.effective_error_label }} {{ df.name }}"));
 {% elif df.is_mode %}
+{% if df.frontend_getter_returns_optional %}
+
+    // Set {{ op.effective_error_label }} mode
+    {
+        auto {{ df.camel_name }}Opt = attributes.{{ df.frontend_getter }};
+        if(!{{ df.camel_name }}Opt.has_value())
+        {
+            return {ErrorCode::INVALID_VALUE, "{{ df.name | replace('_', ' ') }} not set"};
+        }
+        auto {{ df.camel_name }} = hipdnn_frontend::{{ df.backend_converter }}(*{{ df.camel_name }}Opt);
+        if(!{{ df.camel_name }}.has_value())
+        {
+            return {ErrorCode::INVALID_VALUE, "Unsupported {{ df.name | replace('_', ' ') }}"};
+        }
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+            opDesc.get(), {{ df.attr_name }}, {{ df.backend_type }}, *{{ df.camel_name }}, "{{ op.effective_error_label }} mode"));
+    }
+{% else %}
 
     // Set {{ op.effective_error_label }} mode
     auto {{ df.camel_name }} = hipdnn_frontend::{{ df.backend_converter }}(attributes.{{ df.frontend_getter }});
@@ -59,6 +77,7 @@ inline Error {{ op.frontend.packer_function }}(
     }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
         opDesc.get(), {{ df.attr_name }}, {{ df.backend_type }}, *{{ df.camel_name }}, "{{ op.effective_error_label }} mode"));
+{% endif %}
 {% elif df.is_enum %}
 
     // Set {{ op.effective_error_label }} mode and compute data type

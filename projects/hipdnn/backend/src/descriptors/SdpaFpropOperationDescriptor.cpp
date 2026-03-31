@@ -5,6 +5,7 @@
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
@@ -372,6 +373,13 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                     arrayOfElements,
                     "SdpaFpropOperationDescriptor::setAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        setString(_name,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "SdpaFpropOperationDescriptor::setAttribute()");
+        break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "SdpaFpropOperationDescriptor::setAttribute: attributeName not "
@@ -735,6 +743,22 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                     arrayOfElements,
                     "SdpaFpropOperationDescriptor::getAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        getString(_name,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "SdpaFpropOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_TYPE_EXT:
+        getOperationType(HIPDNN_OPERATION_TYPE_SDPA_FORWARD,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "SdpaFpropOperationDescriptor::getAttribute()");
+        break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "SdpaFpropOperationDescriptor::getAttribute: attributeName not "
@@ -788,6 +812,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
 {
     auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
     node->compute_data_type = _computeDataType;
+    node->name = _name;
     node->attributes.Set(hipdnn_data_sdk::data_objects::SdpaAttributesT(_data));
     return node;
 }
@@ -800,7 +825,8 @@ hipdnnBackendDescriptorType_t SdpaFpropOperationDescriptor::getStaticType()
 std::string SdpaFpropOperationDescriptor::toString() const
 {
     std::string str = "SdpaFpropOperationDescriptor: {";
-    str += "q_uid=" + std::to_string(_data.q_tensor_uid);
+    str += "name=" + _name;
+    str += ", q_uid=" + std::to_string(_data.q_tensor_uid);
     str += ", k_uid=" + std::to_string(_data.k_tensor_uid);
     str += ", v_uid=" + std::to_string(_data.v_tensor_uid);
     str += ", o_uid=" + std::to_string(_data.o_tensor_uid);
@@ -849,6 +875,60 @@ std::string SdpaFpropOperationDescriptor::toString() const
     str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
+}
+
+std::shared_ptr<SdpaFpropOperationDescriptor> SdpaFpropOperationDescriptor::fromNode(
+    const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+    const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
+{
+    const auto* attrs = nodeT.attributes.AsSdpaAttributes();
+    THROW_IF_NULL(attrs,
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "SdpaFpropOperationDescriptor::fromNode: SdpaAttributes is null");
+
+    auto desc = std::make_shared<SdpaFpropOperationDescriptor>();
+    desc->_data = *attrs;
+    desc->_computeDataType = nodeT.compute_data_type;
+    desc->_name = nodeT.name;
+
+    // Required tensors
+    desc->_qDesc = findTensorInMap(
+        tensorMap, attrs->q_tensor_uid, "SdpaFpropOperationDescriptor::fromNode: Q");
+    desc->_kDesc = findTensorInMap(
+        tensorMap, attrs->k_tensor_uid, "SdpaFpropOperationDescriptor::fromNode: K");
+    desc->_vDesc = findTensorInMap(
+        tensorMap, attrs->v_tensor_uid, "SdpaFpropOperationDescriptor::fromNode: V");
+    desc->_oDesc = findTensorInMap(
+        tensorMap, attrs->o_tensor_uid, "SdpaFpropOperationDescriptor::fromNode: O");
+
+    // Optional tensors
+    desc->_attnMaskDesc = findOptionalTensor(tensorMap, attrs->attn_mask_tensor_uid);
+    desc->_scaleDesc = findOptionalTensor(tensorMap, attrs->scale_tensor_uid);
+    desc->_seqLenQDesc = findOptionalTensor(tensorMap, attrs->seq_len_q_tensor_uid);
+    desc->_seqLenKvDesc = findOptionalTensor(tensorMap, attrs->seq_len_kv_tensor_uid);
+    desc->_seedDesc = findOptionalTensor(tensorMap, attrs->seed_tensor_uid);
+    desc->_offsetDesc = findOptionalTensor(tensorMap, attrs->offset_tensor_uid);
+    desc->_dropoutMaskDesc = findOptionalTensor(tensorMap, attrs->dropout_mask_tensor_uid);
+    desc->_dropoutScaleDesc = findOptionalTensor(tensorMap, attrs->dropout_scale_tensor_uid);
+    desc->_pageTableKDesc = findOptionalTensor(tensorMap, attrs->page_table_k_tensor_uid);
+    desc->_pageTableVDesc = findOptionalTensor(tensorMap, attrs->page_table_v_tensor_uid);
+    desc->_blockMaskDesc = findOptionalTensor(tensorMap, attrs->block_mask_tensor_uid);
+    desc->_sinkTokenDesc = findOptionalTensor(tensorMap, attrs->sink_token_tensor_uid);
+    desc->_descaleQDesc = findOptionalTensor(tensorMap, attrs->descale_q_tensor_uid);
+    desc->_descaleKDesc = findOptionalTensor(tensorMap, attrs->descale_k_tensor_uid);
+    desc->_descaleVDesc = findOptionalTensor(tensorMap, attrs->descale_v_tensor_uid);
+    desc->_descaleSDesc = findOptionalTensor(tensorMap, attrs->descale_s_tensor_uid);
+    desc->_scaleSDesc = findOptionalTensor(tensorMap, attrs->scale_s_tensor_uid);
+    desc->_scaleODesc = findOptionalTensor(tensorMap, attrs->scale_o_tensor_uid);
+    desc->_statsDesc = findOptionalTensor(tensorMap, attrs->stats_tensor_uid);
+    desc->_maxDesc = findOptionalTensor(tensorMap, attrs->max_tensor_uid);
+    desc->_sumExpDesc = findOptionalTensor(tensorMap, attrs->sum_exp_tensor_uid);
+    desc->_rngDumpDesc = findOptionalTensor(tensorMap, attrs->rng_dump_tensor_uid);
+    desc->_amaxSDesc = findOptionalTensor(tensorMap, attrs->amax_s_tensor_uid);
+    desc->_amaxODesc = findOptionalTensor(tensorMap, attrs->amax_o_tensor_uid);
+
+    desc->finalize();
+    return desc;
 }
 
 } // namespace hipdnn_backend

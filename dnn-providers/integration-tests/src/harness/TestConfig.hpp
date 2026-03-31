@@ -3,40 +3,23 @@
 
 #pragma once
 
-#include <cstdlib>
-#include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <map>
-#include <nlohmann/json.hpp>
-#include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace hipdnn_integration_tests
 {
 
 // Methods for determining acceptable tolerance when comparing reference
 // implementation output to the selected engine's output.
-//
-// Example:
-//   [plugins.miopen]
-//   name = "miopen_provider_plugin"
-//   engines = ["MIOPEN_PLUGIN"]
-//
-//   [engines.MIOPEN_PLUGIN]
-//   tolerance = "gh_12678_tolerance_workaround"
-//
-// The example config would map to ToleranceMode::GH_12678_TOLERANCE_WORKAROUND
-// which uses default tolerance for all graphs besides batch norm backwards
-// operating on bfloat16 where it returns a wider tolerance.
 enum class ToleranceMode
 {
     DEFAULT,
 };
 
-// Singleton class for reading test configuration from JSON file.
+// Singleton class for storing CLI-based test configuration.
 class TestConfig
 {
 public:
@@ -52,111 +35,67 @@ public:
     TestConfig(TestConfig&&) = delete;
     TestConfig& operator=(TestConfig&&) = delete;
 
-    // Get tolerance mode for a given engine ID.
-    ToleranceMode getToleranceMode(int64_t engineId) const
+    // Initialize with CLI arguments. Must be called before any get() access.
+    // Throws if called more than once or if the singleton was already accessed uninitialized.
+    static void initialize(std::filesystem::path articlePath, std::string engineName)
     {
-        std::string engineName;
-        try
+        TestConfig& instance = get();
+        if(instance._initialized)
         {
-            engineName = std::string(hipdnn_data_sdk::utilities::getEngineNameFromId(engineId));
+            throw std::runtime_error("TestConfig::initialize() called more than once");
         }
-        catch(const std::out_of_range&)
+        instance._articlePath = std::move(articlePath);
+        instance._engineName = std::move(engineName);
+        instance._initialized = true;
+    }
+
+    // Get the article (plugin .so) path
+    const std::filesystem::path& getArticlePath() const
+    {
+        if(!_initialized)
         {
-            engineName = "Engine" + std::to_string(engineId);
+            throw std::runtime_error("TestConfig not initialized");
+        }
+        return _articlePath;
+    }
+
+    // Get the engine name string
+    std::string_view getEngineName() const
+    {
+        if(!_initialized)
+        {
+            throw std::runtime_error("TestConfig not initialized");
+        }
+        return _engineName;
+    }
+
+    // Get the engine ID from the engine name
+    int64_t getEngineId() const
+    {
+        if(!_initialized)
+        {
+            throw std::runtime_error("TestConfig not initialized");
+        }
+        return hipdnn_data_sdk::utilities::engineNameToId(_engineName);
+    }
+
+    // Get tolerance mode (always DEFAULT since only one mode exists)
+    ToleranceMode getToleranceMode() const
+    {
+        if(!_initialized)
+        {
+            throw std::runtime_error("TestConfig not initialized");
         }
 
-        if(auto it = _engineTolerances.find(engineName); it != _engineTolerances.end())
-        {
-            return it->second;
-        }
         return ToleranceMode::DEFAULT;
     }
 
-    // Check if a full GTest test name is in the expected failures list.
-    // Test name format: "TestSuite/Prefix.TestName/ParamName"
-    bool isExpectedFailure(const std::string& testName)
-    {
-        return _expectedFailures.contains(testName);
-    }
-
-    // Get expected plugin names from config (e.g., {"fusilli_plugin",
-    // "miopen_provider_plugin"})
-    const std::set<std::string>& getExpectedPluginNames() const
-    {
-        return _expectedPluginNames;
-    }
-
 private:
-    TestConfig()
-    {
-        // Get config path
-        const char* configPathEnv = std::getenv("HIPDNN_TEST_CONFIG_PATH");
-        if(configPathEnv == nullptr || std::strlen(configPathEnv) == 0)
-        {
-            throw std::runtime_error("HIPDNN_TEST_CONFIG_PATH environment variable not set");
-        }
+    TestConfig() = default;
 
-        // Parse config
-        const std::filesystem::path configPath = std::filesystem::weakly_canonical(configPathEnv);
-        std::ifstream configFile(configPath);
-        if(!configFile.is_open())
-        {
-            throw std::runtime_error("Failed to open config file: " + configPath.string());
-        }
-        try
-        {
-            auto config = nlohmann::json::parse(configFile);
-
-            // Populate expected failures set from flattened list
-            if(config.contains("expected_failures"))
-            {
-                for(const auto& name : config["expected_failures"])
-                {
-                    _expectedFailures.insert(name.get<std::string>());
-                }
-            }
-
-            // Populate expected plugin names from plugin definitions
-            if(config.contains("plugins"))
-            {
-                for(const auto& [name, info] : config["plugins"].items())
-                {
-                    if(info.contains("name"))
-                    {
-                        _expectedPluginNames.insert(info["name"].get<std::string>());
-                    }
-                }
-            }
-
-            // Populate engine tolerance modes
-            if(config.contains("engines"))
-            {
-                for(const auto& [engineName, engineConfig] : config["engines"].items())
-                {
-                    if(engineConfig.contains("tolerance"))
-                    {
-                        auto val = engineConfig["tolerance"].get<std::string>();
-                        if(val == "default")
-                        {
-                            _engineTolerances[engineName] = ToleranceMode::DEFAULT;
-                        }
-                        else
-                        {
-                            throw std::runtime_error("Unknown tolerance mode: " + val);
-                        }
-                    }
-                }
-            }
-        }
-        catch(const nlohmann::json::parse_error& e)
-        {
-            throw std::runtime_error("Failed to parse config JSON: " + std::string(e.what()));
-        }
-    }
-
-    std::set<std::string> _expectedFailures;
-    std::set<std::string> _expectedPluginNames;
-    std::map<std::string, ToleranceMode> _engineTolerances;
+    std::filesystem::path _articlePath;
+    std::string _engineName;
+    bool _initialized = false;
 };
 
 } // namespace hipdnn_integration_tests

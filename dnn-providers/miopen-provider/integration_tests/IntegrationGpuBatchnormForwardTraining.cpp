@@ -234,6 +234,22 @@ protected:
     }
 };
 
+// NCL 1D
+using IntegrationGpuBatchnormFwdTrainingNclFp32
+    = BatchnormForwardTraining<float, float, BatchnormTestCase>;
+using IntegrationGpuBatchnormFwdTrainingNclFp16
+    = BatchnormForwardTraining<half, float, BatchnormTestCase>;
+using IntegrationGpuBatchnormFwdTrainingNclBfp16
+    = BatchnormForwardTraining<bfloat16, float, BatchnormTestCase>;
+
+// NLC 1D
+using IntegrationGpuBatchnormFwdTrainingNlcFp32
+    = BatchnormForwardTraining<float, float, BatchnormTestCase>;
+using IntegrationGpuBatchnormFwdTrainingNlcFp16
+    = BatchnormForwardTraining<half, float, BatchnormTestCase>;
+using IntegrationGpuBatchnormFwdTrainingNlcBfp16
+    = BatchnormForwardTraining<bfloat16, float, BatchnormTestCase>;
+
 // NCHW 2D
 using IntegrationGpuBatchnormFwdTrainingNchwFp32
     = BatchnormForwardTraining<float, float, BatchnormTestCase>;
@@ -267,6 +283,98 @@ using IntegrationGpuBatchnormFwdTrainingNdhwcBfp16
     = BatchnormForwardTraining<bfloat16, float, BatchnormTestCase>;
 
 } // namespace
+
+// ============================================================================
+// NCL 1D Tests
+// ============================================================================
+
+TEST_P(IntegrationGpuBatchnormFwdTrainingNclFp32, FullTraining)
+{
+    runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
+                             BatchnormTrainingScenario::FULL_TRAINING,
+                             TensorLayout::NCL);
+}
+
+TEST_P(IntegrationGpuBatchnormFwdTrainingNclFp32, BatchStatsOnly)
+{
+    runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
+                             BatchnormTrainingScenario::WITH_BATCH_STATS,
+                             TensorLayout::NCL);
+}
+
+TEST_P(IntegrationGpuBatchnormFwdTrainingNclFp16, FullTraining)
+{
+    runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
+                             BatchnormTrainingScenario::FULL_TRAINING,
+                             TensorLayout::NCL);
+}
+
+TEST_P(IntegrationGpuBatchnormFwdTrainingNclFp16, BatchStatsOnly)
+{
+    runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
+                             BatchnormTrainingScenario::WITH_BATCH_STATS,
+                             TensorLayout::NCL);
+}
+
+TEST_P(IntegrationGpuBatchnormFwdTrainingNclBfp16, FullTraining)
+{
+    runGraphTestWithScenario(batchnorm::getToleranceTraining<bfloat16>(),
+                             BatchnormTrainingScenario::FULL_TRAINING,
+                             TensorLayout::NCL);
+}
+
+TEST_P(IntegrationGpuBatchnormFwdTrainingNclBfp16, BatchStatsOnly)
+{
+    runGraphTestWithScenario(batchnorm::getToleranceTraining<bfloat16>(),
+                             BatchnormTrainingScenario::WITH_BATCH_STATS,
+                             TensorLayout::NCL);
+}
+
+// ============================================================================
+// NLC 1D Tests
+// ============================================================================
+
+TEST_P(IntegrationGpuBatchnormFwdTrainingNlcFp32, FullTraining)
+{
+    runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
+                             BatchnormTrainingScenario::FULL_TRAINING,
+                             TensorLayout::NLC);
+}
+
+TEST_P(IntegrationGpuBatchnormFwdTrainingNlcFp32, BatchStatsOnly)
+{
+    runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
+                             BatchnormTrainingScenario::WITH_BATCH_STATS,
+                             TensorLayout::NLC);
+}
+
+TEST_P(IntegrationGpuBatchnormFwdTrainingNlcFp16, FullTraining)
+{
+    runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
+                             BatchnormTrainingScenario::FULL_TRAINING,
+                             TensorLayout::NLC);
+}
+
+TEST_P(IntegrationGpuBatchnormFwdTrainingNlcFp16, BatchStatsOnly)
+{
+    runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
+                             BatchnormTrainingScenario::WITH_BATCH_STATS,
+                             TensorLayout::NLC);
+}
+
+TEST_P(IntegrationGpuBatchnormFwdTrainingNlcBfp16, FullTraining)
+{
+    runGraphTestWithScenario(batchnorm::getToleranceTraining<bfloat16>(),
+                             BatchnormTrainingScenario::FULL_TRAINING,
+                             TensorLayout::NLC);
+}
+
+TEST_P(IntegrationGpuBatchnormFwdTrainingNlcBfp16, BatchStatsOnly)
+{
+    runGraphTestWithScenario(batchnorm::getToleranceTraining<bfloat16>(),
+                             BatchnormTrainingScenario::WITH_BATCH_STATS,
+                             TensorLayout::NLC);
+}
 
 // ============================================================================
 // NCHW 2D Tests
@@ -455,6 +563,50 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingNdhwcBfp16, BatchStatsOnly)
 // ============================================================================
 // Test Instantiation
 // ============================================================================
+
+// 1D NCL Tests
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormFwdTrainingNclFp32,
+                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke1dTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormFwdTrainingNclFp32,
+                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormFwdTrainingNclFp16,
+                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke1dTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormFwdTrainingNclFp16,
+                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormFwdTrainingNclBfp16,
+                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke1dTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormFwdTrainingNclBfp16,
+                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull1dTestCases()));
+
+// 1D NLC Tests
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormFwdTrainingNlcFp32,
+                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke1dTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormFwdTrainingNlcFp32,
+                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormFwdTrainingNlcFp16,
+                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke1dTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormFwdTrainingNlcFp16,
+                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormFwdTrainingNlcBfp16,
+                         testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke1dTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormFwdTrainingNlcBfp16,
+                         testing::ValuesIn(test_bn_common::getBnFwdTrainingFull1dTestCases()));
 
 // 2D NCHW Tests
 INSTANTIATE_TEST_SUITE_P(Smoke,

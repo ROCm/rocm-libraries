@@ -1,6 +1,19 @@
 name: clang-tidy
 
 on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
+    paths:
+      - 'projects/hipdnn/**/*.[ch]p?p?'
+      - 'projects/hipdnn/cmake/ClangTidy.cmake'
+      - 'projects/hipdnn/.clang-tidy'
+      # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
+      # - 'dnn-providers/miopen-provider/**/*.[ch]p?p?'
+      # - 'dnn-providers/miopen-provider/cmake/ClangTidy.cmake'
+      # - 'dnn-providers/miopen-provider/.clang-tidy'
+      - '.github/workflows/clang-tidy.yml'
   pull_request:
     paths:
       - 'projects/hipdnn/**/*.[ch]p?p?'
@@ -12,6 +25,14 @@ on:
       # - 'dnn-providers/miopen-provider/.clang-tidy'
       - '.github/workflows/clang-tidy.yml'
   workflow_dispatch:
+
+concurrency:
+  # For PRs, group by PR number so a new commit cancels any in-progress run
+  # for the same PR. For postsubmits, group by commit SHA (unique per commit)
+  # so runs never cancel each other. The workflow name is prepended to avoid
+  # conflicts between different workflows.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
 
 jobs:
   clang-tidy:
