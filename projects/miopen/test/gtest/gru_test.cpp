@@ -1,58 +1,32 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2020 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
-#ifndef GUARD_MIOPEN_TEST_GRU_COMMON_HPP
-#define GUARD_MIOPEN_TEST_GRU_COMMON_HPP
-
-#include "../test/gemm.hpp"
-#include "driver.hpp"
-#include "dropout_util.hpp"
-#include "get_handle.hpp"
-#include "tensor_holder.hpp"
-#include "test.hpp"
-#include "verify.hpp"
-#include "rnn_util.hpp"
-#include "random.hpp"
-#include "workspace.hpp"
-#include <array>
-#include <cmath>
-#include <ctime>
-#include <iomanip>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
+#include <gtest/gtest.h>
 #include <miopen/rnn.hpp>
 #include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
-#include <utility>
-#include <cfloat>
+#include "tensor_holder.hpp"
 
-#define MIO_GRU_TEST_DEBUG 0
-#define MIO_RNN_TIME_EVERYTHING 0
+#include "compare_helper.hpp"
+#include "../dropout_util.hpp"
+#include "../rnn_util.hpp"
+#include "../workspace.hpp"
+
+#include <math.h>
+namespace {
+/// Specific version for compating CPU and GPU results, because this test is order-dependent
+template <class VerifyT>
+auto GruTestCompareResults(VerifyT&& verifier, double tolerance = 80.f)
+    -> std::pair<decltype(verifier.cpu()), decltype(verifier.gpu())>
+{
+    const auto gpu_result = verifier.gpu();
+    const auto cpu_result = verifier.cpu();
+    if(!test_helpers::Compare(cpu_result, gpu_result, tolerance))
+    {
+        verifier.fail();
+    }
+
+    return std::make_pair(cpu_result, gpu_result);
+}
 
 /**********************************************
  * CPU verification functions
@@ -1775,6 +1749,26 @@ void GRUBwdWeightCPUVerify(bool use_dropout,
 
 //////=========END CPU VERIFICATION FUNCTIONS=============
 
+inline std::vector<int> GenBatchSeq(const int batchSize, const int seqLength)
+{
+
+    static constexpr int modval = 3;
+
+    int currentval = batchSize;
+    std::vector<int> batchSeq;
+    batchSeq.reserve(seqLength);
+    for(int i = 0; i < seqLength; i++)
+    {
+        if(i > 0)
+        {
+            int nvalue = currentval - prng::gen_0_to_B(modval);
+            currentval = (nvalue < 1) ? 1 : nvalue;
+        }
+        batchSeq.push_back(currentval);
+    }
+    return batchSeq;
+}
+
 //****************************************************
 // FORWARD INFERENCE
 //****************************************************
@@ -1837,13 +1831,8 @@ struct verify_forward_infer_gru
             initHidden.resize(realHiddenSize);
     }
 
-    std::vector<T> cpu()
+    std::tuple<std::vector<T>> cpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-
         auto&& handle = get_handle();
 
         int bi        = dirMode != 0 ? 2 : 1;
@@ -1873,10 +1862,6 @@ struct verify_forward_infer_gru
         std::vector<T> output(out_sz / sizeof(T));
         std::vector<T> hiddenState(initHidden.size());
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
-
         GRUFwdCPUVerify(handle,
                         false,
                         miopen::deref(miopen::deref(rnnDesc).dropoutDesc),
@@ -1902,38 +1887,11 @@ struct verify_forward_infer_gru
                         inputMode,
                         reserveSpace,
                         nohx);
-
-#if(MIO_GRU_TEST_DEBUG == 2)
-        for(int i = 0; i < output.size(); i++)
-        {
-            printf("CPU outdata[%d]: %f\n", i, output[i]);
-        }
-#endif
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: CPU forward inference GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-
-        std::cout << "Wall clock: CPU forward inference GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU forward inference CPU" << std::endl;
-        std::cout << "---------------------------------\n" << std::endl;
-#endif
-        return output;
+        return std::make_tuple(output);
     }
 
-    std::vector<T> gpu()
+    std::tuple<std::vector<T>> gpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
         auto&& handle = get_handle();
 
         size_t out_sz         = 0;
@@ -1975,11 +1933,6 @@ struct verify_forward_infer_gru
         std::vector<int> wlen(1, 0);
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
-
         miopenRNNForwardInference(&handle,
                                   rnnDesc,
                                   seqLength,
@@ -1999,56 +1952,35 @@ struct verify_forward_infer_gru
                                   nullptr,
                                   wspace.ptr(),
                                   wspace.size());
-
-#if(MIO_GRU_TEST_DEBUG == 2)
-        auto outdata = handle.Read<T>(output_dev, output.size());
-        for(int i = 0; i < outdata.size(); i++)
-        {
-            printf("GPU outdata[%d]: %f\n", i, outdata[i]);
-        }
-#endif
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: GPU forward_infer GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-
-        std::cout << "Wall clock: GPU forward_infer GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU forward inference GPU" << std::endl;
-#endif
-        return (handle.Read<T>(output_dev, output.size()));
+        return std::make_tuple((handle.Read<T>(output_dev, output.size())));
     }
 
-    void fail(int) const
+    void fail() const
     {
-        std::cout << "./bin/MIOpenDriver rnn -n ";
+        std::stringstream ss{};
+        ss << "./bin/MIOpenDriver rnn -n ";
         for(int i = 0; i < seqLength; i++)
         {
             if(i < seqLength - 1)
             {
-                std::cout << batch_seq.at(i) << ",";
+                ss << batch_seq.at(i) << ",";
             }
             else
             {
-                std::cout << batch_seq.at(i);
+                ss << batch_seq.at(i);
             }
         }
-        std::cout << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen
-                  << " -l " << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p "
-                  << inputMode << std::endl;
+        ss << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
+           << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p " << inputMode
+           << std::endl;
 
-        std::cout << "inputMode: " << inputMode << " biasMode: " << biasMode
-                  << " dirMode: " << dirMode << std::endl;
-        std::cout << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
-                  << " inputLen: " << inputVecLen << " numLayers: " << nLayers << std::endl;
-        std::cout << "Forward Inference GRU: " << std::endl;
-        std::cout << "Output tensor output failed verification." << std::endl;
+        ss << "inputMode: " << inputMode << " biasMode: " << biasMode << " dirMode: " << dirMode
+           << std::endl;
+        ss << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
+           << " inputLen: " << inputVecLen << " numLayers: " << nLayers << std::endl;
+        ss << "Forward Inference GRU: " << std::endl;
+        ss << "Output tensor output failed verification." << std::endl;
+        GTEST_FAIL() << ss.str();
     }
 };
 //~~~~~~~~~~~~ END FWD INFERENCE ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2120,11 +2052,6 @@ struct verify_forward_train_gru
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> cpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-
         auto&& handle = get_handle();
 
         int bi        = dirMode != 0 ? 2 : 1;
@@ -2153,9 +2080,6 @@ struct verify_forward_train_gru
         std::vector<T> output(out_sz / sizeof(T));
         std::vector<T> hiddenState(initHidden.size());
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
         GRUFwdCPUVerify(handle,
                         use_dropout,
                         miopen::deref(miopen::deref(rnnDesc).dropoutDesc),
@@ -2182,40 +2106,12 @@ struct verify_forward_train_gru
                         reserveSpace,
                         nohx);
 
-#if(MIO_GRU_TEST_DEBUG == 2)
-        for(int i = 0; i < output.size(); i++)
-        {
-            printf("CPU outdata[%d]: %f\n", i, output[i]);
-        }
-#endif
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: CPU forward train GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-        std::cout << "Wall clock: CPU forward train GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-
         auto retSet = std::make_tuple(output, (nohy ? initHidden : hiddenState), reserveSpace);
-
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU forward train CPU" << std::endl;
-        std::cout << "---------------------------------\n" << std::endl;
-#endif
         return retSet;
     }
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> gpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-
         auto&& handle = get_handle();
 
         size_t out_sz           = 0;
@@ -2266,10 +2162,6 @@ struct verify_forward_train_gru
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
-
         miopenRNNForwardTraining(&handle,
                                  rnnDesc,
                                  seqLength,
@@ -2292,68 +2184,40 @@ struct verify_forward_train_gru
                                  rspace.ptr(),
                                  rspace.size());
 
-#if(MIO_GRU_TEST_DEBUG == 2)
         auto outdata = handle.Read<T>(output_dev, output.size());
-        for(int i = 0; i < outdata.size(); i++)
-        {
-            printf("GPU outdata[%d]: %f\n", i, outdata[i]);
-        }
-#endif
 
-        auto retSet = std::make_tuple(handle.Read<T>(output_dev, output.size()),
+        auto retSet = std::make_tuple(outdata,
                                       (nohy ? initHidden : handle.Read<T>(hy_dev, hy.size())),
                                       rspace.Read<std::vector<T>>());
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: GPU forward_train GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-
-        std::cout << "Wall clock: GPU forward_train GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with RNN forward train GPU" << std::endl;
-#endif
         return retSet;
     }
 
-    void fail(int badtensor) const
+    void fail() const
     {
-        std::cout << "./bin/MIOpenDriver rnn -n ";
+        std::stringstream ss{};
+        ss << "./bin/MIOpenDriver rnn -n ";
         for(int i = 0; i < seqLength; i++)
         {
             if(i < seqLength - 1)
             {
-                std::cout << batch_seq.at(i) << ",";
+                ss << batch_seq.at(i) << ",";
             }
             else
             {
-                std::cout << batch_seq.at(i);
+                ss << batch_seq.at(i);
             }
         }
-        std::cout << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen
-                  << " -l " << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p "
-                  << inputMode << std::endl;
+        ss << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
+           << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p " << inputMode
+           << std::endl;
 
-        std::cout << "inputMode: " << inputMode << " biasMode: " << biasMode
-                  << " dirMode: " << dirMode << std::endl;
-        std::cout << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
-                  << " inputLen: " << inputVecLen << " numLayers: " << nLayers
-                  << " useDropout: " << int(use_dropout) << std::endl;
-        std::cout << "Forward Train GRU: " << std::endl;
-
-        switch(badtensor)
-        {
-        case(0): std::cout << "Output tensor output failed verification." << std::endl; break;
-        case(1): std::cout << "Hidden state tensor failed verification." << std::endl; break;
-        case(2): std::cout << "Weight tensor failed verification." << std::endl; break;
-        case(3): std::cout << "Reserved space tensor failed verification." << std::endl; break;
-        default: break;
-        }
+        ss << "inputMode: " << inputMode << " biasMode: " << biasMode << " dirMode: " << dirMode
+           << std::endl;
+        ss << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
+           << " inputLen: " << inputVecLen << " numLayers: " << nLayers
+           << " useDropout: " << int(use_dropout) << std::endl;
+        ss << "Forward Train GRU: " << std::endl;
+        GTEST_FAIL() << ss.str();
     }
 };
 //~~~~~~~~~~~~ END FWD TRAIN ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2442,11 +2306,6 @@ struct verify_backward_data_gru
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> cpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-
         auto&& handle = get_handle();
 
         int bi        = dirMode != 0 ? 2 : 1;
@@ -2466,10 +2325,6 @@ struct verify_backward_data_gru
         std::vector<T> workSpace(workspace_size / sizeof(T));
         std::vector<T> dx(in_sz / sizeof(T));
         std::vector<T> dhx(initHidden.size());
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
 
         GRUBwdDataCPUVerify(use_dropout,
                             miopen::deref(miopen::deref(rnnDesc).dropoutDesc),
@@ -2499,35 +2354,11 @@ struct verify_backward_data_gru
                             workSpace,
                             nohx,
                             nodhy);
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: CPU backward data GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-
-        std::cout << "Wall clock: CPU backward data GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-
-        auto retSet = std::make_tuple(dx, (nodhx ? initHidden : dhx), reserveSpace, workSpace);
-
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU backward data CPU" << std::endl;
-        std::cout << "---------------------------------\n" << std::endl;
-#endif
-        return retSet;
+        return std::make_tuple(dx, (nodhx ? initHidden : dhx), reserveSpace, workSpace);
     }
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> gpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-
         auto&& handle = get_handle();
 
         size_t out_sz = 0;
@@ -2575,10 +2406,6 @@ struct verify_backward_data_gru
         std::vector<T> dhx(initHidden.size());
         auto dhx_dev = handle.Write(dhx);
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
-
         miopenRNNBackwardData(&handle,
                               rnnDesc,
                               seqLength,
@@ -2606,60 +2433,37 @@ struct verify_backward_data_gru
                               wspace.size(),
                               rspace.ptr(),
                               rspace.size());
-
-        auto retSet = std::make_tuple(handle.Read<T>(dx_dev, dx.size()),
-                                      (nodhx ? initHidden : handle.Read<T>(dhx_dev, dhx.size())),
-                                      rspace.Read<std::vector<T>>(),
-                                      wspace.Read<std::vector<T>>());
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: GPU backward data GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-
-        std::cout << "Wall clock: GPU backward data GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU backward data GPU" << std::endl;
-#endif
-        return retSet;
+        return std::make_tuple(handle.Read<T>(dx_dev, dx.size()),
+                               (nodhx ? initHidden : handle.Read<T>(dhx_dev, dhx.size())),
+                               rspace.Read<std::vector<T>>(),
+                               wspace.Read<std::vector<T>>());
     }
 
-    void fail(int badtensor) const
+    void fail() const
     {
-        std::cout << "./bin/MIOpenDriver rnn -n ";
+        std::stringstream ss{};
+        ss << "./bin/MIOpenDriver rnn -n ";
         for(int i = 0; i < seqLength; i++)
         {
             if(i < seqLength - 1)
             {
-                std::cout << batch_seq.at(i) << ",";
+                ss << batch_seq.at(i) << ",";
             }
             else
             {
-                std::cout << batch_seq.at(i);
+                ss << batch_seq.at(i);
             }
         }
-        std::cout << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen
-                  << " -l " << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p "
-                  << inputMode << std::endl;
-        std::cout << "inputMode: " << inputMode << " biasMode: " << biasMode
-                  << " dirMode: " << dirMode << std::endl;
-        std::cout << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
-                  << " inputLen: " << inputVecLen << " numLayers: " << nLayers
-                  << " useDropout: " << int(use_dropout) << std::endl;
-        std::cout << "Backward Data GRU: " << std::endl;
-        switch(badtensor)
-        {
-        case(0): std::cout << "Output dx failed verification." << std::endl; break;
-        case(1): std::cout << "Hidden state dhx tensor failed verification." << std::endl; break;
-        // case(2): std::cout << "Reserved space tensor failed verification." << std::endl; break;
-        case(2): std::cout << "Workspace space tensor failed verification." << std::endl; break;
-        default: break;
-        }
+        ss << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
+           << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p " << inputMode
+           << std::endl;
+        ss << "inputMode: " << inputMode << " biasMode: " << biasMode << " dirMode: " << dirMode
+           << std::endl;
+        ss << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
+           << " inputLen: " << inputVecLen << " numLayers: " << nLayers
+           << " useDropout: " << int(use_dropout) << std::endl;
+        ss << "Backward Data GRU: " << std::endl;
+        GTEST_FAIL() << ss.str();
     }
 };
 //~~~~~~~~~~~~ END BACKWARD DATA ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2680,8 +2484,8 @@ struct verify_backward_weights_gru
     int hiddenSize;
     int seqLength;
     int nLayers;
-    int biasMode;
-    int dirMode;
+    bool biasMode{false};
+    bool dirMode{false};
     int inputMode;
     int batch_n;
     int inputVecLen;
@@ -2719,8 +2523,8 @@ struct verify_backward_weights_gru
           hiddenSize(pHS),
           seqLength(pS),
           nLayers(pNL),
-          biasMode(pBM),
-          dirMode(pDM),
+          biasMode(pBM == 0 ? false : true),
+          dirMode(pDM == 0 ? false : true),
           inputMode(pIM),
           batch_n(pBN),
           inputVecLen(pVL),
@@ -2735,18 +2539,10 @@ struct verify_backward_weights_gru
             initHidden.resize(realHiddenSize);
     }
 
-    std::vector<T> cpu()
+    std::tuple<std::vector<T>> cpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-        int bi = dirMode != 0 ? 2 : 1;
+        int bi = dirMode ? 2 : 1;
         std::vector<T> dweights(weightSize);
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
         GRUBwdWeightCPUVerify(use_dropout,
                               input,
                               dweights,        // (output) [ input_state_weight_trans
@@ -2769,31 +2565,11 @@ struct verify_backward_weights_gru
                               reserveSpace,
                               workSpace,
                               nohx);
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: CPU backward_weights GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-        std::cout << "Wall clock: CPU backward_weights GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU backward weights CPU" << std::endl;
-        std::cout << "---------------------------------\n" << std::endl;
-#endif
-        return dweights;
+        return std::make_tuple(dweights);
     }
 
-    std::vector<T> gpu()
+    std::tuple<std::vector<T>> gpu()
     {
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-
         auto&& handle = get_handle();
 
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
@@ -2826,10 +2602,6 @@ struct verify_backward_weights_gru
         auto dy_dev    = handle.Write(dy);
         auto input_dev = handle.Write(input);
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_start1 = std::chrono::high_resolution_clock::now();
-#endif
-
         miopenRNNBackwardWeights(&handle,
                                  rnnDesc,
                                  seqLength,
@@ -2845,57 +2617,42 @@ struct verify_backward_weights_gru
                                  wspace.size(),
                                  rspace.ptr(),
                                  rspace.size());
-
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Wall clock: GPU backwards_weights GRU pass time: "
-                  << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
-                  << std::endl;
-
-        std::cout << "Wall clock: GPU backwards_weights GRU pass time (core): "
-                  << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
-                  << std::endl;
-#endif
-#if(MIO_GRU_TEST_DEBUG > 0)
-        std::cout << "Done with GRU backward weights GPU" << std::endl;
-#endif
         auto retvec = handle.Read<T>(dweights_dev, dweights.size());
-        return retvec;
+        return std::make_tuple(retvec);
     }
 
-    void fail(int) const
+    void fail() const
     {
-        std::cout << "./bin/MIOpenDriver rnn -n ";
+        std::stringstream ss{};
+        ss << "./bin/MIOpenDriver rnn -n ";
         for(int i = 0; i < seqLength; i++)
         {
             if(i < seqLength - 1)
             {
-                std::cout << batch_seq.at(i) << ",";
+                ss << batch_seq.at(i) << ",";
             }
             else
             {
-                std::cout << batch_seq.at(i);
+                ss << batch_seq.at(i);
             }
         }
-        std::cout << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen
-                  << " -l " << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p "
-                  << inputMode << std::endl;
-        std::cout << "inputMode: " << inputMode << " biasMode: " << biasMode
-                  << " dirMode: " << dirMode << std::endl;
-        std::cout << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
-                  << " inputLen: " << inputVecLen << " numLayers: " << nLayers
-                  << " useDropout: " << int(use_dropout) << std::endl;
-        std::cout << "Backward Weights GRU: " << std::endl;
+        ss << " -m gru -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
+           << nLayers << " -F 0 -r " << dirMode << " -b " << biasMode << " -p " << inputMode
+           << std::endl;
+        ss << "inputMode: " << inputMode << " biasMode: " << biasMode << " dirMode: " << dirMode
+           << std::endl;
+        ss << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
+           << " inputLen: " << inputVecLen << " numLayers: " << nLayers
+           << " useDropout: " << int(use_dropout) << std::endl;
+        ss << "Backward Weights GRU: " << std::endl;
+        GTEST_FAIL() << ss.str();
     }
 };
 //~~~~~~~~~~~~ END BACKWARD WEIGHTS ~~~~~~~~~~~~~~~~~~~~~~~~
 
-//====================== DRIVER ============================
-template <class T>
-struct gru_basic_driver : test_driver
+struct TestCase
 {
-    std::vector<int> batchSeq;
+    int batchSize{};
     int seqLength{};
     int inVecLen{};
     int hiddenSize{};
@@ -2903,18 +2660,190 @@ struct gru_basic_driver : test_driver
     int inputMode{};
     int biasMode{};
     int dirMode{};
-    int batchSize{};
-    int useDropout{};
-
-    // Null pointer input
+    bool useDropout    = false;
     bool nohx          = false;
     bool nodhy         = false;
     bool nohy          = false;
     bool nodhx         = false;
     bool flatBatchFill = false;
+    std::vector<int> batchSeq{};
+};
 
-    gru_basic_driver() {}
+using TestParam = std::tuple<int,
+                             int,
+                             int,
+                             int,
+                             int,
+                             int,
+                             int,
+                             int,
+                             bool,
+                             bool,
+                             bool,
+                             bool,
+                             bool,
+                             bool,
+                             std::vector<int>>;
 
+TestCase ConvertParam(TestParam const& param)
+{
+    auto [batchSize,
+          seqLength,
+          inVecLen,
+          hiddenSize,
+          numLayers,
+          inputMode,
+          biasMode,
+          dirMode,
+          useDropout,
+          nohx,
+          nodhy,
+          nohy,
+          nodhx,
+          flatBatchFill,
+          batchSeq] = param;
+
+    return TestCase{batchSize,
+                    seqLength,
+                    inVecLen,
+                    hiddenSize,
+                    numLayers,
+                    inputMode,
+                    biasMode,
+                    dirMode,
+                    useDropout,
+                    nohx,
+                    nodhy,
+                    nohy,
+                    nodhx,
+                    flatBatchFill,
+                    batchSeq};
+}
+
+std::vector<TestParam> deepbench_cases = {
+    {32, 1500, 216, 216, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 750, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 375, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 10, 2816, 2816, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 1500, 248, 248, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 12, 2048, 2048, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 1500, 156, 156, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 500, 156, 156, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 12, 1536, 1536, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 1500, 256, 256, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 500, 256, 256, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 10, 2560, 2560, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 1, 512, 512, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {64, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0}}};
+
+std::vector<TestParam> extra_cases = {
+    {32, 3, 128, 128, 1, 0, 0, 0, false, true, false, false, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 0, false, false, true, false, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 0, false, true, true, false, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, true, false, false, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, false, true, false, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, true, true, false, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 0, false, false, false, false, true, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 0, false, false, false, true, true, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, false, false, true, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, false, false, false, true, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, false, false, true, true, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 0, false, true, true, true, true, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, true, true, true, true, false, {32, 32, 32}}};
+
+auto GenCases(bool gen_dropout)
+{
+    std::vector<int> defaultBS(1);
+
+    std::vector<TestParam> cases{};
+    cases.push_back({17,
+                     (gen_dropout ? 23 : 2),
+                     13,
+                     67,
+                     (gen_dropout ? 3 : 1),
+                     0,
+                     0,
+                     0,
+                     gen_dropout,
+                     false,
+                     false,
+                     false,
+                     false,
+                     false,
+                     defaultBS});
+    return ::testing::ValuesIn(cases);
+}
+
+auto GetFullBaseTests()
+{
+    std::vector<int> modes(2, 0);
+    modes[1] = 1;
+    std::vector<int> defaultBS(1);
+    return ::testing::Combine(::testing::ValuesIn(get_gru_batchSize()),
+                              ::testing::ValuesIn(get_gru_seq_len()),
+                              ::testing::ValuesIn(get_gru_vector_len()),
+                              ::testing::ValuesIn(get_gru_hidden_size()),
+                              ::testing::ValuesIn(get_gru_num_layers()),
+                              ::testing::ValuesIn(modes),
+                              ::testing::ValuesIn(modes),
+                              ::testing::ValuesIn(modes),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({defaultBS}));
+}
+
+auto GetDropoutTests()
+{
+    std::vector<int> modes(2, 0);
+    modes[1] = 1;
+    std::vector<int> defaultBS(1);
+    return ::testing::Combine(::testing::ValuesIn({17}),
+                              ::testing::ValuesIn({23}),
+                              ::testing::ValuesIn({13}),
+                              ::testing::ValuesIn({67}),
+                              ::testing::ValuesIn({3}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn(modes),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({defaultBS}));
+}
+
+auto const& GetDropoutSmokeTests()
+{
+    static auto cases = GenCases(true);
+    return cases;
+}
+
+auto const& GetDeepbenchTests() { return deepbench_cases; }
+
+auto const& GetExtraTests() { return extra_cases; }
+
+auto const& GetSmokeTests()
+{
+    static auto cases = GenCases(false);
+    return cases;
+}
+
+template <class T>
+class gru_test : public testing::TestWithParam<TestParam>
+{
+    const double tolerance = 80; // Will be multiplied by std::numeric_limits<T>::epsilon()
+    TestCase param;
+    int batch_n{};
+    size_t statesSizeInBytes{0U};
+
+public:
     void fill_buffers(std::vector<T>& input, std::vector<T>& hx, std::vector<T>& weights)
     {
         auto fill_array_via_gen = [](std::vector<T>& dst, auto gen, int seed_offset = 0) {
@@ -2932,18 +2861,18 @@ struct gru_basic_driver : test_driver
             return [=]() -> T { return prng::gen_descreet_uniform_sign<T>(scale, range); };
         };
 
-        const double data_max_v = sqrt(1. / hiddenSize);
+        const double data_max_v = sqrt(1. / param.hiddenSize);
         int data_range          = 100;
         const double data_scale = data_max_v / data_range;
         fill_array_via_gen(input, pos_gen(data_scale, data_range), 0);
 
-        if(!nohx)
+        if(!param.nohx)
         {
             fill_array_via_gen(hx, pos_gen(data_scale, data_range), 1);
         }
 
         // filter
-        const double weights_max_v = sqrt(1. / hiddenSize);
+        const double weights_max_v = sqrt(1. / param.hiddenSize);
         int weights_range          = 64;
         const double weights_scale = weights_max_v / weights_range;
 
@@ -2964,11 +2893,11 @@ struct gru_basic_driver : test_driver
             return [=]() { return prng::gen_descreet_uniform_sign<T>(scale, range); };
         };
 
-        const double bwd_data_max_v = sqrt(1. / hiddenSize) / 8;
+        const double bwd_data_max_v = sqrt(1. / param.hiddenSize) / 8;
         int bwd_data_range          = 100;
         const double bwd_data_scale = bwd_data_max_v / bwd_data_range;
 
-        if(!nodhy)
+        if(!param.nodhy)
         {
             fill_array_via_gen(dhy, sign_gen(bwd_data_scale, bwd_data_range), 3);
         }
@@ -2977,38 +2906,43 @@ struct gru_basic_driver : test_driver
         prng::reset_seed();
     }
 
-    void run()
+    void SetUp() override
     {
-#if(MIOPEN_BACKEND_OPENCL == 1)
-        if(type == miopenHalf)
-            exit(EXIT_SUCCESS); // NOLINT (concurrency-mt-unsafe)
-#endif
-
-        if(batchSeq.empty() || 0 == batchSeq[0])
+        prng::reset_seed();
+        param = ConvertParam(GetParam());
+        if(!param.useDropout)
         {
-            std::cout << "Empty batch sequence. Filling uniformly with batch size: " << batchSize
-                      << std::endl;
-            if(flatBatchFill)
+            param.batchSeq = generate_batchSeq(param.batchSize, param.seqLength)[0];
+        }
+    }
+
+    void Run()
+    {
+        if(param.batchSeq.empty() || 0 == param.batchSeq[0])
+        {
+            std::cout << "Empty batch sequence. Filling uniformly with batch size: "
+                      << param.batchSize << std::endl;
+            if(param.flatBatchFill)
             {
-                batchSeq.clear();
-                batchSeq.resize(seqLength, batchSize);
+                param.batchSeq.clear();
+                param.batchSeq.resize(param.seqLength, param.batchSize);
             }
             else
             {
-                batchSeq = generate_batchSeq(batchSize, seqLength)[0];
+                param.batchSeq = GenBatchSeq(param.batchSize, param.seqLength);
             }
         }
 
-        if(batchSeq.size() != seqLength)
+        if(param.batchSeq.size() != param.seqLength)
         {
             std::cerr << "FAILED: Batch sequence vector length, does not match sequence length."
                       << std::endl;
-            std::abort();
+            GTEST_SKIP();
         }
 
         auto&& handle = get_handle();
 
-        int batch_n = std::accumulate(batchSeq.begin(), batchSeq.end(), 0);
+        batch_n = std::accumulate(param.batchSeq.begin(), param.batchSeq.end(), 0);
 
         miopenRNNDescriptor_t rnnDesc;
         miopenCreateRNNDescriptor(&rnnDesc);
@@ -3016,16 +2950,9 @@ struct gru_basic_driver : test_driver
 
         miopenDropoutDescriptor_t DropoutDesc;
         miopenCreateDropoutDescriptor(&DropoutDesc);
-        size_t statesSizeInBytes = 0;
 
-        if(useDropout != 0)
+        if(param.useDropout)
         {
-// Workaround for issue #2335.
-// OpenCL error creating buffer: 0 Invalid Buffer Size
-#if MIOPEN_BACKEND_OPENCL
-            std::cout << "Skip test for Issue #2335: " << std::endl;
-            return;
-#endif
             miopenHandle_t mio_handle;
             miopenCreateWithStream(&mio_handle, handle.GetStream());
 
@@ -3033,16 +2960,9 @@ struct gru_basic_driver : test_driver
             unsigned long long dropout_seed = 0ULL;
             miopenDropoutGetStatesSize(mio_handle, &statesSizeInBytes);
 
-#if MIOPEN_BACKEND_OPENCL
-            cl_context ctx;
-            clGetCommandQueueInfo(
-                handle.GetStream(), CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-            cl_mem dropout_state_buf =
-                clCreateBuffer(ctx, CL_MEM_READ_WRITE, statesSizeInBytes, nullptr, nullptr);
-#elif MIOPEN_BACKEND_HIP
             void* dropout_state_buf;
-            (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
-#endif
+            [[maybe_unused]] auto err =
+                hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 
             miopenSetDropoutDescriptor(DropoutDesc,
                                        mio_handle,
@@ -3055,41 +2975,42 @@ struct gru_basic_driver : test_driver
                                        MIOPEN_RNG_PSEUDO_XORWOW);
 
             miopenSetRNNDescriptor_V2(rnnDesc,
-                                      hiddenSize,
-                                      numLayers,
+                                      param.hiddenSize,
+                                      param.numLayers,
                                       DropoutDesc,
-                                      miopenRNNInputMode_t(inputMode),
-                                      miopenRNNDirectionMode_t(dirMode),
+                                      miopenRNNInputMode_t(param.inputMode),
+                                      miopenRNNDirectionMode_t(param.dirMode),
                                       miopenGRU,
-                                      miopenRNNBiasMode_t(biasMode),
+                                      miopenRNNBiasMode_t(param.biasMode),
                                       miopenRNNAlgo_t(algoMode),
-                                      type);
+                                      miopen_type<T>{});
         }
         else
         {
             miopenSetRNNDescriptor(rnnDesc,
-                                   hiddenSize,
-                                   numLayers,
-                                   miopenRNNInputMode_t(inputMode),
-                                   miopenRNNDirectionMode_t(dirMode),
+                                   param.hiddenSize,
+                                   param.numLayers,
+                                   miopenRNNInputMode_t(param.inputMode),
+                                   miopenRNNDirectionMode_t(param.dirMode),
                                    miopenGRU,
-                                   miopenRNNBiasMode_t(biasMode),
+                                   miopenRNNBiasMode_t(param.biasMode),
                                    miopenRNNAlgo_t(algoMode),
-                                   type); // defined in superclass testdriver
+                                   miopen_type<T>{}); // defined in superclass testdriver
         }
 
         // Create input tensor
         // If we are in skip mode, take the real input size to be the vector length.
-        auto inVecReal    = (inputMode != 0) ? hiddenSize : inVecLen;
+        auto inVecReal    = (param.inputMode != 0) ? param.hiddenSize : param.inVecLen;
         std::size_t in_sz = static_cast<std::size_t>(inVecReal) * batch_n;
-        std::size_t hx_sz = ((dirMode != 0) ? 2ULL : 1ULL) * hiddenSize * batchSize * numLayers;
+        std::size_t hx_sz = ((param.dirMode != 0) ? 2ULL : 1ULL) * param.hiddenSize *
+                            param.batchSize * param.numLayers;
 
         std::vector<T> input(in_sz), hx(hx_sz), dhyin(hx_sz);
 
         size_t wei_bytes = [&]() {
             size_t filter_bytes;
             std::vector<int> inlens(2, 0);
-            inlens.at(0)        = batchSeq.at(0);
+            inlens.at(0)        = param.batchSeq.at(0);
             inlens.at(1)        = inVecReal;
             auto firstInputDesc = miopen::TensorDescriptor(miopen::deref(rnnDesc).dataType, inlens);
             miopenGetRNNParamsSize(
@@ -3103,56 +3024,58 @@ struct gru_basic_driver : test_driver
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
-            inputCPPDescs, inputDescs, batchSeq, inVecReal, miopen::deref(rnnDesc).dataType);
+            inputCPPDescs, inputDescs, param.batchSeq, inVecReal, miopen::deref(rnnDesc).dataType);
 
         std::vector<miopen::TensorDescriptor> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
-                              batchSeq,
-                              hiddenSize * ((dirMode != 0) ? 2 : 1),
+                              param.batchSeq,
+                              param.hiddenSize * ((param.dirMode != 0) ? 2 : 1),
                               miopen::deref(rnnDesc).dataType);
 
         size_t out_sz;
-        miopenGetRNNInputTensorSize(&handle, rnnDesc, seqLength, outputDescs.data(), &out_sz);
+        miopenGetRNNInputTensorSize(&handle, rnnDesc, param.seqLength, outputDescs.data(), &out_sz);
         size_t reserveSpaceSize;
         miopenGetRNNTrainingReserveSize(
-            &handle, rnnDesc, seqLength, inputDescs.data(), &reserveSpaceSize);
+            &handle, rnnDesc, param.seqLength, inputDescs.data(), &reserveSpaceSize);
         size_t workspace_size;
-        miopenGetRNNWorkspaceSize(&handle, rnnDesc, seqLength, inputDescs.data(), &workspace_size);
+        miopenGetRNNWorkspaceSize(
+            &handle, rnnDesc, param.seqLength, inputDescs.data(), &workspace_size);
 
         size_t total_mem = statesSizeInBytes + reserveSpaceSize + workspace_size + 2 * out_sz +
-                           (in_sz + wei_sz + (nohx ? 0 : hx_sz) + (nohy ? 0 : hx_sz) +
-                            (nodhx ? 0 : hx_sz) + (nodhy ? 0 : hx_sz)) *
+                           (in_sz + wei_sz + (param.nohx ? 0 : hx_sz) + (param.nohy ? 0 : hx_sz) +
+                            (param.nodhx ? 0 : hx_sz) + (param.nodhy ? 0 : hx_sz)) *
                                sizeof(T);
         size_t device_mem = handle.GetGlobalMemorySize();
         if(total_mem >= device_mem)
         {
-            show_command();
-            std::cout << "Config requires " << total_mem
-                      << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
-                      << " Bytes of memory." << std::endl;
+            GTEST_SKIP() << "Config requires " << total_mem
+                         << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
+                         << " Bytes of memory." << std::endl;
         }
 
         fill_buffers(input, hx, weights);
 
-        auto fwdTrainOutputPair = verify(verify_forward_train_gru<T>{rnnDesc,
-                                                                     input,
-                                                                     hx,
-                                                                     weights,
-                                                                     batchSeq,
-                                                                     hiddenSize,
-                                                                     batch_n,
-                                                                     seqLength,
-                                                                     numLayers,
-                                                                     biasMode,
-                                                                     dirMode,
-                                                                     inputMode,
-                                                                     inVecReal,
-                                                                     hx_sz,
-                                                                     nohx,
-                                                                     nohy,
-                                                                     bool(useDropout)});
+        auto fwdTrainOutputPair =
+            GruTestCompareResults(verify_forward_train_gru<T>{rnnDesc,
+                                                              input,
+                                                              hx,
+                                                              weights,
+                                                              param.batchSeq,
+                                                              param.hiddenSize,
+                                                              batch_n,
+                                                              param.seqLength,
+                                                              param.numLayers,
+                                                              param.biasMode,
+                                                              param.dirMode,
+                                                              param.inputMode,
+                                                              inVecReal,
+                                                              hx_sz,
+                                                              param.nohx,
+                                                              param.nohy,
+                                                              param.useDropout},
+                                  tolerance);
 
         /// RETURNS std::make_tuple(output, hiddenState, reserveSpace);
         auto yin = std::get<0>(fwdTrainOutputPair.second);
@@ -3163,60 +3086,81 @@ struct gru_basic_driver : test_driver
 
         fill_bwd_buffers(dyin, dhyin);
 
-        auto bwdDataOutputPair = verify(verify_backward_data_gru<T>{
-            rnnDesc,   yin,        dyin,    dhyin,     hx,        weights,  reserveSpaceFwdTrain,
-            batchSeq,  hiddenSize, batch_n, seqLength, numLayers, biasMode, dirMode,
-            inputMode, inVecReal,  hx_sz,   nohx,      nodhy,     nodhx,    bool(useDropout)});
+        auto bwdDataOutputPair =
+            GruTestCompareResults(verify_backward_data_gru<T>{rnnDesc,
+                                                              yin,
+                                                              dyin,
+                                                              dhyin,
+                                                              hx,
+                                                              weights,
+                                                              reserveSpaceFwdTrain,
+                                                              param.batchSeq,
+                                                              param.hiddenSize,
+                                                              batch_n,
+                                                              param.seqLength,
+                                                              param.numLayers,
+                                                              param.biasMode,
+                                                              param.dirMode,
+                                                              param.inputMode,
+                                                              inVecReal,
+                                                              hx_sz,
+                                                              param.nohx,
+                                                              param.nodhy,
+                                                              param.nodhx,
+                                                              param.useDropout},
+                                  tolerance);
 
         // RETURNS:  std::make_tuple(dx, dhx, reserveSpace, workSpace);
         auto reserveSpaceBwdData = std::get<2>(bwdDataOutputPair.second);
         auto workSpaceBwdData    = std::get<3>(bwdDataOutputPair.second);
         // auto dweights_pair       =
-        verify(verify_backward_weights_gru<T>{rnnDesc,
-                                              input,
-                                              dyin,
-                                              hx,
-                                              reserveSpaceBwdData,
-                                              workSpaceBwdData,
-                                              batchSeq,
-                                              hiddenSize,
-                                              static_cast<int>(wei_sz),
-                                              batch_n,
-                                              seqLength,
-                                              numLayers,
-                                              biasMode,
-                                              dirMode,
-                                              inputMode,
-                                              inVecReal,
-                                              hx_sz,
-                                              nohx,
-                                              bool(useDropout)});
+        GruTestCompareResults(verify_backward_weights_gru<T>{rnnDesc,
+                                                             input,
+                                                             dyin,
+                                                             hx,
+                                                             reserveSpaceBwdData,
+                                                             workSpaceBwdData,
+                                                             param.batchSeq,
+                                                             param.hiddenSize,
+                                                             static_cast<int>(wei_sz),
+                                                             batch_n,
+                                                             param.seqLength,
+                                                             param.numLayers,
+                                                             param.biasMode,
+                                                             param.dirMode,
+                                                             param.inputMode,
+                                                             inVecReal,
+                                                             hx_sz,
+                                                             param.nohx,
+                                                             param.useDropout},
+                              tolerance);
 
-        if(useDropout == 0)
+        if(!param.useDropout)
         {
-            verify(verify_forward_infer_gru<T>{rnnDesc,
-                                               input,
-                                               hx,
-                                               weights,
-                                               batchSeq,
-                                               hiddenSize,
-                                               batch_n,
-                                               seqLength,
-                                               numLayers,
-                                               biasMode,
-                                               dirMode,
-                                               inputMode,
-                                               inVecReal,
-                                               hx_sz,
-                                               nohx,
-                                               nohy});
+            GruTestCompareResults(verify_forward_infer_gru<T>{rnnDesc,
+                                                              input,
+                                                              hx,
+                                                              weights,
+                                                              param.batchSeq,
+                                                              param.hiddenSize,
+                                                              batch_n,
+                                                              param.seqLength,
+                                                              param.numLayers,
+                                                              param.biasMode,
+                                                              param.dirMode,
+                                                              param.inputMode,
+                                                              inVecReal,
+                                                              hx_sz,
+                                                              param.nohx,
+                                                              param.nohy},
+                                  tolerance);
         }
         // DLOWELL: Subtracting delta weights may produce NAN and infinities. Further investigation
         // is needed.
         //        auto dweights = std::get<1>(dweights_pair);
         //        std::transform(weightData.begin( ), weightData.end( ), dweights.begin( ),
         //        weightData.begin( ),std::minus<T>( ));
-        //        verify(verify_forward_infer_gru<T>{rnnDesc, inputData,
+        //        GruTestCompareResults(verify_forward_infer_gru<T>{rnnDesc, inputData,
         //                                        curHiddenState, curCellState, weightData,
         //                                        batchSeq,
         //                                        hiddenSize, batch_n,
@@ -3226,4 +3170,109 @@ struct gru_basic_driver : test_driver
     }
 };
 
-#endif
+struct TestNameGenerator
+{
+    std::string operator()(const ::testing::TestParamInfo<TestParam>& param_info)
+    {
+        std::stringstream ss{};
+        auto print_bool = [](bool value) { return value ? "true" : "false"; };
+
+        auto print_batch_seq = [](std::vector<int> const& vec) {
+            std::stringstream vec_ss{};
+            for(auto el : vec)
+            {
+                vec_ss << std::to_string(el) << "_";
+            }
+            return vec_ss.str();
+        };
+
+        auto param = ConvertParam(param_info.param);
+
+        ss << "batchSize_" << param.batchSize << "_seqLength_" << param.seqLength << "_inVecLen_"
+           << param.inVecLen << "_hiddenSize_" << param.hiddenSize << "_numLayers_"
+           << param.numLayers << "_inputMode_" << param.inputMode << "_biasMode_" << param.biasMode
+           << "_dirMode_" << param.dirMode << "_useDropout_" << print_bool(param.useDropout)
+           << "_nohx_" << print_bool(param.nohx) << "_nodhy_" << print_bool(param.nodhy) << "_nohy_"
+           << print_bool(param.nohy) << "_nodhx_" << print_bool(param.nodhx) << "_flatBatchFill_"
+           << print_bool(param.flatBatchFill) << "_batch_seq_" << print_batch_seq(param.batchSeq);
+        return ss.str();
+    }
+};
+
+template <typename T>
+struct gru_dropout_test : public gru_test<T>
+{
+    // intentionally empty
+};
+
+template <typename T>
+struct gru_deepbench_test : public gru_test<T>
+{
+    // intentionally empty
+};
+
+template <typename T>
+struct gru_extra_test : public gru_test<T>
+{
+    // intentionally empty
+};
+
+} // anonymous namespace
+
+using GPU_GRU_Base_FP32 = gru_test<float>;
+using GPU_GRU_Base_FP16 = gru_test<half_float::half>;
+
+using GPU_GRU_Dropout_FP32 = gru_dropout_test<float>;
+using GPU_GRU_Dropout_FP16 = gru_dropout_test<half_float::half>;
+
+using GPU_GRU_Deepbench_FP32 = gru_deepbench_test<float>;
+using GPU_GRU_Deepbench_FP16 = gru_deepbench_test<half_float::half>;
+
+using GPU_GRU_Extra_FP32 = gru_extra_test<float>;
+using GPU_GRU_Extra_FP16 = gru_extra_test<half_float::half>;
+
+TEST_P(GPU_GRU_Base_FP32, TestFloat32) { Run(); }
+TEST_P(GPU_GRU_Base_FP16, TestFloat16) { Run(); }
+
+// Base tests
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Base_FP32, GetFullBaseTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Base_FP32, GetSmokeTests(), TestNameGenerator{});
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Base_FP16, GetFullBaseTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Base_FP16, GetSmokeTests(), TestNameGenerator{});
+
+// Dropout tests
+TEST_P(GPU_GRU_Dropout_FP32, TestFloat32) { Run(); }
+TEST_P(GPU_GRU_Dropout_FP16, TestFloat16) { Run(); }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Dropout_FP32, GetDropoutTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Dropout_FP32, GetDropoutSmokeTests(), TestNameGenerator{});
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Dropout_FP16, GetDropoutTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Dropout_FP16, GetDropoutSmokeTests(), TestNameGenerator{});
+
+// // Deepbench tests
+TEST_P(GPU_GRU_Deepbench_FP32, TestFloat32) { Run(); }
+TEST_P(GPU_GRU_Deepbench_FP16, TestFloat16) { Run(); }
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GRU_Deepbench_FP32,
+                         ::testing::ValuesIn(GetDeepbenchTests()),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GRU_Deepbench_FP16,
+                         ::testing::ValuesIn(GetDeepbenchTests()),
+                         TestNameGenerator{});
+
+// Extra tests
+TEST_P(GPU_GRU_Extra_FP32, TestFloat32) { Run(); }
+TEST_P(GPU_GRU_Extra_FP16, TestFloat16) { Run(); }
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GRU_Extra_FP32,
+                         ::testing::ValuesIn(GetExtraTests()),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GRU_Extra_FP16,
+                         ::testing::ValuesIn(GetExtraTests()),
+                         TestNameGenerator{});
