@@ -55,8 +55,8 @@ private:
                                 int64_t* elementCount,
                                 void* arrayOfElements) const;
 
-    /// Lazily populated by getKnobInfoDescriptors() from _knobSerializedBuffers.
-    mutable std::vector<std::shared_ptr<KnobDescriptor>> _knobDescriptors;
+    /// Populated during finalize() from _knobSerializedBuffers.
+    std::vector<std::shared_ptr<KnobDescriptor>> _knobDescriptors;
 
 public:
     void finalize() override;

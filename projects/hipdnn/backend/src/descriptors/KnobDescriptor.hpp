@@ -4,7 +4,6 @@
 #pragma once
 
 #include "BackendDescriptor.hpp"
-#include <hipdnn_data_sdk/data_objects/knob_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 
 #include <optional>

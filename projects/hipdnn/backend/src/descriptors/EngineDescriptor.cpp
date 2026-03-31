@@ -61,12 +61,22 @@ void EngineDescriptor::finalize()
 
             for(const auto& knobWrapper : knobWrappers)
             {
-                flatbuffers::FlatBufferBuilder builder;
                 hipdnn_data_sdk::data_objects::KnobT knobNative;
                 knobWrapper->getKnob().UnPackTo(&knobNative);
+
+                // Serialize for the flatbuffer-based getAttribute path.
+                flatbuffers::FlatBufferBuilder builder;
                 auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(builder, &knobNative);
                 builder.Finish(knobOffset);
                 _knobSerializedBuffers.push_back(builder.Release());
+
+                // Build KnobDescriptor eagerly so the descriptor is fully
+                // immutable after finalize() and safe to share across threads.
+                auto knobDesc = KnobDescriptor::fromKnobT(knobNative);
+                if(knobDesc)
+                {
+                    _knobDescriptors.push_back(std::move(knobDesc));
+                }
             }
         }
     }
@@ -318,27 +328,6 @@ void EngineDescriptor::getKnobInfoDescriptors(hipdnnBackendAttributeType_t attri
     checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                  attributeType,
                  "EngineDescriptor::getAttribute(HIPDNN_ATTR_ENGINE_KNOB_INFO)");
-
-    // Lazily build KnobDescriptor objects from the serialized knob buffers.
-    if(_knobDescriptors.empty() && !_knobSerializedBuffers.empty())
-    {
-        for(const auto& buffer : _knobSerializedBuffers)
-        {
-            auto knobFb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(buffer.data());
-            if(knobFb == nullptr)
-            {
-                continue;
-            }
-            hipdnn_data_sdk::data_objects::KnobT knobNative;
-            knobFb->UnPackTo(&knobNative);
-
-            auto knobDesc = KnobDescriptor::fromKnobT(knobNative);
-            if(knobDesc)
-            {
-                _knobDescriptors.push_back(std::move(knobDesc));
-            }
-        }
-    }
 
     auto count = static_cast<int64_t>(_knobDescriptors.size());
 
