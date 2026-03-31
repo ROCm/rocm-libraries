@@ -90,6 +90,10 @@ def load_config(path: Path) -> OperationConfig:
                 test_enum_value=df.get("test_enum_value", ""),
                 test_constant_name=df.get("test_constant_name", ""),
                 test_backend_value=df.get("test_backend_value", ""),
+                fbs_optional=df.get("fbs_optional", False),
+                frontend_getter_returns_optional=df.get(
+                    "frontend_getter_returns_optional", False
+                ),
                 backend_setter=df.get("backend_setter", ""),
                 backend_getter=df.get("backend_getter", ""),
                 backend_converter=df.get("backend_converter", ""),
