@@ -57,7 +57,7 @@ struct ConvBwdSolverTest
             auto tmp = miopen::ExecutionContext{&handle};
             problem.SetupFloats(tmp);
             problem.SetupComputeType(tmp);
-            return tmp;
+            return std::move(tmp);
         }();
 
         if(!solv.IsApplicable(ctx, problem))

@@ -317,7 +317,7 @@ protected:
             }
 
             solutions.resize(found);
-            return solutions;
+            return std::move(solutions);
         };
 
         std::vector<miopenSolution_t> solutions = FindSolutions(problem);

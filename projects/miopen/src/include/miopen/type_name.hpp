@@ -116,7 +116,7 @@ constexpr std::string_view type_name_bare()
     {
         constexpr auto bare_name = name.substr(pos + 1);
         static_assert(bare_name.size() > 0);
-        return bare_name;
+        return name.substr(pos + 1);
     }
 }
 

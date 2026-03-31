@@ -413,9 +413,10 @@ template <class Problem>
 auto GetContext(miopen::Handle* handle, const Problem& problem);
 
 template <>
-auto GetContext(miopen::Handle* handle, const miopen::conv::ProblemDescription& problem)
+miopen::ExecutionContext GetContext(miopen::Handle* handle,
+                                    const miopen::conv::ProblemDescription& problem)
 {
-    auto tmp = miopen::ExecutionContext{handle};
+    miopen::ExecutionContext tmp{handle};
     problem.SetupFloats(tmp);
     problem.SetupComputeType(tmp);
     return tmp;

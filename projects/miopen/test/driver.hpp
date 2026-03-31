@@ -127,9 +127,8 @@ struct test_driver
     {
         auto s = env::value(MIOPEN_VERIFY_CACHE_PATH);
         if(s.empty())
-            return "~/.cache/miopen/tests";
-        else
-            return s;
+            s = "~/.cache/miopen/tests";
+        return s;
     }
 
     std::string program_name;
@@ -742,7 +741,7 @@ struct test_driver
             return miopen::detach_async([=] {
                 result_type result;
                 load(f.string(), result);
-                return result;
+                return std::move(result);
             });
         }
         else

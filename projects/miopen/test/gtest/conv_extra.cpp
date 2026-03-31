@@ -90,13 +90,9 @@ std::vector<std::string> GetTestCases(const std::string& float_arg)
             {cmd_v_float + " --input	4	32	14	14	--weights	4	32	5	5	--pads_strides_dilations	2	2	1	1	1	1"}
         };
 
-        test_cases.insert(test_cases.end(), common_test_cases.begin(), common_test_cases.end());
-        return test_cases;
+        common_test_cases.insert(common_test_cases.begin(), test_cases.begin(), test_cases.end());
     }
-    else
-    {
-        return common_test_cases;
-    }
+    return common_test_cases;
     // clang-format on
 }
 

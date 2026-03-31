@@ -137,7 +137,7 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathFile(const Handle& handle,
         if(fs::exists(file_path))
         {
             MIOPEN_LOG_I2("Found exact find database file: " << file_path);
-            return file_path;
+            return std::move(file_path);
         }
 
         MIOPEN_LOG_I2("inexact find database search");
@@ -145,7 +145,7 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathFile(const Handle& handle,
         {
             MIOPEN_LOG_I("Database directory does not exist");
             file_path = fs::path{};
-            return file_path;
+            return std::move(file_path);
         }
 
         MIOPEN_LOG_I2("Iterating over find db directory " << root_path);
@@ -172,12 +172,12 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathFile(const Handle& handle,
             if(fname.starts_with(base_name))
             {
                 file_path = entry;
-                return file_path;
+                return std::move(file_path);
             }
             if(db_id.empty() || !miopen::StartsWith(db_id, "gfx") || real_cu_count == 0)
             {
                 file_path = fs::path{};
-                return file_path; // empty
+                return std::move(file_path); // empty
             }
             // Check for alternate ASIC any back end
             if(fname.starts_with(db_id))
@@ -195,7 +195,7 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathFile(const Handle& handle,
                 }
             }
         }
-        return file_path;
+        return std::move(file_path);
     }();
 
     return installed_path;

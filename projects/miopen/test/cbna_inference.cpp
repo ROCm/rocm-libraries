@@ -122,6 +122,8 @@ struct verify_forward_conv_bias_batchnorm_activ
         auto bout = rout;
         std::fill(bout.begin(), bout.end(), 0.);
 
+        decltype(aout) res;
+
         // If we are using convolutions as the base, we can calculate the
         convHostForward(input, rout, weights, bias_mode, bias, filter);
         if(bnmode == miopenBNPerActivation)
@@ -142,12 +144,14 @@ struct verify_forward_conv_bias_batchnorm_activ
                 activDesc, &activ_mode, &activ_alpha, &activ_beta, &activ_gamma);
             activationHostInfer(
                 activ_mode, activ_gamma, activ_beta, activ_alpha, bout.data, aout.data);
+
+            res = aout;
         }
         else
         {
-            return bout;
+            res = bout;
         }
-        return aout;
+        return res;
     }
 
     tensor<T> gpu() const
