@@ -37,19 +37,19 @@ typedef std::tuple<vector<int>, vector<int>> ormtr_hb2st_tuple;
 
 // each size_range vector is a {M, N, KD}
 
-// each store_range vector is a {ldv, ldc, storev, side}
+// each store_range vector is a {ldv, ldc, side, trans}
 // if ldv = -1, then ldv < limit (invalid size)
 // if ldv = 0, then ldv = limit
 // if ldv = 1, then ldv > limit
 // if ldc = -1, then ldc < limit (invalid size)
 // if ldc = 0, then ldc = limit
 // if ldc = 1, then ldc > limit
-// if storev = 0, then storev = 'C' (column-wise)
-// if storev = 1, then storev = 'R' (row-wise)
 // if side = 0, then side = 'L'
 // if side = 1, then side = 'R'
+// if trans = 0, then trans = 'N'
+// if trans = 1, then trans = 'T' or 'C' (transpose or conjugate transpose)
 
-// case when m = 0, n = 1, kd = 0, storev = 'C' and side = 'L'
+// case when m = 0, n = 1, kd = 0, side = 'L', and trans = 'N'
 // will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
@@ -104,8 +104,8 @@ Arguments ormtr_hb2st_setup_arguments(ormtr_hb2st_tuple tup)
 
     arg.set<rocblas_int>("ldv", m + store[0] * 10);
     arg.set<rocblas_int>("ldc", m + store[1] * 10);
-    arg.set<char>("storev", store[2] == 0 ? 'C' : 'R');
-    arg.set<char>("side", store[3] == 0 ? 'L' : 'R');
+    arg.set<char>("side", store[2] == 0 ? 'L' : 'R');
+    arg.set<char>("trans", store[3] == 0 ? 'N' : 'T');
 
     arg.timing = 0;
 
@@ -126,8 +126,8 @@ protected:
         Arguments arg = ormtr_hb2st_setup_arguments(GetParam());
 
         if(arg.peek<rocblas_int>("m") == 0 && arg.peek<rocblas_int>("n") == 1
-           && arg.peek<rocblas_int>("kd") == 0 && arg.peek<char>("storev") == 'C'
-           && arg.peek<char>("side") == 'L')
+           && arg.peek<rocblas_int>("kd") == 0 && arg.peek<char>("side") == 'L'
+           && arg.peek<char>("trans") == 'N')
             testing_ormtr_unmtr_hb2st_bad_arg<T>();
 
         testing_ormtr_unmtr_hb2st<T>(arg);

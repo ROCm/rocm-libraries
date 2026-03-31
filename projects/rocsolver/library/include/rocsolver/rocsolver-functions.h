@@ -4057,12 +4057,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
     to tridiagonal form from a band matrix (HB2ST).
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and storev:
+    the values of side and trans:
 
     \f[
         \begin{array}{cl}
-        QC & \: \text{from the left,}\\
-        CQ & \: \text{from the right.}
+        QC & \: \text{No transpose from the left,}\\
+        Q^TC & \: \text{Transpose from the left,}\\
+        CQ & \: \text{No transpose from the right, and}\\
+        CQ^T & \: \text{Transpose from the right.}
         \end{array}
     \f]
 
@@ -4071,12 +4073,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
     @param[in]
     handle      rocblas_handle.
     @param[in]
-    storev      rocblas_storev.
-                Specifies whether the Householder reflectors are stored as columns
-                or rows in V.
-    @param[in]
     side        rocblas_side.
                 Specifies from which side to apply Q.
+    @param[in]
+    trans       rocblas_operation.
+                Specifies whether the matrix Q or its transpose is to be applied.
     @param[in]
     m           rocblas_int. m >= 0.
                 Number of rows of matrix C.
@@ -4098,15 +4099,15 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
     @param[inout]
     C           pointer to type. Array on the GPU of size ldc*n.
                 On entry, the matrix C. On exit, it is overwritten with
-                Q*C or C*Q.
+                Q*C, Q^T*C, C*Q, or C*Q^T.
     @param[in]
     ldc         rocblas_int. ldc >= m.
                 Leading dimension of C.
     ****************************************************************************/
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_sormtr_hb2st(rocblas_handle handle,
-                                                       const rocblas_storev storev,
                                                        const rocblas_side side,
+                                                       const rocblas_operation trans,
                                                        const rocblas_int m,
                                                        const rocblas_int n,
                                                        const rocblas_int kd,
@@ -4117,8 +4118,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_sormtr_hb2st(rocblas_handle handle,
                                                        const rocblas_int ldc);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr_hb2st(rocblas_handle handle,
-                                                       const rocblas_storev storev,
                                                        const rocblas_side side,
+                                                       const rocblas_operation trans,
                                                        const rocblas_int m,
                                                        const rocblas_int n,
                                                        const rocblas_int kd,
@@ -4137,12 +4138,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr_hb2st(rocblas_handle handle,
     to tridiagonal form from a band matrix (HB2ST).
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and storev:
+    the values of side and trans:
 
     \f[
         \begin{array}{cl}
-        QC & \: \text{from the left,}\\
-        CQ & \: \text{from the right.}
+        QC & \: \text{No transpose from the left,}\\
+        Q^HC & \: \text{Conjugate transpose from the left,}\\
+        CQ & \: \text{No transpose from the right, and}\\
+        CQ^H & \: \text{Conjugate transpose from the right.}
         \end{array}
     \f]
 
@@ -4151,12 +4154,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr_hb2st(rocblas_handle handle,
     @param[in]
     handle      rocblas_handle.
     @param[in]
-    storev      rocblas_storev.
-                Specifies whether the Householder reflectors are stored as columns
-                or rows in V.
-    @param[in]
     side        rocblas_side.
                 Specifies from which side to apply Q.
+    @param[in]
+    trans       rocblas_operation.
+                Specifies whether the matrix Q or its conjugate transpose is to be applied.
     @param[in]
     m           rocblas_int. m >= 0.
                 Number of rows of matrix C.
@@ -4178,15 +4180,15 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr_hb2st(rocblas_handle handle,
     @param[inout]
     C           pointer to type. Array on the GPU of size ldc*n.
                 On entry, the matrix C. On exit, it is overwritten with
-                Q*C or C*Q.
+                Q*C, Q^H*C, C*Q, or C*Q^H.
     @param[in]
     ldc         rocblas_int. ldc >= m.
                 Leading dimension of C.
     ****************************************************************************/
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_cunmtr_hb2st(rocblas_handle handle,
-                                                       const rocblas_storev storev,
                                                        const rocblas_side side,
+                                                       const rocblas_operation trans,
                                                        const rocblas_int m,
                                                        const rocblas_int n,
                                                        const rocblas_int kd,
@@ -4197,8 +4199,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_cunmtr_hb2st(rocblas_handle handle,
                                                        const rocblas_int ldc);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr_hb2st(rocblas_handle handle,
-                                                       const rocblas_storev storev,
                                                        const rocblas_side side,
+                                                       const rocblas_operation trans,
                                                        const rocblas_int m,
                                                        const rocblas_int n,
                                                        const rocblas_int kd,

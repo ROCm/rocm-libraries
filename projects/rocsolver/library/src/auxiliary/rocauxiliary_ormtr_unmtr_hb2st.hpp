@@ -38,8 +38,8 @@
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <bool BATCHED, typename T>
-void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_storev storev,
-                                               const rocblas_side side,
+void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_side side,
+                                               const rocblas_operation trans,
                                                const rocblas_int m,
                                                const rocblas_int n,
                                                const rocblas_int kd,
@@ -64,8 +64,8 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_storev storev,
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
-void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_storev storev,
-                                               const rocblas_side side,
+void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_side side,
+                                               const rocblas_operation trans,
                                                const rocblas_int m,
                                                const rocblas_int n,
                                                const rocblas_int kd,
@@ -97,8 +97,8 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_storev storev,
 
 template <bool COMPLEX, typename T, typename U>
 rocblas_status rocsolver_ormtr_hb2st_argCheck(rocblas_handle handle,
-                                              const rocblas_storev storev,
                                               const rocblas_side side,
+                                              const rocblas_operation trans,
                                               const rocblas_int m,
                                               const rocblas_int n,
                                               const rocblas_int kd,
@@ -111,17 +111,22 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(rocblas_handle handle,
     // order is important for unit tests:
 
     // 1. invalid/non-supported values
-    if(storev != rocblas_column_wise && storev != rocblas_row_wise)
-        return rocblas_status_invalid_value;
     if(side != rocblas_side_left && side != rocblas_side_right)
+        return rocblas_status_invalid_value;
+    if(!COMPLEX && trans == rocblas_operation_conjugate_transpose)
+        return rocblas_status_invalid_value;
+    if(COMPLEX && trans == rocblas_operation_transpose)
+        return rocblas_status_invalid_value;
+    if(trans != rocblas_operation_none && trans != rocblas_operation_transpose
+       && trans != rocblas_operation_conjugate_transpose)
         return rocblas_status_invalid_value;
 
     // 2. invalid size
     if(m < 0 || n < 0 || kd < 0 || ldc < m)
         return rocblas_status_invalid_size;
 
-    // TODO: add ldv validation based on storev
-    if(storev == rocblas_column_wise && ldv < m)
+    // TODO: add ldv validation
+    if(ldv < m)
         return rocblas_status_invalid_size;
 
     // skip pointer check if querying memory size
@@ -137,8 +142,8 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(rocblas_handle handle,
 
 template <bool BATCHED, bool STRIDED, typename T, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
-                                                    const rocblas_storev storev,
                                                     const rocblas_side side,
+                                                    const rocblas_operation trans,
                                                     const rocblas_int m,
                                                     const rocblas_int n,
                                                     const rocblas_int kd,
@@ -157,9 +162,9 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                                                     T* work,
                                                     T** workArr)
 {
-    ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "storev:", storev, "side:", side, "m:", m, "n:", n,
-                    "kd:", kd, "shiftV:", shiftV, "ldv:", ldv, "shiftC:", shiftC, "ldc:", ldc,
-                    "bc:", batch_count);
+    ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "side:", side, "trans:", trans, "m:", m, "n:", n, "kd:",
+                    kd, "shiftV:", shiftV, "ldv:", ldv, "shiftC:", shiftC, "ldc:", ldc, "bc:",
+                    batch_count);
 
     // quick return
     if(!n || !m || !batch_count)
@@ -177,8 +182,8 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
 
 template <bool BATCHED, bool STRIDED, typename T, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
-                                                    const rocblas_storev storev,
                                                     const rocblas_side side,
+                                                    const rocblas_operation trans,
                                                     const rocblas_int m,
                                                     const rocblas_int n,
                                                     const rocblas_int kd,
@@ -201,9 +206,9 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                                                     T** workArr,
                                                     bool optim_mem)
 {
-    ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "storev:", storev, "side:", side, "m:", m, "n:", n,
-                    "kd:", kd, "shiftV:", shiftV, "ldv:", ldv, "shiftC:", shiftC, "ldc:", ldc,
-                    "bc:", batch_count);
+    ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "side:", side, "trans:", trans, "m:", m, "n:", n, "kd:",
+                    kd, "shiftV:", shiftV, "ldv:", ldv, "shiftC:", shiftC, "ldc:", ldc, "bc:",
+                    batch_count);
 
     // quick return
     if(!n || !m || !batch_count)
@@ -222,8 +227,8 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
 /** Adapts V and C to be of the same type **/
 template <bool BATCHED, bool STRIDED, typename T>
 rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
-                                                    const rocblas_storev storev,
                                                     const rocblas_side side,
+                                                    const rocblas_operation trans,
                                                     const rocblas_int m,
                                                     const rocblas_int n,
                                                     const rocblas_int kd,
@@ -250,15 +255,15 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                             batch_count);
 
     return rocsolver_ormtr_unmtr_hb2st_template<BATCHED, STRIDED>(
-        handle, storev, side, m, n, kd, V, shiftV, ldv, strideV, tau, strideT,
+        handle, side, trans, m, n, kd, V, shiftV, ldv, strideV, tau, strideT,
         cast2constType(workArr), shiftC, ldc, strideC, batch_count, scalars, work,
         workArr + batch_count);
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
 rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
-                                                    const rocblas_storev storev,
                                                     const rocblas_side side,
+                                                    const rocblas_operation trans,
                                                     const rocblas_int m,
                                                     const rocblas_int n,
                                                     const rocblas_int kd,
@@ -289,7 +294,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                             batch_count);
 
     return rocsolver_ormtr_unmtr_hb2st_template<BATCHED, STRIDED>(
-        handle, storev, side, m, n, kd, V, shiftV, ldv, strideV, tau, strideT,
+        handle, side, trans, m, n, kd, V, shiftV, ldv, strideV, tau, strideT,
         cast2constType(workArr), shiftC, ldc, strideC, batch_count, scalars, work, work2, work3,
         work4, workArr + batch_count, optim_mem);
 }
