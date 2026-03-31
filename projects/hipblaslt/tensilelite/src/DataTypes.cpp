@@ -242,7 +242,6 @@ namespace TensileLite
 
         info.packing     = T_Info::Packing;
         info.elementSize = T_Info::ElementSize;
-        info.segmentSize = T_Info::SegmentSize;
 
         info.isComplex  = T_Info::IsComplex;
         info.isIntegral = T_Info::IsIntegral;
