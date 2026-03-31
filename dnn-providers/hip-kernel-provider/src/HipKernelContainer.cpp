@@ -5,8 +5,8 @@
 #include "CurrentDevicePropertyProvider.hpp"
 #include "engines/HipKernelEngine.hpp"
 #include "engines/plans/BatchnormPlanBuilder.hpp"
-#include "engines/plans/RMSnorm/RMSnormPlanBuilder.hpp"
 #include "engines/plans/RMSnorm/RMSnormBwdPlanBuilder.hpp"
+#include "engines/plans/RMSnorm/RMSnormPlanBuilder.hpp"
 #include "hip/HipKernelCompiler.hpp"
 
 #ifdef HIPDNN_ENGINE_ASM_SDPA
