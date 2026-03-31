@@ -283,9 +283,9 @@ class TestDescriptorLiftingAdditions:
         assert "finalizeDescriptor()" in output
 
     def test_graph_descriptor_test_reminder(self, convolution_fwd_config, generator):
-        """Output contains graph descriptor test update reminder."""
+        """Output contains graph descriptor name tests note."""
         output = generator._render_descriptor_lifting_additions(convolution_fwd_config)
-        assert "Graph Descriptor Test Update Required" in output
+        assert "Graph Descriptor Name Tests" in output
         assert "OperationNamePreservedInSerialization" in output
         assert "OperationNameRoundTripThroughLifting" in output
 
@@ -902,20 +902,20 @@ class TestDirectRenderMethods:
         assert len(result) > 0
 
     def test_render_backend_file_count(self, matmul_config, generator, tmp_path):
-        """render_backend for matmul (no mode enums) produces exactly 18 files."""
+        """render_backend for matmul (no mode enums) produces exactly 19 files."""
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = generator.render_backend(matmul_config, output_dir)
-        # 9 file templates + 9 fragment templates = 18
-        assert len(result) == 18
+        # 9 file templates + 10 fragment templates = 19
+        assert len(result) == 19
 
     def test_render_lift_only_file_count(self, matmul_config, generator, tmp_path):
-        """render_lift_only produces exactly 9 outputs (3 files + 5 fragments + 1 additions)."""
+        """render_lift_only produces exactly 11 outputs (3 files + 7 fragments + 1 additions)."""
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = generator.render_lift_only(matmul_config, output_dir)
-        # 3 lift templates + 5 lift fragments + 1 descriptor_lifting_additions = 9
-        assert len(result) == 9
+        # 3 lift templates + 7 lift fragments + 1 descriptor_lifting_additions = 11
+        assert len(result) == 11
 
     def test_render_frontend_file_count(
         self, convolution_fwd_config, generator, tmp_path
@@ -983,3 +983,575 @@ class TestRenderTemplate:
             generator._render_mode_template(
                 "nonexistent_mode_template.j2", convolution_fwd_config, df
             )
+
+
+# ---------------------------------------------------------------------------
+# Optional tensor and shared utility template output verification
+# ---------------------------------------------------------------------------
+
+
+class TestOptionalTensorTemplateOutput:
+    """Verify template changes for optional tensor support and shared utilities."""
+
+    # --- Packer tests ---
+
+    def test_packer_optional_tensors_use_optional_ref(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """Packer uses ensureAndSetOptionalTensorRef for optional tensors."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        packer_path = (
+            output_dir
+            / "frontend"
+            / "include"
+            / "hipdnn_frontend"
+            / "detail"
+            / config.packer_filename
+        )
+        content = packer_path.read_text()
+        assert "ensureAndSetOptionalTensorRef" in content
+
+    def test_packer_required_tensors_use_required_ref(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """Packer uses ensureAndSetTensorRef (not Optional) for required tensors."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        packer_path = (
+            output_dir
+            / "frontend"
+            / "include"
+            / "hipdnn_frontend"
+            / "detail"
+            / config.packer_filename
+        )
+        content = packer_path.read_text()
+        # Find lines with ensureAndSetTensorRef that are NOT ensureAndSetOptionalTensorRef
+        lines = content.split("\n")
+        has_required_ref = any(
+            "ensureAndSetTensorRef" in line
+            and "ensureAndSetOptionalTensorRef" not in line
+            for line in lines
+        )
+        assert (
+            has_required_ref
+        ), "Expected ensureAndSetTensorRef for required tensors (in_0, out_0)"
+
+    def test_packer_all_required_no_optional_ref(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Config with all required tensors does NOT contain ensureAndSetOptionalTensorRef."""
+        config = convolution_fwd_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        packer_path = (
+            output_dir
+            / "frontend"
+            / "include"
+            / "hipdnn_frontend"
+            / "detail"
+            / config.packer_filename
+        )
+        content = packer_path.read_text()
+        assert "ensureAndSetOptionalTensorRef" not in content
+
+    # --- Descriptor setAttribute tests ---
+
+    def test_descriptor_set_optional_tensor(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """Descriptor.cpp uses setOptionalTensorDescriptor for optional tensors."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "setOptionalTensorDescriptor" in content
+
+    def test_descriptor_set_required_tensor(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """Descriptor.cpp uses setTensorDescriptor (not Optional) for required tensors."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        lines = content.split("\n")
+        has_required_set = any(
+            "setTensorDescriptor" in line
+            and "setOptionalTensorDescriptor" not in line
+            and "setTensorDescriptorArray" not in line
+            for line in lines
+        )
+        assert (
+            has_required_set
+        ), "Expected setTensorDescriptor for required tensors (in_0, out_0)"
+
+    # --- Descriptor getAttribute tests ---
+
+    def test_descriptor_get_optional_tensor(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """Descriptor.cpp uses getOptionalTensorDescriptor for optional tensors."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "getOptionalTensorDescriptor" in content
+
+    # --- getTensorDescriptors() tests ---
+
+    def test_descriptor_get_tensors_guards_optional(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """getTensorDescriptors() guards optional tensors with null checks."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "if(_in1Desc)" in content
+
+    # --- toString() tests ---
+
+    def test_descriptor_to_string_optional_uid(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """toString() uses nullopt pattern for optional tensor UIDs."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "nullopt" in content
+
+    def test_descriptor_to_string_optional_scalar(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """toString() uses nullopt pattern for optional scalar fields."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        # Pointwise has optional scalars like relu_lower_clip
+        # The toString should have both the nullopt pattern and std::to_string for them
+        # Count occurrences of the optional scalar pattern
+        optional_scalar_count = content.count("? std::to_string(*_data.")
+        # Pointwise has 7 optional scalar fields (relu_lower_clip, relu_upper_clip,
+        # relu_lower_clip_slope, swish_beta, elu_alpha, softplus_beta, axis)
+        assert (
+            optional_scalar_count >= 1
+        ), "Expected at least one optional scalar with nullopt pattern in toString()"
+
+    # --- Vector field (setScalarVector / getScalarVector) tests ---
+
+    def test_descriptor_vectors_use_scalar_vector(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Descriptor.cpp uses setScalarVector<int64_t> and getScalarVector<int64_t>."""
+        config = convolution_fwd_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "setScalarVector<int64_t>" in content
+        assert "getScalarVector<int64_t>" in content
+
+    def test_descriptor_vectors_no_int64_vector(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Descriptor.cpp does NOT contain setInt64Vector or getInt64Vector."""
+        config = convolution_fwd_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "setInt64Vector" not in content
+        assert "getInt64Vector" not in content
+
+    # --- Tensor array shared utility tests ---
+
+    def test_descriptor_tensor_array_uses_shared_utils(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """Descriptor.cpp uses setTensorDescriptorArray and getTensorDescriptorArray."""
+        config = batchnorm_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "setTensorDescriptorArray" in content
+        assert "getTensorDescriptorArray" in content
+
+    # --- Optional scalar field (setOptionalScalar / getOptionalScalar) tests ---
+
+    def test_descriptor_optional_scalars_use_set_optional_scalar(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """setAttribute uses setOptionalScalar for optional scalar fields."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "setOptionalScalar<" in content
+
+    def test_descriptor_optional_scalars_use_get_optional_scalar(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """getAttribute uses getOptionalScalar for optional scalar fields."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "getOptionalScalar<" in content
+
+    def test_descriptor_required_scalars_no_optional_scalar(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Config with no optional scalars does NOT contain setOptionalScalar."""
+        config = convolution_fwd_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "setOptionalScalar" not in content
+        assert "getOptionalScalar" not in content
+
+    # --- fromNode() dereference tests ---
+
+    def test_descriptor_from_node_dereferences_optional_uid(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """fromNode() dereferences optional tensor UIDs with *."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        # Optional tensor UIDs must be dereferenced with * in findTensorInMap calls
+        assert "*attrs->in_1_tensor_uid" in content
+        assert "*attrs->in_2_tensor_uid" in content
+
+
+# ---------------------------------------------------------------------------
+# Constants file generation
+# ---------------------------------------------------------------------------
+
+
+class TestConstantsGeneration:
+    """Test that the constants header file is generated correctly."""
+
+    def test_constants_generated_when_not_set(
+        self, load_test_config, generator, tmp_path
+    ):
+        """Constants file IS generated for configs without constants_include."""
+        config = load_test_config("batchnorm_backward.yaml")
+        assert not config.test_data.constants_include
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        written = generator.render(config, output_dir, "backend")
+
+        constants_path = (
+            f"test_sdk/include/hipdnn_test_sdk/constants/"
+            f"{config.effective_constants_include}.hpp"
+        )
+        assert constants_path in written
+
+        # Verify the file exists and has correct content
+        full_path = output_dir / constants_path
+        assert full_path.exists()
+        content = full_path.read_text()
+        assert "#pragma once" in content
+        assert "namespace hipdnn_tests::constants" in content
+        prefix = config.tensor_const_prefix
+        assert f"{prefix}TENSOR_DY_UID" in content
+        assert f"{prefix}TENSOR_X_UID" in content
+
+    def test_constants_not_generated_when_set(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Constants file is NOT generated for configs with constants_include."""
+        assert (
+            convolution_fwd_config.test_data.constants_include == "ConvFpropConstants"
+        )
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        written = generator.render(convolution_fwd_config, output_dir, "backend")
+
+        constants_files = [f for f in written if "constants/" in f]
+        assert len(constants_files) == 0
+
+    def test_constants_generated_in_lift_only_mode(
+        self, load_test_config, generator, tmp_path
+    ):
+        """Constants file IS generated in lift-only mode when not set."""
+        config = load_test_config("convolution_bwd.yaml")
+        assert not config.test_data.constants_include
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        written = generator.render(config, output_dir, "lift-only")
+
+        constants_path = (
+            f"test_sdk/include/hipdnn_test_sdk/constants/"
+            f"{config.effective_constants_include}.hpp"
+        )
+        assert constants_path in written
+
+    def test_constants_not_generated_in_lift_only_when_set(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Constants file is NOT generated in lift-only mode when set."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        written = generator.render(convolution_fwd_config, output_dir, "lift-only")
+
+        constants_files = [f for f in written if "constants/" in f]
+        assert len(constants_files) == 0
+
+    def test_constants_has_tensor_uids(self, load_test_config, generator, tmp_path):
+        """Generated constants include UID constants for all tensors."""
+        config = load_test_config("batchnorm_inference.yaml")
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        constants_path = (
+            output_dir
+            / "test_sdk/include/hipdnn_test_sdk/constants"
+            / f"{config.effective_constants_include}.hpp"
+        )
+        content = constants_path.read_text()
+
+        prefix = config.tensor_const_prefix
+        for tf in config.tensor_fields:
+            uid = config.test_data.tensor_uids.get(tf.name, 0)
+            assert f"{prefix}TENSOR_{tf.name.upper()}_UID = {uid}" in content
+
+    def test_constants_has_dims_and_strides(
+        self, load_test_config, generator, tmp_path
+    ):
+        """Generated constants include dims/strides for tensors with configs."""
+        config = load_test_config("batchnorm_inference.yaml")
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        constants_path = (
+            output_dir
+            / "test_sdk/include/hipdnn_test_sdk/constants"
+            / f"{config.effective_constants_include}.hpp"
+        )
+        content = constants_path.read_text()
+
+        prefix = config.tensor_const_prefix
+        assert f"{prefix}TENSOR_X_DIMS" in content
+        assert f"{prefix}TENSOR_X_STRIDES" in content
+
+    def test_all_test_files_reference_constants_header(
+        self, load_test_config, generator, tmp_path
+    ):
+        """All generated test files include the constants header."""
+        config = load_test_config("batchnorm_inference.yaml")
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        expected_include = config.effective_constants_include
+
+        test_files = [
+            output_dir / "backend/tests/descriptors" / config.test_descriptor_filename,
+            output_dir / "backend/tests/descriptors" / config.test_graph_filename,
+            output_dir / "backend/tests/descriptors" / config.test_from_node_filename,
+            output_dir / "tests/frontend" / config.test_integration_filename,
+            output_dir / "tests/frontend" / config.test_integration_lifting_filename,
+        ]
+
+        for test_file in test_files:
+            content = test_file.read_text()
+            assert (
+                expected_include in content
+            ), f"{test_file.name} does not reference {expected_include}"
+
+
+class TestLiftingTemplateImprovements:
+    """Test ASSERT_EQ and auto-UIDs in lifting template."""
+
+    def test_lifting_uses_assert_eq_not_ge(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Lifting test uses ASSERT_EQ for tensorMap.size(), not ASSERT_GE."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lifting_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_lifting_filename
+        )
+        content = lifting_path.read_text()
+
+        assert "ASSERT_GE(tensorMap.size()" not in content
+        assert "ASSERT_EQ(tensorMap.size()" in content
+
+    def test_lifting_has_auto_uid_test(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Lifting test includes AutoAssignedUidsPreservedInLiftingRoundTrip."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lifting_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_lifting_filename
+        )
+        content = lifting_path.read_text()
+
+        assert "AutoAssignedUidsPreservedInLiftingRoundTrip" in content
+        assert "std::adjacent_find" in content
+        assert "std::set<int64_t>" in content
+
+    def test_lifting_includes_algorithm_and_set(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Lifting test includes <algorithm> and <set> headers."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lifting_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_lifting_filename
+        )
+        content = lifting_path.read_text()
+
+        assert "#include <algorithm>" in content
+        assert "#include <set>" in content
+
+    def test_lifting_uses_constants_not_inline(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Lifting test uses K_TENSOR_ constants, not K_TEST_ inline constants."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lifting_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_lifting_filename
+        )
+        content = lifting_path.read_text()
+
+        assert "K_TEST_" not in content
+        assert "K_TENSOR_X_UID" in content
+        assert "using namespace hipdnn_tests::constants;" in content
+
+    def test_lowering_uses_constants_not_inline(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Lowering test uses K_TENSOR_ constants, not K_TEST_ inline constants."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lowering_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_filename
+        )
+        content = lowering_path.read_text()
+
+        assert "K_TEST_" not in content
+        assert "K_TENSOR_X_UID" in content
+        assert "using namespace hipdnn_tests::constants;" in content
+
+    def test_lowering_uses_assert_eq_not_ge(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Lowering test uses ASSERT_EQ for tensor count, not ASSERT_GE."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lowering_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_filename
+        )
+        content = lowering_path.read_text()
+
+        assert "ASSERT_GE(graphT.tensors.size()" not in content
+        assert "ASSERT_EQ(graphT.tensors.size()" in content
