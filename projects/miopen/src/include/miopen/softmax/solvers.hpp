@@ -34,11 +34,15 @@ struct PerformanceConfigSoftmax : PerfConfigBase<PerformanceConfigSoftmax>
     {
     }
     PerformanceConfigSoftmax()
-        : local_size(static_cast<int>(start_local_size)), vectorized(start_vectorized), separate_stride(start_separate_stride)
+        : local_size(static_cast<int>(start_local_size)),
+          vectorized(start_vectorized),
+          separate_stride(start_separate_stride)
     {
     }
     PerformanceConfigSoftmax(bool)
-        : local_size(static_cast<int>(start_local_size)), vectorized(start_vectorized), separate_stride(start_separate_stride)
+        : local_size(static_cast<int>(start_local_size)),
+          vectorized(start_vectorized),
+          separate_stride(start_separate_stride)
     {
     }
     void HeuristicInit(const miopen::softmax::ProblemDescription& problem);
@@ -64,9 +68,9 @@ public:
     {
         return problem.stride == 1;
     }
-    static constexpr auto start_vectorized   = false;
+    static constexpr auto start_vectorized        = false;
     static constexpr auto default_separate_stride = true;
-    static constexpr auto start_separate_stride = false;
+    static constexpr auto start_separate_stride   = false;
 };
 
 struct Softmax final : SoftmaxTunableSolver<PerformanceConfigSoftmax>

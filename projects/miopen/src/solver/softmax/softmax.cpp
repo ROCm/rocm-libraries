@@ -97,8 +97,8 @@ Softmax::GetDefaultPerformanceConfig(const ExecutionContext&,
 {
     PerformanceConfigSoftmax config;
     config.HeuristicInit(problem);
-    config.local_size = PerformanceConfigSoftmax::default_local_size;
-    config.vectorized = PerformanceConfigSoftmax::default_vectorized(problem);
+    config.local_size      = PerformanceConfigSoftmax::default_local_size;
+    config.vectorized      = PerformanceConfigSoftmax::default_vectorized(problem);
     config.separate_stride = PerformanceConfigSoftmax::default_separate_stride;
     MIOPEN_LOG_I(config.ToString());
     return config;
@@ -125,19 +125,18 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     size_t grid_size, xlocalsize, ygridsize;
     if(config.separate_stride)
     {
-        grid_size = problem.outer_size;
+        grid_size  = problem.outer_size;
         xlocalsize = config.local_size;
-        ygridsize = problem.stride;
+        ygridsize  = problem.stride;
     }
     else
     {
-        grid_size = problem.outer_size * problem.stride;
+        grid_size  = problem.outer_size * problem.stride;
         xlocalsize = config.local_size;
         ygridsize  = 1;
     }
-    auto num_batch        = problem.inner_size < xlocalsize
-                                ? nextPow2(xlocalsize / problem.inner_size)
-                                : 1;
+    auto num_batch =
+        problem.inner_size < xlocalsize ? nextPow2(xlocalsize / problem.inner_size) : 1;
     auto batch_size       = xlocalsize / num_batch;
     auto vectorized_count = dtype == miopenFloat ? 4 : 8;
     if(config.vectorized && num_batch > 1 && batch_size >= vectorized_count)
@@ -147,8 +146,8 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     }
     auto u_batch_size =
         batch_size < problem.inner_size ? nextPow2(problem.inner_size / batch_size) : 1;
-    auto workgroups = (grid_size + num_batch - 1) / num_batch;
-    size_t xgridsize = workgroups * xlocalsize;
+    auto workgroups   = (grid_size + num_batch - 1) / num_batch;
+    size_t xgridsize  = workgroups * xlocalsize;
     size_t ylocalsize = 1;
     size_t zlocalsize = 1;
     size_t zgridsize  = 1;
@@ -264,10 +263,11 @@ bool PerformanceConfigSoftmax::SetNextValue(const miopen::softmax::ProblemDescri
         local_size = start_local_size;
         vectorized = !start_vectorized;
     }
-    if(separate_stride == start_separate_stride && vectorized != start_vectorized && local_size > max_local_size)
+    if(separate_stride == start_separate_stride && vectorized != start_vectorized &&
+       local_size > max_local_size)
     {
-        local_size = start_local_size;
-        vectorized = start_vectorized;
+        local_size      = start_local_size;
+        vectorized      = start_vectorized;
         separate_stride = !start_separate_stride;
     }
     return local_size <= max_local_size;
@@ -303,7 +303,8 @@ bool PerformanceConfigSoftmax::IsValid(const ExecutionContext&,
 
 bool PerformanceConfigSoftmax::operator==(const PerformanceConfigSoftmax& other) const
 {
-    return local_size == other.local_size && vectorized == other.vectorized && separate_stride == other.separate_stride;
+    return local_size == other.local_size && vectorized == other.vectorized &&
+           separate_stride == other.separate_stride;
 }
 
 } // namespace softmax
