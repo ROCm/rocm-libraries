@@ -189,19 +189,20 @@ __forceinline__ __device__ void get_indices(unsigned int& gid, unsigned int& o, 
 {
     if constexpr(SEPARATE_STRIDE)
     {
-        o = blockIdx.x;
-        s = blockIdx.y;
+        o   = blockIdx.x;
+        s   = blockIdx.y;
         gid = o * STRIDE + s;
     }
     else
     {
         gid = blockIdx.x;
-        o = blockIdx.x / STRIDE;
-        s = blockIdx.x % STRIDE;
+        o   = blockIdx.x / STRIDE;
+        s   = blockIdx.x % STRIDE;
     }
 }
 
-__forceinline__ __device__ void get_indices_stream(unsigned int& o, unsigned int& s, const unsigned int batch)
+__forceinline__ __device__ void
+get_indices_stream(unsigned int& o, unsigned int& s, const unsigned int batch)
 {
     if constexpr(SEPARATE_STRIDE)
     {
@@ -260,9 +261,16 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                     tmp        = max(CVT_FLOAT2ACCUM(x[x_idx]), tmp);
                 }
             }
-            reduce<LOCAL_SIZE>(ltmp, lid, tmp, reduce_max);
-            channel_max = ltmp[0];
-            __syncthreads();
+            if constexpr(LOCAL_SIZE > 1)
+            {
+                reduce<LOCAL_SIZE>(ltmp, lid, tmp, reduce_max);
+                channel_max = ltmp[0];
+                __syncthreads();
+            }
+            else
+            {
+                channel_max = tmp;
+            }
         }
 
         if constexpr(USE_SOFTMAX_LOG)
@@ -326,9 +334,16 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 }
             }
         }
-        // TODO: if constexpr(LOCAL_SIZE > 1)
-        reduce<LOCAL_SIZE>(ltmp, lid, tmp, reduce_sum_log);
-        FLOAT_ACCUM channel_sum = ltmp[0];
+        FLOAT_ACCUM channel_sum;
+        if constexpr(LOCAL_SIZE > 1)
+        {
+            reduce<LOCAL_SIZE>(ltmp, lid, tmp, reduce_sum_log);
+            channel_sum = ltmp[0];
+        }
+        else
+        {
+            channel_sum = tmp;
+        }
 
         if constexpr(VECTORIZED)
         {
@@ -426,7 +441,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         }
         const unsigned int offset = o * INNER_SIZE * STRIDE + s;
         FLOAT_ACCUM tmp           = -MAX_VAL_ACCUM;
-        FLOAT_ACCUM x_values[U_BATCH_SIZE * load_factor<T>]; // TODO: VECTORIZED ? U_BATCH_SIZE * load_factor<T> : U_BATCH_SIZE
+        FLOAT_ACCUM x_values[VECTORIZED ? U_BATCH_SIZE * load_factor<T> : U_BATCH_SIZE];
         for(FLOAT_ACCUM& x_value : x_values)
         {
             x_value = -MAX_VAL_ACCUM;
@@ -480,10 +495,16 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         FLOAT_ACCUM channel_max = 0;
         if constexpr(!USE_SOFTMAX_FAST)
         {
-            // TODO: if constexpr(BATCH_SIZE > 1)
-            reduce_block<LOCAL_SIZE, BATCH_SIZE>(ltmp, lid, batch_lid, tmp, reduce_max);
-            channel_max = ltmp[batch * BATCH_SIZE];
-            __syncthreads();
+            if constexpr(BATCH_SIZE > 1)
+            {
+                reduce_block<LOCAL_SIZE, BATCH_SIZE>(ltmp, lid, batch_lid, tmp, reduce_max);
+                channel_max = ltmp[batch * BATCH_SIZE];
+                __syncthreads();
+            }
+            else
+            {
+                channel_max = tmp;
+            }
         }
 
         if constexpr(USE_SOFTMAX_LOG)
@@ -542,9 +563,16 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 ++index;
             }
         }
-        // TODO: if constexpr(BATCH_SIZE > 1)
-        reduce_block<LOCAL_SIZE, BATCH_SIZE>(ltmp, lid, batch_lid, tmp, reduce_sum_log);
-        FLOAT_ACCUM channel_sum = ltmp[batch * BATCH_SIZE];
+        FLOAT_ACCUM channel_sum;
+        if constexpr(BATCH_SIZE > 1)
+        {
+            reduce_block<LOCAL_SIZE, BATCH_SIZE>(ltmp, lid, batch_lid, tmp, reduce_sum_log);
+            channel_sum = ltmp[batch * BATCH_SIZE];
+        }
+        else
+        {
+            channel_sum = tmp;
+        }
 
         index = 0;
         if constexpr(VECTORIZED)
@@ -699,9 +727,11 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 channel_dot += value;
             }
         }
-        // TODO: if constexpr(LOCAL_SIZE > 1)
-        reduce<LOCAL_SIZE>(ltmp, lid, channel_dot, reduce_sum);
-        channel_dot = ltmp[0];
+        if constexpr(LOCAL_SIZE > 1)
+        {
+            reduce<LOCAL_SIZE>(ltmp, lid, channel_dot, reduce_sum);
+            channel_dot = ltmp[0];
+        }
 
         if constexpr(VECTORIZED)
         {
@@ -782,20 +812,20 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
         get_indices(gid, o, s);
         const unsigned int batch_lid = lid % BATCH_SIZE;
         const unsigned int batch     = lid / BATCH_SIZE;
-        o         = (NUM_BATCH * gid + batch) / STRIDE;
+        o                            = (NUM_BATCH * gid + batch) / STRIDE;
         if(o >= OUTER_SIZE)
         {
             return;
         }
-        s      = (NUM_BATCH * gid + batch) % STRIDE;
+        s                         = (NUM_BATCH * gid + batch) % STRIDE;
         const unsigned int offset = o * INNER_SIZE * STRIDE + s;
         FLOAT_ACCUM channel_dot   = 0;
-        FLOAT_ACCUM y_values[U_BATCH_SIZE * load_factor<T>];
+        FLOAT_ACCUM y_values[VECTORIZED ? U_BATCH_SIZE * load_factor<T> : U_BATCH_SIZE];
         for(FLOAT_ACCUM& y_value : y_values)
         {
             y_value = 0;
         }
-        FLOAT_ACCUM dy_values[U_BATCH_SIZE * load_factor<T>];
+        FLOAT_ACCUM dy_values[VECTORIZED ? U_BATCH_SIZE * load_factor<T> : U_BATCH_SIZE];
         for(FLOAT_ACCUM& dy_value : dy_values)
         {
             dy_value = 0;
@@ -855,8 +885,11 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 ++index;
             }
         }
-        reduce_block<LOCAL_SIZE, BATCH_SIZE>(ltmp, lid, batch_lid, channel_dot, reduce_sum);
-        channel_dot = ltmp[batch * BATCH_SIZE];
+        if constexpr(BATCH_SIZE > 1)
+        {
+            reduce_block<LOCAL_SIZE, BATCH_SIZE>(ltmp, lid, batch_lid, channel_dot, reduce_sum);
+            channel_dot = ltmp[batch * BATCH_SIZE];
+        }
 
         index = 0;
         if constexpr(VECTORIZED)
@@ -926,18 +959,19 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
 }
 
 extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SoftmaxFwd(const DATA_TYPE* __restrict__ x,
-                                      DATA_TYPE* __restrict__ y,
-                                      const float alpha,
-                                      const float beta)
+                                                                    DATA_TYPE* __restrict__ y,
+                                                                    const float alpha,
+                                                                    const float beta)
 {
     softmaxfwd<DATA_TYPE>(x, y, alpha, beta);
 }
 
-extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SoftmaxBwd(const DATA_TYPE* __restrict__ y,
-                                      const DATA_TYPE* __restrict__ dy,
-                                      DATA_TYPE* __restrict__ dx,
-                                      const float alpha,
-                                      const float beta)
+extern "C" __global__
+__launch_bounds__(LOCAL_SIZE) void SoftmaxBwd(const DATA_TYPE* __restrict__ y,
+                                              const DATA_TYPE* __restrict__ dy,
+                                              DATA_TYPE* __restrict__ dx,
+                                              const float alpha,
+                                              const float beta)
 {
     softmaxbwd<DATA_TYPE>(y, dy, dx, alpha, beta);
 }
