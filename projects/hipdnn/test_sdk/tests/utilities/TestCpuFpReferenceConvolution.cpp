@@ -35,9 +35,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwdInferenceBasic)
         weightTensor.memory().hostData()[i] = 1.0f;
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -72,9 +72,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwdInferenceWithStride)
         weightTensor.memory().hostData()[i] = 1.0f;
     }
 
-    std::vector<int64_t> strides = {2, 2};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {2, 2};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -106,9 +106,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwdInferenceWithPadding)
         weightTensor.memory().hostData()[i] = 1.0f;
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {1, 1};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {1, 1};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -137,9 +137,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwdInferenceMultiChannel)
         weightTensor.memory().hostData()[i] = 1.0f;
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -168,9 +168,9 @@ TEST(TestCpuFpReferenceConvolutionBfp16, ConvolutionFwdInferenceBasic)
         weightTensor.memory().hostData()[i] = bfloat16(1.0f);
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::fprop<bfloat16, bfloat16, bfloat16, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -197,9 +197,9 @@ TEST(TestCpuFpReferenceConvolutionFp16, ConvolutionFwdInferenceBasic)
         weightTensor.memory().hostData()[i] = half(1.0f);
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::fprop<half, half, half, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -227,9 +227,9 @@ TEST(TestCpuFpReferenceConvolutionFp64, ConvolutionFwdInferenceBasic)
         weightTensor.memory().hostData()[i] = 1.0;
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::fprop<double, double, double, double>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -259,9 +259,9 @@ TEST(TestCpuFpReferenceConvolutionInt8, ConvolutionFwdInferenceBasic)
         weightTensor.memory().hostData()[i] = 1.0;
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::fprop<int8_t, int8_t, int8_t, int32_t>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -292,9 +292,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwdInferenceWithDilation)
         weightTensor.memory().hostData()[i] = 1.0f;
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {2, 2};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {2, 2};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -321,9 +321,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwdInferenceSanityValidation)
     // Weight: [2]
     weightTensor.setHostValue(2.0f, 0, 0, 0, 0);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -356,9 +356,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd1D)
     weightTensor.setHostValue(2.0f, 0, 0, 1);
     weightTensor.setHostValue(1.0f, 0, 0, 2);
 
-    std::vector<int64_t> strides = {1};
-    std::vector<int64_t> dilations = {1};
-    std::vector<int64_t> padding = {0};
+    const std::vector<int64_t> strides = {1};
+    const std::vector<int64_t> dilations = {1};
+    const std::vector<int64_t> padding = {0};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -400,9 +400,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd1DStride)
         weightTensor.setHostValue(1.0f, 0, 0, i);
     }
 
-    std::vector<int64_t> strides = {2}; // stride=2 in width dimension
-    std::vector<int64_t> dilations = {1};
-    std::vector<int64_t> padding = {0};
+    const std::vector<int64_t> strides = {2}; // stride=2 in width dimension
+    const std::vector<int64_t> dilations = {1};
+    const std::vector<int64_t> padding = {0};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -452,16 +452,16 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DGrouped)
         weightTensor.memory().hostData()[i] = 0.2f;
     }
 
-    std::vector<int64_t> strides = {1, 1, 1};
-    std::vector<int64_t> dilations = {1, 1, 1};
-    std::vector<int64_t> padding = {0, 0, 0};
+    const std::vector<int64_t> strides = {1, 1, 1};
+    const std::vector<int64_t> dilations = {1, 1, 1};
+    const std::vector<int64_t> padding = {0, 0, 0};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 
     // Verify grouped convolution produces different outputs for each group
-    float output0 = outputTensor.getHostValue(0, 0, 0, 0, 0);
-    float output1 = outputTensor.getHostValue(0, 1, 0, 0, 0);
+    const float output0 = outputTensor.getHostValue(0, 0, 0, 0, 0);
+    const float output1 = outputTensor.getHostValue(0, 1, 0, 0, 0);
 
     // 0.1 * (sum(i for i in range(10, 18)) + sum(i for i in range(20, 28))) = 29.6
     EXPECT_EQ(output0, 29.6f) << "Group 0 output should be 29.6";
@@ -496,9 +496,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3D)
         weightTensor.memory().hostData()[i] = 1.0f;
     }
 
-    std::vector<int64_t> strides = {1, 1, 1};
-    std::vector<int64_t> dilations = {1, 1, 1};
-    std::vector<int64_t> padding = {0, 0, 0};
+    const std::vector<int64_t> strides = {1, 1, 1};
+    const std::vector<int64_t> dilations = {1, 1, 1};
+    const std::vector<int64_t> padding = {0, 0, 0};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -549,9 +549,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DNdhwc)
         weightTensor.memory().hostData()[i] = 1.0f;
     }
 
-    std::vector<int64_t> strides = {1, 1, 1};
-    std::vector<int64_t> dilations = {1, 1, 1};
-    std::vector<int64_t> padding = {0, 0, 0};
+    const std::vector<int64_t> strides = {1, 1, 1};
+    const std::vector<int64_t> dilations = {1, 1, 1};
+    const std::vector<int64_t> padding = {0, 0, 0};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -593,9 +593,9 @@ TEST(TestCpuFpReferenceConvolutionFp64, ConvolutionFwd1D)
     weightTensor.setHostValue(1.0, 0, 0, 0);
     weightTensor.setHostValue(-1.0, 0, 0, 1);
 
-    std::vector<int64_t> strides = {1};
-    std::vector<int64_t> dilations = {1};
-    std::vector<int64_t> padding = {0};
+    const std::vector<int64_t> strides = {1};
+    const std::vector<int64_t> dilations = {1};
+    const std::vector<int64_t> padding = {0};
 
     CpuFpReferenceConvolution::fprop<double, double, double, double>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -636,9 +636,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd2D)
         weightTensor.memory().hostData()[i] = 1.0f;
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -694,9 +694,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd2DNhwc)
         weightTensor.memory().hostData()[i] = 1.0f;
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -750,9 +750,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd2DSymmetricPadding)
         weightTensor.memory().hostData()[i] = 1.0f;
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {1, 1}; // Symmetric padding
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {1, 1}; // Symmetric padding
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -806,9 +806,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DSymmetricPadding)
         weightTensor.memory().hostData()[i] = 1.0f;
     }
 
-    std::vector<int64_t> strides = {1, 1, 1};
-    std::vector<int64_t> dilations = {1, 1, 1};
-    std::vector<int64_t> padding = {1, 1, 1}; // Symmetric padding in all dimensions
+    const std::vector<int64_t> strides = {1, 1, 1};
+    const std::vector<int64_t> dilations = {1, 1, 1};
+    const std::vector<int64_t> padding = {1, 1, 1}; // Symmetric padding in all dimensions
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -851,8 +851,8 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DSymmetricPadding)
         {
             for(int w = 0; w < 3; ++w)
             {
-                float actual = outputTensor.getHostValue(0, 0, d, h, w);
-                float expected = expectedOutput[static_cast<size_t>(index++)];
+                const float actual = outputTensor.getHostValue(0, 0, d, h, w);
+                const float expected = expectedOutput[static_cast<size_t>(index++)];
                 EXPECT_FLOAT_EQ(actual, expected) << "Mismatch at output coordinate (d,h,w) = ("
                                                   << d << "," << h << "," << w << ")";
             }
@@ -883,10 +883,10 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd2DAsymmetricPadding)
     weightTensor.setHostValue(3.0f, 0, 0, 1, 0);
     weightTensor.setHostValue(4.0f, 0, 0, 1, 1);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> prePadding = {1, 1}; // 1 padding at top/left
-    std::vector<int64_t> postPadding = {1, 2}; // 1 padding at bottom, 2 at right
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> prePadding = {1, 1}; // 1 padding at top/left
+    const std::vector<int64_t> postPadding = {1, 2}; // 1 padding at bottom, 2 at right
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding);
@@ -905,7 +905,7 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd2DAsymmetricPadding)
     {
         for(int w = 0; w < 5; ++w)
         {
-            float val = outputTensor.getHostValue(0, 0, h, w);
+            const float val = outputTensor.getHostValue(0, 0, h, w);
             EXPECT_GE(val, 0.0f) << "Output at (" << h << "," << w << ") should be non-negative";
             count++;
         }
@@ -939,10 +939,10 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DAsymmetricPadding)
         weightTensor.memory().hostData()[i] = 1.0f;
     }
 
-    std::vector<int64_t> strides = {1, 1, 1};
-    std::vector<int64_t> dilations = {1, 1, 1};
-    std::vector<int64_t> prePadding = {1, 0, 1}; // Different padding for each dimension
-    std::vector<int64_t> postPadding = {1, 0, 2}; // Different padding for each dimension
+    const std::vector<int64_t> strides = {1, 1, 1};
+    const std::vector<int64_t> dilations = {1, 1, 1};
+    const std::vector<int64_t> prePadding = {1, 0, 1}; // Different padding for each dimension
+    const std::vector<int64_t> postPadding = {1, 0, 2}; // Different padding for each dimension
 
     CpuFpReferenceConvolution::fprop<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding);
@@ -954,7 +954,7 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DAsymmetricPadding)
         {
             for(int w = 0; w < 4; ++w)
             {
-                float val = outputTensor.getHostValue(0, 0, d, h, w);
+                const float val = outputTensor.getHostValue(0, 0, d, h, w);
                 EXPECT_GE(val, 0.0f)
                     << "Output at (" << d << "," << h << "," << w << ") should be non-negative";
             }
@@ -978,9 +978,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataSanityValidation)
     // Weight: [2]
     weightTensor.setHostValue(2.0f, 0, 0, 0, 0);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1030,9 +1030,9 @@ TYPED_TEST(CpuFpReferenceConvolutionBwdDataBasic, ConvolutionBwdDataBasic)
         weightTensor.memory().hostData()[i] = weightData[i];
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<
         TypeParam,
@@ -1061,9 +1061,9 @@ TEST(TestCpuFpReferenceConvolutionInt8, ConvolutionBwdDataBasic)
         weightTensor.memory().hostData()[i] = static_cast<int8_t>(i + 1);
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<int8_t, int8_t, int8_t, int32_t>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1089,9 +1089,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataSimple)
         weightTensor.memory().hostData()[i] = weightData[i];
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1119,9 +1119,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataSimple2x2)
         weightTensor.memory().hostData()[i] = weightData[i];
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1152,9 +1152,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataSimple3x3)
         weightTensor.memory().hostData()[i] = weightData[i];
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1192,9 +1192,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataSimple3x3DifferentOutp
         weightTensor.memory().hostData()[i] = weightData[i];
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1261,9 +1261,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataChannels)
         }
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1274,7 +1274,7 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataChannels)
         {
             for(int w = 0; w < 3; ++w)
             {
-                float gradValue = inputTensor.getHostValue(0, ic, h, w);
+                const float gradValue = inputTensor.getHostValue(0, ic, h, w);
 
                 if((h == 0 && w == 0) || (h == 0 && w == 2) || (h == 2 && w == 0)
                    || (h == 2 && w == 2))
@@ -1331,9 +1331,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataGroupedChannels)
     weightTensor.setHostValue(1.5f, 1, 0, 0, 0); // weight for input channel 2
     weightTensor.setHostValue(2.0f, 1, 1, 0, 0); // weight for input channel 3
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1393,9 +1393,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataGroupedBatches)
     // Group 1: weight = 1.5 (for input channel 1 -> output channel 1)
     weightTensor.setHostValue(1.5f, 1, 0, 0, 0);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1438,9 +1438,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataGroupedAsymmetricInput
     // Group 1: weight = 1.5 (for input channel 1 -> output channel 1)
     weightTensor.setHostValue(1.5f, 1, 0, 0, 0);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1488,9 +1488,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataGroupedAsymmetricKerne
     weightTensor.setHostValue(1.5f, 1, 0, 0, 0);
     weightTensor.setHostValue(2.0f, 1, 0, 0, 1);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1527,9 +1527,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataGroupedAsymmetricKerne
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataStrides)
 {
-    std::vector<int64_t> strides = {2, 2};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {2, 2};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     // Basic convolution: 1x1x3x3 input, 1x1x2x2 weight -> 1x1x1x1 output with kernel strides
     Tensor<float> inputTensor({1, 1, 3, 3});
@@ -1578,9 +1578,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataDilation)
         weightTensor.memory().hostData()[i] = weightData[i];
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {2, 2};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {2, 2};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1631,9 +1631,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataPadding)
         weightTensor.memory().hostData()[i] = weightData[i];
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {1, 1};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {1, 1};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1677,9 +1677,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataPaddingAsymmetric)
         weightTensor.memory().hostData()[i] = weightData[i];
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {1, 1};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {1, 1};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1715,9 +1715,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataPaddingZero)
         weightTensor.memory().hostData()[i] = weightData[i];
     }
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -1768,9 +1768,9 @@ TYPED_TEST(CpuFpReferenceConvolutionWrwBasic, TypesConvolutionWrwBasic)
     // Initialize weight to zero
     gradWeightTensor.setHostValue(static_cast<TypeParam>(0.0), 0, 0, 0, 0);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::wgrad<
         TypeParam,
@@ -1821,9 +1821,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightMultiBatch)
 
     gradWeightTensor.setHostValue(0.0f, 0, 0, 0, 0);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::wgrad<float, float, float, float>(
         inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
@@ -1868,9 +1868,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightMultiChannel)
     // Initialize weights to zero
     gradWeightTensor.fillWithValue(0.0f);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::wgrad<float, float, float, float>(
         inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
@@ -1921,9 +1921,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightGrouped)
 
     // Initialize weights to zero
     gradWeightTensor.fillWithValue(0.0f);
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
     CpuFpReferenceConvolution::wgrad<float, float, float, float>(
         inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
 
@@ -1956,10 +1956,10 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightAsymmetricPadding)
     // Initialize weight gradient to zero
     gradWeightTensor.setHostValue(0.0f, 0, 0, 0, 0);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> prePadding = {1, 1}; // 1 padding at top/left
-    std::vector<int64_t> postPadding = {1, 2}; // 1 padding at bottom, 2 at right
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> prePadding = {1, 1}; // 1 padding at top/left
+    const std::vector<int64_t> postPadding = {1, 2}; // 1 padding at bottom, 2 at right
 
     CpuFpReferenceConvolution::wgrad<float, float, float, float>(inputTensor,
                                                                  gradWeightTensor,
@@ -2002,9 +2002,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightStrides)
     // Initialize weight gradients to zero
     gradWeightTensor.fillWithValue(0.0f);
 
-    std::vector<int64_t> strides = {2, 2};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {2, 2};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::wgrad<float, float, float, float>(
         inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
@@ -2044,9 +2044,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightDilations)
     // Initialize weight gradients to zero
     gradWeightTensor.fillWithValue(0.0f);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {2, 2};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {2, 2};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::wgrad<float, float, float, float>(
         inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
@@ -2081,9 +2081,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightPadding)
     // Initialize weight gradients to zero
     gradWeightTensor.fillWithValue(0.0f);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {1, 1};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {1, 1};
 
     CpuFpReferenceConvolution::wgrad<float, float, float, float>(
         inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
@@ -2124,9 +2124,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightAsymmetricInput)
     gradWeightTensor.setHostValue(0.0f, 0, 0, 0, 0);
     gradWeightTensor.setHostValue(0.0f, 0, 0, 0, 1);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::wgrad<float, float, float, float>(
         inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
@@ -2168,9 +2168,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightAsymmetricKernel)
     gradWeightTensor.setHostValue(0.0f, 0, 0, 0, 0);
     gradWeightTensor.setHostValue(0.0f, 0, 0, 1, 0);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
     CpuFpReferenceConvolution::wgrad<float, float, float, float>(
         inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
@@ -2203,9 +2203,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdWeight1D)
         outputTensor.setHostValue(static_cast<float>(i + 1), 0, 0, i);
     }
 
-    std::vector<int64_t> strides = {1};
-    std::vector<int64_t> dilations = {1};
-    std::vector<int64_t> padding = {0};
+    const std::vector<int64_t> strides = {1};
+    const std::vector<int64_t> dilations = {1};
+    const std::vector<int64_t> padding = {0};
 
     CpuFpReferenceConvolution::wgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -2251,9 +2251,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdWeight3D)
     // Initialize weight gradients to zero
     gradWeightTensor.fillWithValue(0.0f);
 
-    std::vector<int64_t> strides = {1, 1, 1};
-    std::vector<int64_t> dilations = {1, 1, 1};
-    std::vector<int64_t> padding = {0, 0, 0};
+    const std::vector<int64_t> strides = {1, 1, 1};
+    const std::vector<int64_t> dilations = {1, 1, 1};
+    const std::vector<int64_t> padding = {0, 0, 0};
 
     CpuFpReferenceConvolution::wgrad<float, float, float, float>(
         inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
@@ -2288,9 +2288,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData1D)
     weightTensor.setHostValue(2.0f, 0, 0, 1);
     weightTensor.setHostValue(3.0f, 0, 0, 2);
 
-    std::vector<int64_t> strides = {1};
-    std::vector<int64_t> dilations = {1};
-    std::vector<int64_t> padding = {0};
+    const std::vector<int64_t> strides = {1};
+    const std::vector<int64_t> dilations = {1};
+    const std::vector<int64_t> padding = {0};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -2327,9 +2327,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData1DPadding)
     weightTensor.setHostValue(2.0f, 0, 0, 1);
     weightTensor.setHostValue(1.0f, 0, 0, 2);
 
-    std::vector<int64_t> strides = {1};
-    std::vector<int64_t> dilations = {1};
-    std::vector<int64_t> padding = {1}; // Padding only in width
+    const std::vector<int64_t> strides = {1};
+    const std::vector<int64_t> dilations = {1};
+    const std::vector<int64_t> padding = {1}; // Padding only in width
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -2338,8 +2338,8 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData1DPadding)
 
     for(int i = 0; i < 5; ++i)
     {
-        float actual = inputTensor.getHostValue(0, 0, i);
-        float expected = expectedGradients[static_cast<size_t>(i)];
+        const float actual = inputTensor.getHostValue(0, 0, i);
+        const float expected = expectedGradients[static_cast<size_t>(i)];
         EXPECT_FLOAT_EQ(actual, expected) << "Mismatch at grad_X index [" << i << "]";
     }
 }
@@ -2360,9 +2360,9 @@ TEST(TestCpuFpReferenceConvolutionBfp16, ConvolutionBwdData3D)
     // Set weight value
     weightTensor.setHostValue(2.0_bf, 0, 0, 0, 0, 0);
 
-    std::vector<int64_t> strides = {1, 1, 1};
-    std::vector<int64_t> dilations = {1, 1, 1};
-    std::vector<int64_t> padding = {0, 0, 0};
+    const std::vector<int64_t> strides = {1, 1, 1};
+    const std::vector<int64_t> dilations = {1, 1, 1};
+    const std::vector<int64_t> padding = {0, 0, 0};
 
     CpuFpReferenceConvolution::dgrad<bfloat16, bfloat16, bfloat16, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -2390,9 +2390,9 @@ TEST(TestCpuFpReferenceConvolutionBfp16, ConvolutionBwdData3DNdhwc)
     // Set weight value
     weightTensor.setHostValue(2.0_bf, 0, 0, 0, 0, 0);
 
-    std::vector<int64_t> strides = {1, 1, 1};
-    std::vector<int64_t> dilations = {1, 1, 1};
-    std::vector<int64_t> padding = {0, 0, 0};
+    const std::vector<int64_t> strides = {1, 1, 1};
+    const std::vector<int64_t> dilations = {1, 1, 1};
+    const std::vector<int64_t> padding = {0, 0, 0};
 
     CpuFpReferenceConvolution::dgrad<bfloat16, bfloat16, bfloat16, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -2420,9 +2420,9 @@ TEST(TestCpuFpReferenceConvolutionFp64, ConvolutionBwdData1D)
     weightTensor.setHostValue(0.5, 0, 0, 0);
     weightTensor.setHostValue(1.5, 0, 0, 1);
 
-    std::vector<int64_t> strides = {1};
-    std::vector<int64_t> dilations = {1};
-    std::vector<int64_t> padding = {0};
+    const std::vector<int64_t> strides = {1};
+    const std::vector<int64_t> dilations = {1};
+    const std::vector<int64_t> padding = {0};
 
     CpuFpReferenceConvolution::dgrad<double, double, double, double>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
@@ -2457,10 +2457,10 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData2DAsymmetricPadding)
     weightTensor.setHostValue(3.0f, 0, 0, 1, 0);
     weightTensor.setHostValue(4.0f, 0, 0, 1, 1);
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> prePadding = {1, 1};
-    std::vector<int64_t> postPadding = {1, 2};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilations = {1, 1};
+    const std::vector<int64_t> prePadding = {1, 1};
+    const std::vector<int64_t> postPadding = {1, 2};
 
     CpuFpReferenceConvolution::dgrad<float, float, float, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding);
@@ -2472,8 +2472,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData2DAsymmetricPadding)
     {
         for(int w = 0; w < 3; ++w)
         {
-            float actual = inputTensor.getHostValue(0, 0, h, w);
-            float expected = expectedGradients[static_cast<size_t>(h)][static_cast<size_t>(w)];
+            const float actual = inputTensor.getHostValue(0, 0, h, w);
+            const float expected
+                = expectedGradients[static_cast<size_t>(h)][static_cast<size_t>(w)];
             EXPECT_FLOAT_EQ(actual, expected) << "Mismatch at grad_X(" << h << "," << w << ")";
         }
     }
@@ -2481,10 +2482,10 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData2DAsymmetricPadding)
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3DAsymmetricPadding)
 {
-    std::vector<int64_t> strides = {1, 1, 1};
-    std::vector<int64_t> dilations = {1, 1, 1};
-    std::vector<int64_t> prePadding = {1, 0, 1};
-    std::vector<int64_t> postPadding = {1, 0, 2};
+    const std::vector<int64_t> strides = {1, 1, 1};
+    const std::vector<int64_t> dilations = {1, 1, 1};
+    const std::vector<int64_t> prePadding = {1, 0, 1};
+    const std::vector<int64_t> postPadding = {1, 0, 2};
 
     // Test 3D backward data convolution with asymmetric padding
     // 1, 1, 4, 2, 5 with paddings
@@ -2531,9 +2532,10 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3DAsymmetricPadding)
         {
             for(int w = 0; w < 2; ++w)
             {
-                float actual = inputTensor.getHostValue(0, 0, d, h, w);
-                float expected = expectedGradients[static_cast<size_t>(d)][static_cast<size_t>(h)]
-                                                  [static_cast<size_t>(w)];
+                const float actual = inputTensor.getHostValue(0, 0, d, h, w);
+                const float expected
+                    = expectedGradients[static_cast<size_t>(d)][static_cast<size_t>(h)]
+                                       [static_cast<size_t>(w)];
                 EXPECT_FLOAT_EQ(actual, expected)
                     << "Mismatch at grad_X(" << d << "," << h << "," << w << ")";
             }
@@ -2543,10 +2545,10 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3DAsymmetricPadding)
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DInvalidOutputDim)
 {
-    std::vector<int64_t> strides = {1, 1, 1};
-    std::vector<int64_t> dilations = {1, 1, 1};
-    std::vector<int64_t> prePadding = {1, 0, 1};
-    std::vector<int64_t> postPadding = {1, 0, 2};
+    const std::vector<int64_t> strides = {1, 1, 1};
+    const std::vector<int64_t> dilations = {1, 1, 1};
+    const std::vector<int64_t> prePadding = {1, 0, 1};
+    const std::vector<int64_t> postPadding = {1, 0, 2};
 
     // Test 3D forward convolution with asymmetric padding
     // The output tensor's height (2) is invalid for the given input (height 2) and kernel (height 2).
@@ -2570,17 +2572,18 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DInvalidOutputDim)
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3DInvalidOutputDim)
 {
-    std::vector<int64_t> strides = {1, 1, 1};
-    std::vector<int64_t> dilations = {1, 1, 1};
-    std::vector<int64_t> prePadding = {1, 0, 1};
-    std::vector<int64_t> postPadding = {1, 0, 2};
+    const std::vector<int64_t> strides = {1, 1, 1};
+    const std::vector<int64_t> dilations = {1, 1, 1};
+    const std::vector<int64_t> prePadding = {1, 0, 1};
+    const std::vector<int64_t> postPadding = {1, 0, 2};
 
     // Test 3D backward data convolution with asymmetric padding
     // The output tensor's height (2) is invalid for the given input (height 2) and kernel (height 2).
     // The expected output height is 1. This test verifies that an exception is thrown.
     Tensor<float> inputTensor({1, 1, 2, 2, 2});
-    Tensor<float> weightTensor({1, 1, 2, 2, 2});
-    Tensor<float> outputTensor({1, 1, 3, 2, 4}); // Gradient output with invalid height dimension
+    const Tensor<float> weightTensor({1, 1, 2, 2, 2});
+    const Tensor<float> outputTensor(
+        {1, 1, 3, 2, 4}); // Gradient output with invalid height dimension
 
     EXPECT_THROW(
         (CpuFpReferenceConvolution::dgrad<float, float, float, float>(
@@ -2590,17 +2593,18 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3DInvalidOutputDim)
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdWeight3DInvalidOutputDim)
 {
-    std::vector<int64_t> strides = {1, 1, 1};
-    std::vector<int64_t> dilations = {1, 1, 1};
-    std::vector<int64_t> prePadding = {1, 0, 1};
-    std::vector<int64_t> postPadding = {1, 0, 2};
+    const std::vector<int64_t> strides = {1, 1, 1};
+    const std::vector<int64_t> dilations = {1, 1, 1};
+    const std::vector<int64_t> prePadding = {1, 0, 1};
+    const std::vector<int64_t> postPadding = {1, 0, 2};
 
     // Test 3D backward weight convolution with asymmetric padding
     // The output tensor's height (2) is invalid for the given input (height 2) and kernel (height 2).
     // The expected output height is 1. This test verifies that an exception is thrown.
-    Tensor<float> inputTensor({1, 1, 2, 2, 2});
+    const Tensor<float> inputTensor({1, 1, 2, 2, 2});
     Tensor<float> weightTensor({1, 1, 2, 2, 2});
-    Tensor<float> outputTensor({1, 1, 3, 2, 4}); // Gradient output with invalid height dimension
+    const Tensor<float> outputTensor(
+        {1, 1, 3, 2, 4}); // Gradient output with invalid height dimension
 
     EXPECT_THROW(
         (CpuFpReferenceConvolution::wgrad<float, float, float, float>(

@@ -38,12 +38,18 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<MatmulOperationDescriptor>();
     auto desc = wrapper->asDescriptor<MatmulOperationDescriptor>();
 
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &aDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_B_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &bDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_C_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &cDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_A_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&aDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_B_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&bDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_C_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&cDesc));
     desc->setAttribute(HIPDNN_ATTR_MATMUL_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     desc->finalize();
@@ -91,7 +97,10 @@ public:
     {
         auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
-        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                           HIPDNN_TYPE_HANDLE,
+                           1,
+                           static_cast<const void*>(&handle));
     }
 
 protected:
@@ -124,8 +133,10 @@ TEST_F(TestGraphDescriptorMatmul, BuildFromSingleMatmulOperation)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {matmulOp.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     auto serialized = desc->getSerializedGraph();
@@ -189,8 +200,10 @@ TEST_F(TestGraphDescriptorMatmul, ComputeDataTypePreserved)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {matmulOp.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     auto serialized = desc->getSerializedGraph();

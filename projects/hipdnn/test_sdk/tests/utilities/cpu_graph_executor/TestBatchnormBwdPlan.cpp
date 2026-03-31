@@ -38,8 +38,8 @@ protected:
 
 TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 {
-    std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = getGlobalTestSeed();
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
+    const unsigned int seed = getGlobalTestSeed();
     BatchnormBwdTensorBundle<float, float, float> planTensorBundle(dims, seed, TensorLayout::NHWC);
     BatchnormBwdTensorBundle<float, float, float> directTensorBundle(
         dims, seed, TensorLayout::NHWC);
@@ -80,7 +80,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 
     bwdPlan.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(
         batchnorm::getToleranceBackward<float>(), batchnorm::getToleranceBackward<float>());
 
     EXPECT_TRUE(
@@ -93,7 +93,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 
 TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     BatchnormBwdTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormBwdGraph(
@@ -105,17 +105,17 @@ TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    BatchnormBwdPlanBuilder<DataType::FLOAT,
-                            DataType::FLOAT,
-                            DataType::FLOAT,
-                            DataType::FLOAT,
-                            DataType::FLOAT,
-                            DataType::FLOAT>
+    const BatchnormBwdPlanBuilder<DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT>
         bwdPlanBuilder;
 
     auto builtPlan = bwdPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
-    bool result
+    const bool result
         = dynamic_cast<BatchnormBwdPlan<float, float, float, float, float, float>*>(builtPlan.get())
           != nullptr;
     EXPECT_TRUE(result);
@@ -123,8 +123,8 @@ TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
 
 TEST_F(TestBatchnormBwdPlan, ExecutePlanNoStats)
 {
-    std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = getGlobalTestSeed();
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
+    const unsigned int seed = getGlobalTestSeed();
     BatchnormBwdTensorBundle<float, float, float> planTensorBundle(dims, seed, TensorLayout::NHWC);
     BatchnormBwdTensorBundle<float, float, float> directTensorBundle(
         dims, seed, TensorLayout::NHWC);
@@ -157,7 +157,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlanNoStats)
 
     bwdPlan.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(
         batchnorm::getToleranceBackward<float>(), batchnorm::getToleranceBackward<float>());
 
     EXPECT_TRUE(
@@ -170,7 +170,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlanNoStats)
 
 TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     BatchnormBwdTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormBwdGraph(
@@ -182,22 +182,22 @@ TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    BatchnormBwdPlanBuilder<DataType::FLOAT,
-                            DataType::FLOAT,
-                            DataType::FLOAT,
-                            DataType::FLOAT,
-                            DataType::FLOAT,
-                            DataType::FLOAT>
+    const BatchnormBwdPlanBuilder<DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT>
         floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
-    BatchnormBwdPlanBuilder<DataType::FLOAT,
-                            DataType::HALF,
-                            DataType::FLOAT,
-                            DataType::FLOAT,
-                            DataType::FLOAT,
-                            DataType::FLOAT>
+    const BatchnormBwdPlanBuilder<DataType::FLOAT,
+                                  DataType::HALF,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT>
         badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 

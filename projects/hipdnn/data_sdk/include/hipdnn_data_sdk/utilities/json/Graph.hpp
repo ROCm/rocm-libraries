@@ -112,7 +112,7 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
             "hipdnn_data_sdk::data_objects::to_json(Node): Unsupported NodeAttributes type: "
             + std::to_string(static_cast<int8_t>(node.attributes_type())));
     }
-    nodeJson["name"] = node.name()->c_str();
+    nodeJson["name"] = node.name();
     nodeJson["type"] = node.attributes_type();
     nodeJson["compute_data_type"] = node.compute_data_type();
 }
@@ -124,7 +124,7 @@ inline void to_json(nlohmann::json& graphJson, const data_objects::Graph& graph)
     graphJson["compute_data_type"] = graph.compute_data_type();
     graphJson["io_data_type"] = graph.io_data_type();
     graphJson["intermediate_data_type"] = graph.intermediate_data_type();
-    graphJson["name"] = graph.name()->c_str();
+    graphJson["name"] = graph.name();
     graphJson["tensors"] = graph.tensors();
     if(graph.preferred_engine_id().has_value())
     {
@@ -143,7 +143,7 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
     auto name = entry.at("name").get<std::string>();
     auto computeDataType = entry.at("compute_data_type").get<data_objects::DataType>();
 
-    flatbuffers::Offset<void> node = [&]() {
+    const flatbuffers::Offset<void> node = [&]() {
         switch(type)
         {
         case data_objects::NodeAttributes::BatchnormInferenceAttributes:

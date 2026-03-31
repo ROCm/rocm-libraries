@@ -5,7 +5,7 @@
  * @file hipdnn_frontend.hpp
  * @brief Main entry point for the hipDNN Frontend C++ API
  *
- * This is the primary header file that users should include to access the hipDNN
+ * Include this header (`#include <hipdnn_frontend.hpp>`) to access the hipDNN
  * frontend API. It provides a high-level C++ interface for building and executing
  * deep learning computational graphs on AMD GPUs.
  *
@@ -58,4 +58,5 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Handle.hpp>
+#include <hipdnn_frontend/PluginPaths.hpp>
 #include <hipdnn_frontend/Types.hpp>

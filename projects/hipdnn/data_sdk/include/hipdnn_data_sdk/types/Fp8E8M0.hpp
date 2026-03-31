@@ -87,7 +87,7 @@ inline uint8_t float_to_fp8_e8m0_bits(float f) noexcept
     // Extract float exponent (biased by 127, same as E8M0).
     // After above checks: exp in [0,254] which maps directly to E8M0.
     // Float denormals (exp=0) clamp to E8M0 min (2^-127).
-    uint8_t exp = static_cast<uint8_t>((bits >> 23) & 0xFF);
+    const uint8_t exp = static_cast<uint8_t>((bits >> 23) & 0xFF);
 
     return exp;
 }
@@ -148,7 +148,6 @@ inline float fp8_e8m0_bits_to_float(uint8_t bits) noexcept
 struct fp8_e8m0
 {
     /// Raw bit representation of the FP8 E8M0 value.
-    /// Public to ensure binary compatibility with HIP native types.
     uint8_t data;
 
     // Default constructor - value-initialized to min (2^-127) for constexpr support
@@ -171,14 +170,14 @@ struct fp8_e8m0
 
     // EXPLICIT constructor from double (via float)
     explicit fp8_e8m0(double d) noexcept
-        : data(detail::float_to_fp8_e8m0_bits(static_cast<float>(d)))
+        : fp8_e8m0(static_cast<float>(d))
     {
     }
 
     // EXPLICIT constructor from integral types
     template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
     explicit fp8_e8m0(T value) noexcept
-        : data(detail::float_to_fp8_e8m0_bits(static_cast<float>(value)))
+        : fp8_e8m0(static_cast<float>(value))
     {
     }
 
@@ -279,10 +278,10 @@ class std::numeric_limits<hipdnn_data_sdk::types::fp8_e8m0>
 {
 public:
     static constexpr bool is_specialized = true;
-    static constexpr bool is_signed = false; // E8M0 is unsigned
+    static constexpr bool is_signed = false;
     static constexpr bool is_integer = false;
     static constexpr bool is_exact = false;
-    static constexpr bool has_infinity = false; // E8M0 has no infinity
+    static constexpr bool has_infinity = false;
     static constexpr bool has_quiet_NaN = true;
     static constexpr bool has_signaling_NaN = false;
     static constexpr std::float_denorm_style has_denorm = std::denorm_absent;
@@ -293,7 +292,7 @@ public:
     static constexpr bool is_modulo = false;
     static constexpr int digits = 1; // Only 1 bit of precision (power of 2)
     static constexpr int digits10 = 0;
-    static constexpr int max_digits10 = 1;
+    static constexpr int max_digits10 = 2;
     static constexpr int radix = 2;
     static constexpr int min_exponent = -126; // 2^(min_exponent-1) = 2^-127 = min()
     static constexpr int min_exponent10 = -38;
