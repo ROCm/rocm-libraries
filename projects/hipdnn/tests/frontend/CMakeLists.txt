@@ -8,6 +8,7 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_public_frontend_tests
     main.cpp
+    IntegrationBatchnormBackwardDescriptorLifting.cpp
     IntegrationBatchnormBackwardDescriptorLowering.cpp
     IntegrationBatchnormDescriptorLifting.cpp
     IntegrationBatchnormDescriptorLowering.cpp
@@ -15,6 +16,7 @@ add_executable(
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
     IntegrationBatchnormInferenceDescriptorLifting.cpp
     IntegrationBatchnormInferenceDescriptorLowering.cpp
+    IntegrationBatchnormInferenceNodeVarianceExtDescriptorLifting.cpp
     IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
     IntegrationBlockScaleDequantize.cpp
     IntegrationBlockScaleDequantizeDescriptorLifting.cpp
@@ -28,11 +30,13 @@ add_executable(
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
     IntegrationConvolutionDgradDescriptorLowering.cpp
+    IntegrationConvolutionDgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationCustomOpDescriptorLifting.cpp
     IntegrationCustomOpDescriptorLowering.cpp
     IntegrationGraphLifting.cpp
     IntegrationGraphSupportCheck.cpp
@@ -44,6 +48,8 @@ add_executable(
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationReductionDescriptorLifting.cpp
+    IntegrationReductionDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLifting.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp

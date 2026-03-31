@@ -32,6 +32,7 @@
 #include <HipdnnDiagonalAlignment.h>
 #include <HipdnnNormFwdPhase.h>
 #include <HipdnnPointwiseMode.h>
+#include <HipdnnReduceTensorOp.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
@@ -181,6 +182,7 @@ enum class DataType
     INT4 = 12, ///< 4-bit signed integer
     FP6_E2M3 = 13, ///< 6-bit floating point (2 exponent, 3 mantissa bits)
     FP6_E3M2 = 14, ///< 6-bit floating point (3 exponent, 2 mantissa bits)
+    INT64 = 15, ///< 64-bit signed integer
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -318,6 +320,10 @@ DataType getDataTypeEnumFromType()
     else if constexpr(std::is_same_v<T, int32_t>)
     {
         return DataType::INT32;
+    }
+    else if constexpr(std::is_same_v<T, int64_t>)
+    {
+        return DataType::INT64;
     }
     else if constexpr(std::is_same_v<T, int8_t>)
     {
@@ -702,6 +708,8 @@ inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
         return hipdnn_data_sdk::data_objects::DataType::FP6_E2M3;
     case DataType::FP6_E3M2:
         return hipdnn_data_sdk::data_objects::DataType::FP6_E3M2;
+    case DataType::INT64:
+        return hipdnn_data_sdk::data_objects::DataType::INT64;
     default:
         return hipdnn_data_sdk::data_objects::DataType::UNSET;
     }
@@ -740,6 +748,8 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::FP6_E2M3;
     case hipdnn_data_sdk::data_objects::DataType::FP6_E3M2:
         return hipdnn_frontend::DataType::FP6_E3M2;
+    case hipdnn_data_sdk::data_objects::DataType::INT64:
+        return hipdnn_frontend::DataType::INT64;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -846,6 +856,8 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
         return HIPDNN_DATA_FP6_E2M3;
     case DataType::FP6_E3M2:
         return HIPDNN_DATA_FP6_E3M2;
+    case DataType::INT64:
+        return HIPDNN_DATA_INT64;
     case DataType::NOT_SET:
     default:
         return std::nullopt;
@@ -892,6 +904,8 @@ inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
         return {DataType::FP6_E2M3, {}};
     case HIPDNN_DATA_FP6_E3M2:
         return {DataType::FP6_E3M2, {}};
+    case HIPDNN_DATA_INT64:
+        return {DataType::INT64, {}};
     default:
         return {DataType::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -1286,6 +1300,8 @@ inline const char* to_string(const DataType& type)
         return "fp6_e2m3";
     case DataType::FP6_E3M2:
         return "fp6_e3m2";
+    case DataType::INT64:
+        return "int64";
     default:
         return "unknown";
     }
@@ -1453,6 +1469,65 @@ inline hipdnn_frontend::ReductionMode
         return hipdnn_frontend::ReductionMode::MUL_NO_ZEROS;
     default:
         return hipdnn_frontend::ReductionMode::NOT_SET;
+    }
+}
+
+/// @brief Convert frontend ReductionMode to backend C-API hipdnnReduceTensorOp_t
+inline std::optional<hipdnnReduceTensorOp_t> toBackendReductionMode(const ReductionMode& type)
+{
+    switch(type)
+    {
+    case ReductionMode::ADD:
+        return HIPDNN_REDUCE_TENSOR_ADD;
+    case ReductionMode::MUL:
+        return HIPDNN_REDUCE_TENSOR_MUL;
+    case ReductionMode::MIN:
+        return HIPDNN_REDUCE_TENSOR_MIN;
+    case ReductionMode::MAX:
+        return HIPDNN_REDUCE_TENSOR_MAX;
+    case ReductionMode::AMAX:
+        return HIPDNN_REDUCE_TENSOR_AMAX;
+    case ReductionMode::AVG:
+        return HIPDNN_REDUCE_TENSOR_AVG;
+    case ReductionMode::NORM1:
+        return HIPDNN_REDUCE_TENSOR_NORM1;
+    case ReductionMode::NORM2:
+        return HIPDNN_REDUCE_TENSOR_NORM2;
+    case ReductionMode::MUL_NO_ZEROS:
+        return HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS;
+    default:
+        return std::nullopt;
+    }
+}
+
+/// @brief Convert backend C-API hipdnnReduceTensorOp_t to frontend ReductionMode
+inline std::pair<ReductionMode, Error> fromHipdnnReduceTensorOp(hipdnnReduceTensorOp_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_REDUCE_TENSOR_ADD:
+        return {ReductionMode::ADD, {}};
+    case HIPDNN_REDUCE_TENSOR_MUL:
+        return {ReductionMode::MUL, {}};
+    case HIPDNN_REDUCE_TENSOR_MIN:
+        return {ReductionMode::MIN, {}};
+    case HIPDNN_REDUCE_TENSOR_MAX:
+        return {ReductionMode::MAX, {}};
+    case HIPDNN_REDUCE_TENSOR_AMAX:
+        return {ReductionMode::AMAX, {}};
+    case HIPDNN_REDUCE_TENSOR_AVG:
+        return {ReductionMode::AVG, {}};
+    case HIPDNN_REDUCE_TENSOR_NORM1:
+        return {ReductionMode::NORM1, {}};
+    case HIPDNN_REDUCE_TENSOR_NORM2:
+        return {ReductionMode::NORM2, {}};
+    case HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS:
+        return {ReductionMode::MUL_NO_ZEROS, {}};
+    default:
+        return {
+            ReductionMode::NOT_SET,
+            {ErrorCode::HIPDNN_BACKEND_ERROR,
+             "Unknown hipdnnReduceTensorOp_t value: " + std::to_string(static_cast<int>(mode))}};
     }
 }
 
