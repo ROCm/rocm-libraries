@@ -10,7 +10,7 @@ void SolutionCache::addKernel(const KernelType&              kernelType,
     auto  index = parametersToIndex(params);
     auto& vec   = m_generatedKernels[kernelType][index];
 
-    if(kernel->staticShape.has_value() || kernel->shapeCondition.has_value())
+    if(kernel->shapeCondition.has_value())
     {
         vec.push_back(kernel);
     }
@@ -18,7 +18,7 @@ void SolutionCache::addKernel(const KernelType&              kernelType,
     {
         for(auto& existing : vec)
         {
-            if(!existing->staticShape.has_value() && !existing->shapeCondition.has_value())
+            if(!existing->shapeCondition.has_value())
             {
                 existing = kernel;
                 return;
@@ -31,7 +31,7 @@ void SolutionCache::addKernel(const KernelType&              kernelType,
 std::optional<std::shared_ptr<GemmKernel>>
     SolutionCache::getKernel(const KernelType&              kernelType,
                              const SolutionIndexParameters& params,
-                             std::optional<ProblemDims>     dims)
+                             std::optional<ProblemDims>      dims)
 {
     auto existingKernelType = m_generatedKernels.find(kernelType);
     if(existingKernelType == m_generatedKernels.end())
@@ -47,39 +47,24 @@ std::optional<std::shared_ptr<GemmKernel>>
 
     const auto& kernels = it->second;
 
+    // Tier 1: conditional shape match (heuristic)
     if(dims.has_value())
     {
-        for(const auto& k : kernels)
-        {
-            if(k->staticShape.has_value() && k->staticShape->matches(dims->m, dims->n, dims->k))
-            {
-                std::cout << "Loading kernel from cache (static): " << k->module->getKernelName()
-                          << std::endl;
-                return k;
-            }
-        }
-
         for(const auto& k : kernels)
         {
             if(k->shapeCondition.has_value()
                && k->shapeCondition->matches(dims->m, dims->n, dims->k))
             {
-                std::cout << "Loading kernel from cache: " << k->module->getKernelName()
-                          << std::endl;
                 return k;
             }
         }
     }
 
+    // Tier 2: unconditional fallback
     for(const auto& k : kernels)
     {
-        if(!k->staticShape.has_value() && !k->shapeCondition.has_value())
+        if(!k->shapeCondition.has_value())
         {
-            if(k->module.has_value())
-            {
-                std::cout << "Loading kernel from cache: " << k->module->getKernelName()
-                          << std::endl;
-            }
             return k;
         }
     }

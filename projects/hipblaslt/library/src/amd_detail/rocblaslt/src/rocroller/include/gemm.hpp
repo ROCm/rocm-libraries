@@ -73,16 +73,6 @@ private:
     hipModule_t module;
 };
 
-struct StaticShape
-{
-    size_t m, n, k;
-
-    bool matches(size_t pm, size_t pn, size_t pk) const
-    {
-        return m == pm && n == pn && k == pk;
-    }
-};
-
 struct ShapeCondition
 {
     std::optional<size_t> minM, maxM;
@@ -144,7 +134,6 @@ public:
     std::optional<GemmHipModuleWrapper> module;
 
     std::optional<std::array<int, 3>> customBlockSize;
-    std::optional<StaticShape>        staticShape;
     std::optional<ShapeCondition>     shapeCondition;
 
     bool isCustomKernel() const
