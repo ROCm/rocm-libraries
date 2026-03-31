@@ -184,6 +184,9 @@ Here are the available options to build the hipTensor library, with or without c
     *   -   ``HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR``
         -   Set the hipTensor default data layout to column major
         -   ``ON``
+    *   -   ``HIPTENSOR_INLINE_UNARY_OPS``
+        -   Set the default compiling option of unary operations to use __attribute__((noinline))
+        -   ``OFF``
 
 Here are some example project configurations:
 

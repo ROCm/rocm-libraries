@@ -41,6 +41,7 @@ For more detailed information, please refer to the [hipTensor installation guide
 | HIPTENSOR_BUILD_SAMPLES             | Build the samples                                       | ON                                                      |
 | HIPTENSOR_BUILD_COMPRESSED_DBG      | Enable compressed debug symbols                         | ON                                                      |
 | HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR | Set the hipTensor default data layout to column major   | ON                                                      |
+| HIPTENSOR_INLINE_UNARY_OPS          | Inline all unary ops for best runtime performance       | OFF                                                     |
 
 ### Example configurations
 
