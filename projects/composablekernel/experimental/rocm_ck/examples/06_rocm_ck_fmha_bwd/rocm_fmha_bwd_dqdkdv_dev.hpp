@@ -19,10 +19,10 @@
 
 #ifndef __HIP_DEVICE_COMPILE__
 #error "rocm_fmha_bwd_dqdkdv_dev.hpp requires device compilation." \
-       " Host code should include rocm_fmha_bwd_dqdkdv_api.hpp."
+       " Host code should include <rocm_ck/ops/fmha_bwd/dqdkdv_api.hpp>."
 #endif
 
-#include "rocm_fmha_bwd_dqdkdv_spec.hpp"
+#include <rocm_ck/ops/fmha_bwd/dqdkdv_spec.hpp>
 
 #include <rocm_ck/args.hpp>
 #include <rocm_ck/ck_type_map.hpp>

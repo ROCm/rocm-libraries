@@ -22,10 +22,10 @@
 
 #ifndef __HIP_DEVICE_COMPILE__
 #error "rocm_fmha_bwd_convert_dq_dev.hpp requires device compilation." \
-       " Host code should include rocm_fmha_bwd_convert_dq_api.hpp."
+       " Host code should include <rocm_ck/ops/fmha_bwd/convert_dq_api.hpp>."
 #endif
 
-#include "rocm_fmha_bwd_convert_dq_spec.hpp"
+#include <rocm_ck/ops/fmha_bwd/convert_dq_spec.hpp>
 
 #include <rocm_ck/args.hpp>
 #include <rocm_ck/ck_type_map.hpp>

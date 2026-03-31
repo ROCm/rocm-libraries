@@ -13,6 +13,10 @@
 
 #include "rocm_fmha_bwd_registry.hpp"
 
+#include <rocm_ck/ops/fmha_bwd/ograd_dot_o_api.hpp>
+#include <rocm_ck/ops/fmha_bwd/dqdkdv_api.hpp>
+#include <rocm_ck/ops/fmha_bwd/convert_dq_api.hpp>
+
 #include <rocm_ck/args.hpp>
 #include <rocm_ck/datatype_convert.hpp>
 #include <rocm_ck/datatype_utils.hpp>
@@ -330,7 +334,8 @@ static void unloadKernel(LoadedKernel& k)
 // Helper: launch a kernel with rocm_ck::Args
 // ---------------------------------------------------------------------------
 
-static void launchArgs(hipFunction_t func, dim3 grid, int block_size, rocm_ck::Args& args)
+static void
+launchArgs(hipFunction_t func, rocm_ck::GridDim grid, int block_size, rocm_ck::Args& args)
 {
     size_t args_size   = sizeof(args);
     void* launch_cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
@@ -441,7 +446,7 @@ static bool runOGradDotOBatch(const rocm_ck::FmhaBwdOGradDotOVariant& variant,
     args.scalars[ODO::P_UNDROP].f32 = p_undrop;
 
     // Launch
-    dim3 grid = rocm_ck::ograd_dot_o_grid_size(batch, nhead, seqlen_q, variant.kernel.block_size);
+    auto grid = rocm_ck::ograd_dot_o_grid_size(batch, nhead, seqlen_q, variant.kernel.block_size);
     std::printf("  %s: grid=(%u,%u,%u), block=%d\n",
                 variant.name,
                 grid.x,
@@ -591,7 +596,7 @@ static bool runOGradDotOGroup(const rocm_ck::FmhaBwdOGradDotOVariant& variant,
 
     args.scalars[ODO::P_UNDROP].f32 = p_undrop;
 
-    dim3 grid = rocm_ck::ograd_dot_o_grid_size(batch, nhead, seqlen_q, variant.kernel.block_size);
+    auto grid = rocm_ck::ograd_dot_o_grid_size(batch, nhead, seqlen_q, variant.kernel.block_size);
     std::printf("  %s: grid=(%u,%u,%u), block=%d (group)\n",
                 variant.name,
                 grid.x,
@@ -804,7 +809,7 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     args.scalars[DKV::NHEAD_RATIO_QK].i32 = 1; // MHA (no GQA)
 
     // Launch
-    dim3 grid = rocm_ck::dqdkdv_grid_size(batch, nhead, seqlen_k, variant.kernel.block_n0);
+    auto grid = rocm_ck::dqdkdv_grid_size(batch, nhead, seqlen_k, variant.kernel.block_n0);
     std::printf("  %s: grid=(%u,%u,%u), block=%d\n",
                 variant.name,
                 grid.x,

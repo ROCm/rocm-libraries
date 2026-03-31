@@ -2,13 +2,18 @@
 // SPDX-License-Identifier: MIT
 //
 // Variant registry for programmatic kernel selection.
-// Host-only header — no CK Tile dependency.
+// Host-only header — no CK Tile dependency, no HIP dependency.
 //
 // Three kernel families, three variant arrays, three findVariant overloads.
+//
+// Include contract: this header includes only _spec.hpp (not _api.hpp).
+// Callers who need grid_size must include the _api.hpp header separately.
 
 #pragma once
 
-#include "rocm_fmha_bwd_api.hpp"
+#include <rocm_ck/ops/fmha_bwd/ograd_dot_o_spec.hpp>
+#include <rocm_ck/ops/fmha_bwd/dqdkdv_spec.hpp>
+#include <rocm_ck/ops/fmha_bwd/convert_dq_spec.hpp>
 
 #include <iterator> // std::size
 

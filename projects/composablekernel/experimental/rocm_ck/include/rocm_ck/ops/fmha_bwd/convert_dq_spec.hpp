@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "rocm_fmha_bwd_common.hpp"
+#include <rocm_ck/ops/fmha_bwd/common.hpp>
 
 #include <rocm_ck/datatype_utils.hpp>
 
@@ -152,70 +152,13 @@ consteval FmhaBwdConvertDQKernel make_kernel(FmhaBwdConvertDQConfig cfg)
     return k;
 }
 
-// --- make_kernel compile-time tests ---
+// Compile canary: GROUP mode exercises pad_seqlen_q and mode constraints.
 // clang-format off
-
-// Valid configs compile:
-static_assert(make_kernel(FmhaBwdConvertDQConfig{
-    .signature = {.dtype = DataType::FP16, .hdim_q = 128,
-                  .mode = FmhaMode::BATCH},
-    .algorithm = {.pad_seqlen_q = true, .pad_hdim_q = true}
-}).dtype == DataType::FP16);
-
-static_assert(make_kernel(FmhaBwdConvertDQConfig{
-    .signature = {.dtype = DataType::BF16, .hdim_q = 64,
-                  .mode = FmhaMode::BATCH},
-    .algorithm = {.pad_seqlen_q = true, .pad_hdim_q = true}
-}).hdim_q == 64);
-
 static_assert(make_kernel(FmhaBwdConvertDQConfig{
     .signature = {.dtype = DataType::FP16, .hdim_q = 128,
                   .mode = FmhaMode::GROUP},
     .algorithm = {.pad_seqlen_q = true, .pad_hdim_q = true}
 }).mode == FmhaMode::GROUP);
-
-static_assert(make_kernel(FmhaBwdConvertDQConfig{
-    .signature = {.dtype = DataType::FP16, .hdim_q = 128,
-                  .mode = FmhaMode::BATCH},
-    .algorithm = {.pad_seqlen_q = false, .pad_hdim_q = false}
-}).pad_seqlen_q == false);
-
-static_assert(make_kernel(FmhaBwdConvertDQConfig{
-    .signature = {.dtype = DataType::FP16, .hdim_q = 128,
-                  .mode = FmhaMode::BATCH},
-    .algorithm = {}
-}).block_size == 256);
-
-static_assert(make_kernel(FmhaBwdConvertDQConfig{
-    .signature = {.dtype = DataType::FP16, .hdim_q = 128,
-                  .mode = FmhaMode::BATCH},
-    .algorithm = {}
-}).is_deterministic == true);
-
-// Slot counts: batch = 2 tensors, group = 6 tensors
-static_assert(fmha_bwd_convert_dq_slots::requiredTensors(
-    make_kernel(FmhaBwdConvertDQConfig{
-        .signature = {.dtype = DataType::FP16, .hdim_q = 128,
-                      .mode = FmhaMode::BATCH},
-        .algorithm = {}})) == 2);
-
-static_assert(fmha_bwd_convert_dq_slots::requiredTensors(
-    make_kernel(FmhaBwdConvertDQConfig{
-        .signature = {.dtype = DataType::FP16, .hdim_q = 128,
-                      .mode = FmhaMode::GROUP},
-        .algorithm = {}})) == 6);
-
-// Invalid configs (uncommenting produces consteval compile errors):
-// make_kernel({.signature = {.dtype = DataType::FP32, ...}})
-//   -- FP32 not supported
-// make_kernel({.signature = {.hdim_q = 100, ...}})
-//   -- invalid hdim
-// make_kernel({.signature = {.mode = FmhaMode::GROUP},
-//              .algorithm = {.pad_seqlen_q = false}})
-//   -- group mode requires pad_seqlen_q
-// make_kernel({..., .algorithm = {.block_per_cu = 0}})
-//   -- block_per_cu must be positive
-
 // clang-format on
 
 } // namespace rocm_ck

@@ -79,13 +79,13 @@ foreach(variant IN LISTS KERNEL_VARIANTS)
                     -o ${hsaco_output}
                     ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
             DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${variant}.hip
-                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_common.hpp
-                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_ograd_dot_o_spec.hpp
                     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_ograd_dot_o_dev.hpp
-                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_dqdkdv_spec.hpp
                     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_dqdkdv_dev.hpp
-                    ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_convert_dq_spec.hpp
                     ${CMAKE_CURRENT_SOURCE_DIR}/rocm_fmha_bwd_convert_dq_dev.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/ops/fmha_bwd/common.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/ops/fmha_bwd/ograd_dot_o_spec.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/ops/fmha_bwd/dqdkdv_spec.hpp
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/ops/fmha_bwd/convert_dq_spec.hpp
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/datatype_utils.hpp
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/args.hpp
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/rocm_ck/types.hpp

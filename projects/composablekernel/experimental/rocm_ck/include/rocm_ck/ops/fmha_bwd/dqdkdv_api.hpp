@@ -14,13 +14,13 @@
 #pragma once
 
 #ifdef __HIP_DEVICE_COMPILE__
-#error "rocm_fmha_bwd_dqdkdv_api.hpp is host-only." \
+#error "dqdkdv_api.hpp is host-only." \
        " Device code should include rocm_fmha_bwd_dqdkdv_dev.hpp."
 #endif
 
-#include "rocm_fmha_bwd_dqdkdv_spec.hpp"
+#include <rocm_ck/ops/fmha_bwd/dqdkdv_spec.hpp>
 
-#include <hip/hip_runtime.h>
+#include <rocm_ck/grid_dim.hpp>
 
 namespace rocm_ck {
 
@@ -30,14 +30,14 @@ namespace rocm_ck {
 
 /// Compute the launch grid for dQ/dK/dV.
 /// Matches CK Tile's FmhaBwdDQDKDVKernel::GridSize():
-///   dim3(ceil(seqlen_k / kN0), nhead, batch).
+///   GridDim(ceil(seqlen_k / kN0), nhead, batch).
 /// block_n0 comes from FmhaBwdDQDKDVKernel::block_n0 (kN0).
 /// Precondition: block_n0 > 0, seqlen_k >= 0, batch > 0, nhead > 0.
-constexpr dim3 dqdkdv_grid_size(int batch, int nhead, int seqlen_k, int block_n0)
+constexpr GridDim dqdkdv_grid_size(int batch, int nhead, int seqlen_k, int block_n0)
 {
-    return dim3(static_cast<unsigned>((seqlen_k + block_n0 - 1) / block_n0),
-                static_cast<unsigned>(nhead),
-                static_cast<unsigned>(batch));
+    return {static_cast<unsigned>((seqlen_k + block_n0 - 1) / block_n0),
+            static_cast<unsigned>(nhead),
+            static_cast<unsigned>(batch)};
 }
 
 } // namespace rocm_ck

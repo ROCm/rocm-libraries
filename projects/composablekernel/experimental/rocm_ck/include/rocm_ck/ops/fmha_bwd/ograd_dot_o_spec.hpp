@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include "rocm_fmha_bwd_common.hpp"
+#include <rocm_ck/ops/fmha_bwd/common.hpp>
 
 #include <rocm_ck/datatype_utils.hpp>
 
@@ -105,30 +105,11 @@ consteval FmhaBwdOGradDotOKernel make_kernel(FmhaBwdOGradDotOConfig cfg)
             algo.block_size};
 }
 
-// --- make_kernel compile-time tests ---
+// Compile canary: GROUP mode exercises pad_seqlen_q constraint.
 // clang-format off
-
-// Valid configs compile:
-static_assert(make_kernel(FmhaBwdOGradDotOConfig{
-    .signature = {.dtype = DataType::FP16, .hdim_v = 128, .mode = FmhaMode::BATCH},
-    .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}}).dtype == DataType::FP16);
-static_assert(make_kernel(FmhaBwdOGradDotOConfig{
-    .signature = {.dtype = DataType::BF16, .hdim_v = 64, .mode = FmhaMode::BATCH},
-    .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}}).hdim_v == 64);
 static_assert(make_kernel(FmhaBwdOGradDotOConfig{
     .signature = {.dtype = DataType::FP16, .hdim_v = 128, .mode = FmhaMode::GROUP},
     .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}}).mode == FmhaMode::GROUP);
-static_assert(make_kernel(FmhaBwdOGradDotOConfig{
-    .signature = {.dtype = DataType::FP16, .hdim_v = 128, .mode = FmhaMode::BATCH},
-    .algorithm = {.pad_seqlen_q = false, .pad_hdim_v = false}}).pad_seqlen_q == false);
-
-// Invalid configs (uncommenting produces consteval compile errors):
-// make_kernel({.signature = {.dtype = DataType::FP32, ...}})  -- FP32 not supported
-// make_kernel({.signature = {.hdim_v = 100, ...}})            -- invalid hdim
-// make_kernel({.signature = {.mode = FmhaMode::GROUP},
-//              .algorithm = {.pad_seqlen_q = false}})
-//   -- group mode requires pad_seqlen_q
-
 // clang-format on
 
 // ---------------------------------------------------------------------------

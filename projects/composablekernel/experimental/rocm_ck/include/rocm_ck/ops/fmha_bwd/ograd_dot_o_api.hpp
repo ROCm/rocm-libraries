@@ -14,13 +14,13 @@
 #pragma once
 
 #ifdef __HIP_DEVICE_COMPILE__
-#error "rocm_fmha_bwd_ograd_dot_o_api.hpp is host-only." \
+#error "ograd_dot_o_api.hpp is host-only." \
        " Device code should include rocm_fmha_bwd_ograd_dot_o_dev.hpp."
 #endif
 
-#include "rocm_fmha_bwd_ograd_dot_o_spec.hpp"
+#include <rocm_ck/ops/fmha_bwd/ograd_dot_o_spec.hpp>
 
-#include <hip/hip_runtime.h>
+#include <rocm_ck/grid_dim.hpp>
 
 namespace rocm_ck {
 
@@ -30,13 +30,13 @@ namespace rocm_ck {
 
 /// Compute the launch grid for OGradDotO.
 /// Matches FmhaBwdOGradDotOKernel::GridSize():
-///   dim3(ceil(seqlen_q / kM0), nhead, batch).
+///   GridDim(ceil(seqlen_q / kM0), nhead, batch).
 /// Precondition: block_size > 0, seqlen_q >= 0, batch > 0, nhead > 0.
-constexpr dim3 ograd_dot_o_grid_size(int batch, int nhead, int seqlen_q, int block_size)
+constexpr GridDim ograd_dot_o_grid_size(int batch, int nhead, int seqlen_q, int block_size)
 {
-    return dim3(static_cast<unsigned>((seqlen_q + block_size - 1) / block_size),
-                static_cast<unsigned>(nhead),
-                static_cast<unsigned>(batch));
+    return {static_cast<unsigned>((seqlen_q + block_size - 1) / block_size),
+            static_cast<unsigned>(nhead),
+            static_cast<unsigned>(batch)};
 }
 
 } // namespace rocm_ck
