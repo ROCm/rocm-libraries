@@ -33,7 +33,6 @@
 #include "singletons.hpp"
 #include <cinttypes>
 #include <hipblaslt/hipblaslt.h>
-#include <type_traits>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -74,7 +73,7 @@ public:
         return capacity() < s;
     }
 
-    size_t get_available_host_memory(size_t allocated_capacity)
+    size_t get_available_host_memory()
     {
 #ifdef __linux__
         struct sysinfo info;
@@ -93,29 +92,9 @@ public:
         memStatus.dwLength = sizeof(memStatus);
         if(GlobalMemoryStatusEx(&memStatus))
         {
-            hipblaslt_cout << "!!!!!!!!!!!!!!!" << std::endl;
-            hipblaslt_cout << "Total physical memory / 2: " << memStatus.ullTotalPhys / 2 << std::endl;
-            hipblaslt_cout << "allocated capacity: " << allocated_capacity << std::endl;
-            // In the windows system, the host memory(pinned memory)'s capacity is the half of the physical memory
-            unsigned long long host_max_capacity = 0;
-            if(memStatus.ullTotalPhys <= (32ULL << 30))
-            {
-                host_max_capacity = memStatus.ullTotalPhys / 3.0;
-            }
-            else
-            {
-                host_max_capacity = memStatus.ullTotalPhys / 2.5;
-            }
-            if(allocated_capacity > host_max_capacity)
-                return 0;
-            size_t available_host_memory = static_cast<size_t>(host_max_capacity - allocated_capacity);
-            size_t host_real_capacity = (memStatus.ullAvailPhys > (memStatus.ullTotalPhys / 2)) \
-                                        ? memStatus.ullAvailPhys - (memStatus.ullTotalPhys / 2) \
-                                        : 0;
-            hipblaslt_cout << "memStatus.ullAvailPhys: " << memStatus.ullAvailPhys << std::endl;
-            hipblaslt_cout << "host_real_capacity: " << host_real_capacity << std::endl;
-            hipblaslt_cout << "available_host_memory: " << available_host_memory << std::endl;
-            return std::min(available_host_memory, host_real_capacity);
+            // In the windows system, the host memory's capacity is the half of the physical memory
+            // And previous allocation of host memory is got cleared before
+            return memStatus.ullTotalPhys / 2;
         }
         else
         {
@@ -154,15 +133,15 @@ public:
     {
     }
 
-    d_memory(size_t size, size_t capacity, bool use_HMM = false, size_t allocated_capacity = 0)
-        : hip_memory(size, capacity, use_HMM, allocated_capacity)
+    d_memory(size_t size, size_t capacity, bool use_HMM = false)
+        : hip_memory(size, capacity, use_HMM)
     {
         char* d = nullptr;
 
         if(use_HMM)
         {
             // Keep 20% of the available system memory for room of emergency
-            size_t available_host_memory = get_available_host_memory(allocated_capacity) * 0.8;
+            size_t available_host_memory = get_available_host_memory() * 0.8;
             // Need to ensure sufficient host memory, otherwise hipMallocManaged may OOM and hip api won't return error code,
             // and will cause the gtest get aborted
             if(available_host_memory < capacity || hipMallocManaged(&d, capacity) != hipSuccess)
@@ -208,14 +187,13 @@ public:
     {
     }
 
-    h_memory(size_t size, size_t capacity, bool use_HMM = false, size_t allocated_capacity = 0)
-        : hip_memory(size, capacity, false, allocated_capacity)
+    h_memory(size_t size, size_t capacity, bool use_HMM = false)
+        : hip_memory(size, capacity, false)
     {
         char* d = nullptr;
 
         // Keep 20% of the available system memory for room of emergency
-        size_t available_host_memory = get_available_host_memory(allocated_capacity) * 0.8;
-        hipblaslt_cout << "capacity: " << capacity << std::endl;
+        size_t available_host_memory = get_available_host_memory() * 0.8;
         // Need to ensure sufficient host memory, otherwise hipHostMalloc may OOM and hip api won't return error code,
         // and will cause the gtest get aborted
         if(available_host_memory < capacity || hipHostMalloc(&d, capacity) != hipSuccess)
@@ -294,22 +272,21 @@ private:
 
             // remove the (largest) buffer that was too small
             if(it != pool.begin())
-            {
-                subtract_allocated_capacity(*(it - 1));
                 pool.erase(it - 1);
-            }
+
+            // For Windows system, not suitable for memory pool management, so always clear the pool
+            #ifdef _WIN32
+            pool.clear();
+            #endif
+
             // Allocate 20% extra if it is not huge_request for later reuse
             size_t alloc_capacity = huge_request ? bytes : static_cast<size_t>(bytes * 1.2);
 
-            auto e = M(bytes, alloc_capacity, use_HMM, host_allocated_capacity);
+            auto e = M(bytes, alloc_capacity, use_HMM);
             if(e.get())
-            {
-                add_allocated_capacity(e);
                 return e;
-            }
             hipblaslt_cerr << "Clearing memory pool and retrying" << std::endl;
             // allocation failed, so clear the pool and try again (without the 20%)
-            clean_allocated_capacity(e, pool);
             pool.clear();
 
             // reset the error code from previous hipMalloc failure and try again to allocate memory
@@ -317,10 +294,7 @@ private:
             if(err == hipErrorOutOfMemory || err == hipErrorMemoryAllocation )
                 (void)hipGetLastError();
 
-            auto res = M(bytes, bytes, use_HMM, host_allocated_capacity);
-            if(res.get())
-                add_allocated_capacity(res);
-            return res;
+            return M(bytes, bytes, use_HMM);
         }
     }
 
@@ -331,46 +305,6 @@ private:
         auto& pool = dm.is_managed() ? m_pool_managed : m_pool;
         // insert in (sorted) pool
         pool.insert(std::lower_bound(pool.begin(), pool.end(), dm.capacity()), std::move(dm));
-    }
-
-    void add_allocated_capacity(M& dm)
-    {
-        if(std::is_same<M, h_memory>::value)
-        {
-            hipblaslt_cout << "add_allocated_capacity: " << dm.capacity() << std::endl;
-            host_allocated_capacity += dm.capacity();
-        }
-        else if(dm.is_managed())
-            host_allocated_capacity += dm.capacity();
-    }
-
-    void subtract_allocated_capacity(M& dm)
-    {
-        if(std::is_same<M, h_memory>::value)
-        {
-            hipblaslt_cout << "subtract_allocated_capacity: " << dm.capacity() << std::endl;
-            host_allocated_capacity -= dm.capacity();
-        }
-        else if(dm.is_managed())
-            host_allocated_capacity -= dm.capacity();
-    }
-
-    void clean_allocated_capacity(M& dm, const std::vector<M>& pool)
-    {
-        size_t pool_capacity = 0;
-        for(const auto& m : pool)
-        {
-            pool_capacity += m.capacity();
-        }
-        if(std::is_same<M, h_memory>::value)
-        {
-            hipblaslt_cout << "clean_allocated_capacity: " << pool_capacity << std::endl;
-            host_allocated_capacity -= pool_capacity;
-        }
-        else if(dm.is_managed())
-        {
-            host_allocated_capacity -= pool_capacity;
-        }
     }
 };
 
