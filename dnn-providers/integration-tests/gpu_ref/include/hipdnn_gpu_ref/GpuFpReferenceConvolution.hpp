@@ -5,7 +5,7 @@
 
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
-#include <hipdnn_data_sdk/utilities/ConvolutionValidation.hpp>
+#include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
@@ -65,7 +65,7 @@ struct HipRtcTypeName<double>
     static constexpr const char* VALUE = "double";
 };
 
-// --- Stride structs (must match device-side layout in GpuRefTypes.h) ---
+// --- Argument and stride structs (must match device-side layout in GpuRefTypes.h) ---
 // C-style arrays required for ABI compatibility with HipRTC-compiled device code.
 
 // NOLINTBEGIN(modernize-avoid-c-arrays)
@@ -83,6 +83,64 @@ struct Strides5
 {
     long long s[5];
 };
+
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes,
+//             readability-identifier-naming)
+struct ConvFwdArgs1d
+{
+    const void* x;
+    const void* w;
+    void* y;
+    Strides3 xStr;
+    Strides3 wStr;
+    Strides3 yStr;
+    long long N, C, Wi;
+    long long K, Wo;
+    long long Kw;
+    long long strideW;
+    long long dilW;
+    long long padW;
+    long long groups;
+    double alpha, beta;
+};
+
+struct ConvFwdArgs2d
+{
+    const void* x;
+    const void* w;
+    void* y;
+    Strides4 xStr;
+    Strides4 wStr;
+    Strides4 yStr;
+    long long N, C, Hi, Wi;
+    long long K, Ho, Wo;
+    long long Kh, Kw;
+    long long strideH, strideW;
+    long long dilH, dilW;
+    long long padH, padW;
+    long long groups;
+    double alpha, beta;
+};
+
+struct ConvFwdArgs3d
+{
+    const void* x;
+    const void* w;
+    void* y;
+    Strides5 xStr;
+    Strides5 wStr;
+    Strides5 yStr;
+    long long N, C, Di, Hi, Wi;
+    long long K, Do, Ho, Wo;
+    long long Kd, Kh, Kw;
+    long long strideD, strideH, strideW;
+    long long dilD, dilH, dilW;
+    long long padD, padH, padW;
+    long long groups;
+    double alpha, beta;
+};
+// NOLINTEND(misc-non-private-member-variables-in-classes,
+//           readability-identifier-naming)
 // NOLINTEND(modernize-avoid-c-arrays)
 
 // --- Helpers ---
@@ -300,7 +358,7 @@ private:
                                         "4 dimensions (2D conv), or 5 dimensions (3D conv)");
         }
 
-        hipdnn_data_sdk::utilities::validateConvolutionParams(
+        hipdnn_test_sdk::utilities::validateConvolutionParams(
             x, w, y, strides, dilations, prePadding, postPadding);
     }
 
@@ -327,29 +385,7 @@ private:
 
         auto nGroups = xDims[1] / wDims[1];
 
-        // NOLINTBEGIN(misc-non-private-member-variables-in-classes,
-        //             readability-identifier-naming)
-        struct KernelArgs
-        {
-            const void* x;
-            const void* w;
-            void* y;
-            detail::Strides3 xStr;
-            detail::Strides3 wStr;
-            detail::Strides3 yStr;
-            long long N, C, Wi;
-            long long K, Wo;
-            long long Kw;
-            long long strideW;
-            long long dilW;
-            long long padW;
-            long long groups;
-            double alpha, beta;
-        };
-        // NOLINTEND(misc-non-private-member-variables-in-classes,
-        //           readability-identifier-naming)
-
-        KernelArgs args;
+        detail::ConvFwdArgs1d args{};
         args.x = xPtr;
         args.w = wPtr;
         args.y = yPtr;
@@ -396,29 +432,7 @@ private:
 
         auto nGroups = xDims[1] / wDims[1];
 
-        // NOLINTBEGIN(misc-non-private-member-variables-in-classes,
-        //             readability-identifier-naming)
-        struct KernelArgs
-        {
-            const void* x;
-            const void* w;
-            void* y;
-            detail::Strides4 xStr;
-            detail::Strides4 wStr;
-            detail::Strides4 yStr;
-            long long N, C, Hi, Wi;
-            long long K, Ho, Wo;
-            long long Kh, Kw;
-            long long strideH, strideW;
-            long long dilH, dilW;
-            long long padH, padW;
-            long long groups;
-            double alpha, beta;
-        };
-        // NOLINTEND(misc-non-private-member-variables-in-classes,
-        //           readability-identifier-naming)
-
-        KernelArgs args;
+        detail::ConvFwdArgs2d args{};
         args.x = xPtr;
         args.w = wPtr;
         args.y = yPtr;
@@ -471,29 +485,7 @@ private:
 
         auto nGroups = xDims[1] / wDims[1];
 
-        // NOLINTBEGIN(misc-non-private-member-variables-in-classes,
-        //             readability-identifier-naming)
-        struct KernelArgs
-        {
-            const void* x;
-            const void* w;
-            void* y;
-            detail::Strides5 xStr;
-            detail::Strides5 wStr;
-            detail::Strides5 yStr;
-            long long N, C, Di, Hi, Wi;
-            long long K, Do, Ho, Wo;
-            long long Kd, Kh, Kw;
-            long long strideD, strideH, strideW;
-            long long dilD, dilH, dilW;
-            long long padD, padH, padW;
-            long long groups;
-            double alpha, beta;
-        };
-        // NOLINTEND(misc-non-private-member-variables-in-classes,
-        //           readability-identifier-naming)
-
-        KernelArgs args;
+        detail::ConvFwdArgs3d args{};
         args.x = xPtr;
         args.w = wPtr;
         args.y = yPtr;

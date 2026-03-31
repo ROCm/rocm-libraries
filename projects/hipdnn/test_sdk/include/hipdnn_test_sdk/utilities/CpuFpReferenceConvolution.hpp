@@ -4,7 +4,7 @@
 #pragma once
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/utilities/ConvolutionValidation.hpp>
+#include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <stdexcept>
@@ -441,7 +441,7 @@ private:
                 "Input tensor must have at least 3 dimensions (N, C, spatial...)");
         }
 
-        hipdnn_data_sdk::utilities::validateConvolutionParams(
+        hipdnn_test_sdk::utilities::validateConvolutionParams(
             x, w, y, strides, dilations, prePadding, postPadding);
     }
 };

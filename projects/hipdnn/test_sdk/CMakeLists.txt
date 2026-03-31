@@ -79,5 +79,4 @@ install(
     COMPONENT Development
 )
 
-add_subdirectory(gpu_ref)
 add_subdirectory(tests)

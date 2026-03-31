@@ -21,8 +21,8 @@ target_include_directories(
 
 target_link_libraries(
     hipdnn_gpu_ref
-    PUBLIC hipdnn_data_sdk
+    PUBLIC hipdnn_test_sdk
     PRIVATE hiprtc::hiprtc hip::host
 )
 
-target_compile_options(hipdnn_gpu_ref PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_gpu_ref PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})

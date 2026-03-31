@@ -11,10 +11,14 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <hipdnn_gpu_ref/GpuFpReferenceConvolution.hpp>
+#include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
+#include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
 
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -294,7 +298,285 @@ std::vector<ConvFwdShapeCase> getMedium3dConvCases()
     };
 }
 
+// Alias to avoid verbose braced-init-list issues inside EXPECT_THROW macros
+using Vec = std::vector<int64_t>;
+
 } // namespace
+
+// ============================================================================
+// TestConvolutionValidation — direct tests for validateConvolutionParams
+// (no GPU needed, tests the standalone validation function)
+// ============================================================================
+
+TEST(TestConvolutionValidation, AcceptsValidParams)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_NO_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+        x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}));
+}
+
+TEST(TestConvolutionValidation, ThrowsOnWeightDimMismatch)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestConvolutionValidation, ThrowsOnOutputDimMismatch)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestConvolutionValidation, ThrowsOnStridesSizeMismatch)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestConvolutionValidation, ThrowsOnDilationsSizeMismatch)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{1, 1}, Vec{1, 1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestConvolutionValidation, ThrowsOnPrePaddingSizeMismatch)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestConvolutionValidation, ThrowsOnPostPaddingSizeMismatch)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestConvolutionValidation, ThrowsOnZeroStride)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{0, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestConvolutionValidation, ThrowsOnNegativeDilation)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{1, 1}, Vec{1, -1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestConvolutionValidation, ThrowsOnNegativePrePadding)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{-1, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestConvolutionValidation, ThrowsOnNegativePostPadding)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, -1}),
+                 std::invalid_argument);
+}
+
+TEST(TestConvolutionValidation, ThrowsOnOutputDimValueMismatch)
+{
+    // Input [1,1,4,4], kernel [1,1,3,3], no padding, stride 1 → expected output [1,1,2,2]
+    // Provide wrong output dims [1,1,3,3]
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 3, 3});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+// ============================================================================
+// TestGpuConvFwdRefValidation — validateInput throw paths (via GpuFpReferenceConvolution)
+// ============================================================================
+
+TEST(TestGpuConvFwdRefValidation, ThrowsOnInvalidDimCount)
+{
+    Tensor<float> x({8, 8});
+    Tensor<float> w({8, 8});
+    Tensor<float> y({8, 8});
+
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(x, w, y, Vec{1}, Vec{1}, Vec{0}, Vec{0}),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuConvFwdRefValidation, ThrowsOnWeightDimMismatch)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuConvFwdRefValidation, ThrowsOnOutputDimMismatch)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2});
+
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuConvFwdRefValidation, ThrowsOnStridesSizeMismatch)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(
+        GpuFpReferenceConvolution::fprop<float>(x, w, y, Vec{1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+        std::invalid_argument);
+}
+
+TEST(TestGpuConvFwdRefValidation, ThrowsOnDilationsSizeMismatch)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuConvFwdRefValidation, ThrowsOnPrePaddingSizeMismatch)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(
+        GpuFpReferenceConvolution::fprop<float>(x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0}, Vec{0, 0}),
+        std::invalid_argument);
+}
+
+TEST(TestGpuConvFwdRefValidation, ThrowsOnPostPaddingSizeMismatch)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuConvFwdRefValidation, ThrowsOnZeroStride)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{0, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuConvFwdRefValidation, ThrowsOnNegativeDilation)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, -1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuConvFwdRefValidation, ThrowsOnNegativePrePadding)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{-1, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuConvFwdRefValidation, ThrowsOnNegativePostPadding)
+{
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, -1}),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuConvFwdRefValidation, ThrowsOnOutputDimValueMismatch)
+{
+    // Input [1,1,4,4], kernel [1,1,3,3], no padding, stride 1 → expected output [1,1,2,2]
+    // Provide wrong output dims [1,1,3,3]
+    Tensor<float> x({1, 1, 4, 4});
+    Tensor<float> w({1, 1, 3, 3});
+    Tensor<float> y({1, 1, 3, 3});
+
+    EXPECT_THROW(GpuFpReferenceConvolution::fprop<float>(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
 
 // ============================================================================
 // Standalone tests (TEST, not TEST_P)

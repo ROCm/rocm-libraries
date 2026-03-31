@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace hipdnn_data_sdk::utilities
+namespace hipdnn_test_sdk::utilities
 {
 
 /// Validates convolution parameters against tensor dimensions.
@@ -21,9 +21,9 @@ namespace hipdnn_data_sdk::utilities
 /// (e.g. restricting to 3D/4D/5D for GPU kernels, or >= 3 for a generic CPU path).
 /// This function assumes all three tensors have the same number of dimensions.
 template <typename T1, typename T2, typename T3>
-void validateConvolutionParams(const TensorBase<T1>& x,
-                               const TensorBase<T2>& w,
-                               const TensorBase<T3>& y,
+void validateConvolutionParams(const hipdnn_data_sdk::utilities::TensorBase<T1>& x,
+                               const hipdnn_data_sdk::utilities::TensorBase<T2>& w,
+                               const hipdnn_data_sdk::utilities::TensorBase<T3>& y,
                                const std::vector<int64_t>& strides,
                                const std::vector<int64_t>& dilations,
                                const std::vector<int64_t>& prePadding,
@@ -112,4 +112,4 @@ void validateConvolutionParams(const TensorBase<T1>& x,
     }
 }
 
-} // namespace hipdnn_data_sdk::utilities
+} // namespace hipdnn_test_sdk::utilities
