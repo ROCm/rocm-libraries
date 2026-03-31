@@ -768,6 +768,7 @@ def buildObjectFilePaths(
     sourceLibFiles,
     asmLibFiles,
     masterLibraries,
+    requestedArchs=None,
 ):
     solutionPaths = []
     sourceKernelPaths = []
@@ -793,11 +794,16 @@ def buildObjectFilePaths(
         asmKernelPaths += [os.path.join(asmKernelDir, asmKernelFile)]
 
     # Build full paths for source and asm library files
+    # Code objects (.co, .hsaco) stay in the flat library/ dir; sanityCheck compares
+    # these against writeKernels output which also uses the flat dir.
     libDir = os.path.join(prefixDir, "library")
+    # Solution catalog .dat/.yaml files move to library/<arch>/ for single-arch builds
+    # so that shard overlays cannot corrupt each other (see libraryDir()).
+    metaDir = str(libraryDir(prefixDir, requestedArchs)) if requestedArchs else libDir
 
     libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
     if not globalParameters["SeparateArchitectures"] and not globalParameters["LazyLibraryLoading"]:
-        libMetadataPaths = [os.path.join(libDir, "TensileLibrary" + libraryExt)]
+        libMetadataPaths = [os.path.join(metaDir, "TensileLibrary" + libraryExt)]
 
     for sourceLibFile in sourceLibFiles:
         sourceLibPaths += [os.path.join(libDir, sourceLibFile)]
@@ -808,12 +814,12 @@ def buildObjectFilePaths(
         for arch, lib in masterLibraries.items():
             if globalParameters["LazyLibraryLoading"]:
                 newMetadataPaths.add(
-                    os.path.join(libDir, "TensileLibrary_lazy_" + arch + libraryExt)
+                    os.path.join(metaDir, "TensileLibrary_lazy_" + arch + libraryExt)
                 )
             else:
-                newMetadataPaths.add(os.path.join(libDir, "TensileLibrary_" + arch + libraryExt))
+                newMetadataPaths.add(os.path.join(metaDir, "TensileLibrary_" + arch + libraryExt))
             for name, placeholder in lib.lazyLibraries.items():
-                newMetadataPaths.add(os.path.join(libDir, name + libraryExt))
+                newMetadataPaths.add(os.path.join(metaDir, name + libraryExt))
 
     libMetadataPaths += list(newMetadataPaths)
 
@@ -1482,6 +1488,7 @@ def TensileCreateLibrary():
         sourceLibFiles,
         asmLibFiles,
         masterLibraries,
+        requestedArchs,
     )
 
     toFile(Path(manifestFile), libMetadataPaths + sourceLibPaths + asmLibPaths)
@@ -1518,7 +1525,7 @@ def TensileCreateLibrary():
     tPrint(2, f"codeObjectFiles: {codeObjectFiles}")
     tPrint(2, f"sourceLibPaths + asmLibPaths: {sourceLibPaths + asmLibPaths}")
 
-    newLibraryDir = Path(outputPath) / "library"
+    newLibraryDir = libraryDir(outputPath, requestedArchs)
     newLibraryDir.mkdir(parents=True, exist_ok=True)
 
     masterFileList = generateMasterFileList(masterLibraries, supportedArchs, lazyLoading)
