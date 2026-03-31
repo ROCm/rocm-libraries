@@ -82,7 +82,7 @@ RUN apt-get remove --purge -y python3-pyparsing python3-cryptography
 ADD miopen/docs/sphinx/requirements.txt /doc-requirements.txt
 
 # Install doc requirements
-RUN pip3 install --break-system-packages -r /doc-requirements.txt && \
+RUN pip3 install --break-system-packages --ignore-installed -r /doc-requirements.txt && \
 # Install an init system
     wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64.deb && \
     dpkg -i dumb-init_*.deb && rm dumb-init_*.deb && \
