@@ -320,6 +320,50 @@ bool _rocblas_handle::device_allocator(size_t size)
 }
 #endif
 
+rocblas_status _rocblas_handle::set_stream(hipStream_t new_stream)
+{
+    // If the stream is unchanged, return immediately
+    if(new_stream == stream)
+        return rocblas_status_success;
+
+    //Verify if the new stream is in capture mode
+    hipStreamCaptureStatus stream_status = hipStreamCaptureStatusNone;
+    if(new_stream != 0)
+    {
+        bool status = hipStreamIsCapturing(new_stream, &stream_status) == hipSuccess;
+
+        if(!status)
+            return rocblas_status_invalid_value;
+    }
+
+    // Stream capture does not allow use of hipStreamQuery
+    // If the current stream or new stream is in capture mode, skip use of hipStreamQuery()
+    if((stream == 0 || !is_stream_in_capture_mode()) && stream_status == hipStreamCaptureStatusNone)
+    {
+        // The new stream must be valid
+        if(new_stream != 0 && hipStreamQuery(new_stream) == hipErrorInvalidHandle)
+            return rocblas_status_invalid_value;
+    }
+
+    /*
+    if(stream_order_alloc)
+    {
+        // only if in stream_order_alloc can we release now as it will be async release
+        // and we have to update our memory book keeping
+        rocblas_status status = free_existing_device_memory(this);
+        if(status != rocblas_status_success)
+        {
+            rocblas_cerr << "rocBLAS error during async freeing of allocated memory in handle "
+                            "(stream order allocation)"
+                         << std::endl;
+            return status;
+        }
+    }*/
+
+    stream = new_stream;
+    return rocblas_status_success;
+}
+
 int _rocblas_handle::getActiveDevice()
 {
     int deviceId;
@@ -378,6 +422,30 @@ Processor _rocblas_handle::getActiveArch()
     {
         return Processor::gfx1030;
     }
+    else if(deviceString.find("gfx1031") != std::string::npos)
+    {
+        return Processor::gfx1031;
+    }
+    else if(deviceString.find("gfx1032") != std::string::npos)
+    {
+        return Processor::gfx1032;
+    }
+    else if(deviceString.find("gfx1033") != std::string::npos)
+    {
+        return Processor::gfx1033;
+    }
+    else if(deviceString.find("gfx1034") != std::string::npos)
+    {
+        return Processor::gfx1034;
+    }
+    else if(deviceString.find("gfx1035") != std::string::npos)
+    {
+        return Processor::gfx1035;
+    }
+    else if(deviceString.find("gfx1036") != std::string::npos)
+    {
+        return Processor::gfx1036;
+    }
     else if(deviceString.find("gfx1100") != std::string::npos)
     {
         return Processor::gfx1100;
@@ -401,6 +469,14 @@ Processor _rocblas_handle::getActiveArch()
     else if(deviceString.find("gfx1151") != std::string::npos)
     {
         return Processor::gfx1151;
+    }
+    else if(deviceString.find("gfx1152") != std::string::npos)
+    {
+        return Processor::gfx1152;
+    }
+    else if(deviceString.find("gfx1153") != std::string::npos)
+    {
+        return Processor::gfx1153;
     }
     else if(deviceString.find("gfx1200") != std::string::npos)
     {

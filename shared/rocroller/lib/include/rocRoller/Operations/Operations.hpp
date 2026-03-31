@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -36,6 +13,7 @@
 
 #include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/Operations/Scratch.hpp>
 #include <rocRoller/Operations/T_LoadStore.hpp>
 #include <rocRoller/Operations/T_Mul.hpp>
 #include <rocRoller/Operations/TensorScalar.hpp>
@@ -63,6 +41,7 @@ namespace rocRoller
             std::unordered_set<OperationTag> operator()(Scalar const&);
             std::unordered_set<OperationTag> operator()(Literal const&);
             std::unordered_set<OperationTag> operator()(BlockScale const&);
+            std::unordered_set<OperationTag> operator()(Scratch const&);
             std::unordered_set<OperationTag> operator()(SubTileTranspose const&);
             std::unordered_set<OperationTag> operator()(T_Load_Linear const&);
             std::unordered_set<OperationTag> operator()(T_Load_Scalar const&);
@@ -88,6 +67,7 @@ namespace rocRoller
             std::unordered_set<OperationTag> operator()(Scalar const&);
             std::unordered_set<OperationTag> operator()(Literal const&);
             std::unordered_set<OperationTag> operator()(BlockScale const&);
+            std::unordered_set<OperationTag> operator()(Scratch const&);
             std::unordered_set<OperationTag> operator()(SubTileTranspose const&);
             std::unordered_set<OperationTag> operator()(T_Load_Linear const&);
             std::unordered_set<OperationTag> operator()(T_Load_Scalar const&);
@@ -121,6 +101,7 @@ namespace rocRoller
             std::unordered_set<OperationTag> operator()(Scalar&);
             std::unordered_set<OperationTag> operator()(Literal&);
             std::unordered_set<OperationTag> operator()(BlockScale&);
+            std::unordered_set<OperationTag> operator()(Scratch&);
             std::unordered_set<OperationTag> operator()(SubTileTranspose&);
             std::unordered_set<OperationTag> operator()(T_Load_Linear&);
             std::unordered_set<OperationTag> operator()(T_Load_Scalar&);
@@ -149,6 +130,7 @@ namespace rocRoller
             std::string operator()(Scalar const&);
             std::string operator()(Literal const&);
             std::string operator()(BlockScale const&);
+            std::string operator()(Scratch const&);
             std::string operator()(SubTileTranspose const&);
             std::string operator()(T_Load_Linear const&);
             std::string operator()(T_Load_Scalar const&);
@@ -179,6 +161,7 @@ namespace rocRoller
             void operator()(Scalar&);
             void operator()(Literal&);
             void operator()(BlockScale&);
+            void operator()(Scratch&);
             void operator()(SubTileTranspose&);
             void operator()(T_Load_Linear&);
             void operator()(T_Load_Scalar&);
@@ -201,6 +184,7 @@ namespace rocRoller
             void operator()(Scalar&);
             void operator()(Literal&);
             void operator()(BlockScale&);
+            void operator()(Scratch&);
             void operator()(SubTileTranspose&);
             void operator()(T_Load_Linear&);
             void operator()(T_Load_Scalar&);
@@ -221,6 +205,7 @@ namespace rocRoller
             rocRoller::VariableType operator()(Scalar&);
             rocRoller::VariableType operator()(Literal&);
             rocRoller::VariableType operator()(BlockScale&);
+            rocRoller::VariableType operator()(Scratch&);
             rocRoller::VariableType operator()(SubTileTranspose&);
             rocRoller::VariableType operator()(T_Load_Linear&);
             rocRoller::VariableType operator()(T_Load_Scalar&);

@@ -122,6 +122,12 @@ private:
     }
 };
 
+#ifdef _WIN32
+// Suppress -Wundefined-func-template warning for Windows
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wundefined-func-template"
+#endif
+
 /// Common interface for tunable and non-tunable solvers
 template <class Context, class Problem>
 struct SolverInterface : SolverBase
@@ -176,7 +182,8 @@ struct SolverBaseNonTunable : SolverInterfaceNonTunable<Context, Problem>
     InvokerFactory GetInvokerFactory(const Context& ctx, const Problem& problem) const
     {
         const auto solution = this->GetSolution(ctx, problem);
-        return *solution.invoker_factory;
+        // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
+        return solution.invoker_factory.value();
     }
 };
 
@@ -225,9 +232,15 @@ struct SolverBaseTunable : SolverInterfaceTunable<Context, Problem>, TunableSolv
                                      const Problem& problem,
                                      const PerformanceConfig& config) const
     {
-        return *GetSolution(ctx, problem, config).invoker_factory;
+        // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
+        return GetSolution(ctx, problem, config).invoker_factory.value();
     }
 };
+
+#ifdef _WIN32
+// Suppress -Wundefined-func-template warning for Windows
+#pragma GCC diagnostic pop
+#endif
 
 // \todo Should be removed
 template <class Context, class Problem>

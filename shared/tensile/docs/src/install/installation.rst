@@ -32,8 +32,7 @@ Install OS dependencies
 
    .. code-block::
 
-    apt-get install libyaml python3-yaml \
-        libomp-dev libboost-program-options-dev libboost-filesystem-dev
+    apt-get install libyaml python3-yaml libomp-dev
 
 2. Install one of the following, depending on your preferred Tensile data format. If both are installed, ``msgpack`` is preferred:
 
@@ -68,7 +67,7 @@ Option 1: Install with pip
 
 .. code-block:: bash
 
-  pip3 install git+https://github.com/ROCmSoftwarePlatform/Tensile.git@develop
+  pip3 install git+https://github.com/ROCm/Tensile.git@develop
 
 
 Option 2: Install with git

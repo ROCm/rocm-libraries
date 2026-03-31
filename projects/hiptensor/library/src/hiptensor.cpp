@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -79,17 +79,16 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         return HIPTENSOR_STATUS_INVALID_VALUE;
     }
 
-    const char* plan_cache_disable = std::getenv("HIPTENSOR_DISABLE_PLAN_CACHE");
-    if(plan_cache_disable == nullptr || strcmp(plan_cache_disable, "ON") != 0)
+    if (hiptensor::checkEnvironmentVariableEnabled("HIPTENSOR_DISABLE_PLAN_CACHE"))
     {
-        hiptensor::PlanCache* planCache = new hiptensor::PlanCache;
-        (*handle)->setPlanCache(planCache);
-        snprintf(msg, sizeof(msg), "Plan Cache is %s", "enabled.");
+        snprintf(msg, sizeof(msg), "Plan Cache is disabled.");
         logger->logAPITrace("hiptensorCreate", msg);
     }
     else
     {
-        snprintf(msg, sizeof(msg), "Plan Cache is %s", "disabled.");
+        hiptensor::PlanCache* planCache = new hiptensor::PlanCache;
+        (*handle)->setPlanCache(planCache);
+        snprintf(msg, sizeof(msg), "Plan Cache is enabled.");
         logger->logAPITrace("hiptensorCreate", msg);
     }
 
@@ -297,6 +296,24 @@ hiptensorStatus_t
     case HIPTENSOR_OPERATION_DESCRIPTOR_TAG:
         std::memcpy(&desc->mTag, buf, sizeInBytes);
         break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE:
+        std::memcpy(&desc->mScalarType, buf, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_FLOPS:
+        std::memcpy(&desc->mFlops, buf, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_MOVED_BYTES:
+        std::memcpy(&desc->mMovedBytes, buf, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_LEFT:
+        std::memcpy(&desc->mPaddingLeft, buf, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_RIGHT:
+        std::memcpy(&desc->mPaddingRighT, buf, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_VALUE:
+        std::memcpy(desc->mPaddingValue, buf, sizeInBytes);
+        break;
     default:
         retStatus = HIPTENSOR_STATUS_NOT_SUPPORTED;
         break;
@@ -312,7 +329,37 @@ hiptensorStatus_t
                                              void*                                   buf,
                                              size_t                                  sizeInBytes)
 {
-    return HIPTENSOR_STATUS_SUCCESS;
+    hiptensorStatus_t retStatus = HIPTENSOR_STATUS_SUCCESS;
+
+    switch(attr)
+    {
+    case HIPTENSOR_OPERATION_DESCRIPTOR_TAG:
+        std::memcpy(buf, &desc->mTag, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE:
+        std::memcpy(buf, &desc->mScalarType, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_FLOPS:
+        std::memcpy(buf, &desc->mFlops, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_MOVED_BYTES:
+        std::memcpy(buf, &desc->mMovedBytes, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_LEFT:
+        std::memcpy(buf, &desc->mPaddingLeft, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_RIGHT:
+        std::memcpy(buf, &desc->mPaddingRighT, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_VALUE:
+        std::memcpy(buf, desc->mPaddingValue, sizeInBytes);
+        break;
+    default:
+        retStatus = HIPTENSOR_STATUS_NOT_SUPPORTED;
+        break;
+    }
+
+    return retStatus;
 }
 
 hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            handle,
@@ -559,7 +606,18 @@ hiptensorStatus_t hiptensorPlanGetAttribute(const hiptensorHandle_t  handle,
                                             void*                    buf,
                                             size_t                   sizeInBytes)
 {
-    return HIPTENSOR_STATUS_SUCCESS;
+    hiptensorStatus_t retStatus = HIPTENSOR_STATUS_SUCCESS;
+    switch(attr)
+    {
+    case HIPTENSOR_PLAN_REQUIRED_WORKSPACE:
+        std::memcpy(buf, &plan->mRequiredWorkspace, sizeInBytes);
+        break;
+    default:
+        retStatus = HIPTENSOR_STATUS_NOT_SUPPORTED;
+        break;
+    }
+
+    return retStatus;
 }
 
 hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t              handle,
@@ -578,6 +636,7 @@ hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t        
         return contractionGetWorkspaceSize(
             handle, desc, planPref, workspacePref, workspaceSizeEstimate);
     }
+    *workspaceSizeEstimate = 0u;
     return HIPTENSOR_STATUS_SUCCESS;
 }
 
@@ -593,13 +652,41 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
                                       uint64_t                             workspaceSizeLimit)
 {
     (*plan)                     = new hiptensorPlan();
-    (*plan)->mRequiredWorkspace = workspaceSizeLimit;
-    (*plan)->mOpDesc            = desc;
-    (*plan)->mPref              = pref;
+    hiptensorPlan_t             newPlan = *plan;
+    newPlan->mRequiredWorkspace = workspaceSizeLimit;
+
+    // Deep-copy the tensor descriptors referenced by the operation descriptor
+    if(desc->mDescA)
+    {
+        newPlan->mOwnedDescA = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescA);
+    }
+    if(desc->mDescB)
+    {
+        newPlan->mOwnedDescB = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescB);
+    }
+    if(desc->mDescC)
+    {
+        newPlan->mOwnedDescC = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescC);
+    }
+    if(desc->mDescD)
+    {
+        newPlan->mOwnedDescD = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescD);
+    }
+
+    newPlan->mOwnedOpDesc  = std::make_unique<hiptensorOperationDescriptor>(*desc);
+    newPlan->mOwnedOpDesc->mDescA = newPlan->mOwnedDescA.get();
+    newPlan->mOwnedOpDesc->mDescB = newPlan->mOwnedDescB.get();
+    newPlan->mOwnedOpDesc->mDescC = newPlan->mOwnedDescC.get();
+    newPlan->mOwnedOpDesc->mDescD = newPlan->mOwnedDescD.get();
+
+    newPlan->mOwnedPref = std::make_unique<hiptensorPlanPreference>(*pref);
+
+    newPlan->mOpDesc = newPlan->mOwnedOpDesc.get();
+    newPlan->mPref   = newPlan->mOwnedPref.get();
 
     if(desc->mOperationType == HIPTENSOR_CONTRACTION)
     {
-        return contractionInitPlan(handle, *plan, desc, pref, workspaceSizeLimit);
+        return contractionInitPlan(handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
     }
     return HIPTENSOR_STATUS_SUCCESS;
 }

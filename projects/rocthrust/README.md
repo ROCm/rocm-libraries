@@ -84,10 +84,11 @@ mkdir build; cd build
 # On ROCm platform set C++ compiler to HipCC. You can do it by adding 'CXX=<path-to-hipcc>'
 # before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' with the path to the HipCC compiler.
 #
+# The package and install scripts require Make, but otherwise passing -GNinja is recommended for faster building.
 [CXX=hipcc] cmake ../. # or cmake-gui ../.
 
 # Build
-make -j4
+make -j4 # or `ninja`
 
 # Optionally, run tests if they're enabled.
 ctest --output-on-failure
@@ -183,11 +184,11 @@ ctest
 
 ### Using multiple GPUs concurrently for testing
 
-This feature requires CMake 3.16+ to be used for building and testing. *(Prior versions of CMake can't
-assign IDs to tests when running in parallel. Assigning tests to distinct devices could only be done at
-the cost of extreme complexity.)*
+This feature requires CMake 3.18+ to be used for building and testing. *(Prior versions of CMake don't
+support the RESOURCE_SPEC_FILE argument for CTest and versions prior to 3.16 don't support the RESOURCE_GROUPS
+property on tests. Both are needed to run tests concurrently on multiple GPUs.)*
 
-Unit tests can make use of the
+Unit tests of rocThrust make use of the
 [CTest Resource Allocation](https://cmake.org/cmake/help/latest/manual/ctest.1.html#resource-allocation) feature, which enables distributing tests across multiple GPUs in an intelligent manner. This feature can
 accelerate testing when multiple GPUs of the same family are in a system. It can also test multiple
 product families from one invocation without having to use the `HIP_VISIBLE_DEVICES` environment
@@ -201,26 +202,28 @@ invoke are sufficiently recent.
 
 #### Auto resource spec generation
 
-There is a utility script in the repo that may be called independently:
+An executable named `generate_resource_spec` will be built when you run `cmake -DBUILD_TEST=ON`. It can be used to generate the resource spec file, which describes the GPU resources available on your system:
 
 ```shell
 # Go to rocThrust build directory
 cd projects/rocthrust; cd build
 
-# Invoke directly or use CMake script mode via cmake -P
-../cmake/GenerateResourceSpec.cmake
+# Invoke the executable with a name for the output json file
+./generate_resource_spec resources.json
 
-# Assuming you have 2 compatible GPUs in the system
-ctest --resource-spec-file ./resources.json --parallel 2
+# Run tests in parallel with specified number of jobs
+ctest --resource-spec-file ./resources.json --parallel <number-of-jobs>
 ```
+
+It will launch up to the specified number of jobs to run tests in parallel, while honoring the available GPU resources defined by the resource spec file and their allocation defined by the `RESOURCE_GROUPS` property on the tests.
 
 #### Manual
 
 Assuming you have two GPUs from the gfx900 family and they are the first devices enumerated by the
 system, you can specify `-D AMDGPU_TEST_TARGETS=gfx900` during configuration to specify that you
-want only one family to be tested. If you leave this var empty (default), the default device in the system
-is targeted. To specify that there are two GPUs that should be targeted, you must feed a JSON file to
-CTest using the `--resource-spec-file <path_to_file>` flag. For example:
+want only one family to be tested. If you leave this var empty (default), all GPUs in the system
+are targeted. To specify that there are two GPUs that should be targeted, you must feed a JSON file,
+similar to the generated `resources.json` file, for example:
 
 ```json
 {
@@ -241,6 +244,13 @@ CTest using the `--resource-spec-file <path_to_file>` flag. For example:
     }
   ]
 }
+```
+
+to CTest using the `--resource-spec-file` flag:
+
+```shell
+# Run tests on specified GPU family
+ctest --resource-spec-file <path-to-your-resources.json> --parallel <number-of-jobs>
 ```
 
 ## Using custom seeds for the tests

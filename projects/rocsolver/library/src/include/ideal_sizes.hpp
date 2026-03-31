@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,12 +27,15 @@
 
 #pragma once
 
+#include "asan_helpers.hpp"
+
 /*! \file
     \brief ideal_sizes.hpp gathers all constants that can be tuned for performance.
  *********************************************************************************/
 
 #define BS1 256 // generic 1 dimensional thread-block size used to call common kernels
-#define BS2 32 // generic 2 dimensional thread-block size used to call common kernels
+#define BS2 \
+    ROCSOLVER_ASAN_VALUE(16, 32) // generic 2 dimensional thread-block size used to call common kernels
 
 /******************************* larf ****************************************
 *******************************************************************************/
@@ -278,31 +281,24 @@
 
 /************************** potf2/potrf ***************************************
 *******************************************************************************/
-/*! \brief Determines the size of the leading block that is factorized at each step
-    when using the blocked algorithm (POTRF). It also applies to the
-    corresponding batched and strided-batched routines.*/
-#ifndef POTRF_BLOCKSIZE
-#define POTRF_BLOCKSIZE(T) ((sizeof(T) == 4) ? 180 : (sizeof(T) == 8) ? 127 : 90)
+/*! \brief Determines the maximum size at which rocSOLVER can use POTF2 small-size kernel.
+    \details
+    POTF2 will attempt to factorize a small symmetric matrix that can fit entirely
+    within the LDS shared memory using compact storage.
+    The amount of LDS shared memory is assumed to be at least (64 * 1024) bytes. */
+#ifndef POTF2_MAX_SMALL_SIZE
+#define POTF2_MAX_SMALL_SIZE(T) ((sizeof(T) == 16) ? 128 : 256)
 #endif
 
 /*! \brief Determines the size at which rocSOLVER switches from
     the unblocked to the blocked algorithm when executing POTRF. It also applies to the
     corresponding batched and strided-batched routines.
 
-    \details POTRF will factorize blocks of POTRF_BLOCKSIZE columns at a time until
+    \details POTRF will factorize blocks of columns at a time until
     the rest of the matrix has no more than POTRF_POTF2_SWITCHSIZE columns; at this point the last block,
     if any, will be factorized with the unblocked algorithm (POTF2).*/
 #ifndef POTRF_POTF2_SWITCHSIZE
-#define POTRF_POTF2_SWITCHSIZE(T) POTRF_BLOCKSIZE(T)
-#endif
-
-/*! \brief Determines the maximum size at which rocSOLVER can use POTF2
-    \details
-    POTF2 will attempt to factorize a small symmetric matrix that can fit entirely
-    within the LDS share memory using compact storage.
-    The amount of LDS shared memory is assumed to be at least (64 * 1024) bytes. */
-#ifndef POTF2_MAX_SMALL_SIZE
-#define POTF2_MAX_SMALL_SIZE(T) ((sizeof(T) == 4) ? 180 : (sizeof(T) == 8) ? 127 : 90)
+#define POTRF_POTF2_SWITCHSIZE(T) ((sizeof(T) == 4) ? 256 : 128)
 #endif
 
 /************************** syevj/heevj ***************************************
@@ -366,7 +362,7 @@
 #define GETF2_SPKER_MAX_N 256 //always <= 256
 #endif
 #ifndef GETF2_SSKER_MAX_M
-#define GETF2_SSKER_MAX_M 512 //always <= 512 and <= GETF2_SPKER_MAX_M
+#define GETF2_SSKER_MAX_M ROCSOLVER_ASAN_VALUE(256, 512) //always <= 512 and <= GETF2_SPKER_MAX_M
 #endif
 #ifndef GETF2_SSKER_MAX_N
 #define GETF2_SSKER_MAX_N 64 //always <= wavefront and <= GETF2_SPKER_MAX_N

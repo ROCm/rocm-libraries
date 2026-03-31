@@ -201,7 +201,7 @@ void testing_tpsv_batched(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dAp.memcheck());
     CHECK_DEVICE_ALLOCATION(dx_or_b.memcheck());
 
-    double gpu_time_used, hipblas_error, cumulative_hipblas_error = 0;
+    double gpu_time_used{0}, hipblas_error{0}, cumulative_hipblas_error{0};
 
     // Initial Data on CPU
     hipblas_init_matrix(hA,
@@ -270,7 +270,7 @@ void testing_tpsv_batched(const Arguments& arg)
 
     if(arg.timing)
     {
-        double      gpu_time_used;
+        double      gpu_time_used{0};
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));

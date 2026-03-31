@@ -7,12 +7,11 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 
 #include "PluginCore.hpp"
 
-namespace hipdnn_backend
-{
-namespace plugin
+namespace hipdnn_backend::plugin
 {
 
 class EnginePlugin : public PluginBase
@@ -112,5 +111,4 @@ private:
     friend class PluginManagerBase<EnginePlugin>;
 };
 
-} // namespace plugin
-} // hipdnn_backend
+} // namespace hipdnn_backend::plugin

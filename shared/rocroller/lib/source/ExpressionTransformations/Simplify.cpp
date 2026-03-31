@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/Expression.hpp>
 
@@ -400,32 +377,50 @@ namespace rocRoller
 
         struct ConcatenatePartialSimplifyVisitor
         {
-            // TODO: support 32 bit literal merging into 64 bit literal, codegen (copier) has problems
-            // ExpressionPtr operator()(CommandArgumentValue const& expr1,
-            //                          CommandArgumentValue const& expr2) const
-            // {
-            //     return std::visit(
-            //         [](auto const& val1, auto const& val2) -> ExpressionPtr {
-            //             using T1 = std::decay_t<decltype(val1)>;
-            //             using T2 = std::decay_t<decltype(val2)>;
-            //             if constexpr(std::is_same_v<T1, uint32_t> && std::is_same_v<T2, uint32_t>)
-            //             {
-            //                 uint64_t result
-            //                     = (static_cast<uint64_t>(val2) << 32) | static_cast<uint64_t>(val1);
-            //                 return literal(result);
-            //             }
-            //             return {};
-            //         },
-            //         expr1,
-            //         expr2);
-            // }
+            ConcatenatePartialSimplifyVisitor(Concatenate const& concatenate)
+                : m_concatenate(concatenate)
+            {
+            }
+
+            ExpressionPtr operator()(CommandArgumentValue const& expr1,
+                                     CommandArgumentValue const& expr2) const
+            {
+                // TODO: Support partial 32 bit literal merging into 64 bit literal, codegen (copier) has problems
+                // Full merging is enabled because a concatenate of a single operand is simplified to the operand
+                // Partial merging would also require a Raw64 type
+                if(m_concatenate.operands.size() != 2
+                   || m_concatenate.destinationType != DataType::UInt64)
+                    return {};
+
+                return std::visit(
+                    [](auto const& val1, auto const& val2) -> ExpressionPtr {
+                        using T1 = std::decay_t<decltype(val1)>;
+                        using T2 = std::decay_t<decltype(val2)>;
+                        if constexpr((std::is_same_v<T1, uint32_t> || std::is_same_v<T1, Raw32>)&&(
+                                         std::is_same_v<T2, uint32_t> || std::is_same_v<T2, Raw32>))
+                        {
+                            auto get_value = [](auto const& val) -> uint32_t {
+                                if constexpr(std::is_same_v<std::decay_t<decltype(val)>, Raw32>)
+                                    return val.value;
+                                else
+                                    return val;
+                            };
+                            uint64_t result = (static_cast<uint64_t>(get_value(val2)) << 32)
+                                              | static_cast<uint64_t>(get_value(val1));
+                            return literal(result);
+                        }
+                        return {};
+                    },
+                    expr1,
+                    expr2);
+            }
 
             ExpressionPtr operator()(BitFieldExtract const& expr1,
                                      BitFieldExtract const& expr2) const
             {
-                if(expr1.arg == expr2.arg && resultVariableType(expr1.arg).getElementSize() == 8
-                   && expr1.offset == 0 && expr1.width == 32 && expr2.offset == 32
-                   && expr2.width == 32)
+                if(identical(expr1.arg, expr2.arg)
+                   && resultVariableType(expr1.arg).getElementSize() == 8 && expr1.offset == 0
+                   && expr1.width == 32 && expr2.offset == 32 && expr2.width == 32)
                 {
                     return expr1.arg;
                 }
@@ -443,6 +438,9 @@ namespace rocRoller
             {
                 return std::visit(*this, *expr1, *expr2);
             }
+
+        private:
+            Concatenate m_concatenate;
         };
 
         /**
@@ -453,7 +451,7 @@ namespace rocRoller
         {
             Concatenate                cpy = expr;
             std::vector<ExpressionPtr> operands;
-            auto const                 visitor = ConcatenatePartialSimplifyVisitor();
+            auto const                 visitor = ConcatenatePartialSimplifyVisitor(cpy);
 
             for(size_t i = 0; i < expr.operands.size(); ++i)
             {
@@ -585,9 +583,10 @@ namespace rocRoller
 
         struct DeepBitfieldExtractVisitor
         {
-            DeepBitfieldExtractVisitor(uint32_t offset, uint32_t width)
+            DeepBitfieldExtractVisitor(uint32_t offset, uint32_t width, DataType outputDataType)
                 : m_offset(offset)
                 , m_width(width)
+                , m_outputDataType(outputDataType)
             {
             }
 
@@ -608,17 +607,43 @@ namespace rocRoller
             {
                 uint32_t operandStartBit = 0;
                 uint32_t operandEndBit   = 0;
+                uint32_t startBit        = m_offset;
                 uint32_t endBit          = m_offset + m_width - 1;
+
+                std::vector<ExpressionPtr> overlapOperands;
+                uint32_t                   firstOperandStartBit = 0;
+
                 for(int i = 0; i < expr.operands.size(); ++i)
                 {
                     operandStartBit = operandEndBit;
                     operandEndBit += resultVariableType(expr.operands[i]).getElementSize() * 8;
-                    // bitField is fully contained within this operand
-                    if(operandStartBit <= m_offset && endBit <= operandEndBit)
+
+                    // bitfield overlaps with this operand
+                    if(operandStartBit <= endBit && startBit <= (operandEndBit - 1))
                     {
-                        this->m_offset -= operandStartBit;
-                        return call(expr.operands[i]);
+                        if(overlapOperands.empty())
+                            firstOperandStartBit = operandStartBit;
+
+                        overlapOperands.push_back(expr.operands[i]);
                     }
+                }
+
+                // bitfield is fully contained within this operand
+                if(overlapOperands.size() == 1)
+                {
+                    this->m_offset -= firstOperandStartBit;
+                    return call(overlapOperands[0]);
+                }
+
+                uint32_t operandsSize = 0;
+                for(auto const& operand : overlapOperands)
+                    operandsSize += resultVariableType(operand).getElementSize();
+
+                // The overlapping operands compose a single operand of type that matches the BitFieldExtract output type
+                if(operandsSize == DataTypeInfo::Get(m_outputDataType).elementBytes)
+                {
+                    this->m_offset -= firstOperandStartBit;
+                    return concat(overlapOperands, m_outputDataType);
                 }
 
                 return std::make_shared<Expression>(expr);
@@ -661,6 +686,7 @@ namespace rocRoller
         private:
             mutable uint32_t m_offset;
             uint32_t         m_width;
+            DataType         m_outputDataType;
         };
 
         /**
@@ -671,11 +697,10 @@ namespace rocRoller
          */
         BitFieldExtract deepBitFieldExtract(BitFieldExtract expr)
         {
-            auto visitor   = DeepBitfieldExtractVisitor(expr.offset, expr.width);
-            auto extracted = visitor.call(expr.arg);
-            int  offset    = visitor.get_offset();
+            auto visitor = DeepBitfieldExtractVisitor(expr.offset, expr.width, expr.outputDataType);
+            auto extracted  = visitor.call(expr.arg);
+            uint32_t offset = visitor.get_offset();
 
-            // return bfe(expr.outputDataType, extracted, offset, expr.width);
             return BitFieldExtract{{extracted}, expr.outputDataType, offset, expr.width};
         }
 
@@ -695,6 +720,23 @@ namespace rocRoller
 
                 Expr cpy = expr;
                 cpy.arg  = call(expr.arg);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(Reinterpret const& expr) const
+            {
+                if(resultVariableType(expr.arg).dataType == expr.destinationType)
+                    return call(expr.arg);
+
+                if(expr.arg && std::holds_alternative<Reinterpret>(*expr.arg))
+                {
+                    // Collapse: reinterpret(B, reinterpret(A, x)) -> reinterpret(B, x)
+                    auto const& innerReinterpret = std::get<Reinterpret>(*expr.arg);
+                    return call(reinterpret(expr.destinationType, innerReinterpret.arg));
+                }
+
+                Reinterpret cpy = expr;
+                cpy.arg         = call(expr.arg);
                 return std::make_shared<Expression>(cpy);
             }
 
@@ -780,8 +822,11 @@ namespace rocRoller
                     return literal(result.value());
 
                 // Extracting the entire arg with no offset
-                if(cpy.offset == 0 && cpy.width == resultVariableType(cpy.arg).getElementSize() * 8)
-                    return call(convert(cpy.outputDataType, cpy.arg));
+                auto argVarType = resultVariableType(cpy.arg);
+                if(cpy.offset == 0 && cpy.width == argVarType.getElementSize() * 8
+                   && argVarType.getElementSize()
+                          == DataTypeInfo::Get(cpy.outputDataType).elementBytes)
+                    return call(reinterpret(cpy.outputDataType, cpy.arg));
 
                 cpy.arg = call(cpy.arg);
                 return std::make_shared<Expression>(cpy);
@@ -809,6 +854,35 @@ namespace rocRoller
                 cpy.matC                 = call(expr.matC);
                 cpy.scaleA               = call(expr.scaleA);
                 cpy.scaleB               = call(expr.scaleB);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(Conditional const& expr) const
+            {
+                // Check if the condition can be evaluated at Translate time or not.
+                bool const eval_lhs = evaluationTimes(expr.lhs)[EvaluationTime::Translate];
+                if(eval_lhs)
+                {
+                    bool const condFalse = std::visit(
+                        [](auto&& arg) {
+                            using T = std::decay_t<decltype(arg)>;
+                            if constexpr(std::is_pointer_v<T>)
+                                return arg == nullptr;
+                            else
+                                return arg == T();
+                        },
+                        evaluate(expr.lhs));
+
+                    if(condFalse)
+                        return call(expr.r2hs);
+                    else
+                        return call(expr.r1hs);
+                }
+
+                auto cpy = expr;
+                cpy.lhs  = call(expr.lhs);
+                cpy.r1hs = call(expr.r1hs);
+                cpy.r2hs = call(expr.r2hs);
                 return std::make_shared<Expression>(cpy);
             }
 

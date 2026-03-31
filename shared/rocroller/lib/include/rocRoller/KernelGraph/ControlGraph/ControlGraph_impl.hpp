@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -124,116 +101,54 @@ namespace rocRoller::KernelGraph::ControlGraph
         Throw<FatalError>("Invalid NodeOrdering");
     }
 
-    inline void ControlGraph::checkOrderCache() const
-    {
-        if(m_orderCache.empty())
-            populateOrderCache();
-    }
-
     inline NodeOrdering ControlGraph::lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const
     {
-        if(nodeA > nodeB)
-            return opposite(lookupOrder(CacheOnly, nodeB, nodeA));
-
-        if(not m_orderCache.contains(nodeA))
+        auto it = m_orderCache.find(nodeA);
+        if(it == m_orderCache.end())
             return NodeOrdering::Undefined;
-
-        auto const& nodeOrderPairs = m_orderCache.at(nodeA);
-        return nodeOrderPairs.contains(nodeB) ? nodeOrderPairs.at(nodeB) : NodeOrdering::Undefined;
+        auto const& orders = it->second;
+        if(std::ranges::binary_search(orders.after, nodeB))
+            return NodeOrdering::LeftFirst;
+        if(std::ranges::binary_search(orders.before, nodeB))
+            return NodeOrdering::RightFirst;
+        if(std::ranges::binary_search(orders.inBody, nodeB))
+            return NodeOrdering::RightInBodyOfLeft;
+        if(std::ranges::binary_search(orders.containing, nodeB))
+            return NodeOrdering::LeftInBodyOfRight;
+        return NodeOrdering::Undefined;
     }
 
     inline Generator<int> ControlGraph::nodesAfter(int node) const
     {
         populateOrderCache();
-
-        if(m_orderCache.contains(node))
-        {
-            for(auto const& [otherNode, order] : m_orderCache.at(node))
-            {
-                if(order == NodeOrdering::LeftFirst)
-                    co_yield otherNode;
-            }
-        }
-
-        for(auto const& [otherNode, nodeOrderPairs] : m_orderCache)
-        {
-            if(otherNode >= node)
-                continue;
-
-            if(nodeOrderPairs.contains(node) && nodeOrderPairs.at(node) == NodeOrdering::RightFirst)
-                co_yield otherNode;
-        }
+        auto it = m_orderCache.find(node);
+        if(it != m_orderCache.end())
+            for(int n : it->second.after)
+                co_yield n;
     }
-
     inline Generator<int> ControlGraph::nodesBefore(int node) const
     {
         populateOrderCache();
-
-        if(m_orderCache.contains(node))
-        {
-            for(auto const& [otherNode, order] : m_orderCache.at(node))
-            {
-                if(order == NodeOrdering::RightFirst)
-                    co_yield otherNode;
-            }
-        }
-
-        for(auto const& [otherNode, nodeOrderPairs] : m_orderCache)
-        {
-            if(otherNode >= node)
-                continue;
-
-            if(nodeOrderPairs.contains(node) && nodeOrderPairs.at(node) == NodeOrdering::LeftFirst)
-                co_yield otherNode;
-        }
+        auto it = m_orderCache.find(node);
+        if(it != m_orderCache.end())
+            for(int n : it->second.before)
+                co_yield n;
     }
-
     inline Generator<int> ControlGraph::nodesInBody(int node) const
     {
         populateOrderCache();
-
-        if(m_orderCache.contains(node))
-        {
-            for(auto const& [otherNode, order] : m_orderCache.at(node))
-            {
-                if(order == NodeOrdering::RightInBodyOfLeft)
-                    co_yield otherNode;
-            }
-        }
-
-        for(auto const& [otherNode, nodeOrderPairs] : m_orderCache)
-        {
-            if(otherNode >= node)
-                continue;
-
-            if(nodeOrderPairs.contains(node)
-               && nodeOrderPairs.at(node) == NodeOrdering::LeftInBodyOfRight)
-                co_yield otherNode;
-        }
+        auto it = m_orderCache.find(node);
+        if(it != m_orderCache.end())
+            for(int n : it->second.inBody)
+                co_yield n;
     }
-
     inline Generator<int> ControlGraph::nodesContaining(int node) const
     {
         populateOrderCache();
-
-        if(m_orderCache.contains(node))
-        {
-            for(auto const& [otherNode, order] : m_orderCache.at(node))
-            {
-                if(order == NodeOrdering::LeftInBodyOfRight)
-                    co_yield otherNode;
-            }
-        }
-
-        for(auto const& [otherNode, nodeOrderPairs] : m_orderCache)
-        {
-            if(otherNode >= node)
-                continue;
-
-            if(nodeOrderPairs.contains(node)
-               && nodeOrderPairs.at(node) == NodeOrdering::RightInBodyOfLeft)
-                co_yield otherNode;
-        }
+        auto it = m_orderCache.find(node);
+        if(it != m_orderCache.end())
+            for(int n : it->second.containing)
+                co_yield n;
     }
 
     template <typename T>

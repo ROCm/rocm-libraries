@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -185,7 +185,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
              sizeof(msg),
              "hiptensorReduce: handle=%p, alpha=%p, A=%p, descA=%p, modeA=%p, beta=%p, C=%p, "
              "descC=%p, modeC=%p, D=%p, descD=%p, modeD=%p, opReduce=%s, typeCompute=%s, "
-             "workspace=%p, workspaceSize=%lu, stream=%p",
+             "workspace=%p, workspaceSize=%llu, stream=%p",
              handle,
              alpha,
              A,
@@ -201,7 +201,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
              hiptensor::opTypeToString(opReduce).c_str(),
              hiptensor::computeTypeToString(typeCompute).c_str(),
              workspace,
-             workspaceSize,
+             static_cast<unsigned long long>(workspaceSize),
              stream);
 
     logger->logAPITrace("hiptensorReduce", msg);
@@ -394,7 +394,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
                 // log perf metrics (not name/id)
                 snprintf(msg,
                          sizeof(msg),
-                         "KernelId: %lu KernelName: %s, %0.3f ms, %0.3f TFlops/s, %0.3f GB/s",
+                         "KernelId: %zu KernelName: %s, %0.3f ms, %0.3f TFlops/s, %0.3f GB/s",
                          metrics.mKernelUid,
                          metrics.mKernelName.c_str(),
                          metrics.mAvgTimeMs,

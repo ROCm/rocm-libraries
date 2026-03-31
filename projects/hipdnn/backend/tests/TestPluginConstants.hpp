@@ -5,15 +5,13 @@
 
 #include <string>
 
-namespace hipdnn_backend
-{
-namespace plugin_constants
+namespace hipdnn_backend::plugin_constants
 {
 // Test plugin directory constants relative to backend library location
 inline const std::string& getTestPluginDefaultDir()
 {
 
-    static std::string s_defaultDir
+    static const std::string s_defaultDir
 #if defined(_WIN32)
         = "bin/test_plugins";
 #else
@@ -22,5 +20,4 @@ inline const std::string& getTestPluginDefaultDir()
     return s_defaultDir;
 }
 
-}
-}
+} // namespace hipdnn_backend::plugin_constants

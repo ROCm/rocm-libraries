@@ -103,28 +103,28 @@ auto reduceWithCpu(hiptensorDataType_t          typeA,
     const hiptensorOperator_t opReduce = HIPTENSOR_OP_ADD;
 
     hiptensorOperationDescriptor_t desc;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreateReduction(
-                          handle, &desc,
-                          descA, modeA.data(), HIPTENSOR_OP_IDENTITY,
-                          descC, modeC.data(), HIPTENSOR_OP_IDENTITY,
-                          descC, modeC.data(),
-                          opReduce, typeCompute));
+    CHECK_HIPTENSOR_ERROR(hiptensorCreateReduction(handle,
+                                                   &desc,
+                                                   descA,
+                                                   modeA.data(),
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   descC,
+                                                   modeC.data(),
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   descC,
+                                                   modeC.data(),
+                                                   opReduce,
+                                                   typeCompute));
 
-    const hiptensorAlgo_t algo = HIPTENSOR_ALGO_DEFAULT;
+    const hiptensorAlgo_t     algo = HIPTENSOR_ALGO_DEFAULT;
     hiptensorPlanPreference_t planPref;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreatePlanPreference(
-                               handle,
-                               &planPref,
-                               algo,
-                               HIPTENSOR_JIT_MODE_NONE));
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorCreatePlanPreference(handle, &planPref, algo, HIPTENSOR_JIT_MODE_NONE));
 
-    uint64_t worksize = 0;
+    uint64_t                            worksize      = 0;
     const hiptensorWorksizePreference_t workspacePref = HIPTENSOR_WORKSPACE_DEFAULT;
-    CHECK_HIPTENSOR_ERROR(hiptensorEstimateWorkspaceSize(handle,
-                                          desc,
-                                          planPref,
-                                          workspacePref,
-                                          &worksize));
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorEstimateWorkspaceSize(handle, desc, planPref, workspacePref, &worksize));
 
     double alphaValue{};
     double betaValue{};
@@ -163,6 +163,21 @@ auto reduceWithCpu(hiptensorDataType_t          typeA,
     return compareEqual(referenceArray.data(), cArray.data(), cArray.size(), typeCompute);
 }
 
+// Kernel run checks. Virtual as different Reduction kernels have different requirements
+// True = run test
+// False = skip test
+bool checkDevice(hiptensorDataType_t datatype, hiptensorComputeDescriptor_t computeDataType)
+{
+    return !(((datatype == HIPTENSOR_R_16F || datatype == HIPTENSOR_R_16BF
+               || computeDataType == HIPTENSOR_COMPUTE_DESC_16F
+               || computeDataType == HIPTENSOR_COMPUTE_DESC_16BF)
+              && !isF16Supported())
+             || ((datatype == HIPTENSOR_R_32F || computeDataType == HIPTENSOR_COMPUTE_DESC_32F)
+                 && !isF32Supported())
+             || ((datatype == HIPTENSOR_R_64F || computeDataType == HIPTENSOR_COMPUTE_DESC_64F)
+                 && !isF64Supported()));
+}
+
 TEST(ReductionCpuImplTest, CompareF32ResultWithReference)
 {
     using floatTypeA       = hiptensor::float32_t;
@@ -172,6 +187,12 @@ TEST(ReductionCpuImplTest, CompareF32ResultWithReference)
     hiptensorDataType_t          typeA       = HIPTENSOR_R_32F;
     hiptensorDataType_t          typeC       = HIPTENSOR_R_32F;
     hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_32F;
+
+    bool runFlag = checkDevice(typeA, typeCompute);
+    if(!runFlag)
+    {
+        GTEST_SKIP();
+    }
 
     auto [result, maxRelativeError]
         = reduceWithCpu<floatTypeA, floatTypeC, floatTypeCompute>(typeA, typeC, typeCompute);
@@ -188,22 +209,34 @@ TEST(ReductionCpuImplTest, CompareF64ResultWithReference)
     hiptensorDataType_t          typeC       = HIPTENSOR_R_64F;
     hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_64F;
 
+    bool runFlag = checkDevice(typeA, typeCompute);
+    if(!runFlag)
+    {
+        GTEST_SKIP();
+    }
+
     auto [result, maxRelativeError]
         = reduceWithCpu<floatTypeA, floatTypeC, floatTypeCompute>(typeA, typeC, typeCompute);
     EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
 }
 
-// TEST(ReductionCpuImplTest, CompareF16ResultWithReference)
-// {
-// typedef _Float16 floatTypeA;
-// typedef _Float16 floatTypeC;
-// typedef _Float16 floatTypeCompute;
-//
-// hiptensorDataType_t typeA       = HIPTENSOR_R_16F;
-// hiptensorDataType_t typeC       = HIPTENSOR_R_16F;
-// hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_16F;
-//
-// auto [result, maxRelativeError]
-// = reduceWithCpu<floatTypeA, floatTypeC, floatTypeCompute>(typeA, typeC, typeCompute);
-// EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
-// }
+TEST(ReductionCpuImplTest, CompareF16ResultWithReference)
+{
+    typedef _Float16 floatTypeA;
+    typedef _Float16 floatTypeC;
+    typedef _Float16 floatTypeCompute;
+
+    hiptensorDataType_t          typeA       = HIPTENSOR_R_16F;
+    hiptensorDataType_t          typeC       = HIPTENSOR_R_16F;
+    hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_16F;
+
+    bool runFlag = checkDevice(typeA, typeCompute);
+    if(!runFlag)
+    {
+        GTEST_SKIP();
+    }
+
+    auto [result, maxRelativeError]
+        = reduceWithCpu<floatTypeA, floatTypeC, floatTypeCompute>(typeA, typeC, typeCompute);
+    EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
+}

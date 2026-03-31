@@ -458,3 +458,8 @@ hipsparseSpSM_solve()
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
       :linenos:
+
+hipsparseSpSM_solve_ex()
+========================
+
+.. doxygenfunction:: hipsparseSpSM_solve_ex

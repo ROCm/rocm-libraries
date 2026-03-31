@@ -1,9 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <HipdnnBackendPluginLoadingMode.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
 
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
@@ -18,7 +20,16 @@ void types_bindings(nb::module_& m)
         .value("BFLOAT16", DataType::BFLOAT16)
         .value("DOUBLE", DataType::DOUBLE)
         .value("UINT8", DataType::UINT8)
-        .value("INT32", DataType::INT32);
+        .value("INT32", DataType::INT32)
+        .value("INT8", DataType::INT8)
+        .value("FP8_E4M3", DataType::FP8_E4M3)
+        .value("FP8_E5M2", DataType::FP8_E5M2)
+        .value("FP8_E8M0", DataType::FP8_E8M0)
+        .value("FP4_E2M1", DataType::FP4_E2M1)
+        .value("INT4", DataType::INT4)
+        .value("FP6_E2M3", DataType::FP6_E2M3)
+        .value("FP6_E3M2", DataType::FP6_E3M2)
+        .value("INT64", DataType::INT64);
 
     // Bind ConvolutionMode enum
     nb::enum_<ConvolutionMode>(m, "ConvolutionMode")
@@ -97,4 +108,9 @@ void types_bindings(nb::module_& m)
         .def("get_code", &Error::get_code)
         .def("is_good", &Error::is_good)
         .def("is_bad", &Error::is_bad);
+
+    // Bind PluginLoadingMode enum
+    nb::enum_<hipdnnPluginLoadingMode_ext_t>(m, "PluginLoadingMode")
+        .value("ADDITIVE", HIPDNN_PLUGIN_LOADING_ADDITIVE)
+        .value("ABSOLUTE", HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 }

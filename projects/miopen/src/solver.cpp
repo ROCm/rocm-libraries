@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/activ/solvers.hpp>
 #include <miopen/adam/solvers.hpp>
@@ -53,7 +30,7 @@
 #include <miopen/any_solver.hpp>
 #include <miopen/timer.hpp>
 
-#include <boost/range/adaptor/transformed.hpp>
+#include <algorithm>
 #include <ostream>
 
 namespace miopen {
@@ -119,9 +96,11 @@ void PrecompileSolutions(const Handle& h,
 
 std::ostream& operator<<(std::ostream& os, const ConvSolution& s)
 {
-    auto strings =
-        s.construction_params | boost::adaptors::transformed([](auto k) { return k.kernel_name; });
-    os << s.solver_id << ": " << JoinStrings(strings, "/");
+    os << s.solver_id << ": ";
+    std::transform(s.construction_params.begin(),
+                   s.construction_params.end(),
+                   std::ostream_iterator<std::string>(os, "/"),
+                   [](const auto& k) { return k.kernel_name; });
     return os;
 }
 
@@ -633,10 +612,8 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     ++id; // removed batchnorm::BnCKFwdInference
     ++id; // removed batchnorm::BnCKBwdBackward
     ++id; // removed batchnorm::BnCKFwdTraining
-    Register(
-        registry, ++id, Primitive::Normalization, layernorm::Layernorm2DCKForward{}.SolverDbId());
-    Register(
-        registry, ++id, Primitive::Normalization, layernorm::Layernorm4DCKForward{}.SolverDbId());
+    ++id; // removed layernorm::Layernorm2DCKForward
+    ++id; // removed layernorm::Layernorm4DCKForward
     Register(registry, ++id, Primitive::Normalization, layernorm::LayernormForward{}.SolverDbId());
     Register(registry, ++id, Primitive::Reduce, reduce::SumForward{}.SolverDbId());
     ++id;
@@ -707,11 +684,7 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
 
     RegisterWithSolver(
         registry, ++id, conv::ConvWinoRageRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
-    Register(registry,
-             ++id,
-             Primitive::Fusion,
-             fusion::ConvWinoRageRxSFused<2, 3>{}.SolverDbId(),
-             miopenConvolutionAlgoWinograd);
+    ++id; // Removed ConvWinoRageRxSFused solver
     Register(registry,
              ++id,
              Primitive::Fusion,
@@ -724,6 +697,8 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
              miopenConvolutionAlgoImplicitGEMM);
 
     Register(registry, ++id, Primitive::Normalization, layernorm::LayernormBackward().SolverDbId());
+
+    RegisterWithSolver(registry, ++id, conv::ConvDepthwiseFwd2D{}, miopenConvolutionAlgoDirect);
     // IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
     // space between this comment and the newly registered solver(s)!
 }

@@ -4,14 +4,14 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 namespace
 {
@@ -69,6 +69,10 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+
+        ASSERT_EQ(hipInit(0), hipSuccess);
+        int deviceId = 0;
+        ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
     }
 
     void TearDown() override
@@ -81,10 +85,6 @@ protected:
 
     static hipdnnHandle_t createHandle()
     {
-        EXPECT_EQ(hipInit(0), hipSuccess);
-        int deviceId = 0;
-        EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
-
         // Load both plugins once for all tests
         const std::array<const char*, 2> paths
             = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str(),
@@ -132,7 +132,7 @@ protected:
 
         _handle = createHandle();
 
-        std::vector<int64_t> dims = {1, 3, 4, 4};
+        const std::vector<int64_t> dims = {1, 3, 4, 4};
         SimpleTensorBundle<float> tensorBundle(dims);
 
         auto graph = createSimplePointwiseGraph("EngineFilteringTest", dims);

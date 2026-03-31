@@ -3,16 +3,18 @@
 #pragma once
 
 #include "Node.hpp"
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
-#include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_frontend/detail/PointwisePacker.hpp>
+#include <hipdnn_frontend/detail/PointwiseUnpacker.hpp>
+#include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class PointwiseNode : public BaseNode<PointwiseNode>
+class PointwiseNode : public BaseNode<PointwiseNode, NodeType::POINTWISE>
 {
 
 public:
@@ -77,7 +79,7 @@ public:
             }
 
             auto outputDims = out->get_dim();
-            HIPDNN_CHECK_ERROR(findCommonShape(inputShapes, outputDims));
+            HIPDNN_CHECK_ERROR(detail::findCommonShape(inputShapes, outputDims));
             out->set_dim(outputDims);
         }
 
@@ -92,11 +94,10 @@ public:
 
                 if(tensor->get_dim() == out->get_dim())
                 {
-                    HIPDNN_FE_LOG_INFO(
-                        "PointwiseNode {} inferring stride from input tensor {} for output {}",
-                        attributes.get_name(),
-                        tensor->get_name(),
-                        out->get_name());
+                    HIPDNN_FE_LOG_INFO("PointwiseNode " << attributes.get_name()
+                                                        << " inferring stride from input tensor "
+                                                        << tensor->get_name() << " for output "
+                                                        << out->get_name());
                     out->set_stride(tensor->get_stride());
                     break;
                 }
@@ -111,15 +112,32 @@ public:
         return {};
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
         pack_node(flatbuffers::FlatBufferBuilder& builder) const override
     {
-        return hipdnn_sdk::data_objects::CreateNodeDirect(
+        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
             toSdkType(attributes.compute_data_type),
-            hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+            hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createPointwiseOperation(attributes, tensorDescs, operations);
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        PointwiseAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackPointwiseOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 
 private:
@@ -171,8 +189,8 @@ private:
                 {
                     const auto& inputDims = inputTensor->get_dim();
 
-                    if(!hipdnn_sdk::utilities::areDimensionsBroadcastCompatible(inputDims,
-                                                                                outputDims))
+                    if(!hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(inputDims,
+                                                                                     outputDims))
                     {
                         return {ErrorCode::INVALID_VALUE,
                                 "PointwiseNode input '" + inputTensor->get_name()

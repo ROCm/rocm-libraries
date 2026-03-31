@@ -33,18 +33,23 @@ __author__ = "Advanced Micro Devices, Inc."
 __all__ = [
     # These will be defined by the C++ bindings
     "Graph",
-    "Tensor", 
+    "Tensor",
     "TensorAttributes",
     "ConvolutionForwardAttributes",
     "ActivationAttributes",
     "BatchnormForwardInferenceAttributes",
     "BatchnormBackwardAttributes",
     "PoolingForwardAttributes",
+    "MatmulAttributes",
     "DataType",
     "TensorLayout",
     "ConvolutionMode",
     "ActivationMode",
     "PoolingMode",
     "BatchnormMode",
-    # Add other exported symbols as needed
+    "Handle",
+    "create_handle",
+    "destroy_handle",
+    "set_stream",
+    "get_stream",
 ]

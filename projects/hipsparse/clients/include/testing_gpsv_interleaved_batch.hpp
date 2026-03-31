@@ -131,7 +131,7 @@ void testing_gpsv_interleaved_batch_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_gpsv_interleaved_batch(Arguments argus)
+void testing_gpsv_interleaved_batch(Arguments argus)
 {
     int m           = argus.M;
     int batch_count = argus.batch_count;
@@ -275,8 +275,6 @@ hipsparseStatus_t testing_gpsv_interleaved_batch(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_GPSV_INTERLEAVED_BATCH_HPP

@@ -83,7 +83,6 @@ and :doc:`Performance database <../conceptual/perfdb>`.
 
     * - | ``MIOPEN_FIND_MODE``
         | Sets find mode to accelerate find API calls.
-        | **Note**: For details on safe/unsafe combinations with ``MIOPEN_FIND_ENFORCE``, see :ref:`Find mode and enforcement combinations <find_mode_and_enforce_combinations>`.
       - | "NORMAL" or 1: Full find mode (benchmarks all solvers)
         | "FAST" or 2: Fast find (use FindDb or immediate fallback)
         | "HYBRID" or 3: Hybrid find (FindDb hit or full find)
@@ -94,12 +93,16 @@ and :doc:`Performance database <../conceptual/perfdb>`.
 
     * - | ``MIOPEN_FIND_ENFORCE``
         | Controls auto-tune behavior and database updates.
-        | **Note**: For details on safe/unsafe combinations with ``MIOPEN_FIND_MODE``, see :ref:`Find mode and enforcement combinations <find_mode_and_enforce_combinations>`.
       - | "NONE" or 1: No change in default behavior
-        | "DB_UPDATE" or 2: Always perform auto-tune and update PerfDb (unsafe with Fast/Hybrid/Trust modes)
+        | "DB_UPDATE" or 2: Always perform auto-tune and update PerfDb
         | "SEARCH" or 3: Auto-tune even if not requested via API
-        | "SEARCH_DB_UPDATE" or 4: Combination of DB_UPDATE and SEARCH (unsafe with Fast/Hybrid/Trust modes)
-        | "DB_CLEAN" or 5: Remove optimized values from User PerfDb (unsafe with Fast/Hybrid/Trust modes)
+        | "SEARCH_DB_UPDATE" or 4: Combination of DB_UPDATE and SEARCH
+        | "DB_CLEAN" or 5: Remove optimized values from User PerfDb
+
+    * - | ``MIOPEN_SEARCH_CUTOFF``
+        | Allows speculative early termination of suboptimal searches.
+      - | 1: Enable
+        | 0 or unset: Disable
 
     * - | ``MIOPEN_DEBUG_DISABLE_FIND_DB``
         | Disables FindDb functionality.
@@ -380,6 +383,11 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
 
     * - | ``MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2``
         | Controls Winograd Fury RxS F(3,2) solution.
+      - | 0: Disable
+        | 1: Enable
+
+    * - | ``MIOPEN_DEBUG_AMD_WINOGRAD_RAGE_RXS_F2X3``
+        | Controls Winograd Rage RxS F(2,3) solution.
       - | 0: Disable
         | 1: Enable
 

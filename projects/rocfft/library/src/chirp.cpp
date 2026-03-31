@@ -61,7 +61,7 @@ void launch_chirp_kernel(const size_t           N,
     RTCKernelArgs kargs;
     kargs.append_size_t(N);
     kargs.append_ptr(output);
-    kernel.launch(kargs, dim3(numBlocks), dim3(blockSize), 0, deviceProp, stream);
+    kernel.get()->launch(kargs, dim3(numBlocks), dim3(blockSize), 0, deviceProp, stream);
 }
 
 template <typename Tcomplex>

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -120,6 +120,7 @@ hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t           
                               hiptensor::getTensorLengths(desc->mDescD),
                               hiptensor::getTensorStrides(desc->mDescD),
                               desc->mModeD,
+                              {},
                               nullptr))
         {
             if(*workspaceSize == 0)
@@ -178,6 +179,11 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
         return checkResult;
     }
 
+    if(!handle->getDevice().matrixCoreSupport(descCompute))
+    {
+        return HIPTENSOR_STATUS_ARCH_MISMATCH;
+    }
+
     *desc = new hiptensorOperationDescriptor();
 
     int                  nModeA = descA->mLengths.size();
@@ -191,10 +197,14 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
     int                  nModeD = descD->mLengths.size();
     std::vector<int32_t> modeDV(modeD, modeD + nModeD);
 
+    bool hasUnaryOp = (opA != HIPTENSOR_OP_IDENTITY) || (opB != HIPTENSOR_OP_IDENTITY)
+                      || (opC != HIPTENSOR_OP_IDENTITY);
+
     auto contractionOp = descC ? (descCompute == HIPTENSOR_COMPUTE_DESC_C32F
                                           || descCompute == HIPTENSOR_COMPUTE_DESC_C64F
                                       ? hiptensor::ContractionOpId_t::BILINEAR_COMPLEX
-                                      : hiptensor::ContractionOpId_t::BILINEAR)
+                                      : (hasUnaryOp ? hiptensor::ContractionOpId_t::BILINEAR_UNARY
+                                                    : hiptensor::ContractionOpId_t::BILINEAR))
                                : (descCompute == HIPTENSOR_COMPUTE_DESC_C32F
                                           || descCompute == HIPTENSOR_COMPUTE_DESC_C64F
                                       ? hiptensor::ContractionOpId_t::SCALE_COMPLEX
@@ -342,33 +352,35 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
         using hiptensor::HiptensorOptions;
         auto& options = HiptensorOptions::instance();
 
-        std::tie(errorCode, time) = (*cSolution)(alpha,
-                                                 A,
-                                                 B,
-                                                 beta,
-                                                 C,
-                                                 D,
-                                                 hiptensor::getTensorLengths(plan->mOpDesc->mDescA),
-                                                 hiptensor::getTensorStrides(plan->mOpDesc->mDescA),
-                                                 plan->mOpDesc->mModeA,
-                                                 hiptensor::getTensorLengths(plan->mOpDesc->mDescB),
-                                                 hiptensor::getTensorStrides(plan->mOpDesc->mDescB),
-                                                 plan->mOpDesc->mModeB,
-                                                 hiptensor::getTensorLengths(plan->mOpDesc->mDescC),
-                                                 hiptensor::getTensorStrides(plan->mOpDesc->mDescC),
-                                                 plan->mOpDesc->mModeC,
-                                                 hiptensor::getTensorLengths(plan->mOpDesc->mDescD),
-                                                 hiptensor::getTensorStrides(plan->mOpDesc->mDescD),
-                                                 plan->mOpDesc->mModeD,
-                                                 workspace,
-                                                 workspaceSize,
-                                                 StreamConfig{
-                                                     stream, // stream id
-                                                     true, // time_kernel
-                                                     0, // log_level
-                                                     options->coldRuns(), // cold_niters
-                                                     options->hotRuns(), // nrepeat
-                                                 });
+        std::tie(errorCode, time)
+            = (*cSolution)(alpha,
+                           A,
+                           B,
+                           beta,
+                           C,
+                           D,
+                           hiptensor::getTensorLengths(plan->mOpDesc->mDescA),
+                           hiptensor::getTensorStrides(plan->mOpDesc->mDescA),
+                           plan->mOpDesc->mModeA,
+                           hiptensor::getTensorLengths(plan->mOpDesc->mDescB),
+                           hiptensor::getTensorStrides(plan->mOpDesc->mDescB),
+                           plan->mOpDesc->mModeB,
+                           hiptensor::getTensorLengths(plan->mOpDesc->mDescC),
+                           hiptensor::getTensorStrides(plan->mOpDesc->mDescC),
+                           plan->mOpDesc->mModeC,
+                           hiptensor::getTensorLengths(plan->mOpDesc->mDescD),
+                           hiptensor::getTensorStrides(plan->mOpDesc->mDescD),
+                           plan->mOpDesc->mModeD,
+                           {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB, plan->mOpDesc->mOpC},
+                           workspace,
+                           workspaceSize,
+                           StreamConfig{
+                               stream, // stream id
+                               true, // time_kernel
+                               0, // log_level
+                               options->coldRuns(), // cold_niters
+                               options->hotRuns(), // nrepeat
+                           });
 
         if(errorCode == HIPTENSOR_STATUS_SUCCESS)
         {
@@ -388,7 +400,7 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
             // log perf metrics (not name/id)
             snprintf(msg,
                      sizeof(msg),
-                     "KernelId: %lu KernelName: %s, %0.3f ms, %0.3f TFlops/s, %0.3f GB/s",
+                     "KernelId: %zu KernelName: %s, %0.3f ms, %0.3f TFlops/s, %0.3f GB/s",
                      metrics.mKernelUid,
                      metrics.mKernelName.c_str(),
                      metrics.mAvgTimeMs,
@@ -399,36 +411,38 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
     }
     else // Perform contraction without timing
     {
-        std::tie(errorCode, time) = (*cSolution)(alpha,
-                                                 A,
-                                                 B,
-                                                 beta,
-                                                 C,
-                                                 D,
-                                                 hiptensor::getTensorLengths(plan->mOpDesc->mDescA),
-                                                 hiptensor::getTensorStrides(plan->mOpDesc->mDescA),
-                                                 plan->mOpDesc->mModeA,
-                                                 hiptensor::getTensorLengths(plan->mOpDesc->mDescB),
-                                                 hiptensor::getTensorStrides(plan->mOpDesc->mDescB),
-                                                 plan->mOpDesc->mModeB,
-                                                 hiptensor::getTensorLengths(plan->mOpDesc->mDescC),
-                                                 hiptensor::getTensorStrides(plan->mOpDesc->mDescC),
-                                                 plan->mOpDesc->mModeC,
-                                                 hiptensor::getTensorLengths(plan->mOpDesc->mDescD),
-                                                 hiptensor::getTensorStrides(plan->mOpDesc->mDescD),
-                                                 plan->mOpDesc->mModeD,
-                                                 workspace,
-                                                 workspaceSize,
-                                                 StreamConfig{stream, false});
+        std::tie(errorCode, time)
+            = (*cSolution)(alpha,
+                           A,
+                           B,
+                           beta,
+                           C,
+                           D,
+                           hiptensor::getTensorLengths(plan->mOpDesc->mDescA),
+                           hiptensor::getTensorStrides(plan->mOpDesc->mDescA),
+                           plan->mOpDesc->mModeA,
+                           hiptensor::getTensorLengths(plan->mOpDesc->mDescB),
+                           hiptensor::getTensorStrides(plan->mOpDesc->mDescB),
+                           plan->mOpDesc->mModeB,
+                           hiptensor::getTensorLengths(plan->mOpDesc->mDescC),
+                           hiptensor::getTensorStrides(plan->mOpDesc->mDescC),
+                           plan->mOpDesc->mModeC,
+                           hiptensor::getTensorLengths(plan->mOpDesc->mDescD),
+                           hiptensor::getTensorStrides(plan->mOpDesc->mDescD),
+                           plan->mOpDesc->mModeD,
+                           {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB, plan->mOpDesc->mOpC},
+                           workspace,
+                           workspaceSize,
+                           StreamConfig{stream, false});
     }
 
     if(errorCode == HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE)
     {
         snprintf(msg,
                  sizeof(msg),
-                 "Insufficient workspace: req: %lu alloc: %lu (%s)",
+                 "Insufficient workspace: req: %zu alloc: %llu (%s)",
                  cSolution->workspaceSize(),
-                 workspaceSize,
+                 static_cast<unsigned long long>(workspaceSize),
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorContraction", msg);
     }
@@ -593,6 +607,13 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
                          .query((hiptensor::ContractionOpId_t)desc->mContractionOpId)
                          .query(ADataType, BDataType, DDataType, EDataType, computeType);
 
+    bool hasUnaryOp = (desc->mOpA != HIPTENSOR_OP_IDENTITY) || (desc->mOpB != HIPTENSOR_OP_IDENTITY)
+                      || (desc->mOpC != HIPTENSOR_OP_IDENTITY);
+    if(hasUnaryOp)
+        solutionQ = solutionQ.query(HIPTENSOR_OP_UNKNOWN, HIPTENSOR_OP_UNKNOWN);
+    else
+        solutionQ = solutionQ.query(HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_IDENTITY);
+
     candidates = toContractionSolutionVec(solutionQ.solutions());
 
     // Measure timing for solution selection
@@ -624,26 +645,28 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
         if(pref->mSelectionAlgorithm == HIPTENSOR_ALGO_DEFAULT
            || pref->mSelectionAlgorithm == HIPTENSOR_ALGO_DEFAULT_PATIENT)
         {
-            result = hiptensor::bruteForceModel(&winner,
-                                                candidates,
-                                                ADataType,
-                                                hiptensor::getTensorLengths(desc->mDescA),
-                                                hiptensor::getTensorStrides(desc->mDescA),
-                                                desc->mModeA,
-                                                BDataType,
-                                                hiptensor::getTensorLengths(desc->mDescB),
-                                                hiptensor::getTensorStrides(desc->mDescB),
-                                                desc->mModeB,
-                                                DDataType,
-                                                hiptensor::getTensorLengths(desc->mDescC),
-                                                hiptensor::getTensorStrides(desc->mDescC),
-                                                desc->mModeC,
-                                                EDataType,
-                                                hiptensor::getTensorLengths(desc->mDescD),
-                                                hiptensor::getTensorStrides(desc->mDescD),
-                                                desc->mModeD,
-                                                desc->mDescCompute,
-                                                workspaceSizeLimit);
+            result = hiptensor::bruteForceModel(
+                &winner,
+                candidates,
+                ADataType,
+                hiptensor::getTensorLengths(desc->mDescA),
+                hiptensor::getTensorStrides(desc->mDescA),
+                desc->mModeA,
+                BDataType,
+                hiptensor::getTensorLengths(desc->mDescB),
+                hiptensor::getTensorStrides(desc->mDescB),
+                desc->mModeB,
+                DDataType,
+                hiptensor::getTensorLengths(desc->mDescC),
+                hiptensor::getTensorStrides(desc->mDescC),
+                desc->mModeC,
+                EDataType,
+                hiptensor::getTensorLengths(desc->mDescD),
+                hiptensor::getTensorStrides(desc->mDescD),
+                desc->mModeD,
+                desc->mDescCompute,
+                {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB, plan->mOpDesc->mOpC},
+                workspaceSizeLimit);
             //Save solutions (from fastest to slowest) for plan cache autotune
             pref->mCandidates.clear();
             for(auto candidate : candidates)
@@ -651,26 +674,49 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
         }
         else if(pref->mSelectionAlgorithm == HIPTENSOR_ALGO_ACTOR_CRITIC)
         {
-            result = hiptensor::actorCriticModel(&winner,
-                                                 solutionQ.solutions(),
-                                                 ADataType,
-                                                 hiptensor::getTensorLengths(desc->mDescA),
-                                                 hiptensor::getTensorStrides(desc->mDescA),
-                                                 desc->mModeA,
-                                                 BDataType,
-                                                 hiptensor::getTensorLengths(desc->mDescB),
-                                                 hiptensor::getTensorStrides(desc->mDescB),
-                                                 desc->mModeB,
-                                                 DDataType,
-                                                 hiptensor::getTensorLengths(desc->mDescC),
-                                                 hiptensor::getTensorStrides(desc->mDescC),
-                                                 desc->mModeC,
-                                                 EDataType,
-                                                 hiptensor::getTensorLengths(desc->mDescD),
-                                                 hiptensor::getTensorStrides(desc->mDescD),
-                                                 desc->mModeC,
-                                                 desc->mDescCompute,
-                                                 workspaceSizeLimit);
+            if(hasUnaryOp)
+                result
+                    = hiptensor::actorCriticModelUnaryOps(&winner,
+                                                          solutionQ.solutions(),
+                                                          ADataType,
+                                                          hiptensor::getTensorLengths(desc->mDescA),
+                                                          hiptensor::getTensorStrides(desc->mDescA),
+                                                          desc->mModeA,
+                                                          BDataType,
+                                                          hiptensor::getTensorLengths(desc->mDescB),
+                                                          hiptensor::getTensorStrides(desc->mDescB),
+                                                          desc->mModeB,
+                                                          DDataType,
+                                                          hiptensor::getTensorLengths(desc->mDescC),
+                                                          hiptensor::getTensorStrides(desc->mDescC),
+                                                          desc->mModeC,
+                                                          EDataType,
+                                                          hiptensor::getTensorLengths(desc->mDescD),
+                                                          hiptensor::getTensorStrides(desc->mDescD),
+                                                          desc->mModeC,
+                                                          desc->mDescCompute,
+                                                          workspaceSizeLimit);
+            else
+                result = hiptensor::actorCriticModel(&winner,
+                                                     solutionQ.solutions(),
+                                                     ADataType,
+                                                     hiptensor::getTensorLengths(desc->mDescA),
+                                                     hiptensor::getTensorStrides(desc->mDescA),
+                                                     desc->mModeA,
+                                                     BDataType,
+                                                     hiptensor::getTensorLengths(desc->mDescB),
+                                                     hiptensor::getTensorStrides(desc->mDescB),
+                                                     desc->mModeB,
+                                                     DDataType,
+                                                     hiptensor::getTensorLengths(desc->mDescC),
+                                                     hiptensor::getTensorStrides(desc->mDescC),
+                                                     desc->mModeC,
+                                                     EDataType,
+                                                     hiptensor::getTensorLengths(desc->mDescD),
+                                                     hiptensor::getTensorStrides(desc->mDescD),
+                                                     desc->mModeC,
+                                                     desc->mDescCompute,
+                                                     workspaceSizeLimit);
         }
     }
 
@@ -696,7 +742,7 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
     // Log the selected contraction solution and selection timing
     snprintf(msg,
              sizeof(msg),
-             "Algo: %d, KernelId: %lu, KernelName: %s, SelectionTime: %0.3f ms",
+             "Algo: %d, KernelId: %zu, KernelName: %s, SelectionTime: %0.3f ms",
              pref->mSelectionAlgorithm,
              winner->uid(),
              winner->kernelName().c_str(),

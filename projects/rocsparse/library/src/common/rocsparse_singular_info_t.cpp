@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,60 +24,61 @@
 #include "rocsparse_singular_info_t.hpp"
 #include "rocsparse_utility.hpp"
 
-rocsparse_status
-    rocsparse::singular_info_t::copy_singular_pivot_async(rocsparse_pointer_mode pointer_mode,
-                                                          rocsparse_indextype    position_indextype,
-                                                          void*                  position,
-                                                          hipStream_t            stream) const
+void rocsparse::singular_info_t::set_tolerance_pointer(const void*            p,
+                                                       rocsparse_pointer_mode pointer_mode,
+                                                       rocsparse_datatype     datatype)
 {
-    auto status = this->copy_position_async(pointer_mode, position_indextype, position, stream);
-    if(status == rocsparse_status_zero_pivot)
-    {
-        return status;
-    }
-    RETURN_IF_ROCSPARSE_ERROR(status);
-    return rocsparse_status_success;
+    this->m_singular_tol_pointer      = reinterpret_cast<const double*>(p);
+    this->m_singular_tol_pointer_mode = pointer_mode;
+    this->m_singular_tol_datatype     = datatype;
 }
 
-void rocsparse::singular_info_t::copy_singular_info_async(const rocsparse::singular_info_t* that,
-                                                          hipStream_t                       stream)
+rocsparse_status
+    rocsparse::singular_info_t::copy_singular_info_async(const rocsparse::singular_info_t* that,
+                                                         hipStream_t                       stream)
 {
     if(that != nullptr && that != this)
     {
-        this->m_singular_tol = that->m_singular_tol;
+        this->m_singular_tol_host_value[0] = that->m_singular_tol_host_value[0];
+        this->m_singular_tol_pointer       = that->m_singular_tol_pointer;
+        this->m_singular_tol_pointer_mode  = that->m_singular_tol_pointer_mode;
     }
-    return this->copy_position_async(that, stream);
+    RETURN_IF_ROCSPARSE_ERROR(this->copy_position_async(that, stream));
+    return rocsparse_status_success;
 }
 
-void* rocsparse::singular_info_t::get_singular_pivot()
+rocsparse_status rocsparse::singular_info_t::create_singular_pivot_async(
+    int64_t batch_count, rocsparse_indextype indextype, hipStream_t stream)
 {
-    return this->get_position();
+    RETURN_IF_ROCSPARSE_ERROR(this->create_position_async(batch_count, indextype, stream));
+    return rocsparse_status_success;
 }
 
-const void* rocsparse::singular_info_t::get_singular_pivot() const
+double rocsparse::singular_info_t::get_tolerance_legacy() const
 {
-    return this->get_position();
+    return this->m_singular_tol_host_value[0];
 }
 
-void rocsparse::singular_info_t::create_singular_pivot_async(rocsparse_indextype indextype,
-                                                             hipStream_t         stream)
+void rocsparse::singular_info_t::set_tolerance_legacy(double value)
 {
-    this->create_position_async(indextype, stream);
-}
-
-rocsparse_indextype rocsparse::singular_info_t::get_singular_pivot_indextype() const
-{
-    return this->get_position_indextype();
-}
-
-double rocsparse::singular_info_t::get_singular_tol() const
-{
-    return this->m_singular_tol;
-}
-
-void rocsparse::singular_info_t::set_singular_tol(double value)
-{
-    this->m_singular_tol = value;
+    this->m_singular_tol_host_value[0] = value;
+    this->m_singular_tol_pointer       = &this->m_singular_tol_host_value[0];
+    this->m_singular_tol_pointer_mode  = rocsparse_pointer_mode_host;
 }
 
 rocsparse::singular_info_t::~singular_info_t() {}
+
+const void* rocsparse::singular_info_t::get_tolerance_pointer() const
+{
+    return this->m_singular_tol_pointer;
+}
+
+rocsparse_pointer_mode rocsparse::singular_info_t::get_tolerance_pointer_mode() const
+{
+    return this->m_singular_tol_pointer_mode;
+}
+
+rocsparse_datatype rocsparse::singular_info_t::get_tolerance_datatype() const
+{
+    return this->m_singular_tol_datatype;
+}

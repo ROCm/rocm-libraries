@@ -61,7 +61,7 @@ void testing_identity_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_identity(Arguments argus)
+void testing_identity(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int n = argus.N;
@@ -127,8 +127,6 @@ hipsparseStatus_t testing_identity(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_IDENTITY_HPP

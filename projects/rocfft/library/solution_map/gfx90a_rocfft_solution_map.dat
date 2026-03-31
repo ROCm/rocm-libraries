@@ -424,76 +424,56 @@
               ,{"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 256,0 ],"precision":"single","scheme":"CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z","sbrc_trans":"TILE_ALIGNED","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":true,"buffer_inst":false,"tpb":16,"wgs":256,"tpt":[ 16,0 ],"factors":[ 8,2,16 ],"ebtype":"NONE","direction":-1,"static_dim":0,"placement":"NA","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len10x20_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 10,20 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":100,"tpt":[ 1,10 ],"factors":[ 10,2,10 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len20x10_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 20,10 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":100,"tpt":[ 5,5 ],"factors":[ 5,4,5,2 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 10,20 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":100,"tpt":[ 1,10 ],"factors":[ 10,2,10 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}},
+   {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 10,20 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":100,"tpt":[ 5,5 ],"factors":[ 5,2,5,4 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len26x64_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 26,64 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":208,"tpt":[ 2,8 ],"factors":[ 13,2,8,8 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 26,64 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":208,"tpt":[ 2,8 ],"factors":[ 13,2,8,8 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}},
+   {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 26,64 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":128,"tpt":[ 2,4 ],"factors":[ 2,13,4,16 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len26x72_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 26,72 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":234,"tpt":[ 2,9 ],"factors":[ 13,2,9,8 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 26,72 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":234,"tpt":[ 2,9 ],"factors":[ 13,2,9,8 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}},
+   {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 26,72 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":234,"tpt":[ 2,9 ],"factors":[ 13,2,9,8 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len30x60_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 30,60 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":180,"tpt":[ 3,6 ],"factors":[ 10,3,6,10 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 30,60 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":180,"tpt":[ 3,6 ],"factors":[ 10,3,6,10 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}},
+   {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 30,60 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":180,"tpt":[ 3,6 ],"factors":[ 10,3,10,6 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len32x16_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 32,16 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":256,"tpt":[ 16,8 ],"factors":[ 2,2,2,4,2,2,4 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len16x32_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 16,32 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":256,"tpt":[ 8,16 ],"factors":[ 2,2,4,2,2,2,4 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len32x64_single_2d_single"},
  "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 32,64 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":256,"tpt":[ 2,8 ],"factors":[ 2,16,8,8 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len36x72_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 36,72 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":432,"tpt":[ 6,12 ],"factors":[ 6,6,2,6,6 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 36,72 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":432,"tpt":[ 6,12 ],"factors":[ 6,6,2,6,6 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}},
+   {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 36,72 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":432,"tpt":[ 6,12 ],"factors":[ 6,6,2,6,6 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len36x80_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 36,80 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":480,"tpt":[ 6,10 ],"factors":[ 6,6,8,10 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 36,80 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":480,"tpt":[ 6,10 ],"factors":[ 6,6,8,10 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}},
+   {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 36,80 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":480,"tpt":[ 6,10 ],"factors":[ 6,6,10,8 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len36x84_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 36,84 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":504,"tpt":[ 6,12 ],"factors":[ 6,6,3,4,7 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 36,84 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":504,"tpt":[ 6,12 ],"factors":[ 6,6,3,4,7 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}},
+   {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 36,84 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":504,"tpt":[ 6,12 ],"factors":[ 6,6,4,3,7 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len40x80_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 40,80 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":400,"tpt":[ 5,10 ],"factors":[ 5,8,10,8 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 40,80 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":400,"tpt":[ 5,10 ],"factors":[ 5,8,10,8 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}},
+   {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 40,80 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":400,"tpt":[ 5,10 ],"factors":[ 5,8,8,10 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len42x84_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 42,84 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":504,"tpt":[ 6,12 ],"factors":[ 6,7,3,4,7 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 42,84 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":504,"tpt":[ 6,12 ],"factors":[ 6,7,3,4,7 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}},
+   {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 42,84 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":504,"tpt":[ 6,12 ],"factors":[ 6,7,4,3,7 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len42x96_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 42,96 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":672,"tpt":[ 7,16 ],"factors":[ 7,6,4,4,6 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 42,96 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":672,"tpt":[ 7,16 ],"factors":[ 7,6,4,4,6 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}},
+   {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 42,96 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":672,"tpt":[ 7,16 ],"factors":[ 6,7,4,4,6 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len60x30_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 60,30 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":180,"tpt":[ 6,3 ],"factors":[ 10,6,10,3 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len32x64_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 32,64 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":256,"tpt":[ 4,8 ],"factors":[ 2,2,8,8,8 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len64x26_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 64,26 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":128,"tpt":[ 4,2 ],"factors":[ 4,16,2,13 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len64x32_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 64,32 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":256,"tpt":[ 8,4 ],"factors":[ 8,8,2,2,8 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len72x26_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 72,26 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":234,"tpt":[ 9,2 ],"factors":[ 9,8,13,2 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len72x36_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 72,36 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":432,"tpt":[ 12,6 ],"factors":[ 2,6,6,6,6 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len80x36_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 80,36 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":480,"tpt":[ 10,6 ],"factors":[ 10,8,6,6 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len80x40_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 80,40 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":400,"tpt":[ 10,5 ],"factors":[ 8,10,5,8 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len84x36_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 84,36 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":504,"tpt":[ 12,6 ],"factors":[ 4,3,7,6,6 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len84x42_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 84,42 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":504,"tpt":[ 12,6 ],"factors":[ 4,3,7,6,7 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len84x7_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 84,7 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":84,"tpt":[ 12,1 ],"factors":[ 3,7,4,7 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len96x42_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 96,42 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":672,"tpt":[ 16,7 ],"factors":[ 4,4,6,6,7 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len7x84_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 7,84 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":84,"tpt":[ 1,12 ],"factors":[ 7,3,7,4 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"100_dp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
@@ -951,27 +931,27 @@
                ]},
 {"Problem":{"arch":"gfx90a","token":"10_20_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len10x20_single_2d_single","child_option":0} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"20_10_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len20x10_single_2d_single","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len10x20_single_2d_single","child_option":0} ]},
+              {"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len10x20_single_2d_single","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"26_64_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len26x64_single_2d_single","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len26x64_single_2d_single","child_option":0} ]},
+              {"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len26x64_single_2d_single","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"26_72_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len26x72_single_2d_single","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len26x72_single_2d_single","child_option":0} ]},
+              {"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len26x72_single_2d_single","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"30_60_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len30x60_single_2d_single","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len30x60_single_2d_single","child_option":0} ]},
+              {"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len30x60_single_2d_single","child_option":1} ]}
                ]},
-{"Problem":{"arch":"gfx90a","token":"32_16_sp_ip_complex"},
+{"Problem":{"arch":"gfx90a","token":"16_32_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len32x16_single_2d_single","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len16x32_single_2d_single","child_option":0} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"32_64_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
@@ -979,71 +959,37 @@
                ]},
 {"Problem":{"arch":"gfx90a","token":"36_72_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len36x72_single_2d_single","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len36x72_single_2d_single","child_option":0} ]},
+              {"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len36x72_single_2d_single","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"36_80_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len36x80_single_2d_single","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len36x80_single_2d_single","child_option":0} ]},
+              {"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len36x80_single_2d_single","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"36_84_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len36x84_single_2d_single","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len36x84_single_2d_single","child_option":0} ]},
+              {"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len36x84_single_2d_single","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"40_80_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len40x80_single_2d_single","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len40x80_single_2d_single","child_option":0} ]},
+              {"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len40x80_single_2d_single","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"42_84_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len42x84_single_2d_single","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len42x84_single_2d_single","child_option":0} ]},
+              {"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len42x84_single_2d_single","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"42_96_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len42x96_single_2d_single","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len42x96_single_2d_single","child_option":0} ]},
+              {"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len42x96_single_2d_single","child_option":1} ]}
                ]},
-{"Problem":{"arch":"gfx90a","token":"60_30_sp_ip_complex"},
+{"Problem":{"arch":"gfx90a","token":"7_84_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len60x30_single_2d_single","child_option":0} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"64_26_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len64x26_single_2d_single","child_option":0} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"64_32_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len64x32_single_2d_single","child_option":0} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"72_26_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len72x26_single_2d_single","child_option":0} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"72_36_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len72x36_single_2d_single","child_option":0} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"80_36_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len80x36_single_2d_single","child_option":0} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"80_40_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len80x40_single_2d_single","child_option":0} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"84_36_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len84x36_single_2d_single","child_option":0} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"84_42_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len84x42_single_2d_single","child_option":0} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"84_7_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len84x7_single_2d_single","child_option":0} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"96_42_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len96x42_single_2d_single","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_2D_SINGLE","solution_childnodes":[ {"child_token":"kernel_len7x84_single_2d_single","child_option":0} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"16807_dp_ip_real_bwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_TRANSFORM_USING_CMPLX","solution_childnodes":[ {"child_token":"leafnode_token_builtin_kernel","child_option":6},{"child_token":"16807_dp_ip_complex","child_option":1},{"child_token":"leafnode_token_builtin_kernel","child_option":7} ]}
@@ -1145,18 +1091,6 @@
               ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_STOCKHAM","solution_childnodes":[ {"child_token":"kernel_len256_single_sbrr","child_option":0} ]}
               ,{"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_TRANSFORM_EVEN","solution_childnodes":[ {"child_token":"128_sp_ip_complex","child_option":1} ]}
               ,{"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_TRANSFORM_EVEN","solution_childnodes":[ {"child_token":"128_sp_ip_complex","child_option":3} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"486_dp_ip_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_TRANSFORM_EVEN","solution_childnodes":[ {"child_token":"243_dp_ip_complex","child_option":5} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"486_dp_ip_real_fwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_TRANSFORM_EVEN","solution_childnodes":[ {"child_token":"243_dp_ip_complex","child_option":2} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"486_dp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_TRANSFORM_EVEN","solution_childnodes":[ {"child_token":"243_dp_ip_complex","child_option":6} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"486_dp_op_real_fwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_TRANSFORM_EVEN","solution_childnodes":[ {"child_token":"243_dp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"49_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
@@ -1292,7 +1226,7 @@
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"144_sp_ip_complex","child_option":1},{"child_token":"sbcc_80_sp_ip_complex","child_option":3},{"child_token":"sbcc_84_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"14_84_80_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_80_sp_ip_complex","child_option":2},{"child_token":"84_7_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_80_sp_ip_complex","child_option":2},{"child_token":"7_84_sp_ip_complex","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"168_160_160_sp_op_real_bwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_160_sp_ip_complex","child_option":0},{"child_token":"sbcc_160_sp_ip_complex","child_option":1},{"child_token":"85_sp_ip_complex","child_option":1} ]}
@@ -1349,7 +1283,7 @@
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"200_sp_ip_complex","child_option":1},{"child_token":"sbcc_200_sp_ip_complex","child_option":4},{"child_token":"sbcc_200_sp_ip_complex","child_option":5} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"20_20_25_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"25_sp_ip_complex","child_option":2},{"child_token":"20_10_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"25_sp_ip_complex","child_option":2},{"child_token":"10_20_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"20_20_25_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"10_20_sp_ip_complex","child_option":1},{"child_token":"25_sp_ip_complex","child_option":1} ]}
@@ -1373,46 +1307,46 @@
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"256_sp_ip_complex","child_option":3},{"child_token":"sbcc_128_sp_ip_complex","child_option":2},{"child_token":"sbcc_128_sp_ip_complex","child_option":0} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"32_32_42_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"42_sp_ip_complex","child_option":1},{"child_token":"32_16_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"42_sp_ip_complex","child_option":1},{"child_token":"16_32_sp_ip_complex","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"52_64_64_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_64_sp_ip_complex","child_option":1},{"child_token":"64_26_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_64_sp_ip_complex","child_option":1},{"child_token":"26_64_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"52_64_64_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"26_64_sp_ip_complex","child_option":1},{"child_token":"sbcc_64_sp_ip_complex","child_option":0} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"52_72_72_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_72_sp_ip_complex","child_option":1},{"child_token":"72_26_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_72_sp_ip_complex","child_option":1},{"child_token":"26_72_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"52_72_72_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"26_72_sp_ip_complex","child_option":1},{"child_token":"sbcc_72_sp_ip_complex","child_option":0} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"60_60_60_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_60_sp_ip_complex","child_option":1},{"child_token":"60_30_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_60_sp_ip_complex","child_option":1},{"child_token":"30_60_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"60_60_60_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"30_60_sp_ip_complex","child_option":1},{"child_token":"sbcc_60_sp_ip_complex","child_option":0} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"72_72_160_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_160_sp_ip_complex","child_option":4},{"child_token":"72_36_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_160_sp_ip_complex","child_option":4},{"child_token":"36_72_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"72_72_160_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"36_72_sp_ip_complex","child_option":1},{"child_token":"sbcc_160_sp_ip_complex","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"72_72_72_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_72_sp_ip_complex","child_option":3},{"child_token":"72_36_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_72_sp_ip_complex","child_option":3},{"child_token":"36_72_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"72_72_72_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"36_72_sp_ip_complex","child_option":1},{"child_token":"sbcc_72_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"72_80_160_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_160_sp_ip_complex","child_option":4},{"child_token":"80_36_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_160_sp_ip_complex","child_option":4},{"child_token":"36_80_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"72_80_160_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"36_80_sp_ip_complex","child_option":1},{"child_token":"sbcc_160_sp_ip_complex","child_option":5} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"72_84_84_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_84_sp_ip_complex","child_option":1},{"child_token":"84_36_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_84_sp_ip_complex","child_option":1},{"child_token":"36_84_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"72_84_84_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"36_84_sp_ip_complex","child_option":1},{"child_token":"sbcc_84_sp_ip_complex","child_option":0} ]}
@@ -1421,31 +1355,31 @@
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"80_sp_ip_complex","child_option":1},{"child_token":"sbcc_108_sp_ip_complex","child_option":0},{"child_token":"sbcc_108_sp_ip_complex","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"80_80_160_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_160_sp_ip_complex","child_option":4},{"child_token":"80_40_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_160_sp_ip_complex","child_option":4},{"child_token":"40_80_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"80_80_160_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"40_80_sp_ip_complex","child_option":1},{"child_token":"sbcc_160_sp_ip_complex","child_option":1} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"80_80_168_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_168_sp_ip_complex","child_option":9},{"child_token":"80_40_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_168_sp_ip_complex","child_option":9},{"child_token":"40_80_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"80_80_168_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"40_80_sp_ip_complex","child_option":1},{"child_token":"sbcc_168_sp_ip_complex","child_option":8} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"80_80_80_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_80_sp_ip_complex","child_option":1},{"child_token":"80_40_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_80_sp_ip_complex","child_option":1},{"child_token":"40_80_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"80_80_80_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"40_80_sp_ip_complex","child_option":1},{"child_token":"sbcc_80_sp_ip_complex","child_option":0} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"84_84_192_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_192_sp_ip_complex","child_option":8},{"child_token":"84_42_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_192_sp_ip_complex","child_option":8},{"child_token":"42_84_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"84_84_192_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"42_84_sp_ip_complex","child_option":1},{"child_token":"sbcc_192_sp_ip_complex","child_option":7} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"84_96_192_sp_op_real_bwd"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_192_sp_ip_complex","child_option":10},{"child_token":"96_42_sp_ip_complex","child_option":1} ]}
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"sbcc_192_sp_ip_complex","child_option":10},{"child_token":"42_96_sp_ip_complex","child_option":2} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"84_96_192_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"42_96_sp_ip_complex","child_option":1},{"child_token":"sbcc_192_sp_ip_complex","child_option":9} ]}

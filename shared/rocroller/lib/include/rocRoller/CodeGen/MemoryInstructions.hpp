@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2022-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -76,14 +53,14 @@ namespace rocRoller
          * @param buffDesc Buffer descriptor to use when `kind` is `Buffer`. (Default = nullptr)
          * @param buffOpts Buffer options. (Default = BufferInstructionOptions())
          */
-        Generator<Instruction> load(MemoryKind                        kind,
-                                    Register::ValuePtr                dest,
-                                    Register::ValuePtr                addr,
-                                    Register::ValuePtr                offset,
-                                    int                               numBytes,
-                                    std::string                       comment  = "",
-                                    bool                              high     = false,
-                                    std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
+        Generator<Instruction> load(MemoryKind               kind,
+                                    Register::ValuePtr       dest,
+                                    Register::ValuePtr       addr,
+                                    Register::ValuePtr       offset,
+                                    int                      numBytes,
+                                    std::string              comment  = "",
+                                    bool                     high     = false,
+                                    Register::ValuePtr       buffDesc = nullptr,
                                     BufferInstructionOptions buffOpts = BufferInstructionOptions());
 
         /**
@@ -100,15 +77,15 @@ namespace rocRoller
          * @param buffDesc Buffer descriptor to use when `kind` is `Buffer`. (Default = nullptr)
          * @param buffOpts Buffer options. (Default = BufferInstructionOptions())
          */
-        Generator<Instruction> store(MemoryKind                        kind,
-                                     Register::ValuePtr                addr,
-                                     Register::ValuePtr                data,
-                                     Register::ValuePtr                offset,
-                                     int                               numBytes,
-                                     std::string const                 comment  = "",
-                                     bool                              high     = false,
-                                     std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
-                                     BufferInstructionOptions          buffOpts
+        Generator<Instruction> store(MemoryKind               kind,
+                                     Register::ValuePtr       addr,
+                                     Register::ValuePtr       data,
+                                     Register::ValuePtr       offset,
+                                     int                      numBytes,
+                                     std::string const        comment  = "",
+                                     bool                     high     = false,
+                                     Register::ValuePtr       buffDesc = nullptr,
+                                     BufferInstructionOptions buffOpts
                                      = BufferInstructionOptions());
 
         /**
@@ -126,15 +103,15 @@ namespace rocRoller
          * @param buffOpts Buffer options. (Default = BufferInstructionOptions())
          */
         template <MemoryDirection Dir>
-        Generator<Instruction> moveData(MemoryKind                        kind,
-                                        Register::ValuePtr                addr,
-                                        Register::ValuePtr                data,
-                                        Register::ValuePtr                offset,
-                                        int                               numBytes,
-                                        std::string const                 comment  = "",
-                                        bool                              high     = false,
-                                        std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
-                                        BufferInstructionOptions          buffOpts
+        Generator<Instruction> moveData(MemoryKind               kind,
+                                        Register::ValuePtr       addr,
+                                        Register::ValuePtr       data,
+                                        Register::ValuePtr       offset,
+                                        int                      numBytes,
+                                        std::string const        comment  = "",
+                                        bool                     high     = false,
+                                        Register::ValuePtr       buffDesc = nullptr,
+                                        BufferInstructionOptions buffOpts
                                         = BufferInstructionOptions());
 
         /**
@@ -151,15 +128,15 @@ namespace rocRoller
          * @param buffDesc Buffer descriptor to use when `kind` is `Buffer`. (Default = nullptr)
          * @param buffOpts Buffer options. (Default = BufferInstructionOptions())
          */
-        Generator<Instruction> loadAndPack(MemoryKind                        kind,
-                                           Register::ValuePtr                dest,
-                                           Register::ValuePtr                addr1,
-                                           Register::ValuePtr                offset1,
-                                           Register::ValuePtr                addr2,
-                                           Register::ValuePtr                offset2,
-                                           std::string const                 comment  = "",
-                                           std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
-                                           BufferInstructionOptions          buffOpts
+        Generator<Instruction> loadAndPack(MemoryKind               kind,
+                                           Register::ValuePtr       dest,
+                                           Register::ValuePtr       addr1,
+                                           Register::ValuePtr       offset1,
+                                           Register::ValuePtr       addr2,
+                                           Register::ValuePtr       offset2,
+                                           std::string const        comment  = "",
+                                           Register::ValuePtr       buffDesc = nullptr,
+                                           BufferInstructionOptions buffOpts
                                            = BufferInstructionOptions());
 
         /**
@@ -310,13 +287,13 @@ namespace rocRoller
          * @param numBytes The number of bytes to load.
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
-        Generator<Instruction> loadBuffer(Register::ValuePtr                dest,
-                                          Register::ValuePtr                addr,
-                                          int                               offset,
-                                          std::shared_ptr<BufferDescriptor> buffDesc,
-                                          BufferInstructionOptions          buffOpts,
-                                          int                               numBytes,
-                                          bool                              high = false);
+        Generator<Instruction> loadBuffer(Register::ValuePtr       dest,
+                                          Register::ValuePtr       addr,
+                                          int                      offset,
+                                          Register::ValuePtr       buffDesc,
+                                          BufferInstructionOptions buffOpts,
+                                          int                      numBytes,
+                                          bool                     high = false);
 
         /**
          * @brief Generate the instructions required to perform a buffer store.
@@ -330,13 +307,13 @@ namespace rocRoller
          * @param numBytes The number of bytes to load.
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
-        Generator<Instruction> storeBuffer(Register::ValuePtr                data,
-                                           Register::ValuePtr                addr,
-                                           int                               offset,
-                                           std::shared_ptr<BufferDescriptor> buffDesc,
-                                           BufferInstructionOptions          buffOpts,
-                                           int                               numBytes,
-                                           bool                              high = false);
+        Generator<Instruction> storeBuffer(Register::ValuePtr       data,
+                                           Register::ValuePtr       addr,
+                                           int                      offset,
+                                           Register::ValuePtr       buffDesc,
+                                           BufferInstructionOptions buffOpts,
+                                           int                      numBytes,
+                                           bool                     high = false);
 
         /**
          * @brief Generate the instructions required to perform a direct global to lds buffer load.
@@ -348,11 +325,11 @@ namespace rocRoller
          * @param buffOpts Buffer options
          * @param numBytes The number of bytes to load.
          */
-        Generator<Instruction> bufferLoad2LDS(Register::ValuePtr                data,
-                                              std::shared_ptr<BufferDescriptor> buffDesc,
-                                              BufferInstructionOptions          buffOpts,
-                                              int                               numBytes,
-                                              Register::ValuePtr                soffset);
+        Generator<Instruction> bufferLoad2LDS(Register::ValuePtr       data,
+                                              Register::ValuePtr       buffDesc,
+                                              BufferInstructionOptions buffOpts,
+                                              int                      numBytes,
+                                              Register::ValuePtr       soffset);
 
         /**
          * @brief Generate the instructions required to add a wave synchronization barrier.

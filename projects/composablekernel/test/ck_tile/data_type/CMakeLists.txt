@@ -1,9 +1,14 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
     add_gtest_executable(test_ck_tile_pk_int4 test_pk_int4.cpp)
 endif()
 if(GPU_TARGETS MATCHES "gfx95")
     add_gtest_executable(test_ck_tile_pk_fp4 test_pk_fp4.cpp)
     add_gtest_executable(test_ck_tile_mx_scale test_mx_scale.cpp)
+    add_gtest_executable(test_ck_tile_tf32 test_tf32.cpp)
+    add_gtest_executable(test_ck_tile_bf16_f32_convert test_bf16_f32_convert.cpp)
 endif()
 
 if(CK_USE_OCP_FP8 OR CK_USE_FNUZ_FP8)

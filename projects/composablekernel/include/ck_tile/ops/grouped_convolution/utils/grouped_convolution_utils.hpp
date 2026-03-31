@@ -9,6 +9,13 @@
 
 namespace ck_tile {
 
+enum class GroupedConvDirection
+{
+    FORWARD,
+    BACKWARD_DATA,
+    BACKWARD_WEIGHT
+};
+
 /// @brief The Grouped Conv kernel host arguments.
 ///
 /// @par Overview
@@ -101,7 +108,9 @@ struct GroupedConvTraits
     using OutLayout                                               = OutLayout_;
 
     // Forward Gemm Layouts
-    using AsLayoutFwd = ck_tile::tensor_layout::gemm::RowMajor;
+    using AsLayoutFwd = std::conditional_t<NumGroupsToMerge == 1,
+                                           ck_tile::tensor_layout::gemm::RowMajor,
+                                           ck_tile::tensor_layout::gemm::ColumnMajor>;
     using BsLayoutFwd = ck_tile::tensor_layout::gemm::ColumnMajor;
     using CLayoutFwd  = ck_tile::tensor_layout::gemm::RowMajor;
     // Backward Data Gemm Layouts
@@ -112,6 +121,36 @@ struct GroupedConvTraits
     using AsLayoutBwdWeight = ck_tile::tensor_layout::gemm::ColumnMajor;
     using BsLayoutBwdWeight = ck_tile::tensor_layout::gemm::RowMajor;
     using CLayoutBwdWeight  = ck_tile::tensor_layout::gemm::RowMajor;
+
+    template <GroupedConvDirection Direction>
+    struct GemmLayouts
+    {
+        static_assert(false, "Unsupported direction.");
+    };
+
+    template <>
+    struct GemmLayouts<GroupedConvDirection::FORWARD>
+    {
+        using AsLayout = AsLayoutFwd;
+        using BsLayout = BsLayoutFwd;
+        using CLayout  = CLayoutFwd;
+    };
+
+    template <>
+    struct GemmLayouts<GroupedConvDirection::BACKWARD_DATA>
+    {
+        using AsLayout = AsLayoutBwdData;
+        using BsLayout = BsLayoutBwdData;
+        using CLayout  = CLayoutBwdData;
+    };
+
+    template <>
+    struct GemmLayouts<GroupedConvDirection::BACKWARD_WEIGHT>
+    {
+        using AsLayout = AsLayoutBwdWeight;
+        using BsLayout = BsLayoutBwdWeight;
+        using CLayout  = CLayoutBwdWeight;
+    };
 
     template <ck_tile::index_t NumWaveGroups = 1>
     using GroupedConvImplicitGemmTraitsFwd =

@@ -280,7 +280,7 @@ TEST(TestBatchnormAttributes, PackAttributes)
 
     auto buffer = builder.GetBufferPointer();
     auto batchnormAttributesFb
-        = flatbuffers::GetRoot<hipdnn_sdk::data_objects::BatchnormAttributes>(buffer);
+        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::BatchnormAttributes>(buffer);
 
     EXPECT_EQ(batchnormAttributesFb->x_tensor_uid(), 1);
     EXPECT_EQ(batchnormAttributesFb->y_tensor_uid(), 2);
@@ -330,7 +330,7 @@ TEST(TestBatchnormAttributes, PackAttributesWithoutOptionalValues)
 
     auto buffer = builder.GetBufferPointer();
     auto batchnormAttributesFb
-        = flatbuffers::GetRoot<hipdnn_sdk::data_objects::BatchnormAttributes>(buffer);
+        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::BatchnormAttributes>(buffer);
 
     EXPECT_EQ(batchnormAttributesFb->x_tensor_uid(), 1);
     EXPECT_EQ(batchnormAttributesFb->y_tensor_uid(), 2);
@@ -499,7 +499,7 @@ TEST(TestBatchnormAttributes, SimplifiedSetPeerStatsWithMove)
     peerStatsMove.push_back(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
     peerStatsMove.push_back(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
 
-    size_t originalSize = peerStatsMove.size();
+    const size_t originalSize = peerStatsMove.size();
     batchnormAttributes.set_peer_stats(std::move(peerStatsMove));
 
     // Verify the vector was moved

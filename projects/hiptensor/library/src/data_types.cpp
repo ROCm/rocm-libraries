@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@
 namespace hiptensor
 {
     // Get data size in bytes from id
-    uint32_t hiptensorDataTypeSize(hiptensorDataType_t id)
+    HIPTENSOR_EXPORT uint32_t hiptensorDataTypeSize(hiptensorDataType_t id)
     {
         switch(id)
         {
@@ -102,8 +102,8 @@ namespace hiptensor
         }
     }
 
-    std::optional<hiptensorDataType_t>
-        convertToHipTensorDataType(hiptensorComputeDescriptor_t computeType)
+    HIPTENSOR_EXPORT std::optional<hiptensorDataType_t>
+                     convertToHipTensorDataType(hiptensorComputeDescriptor_t computeType)
     {
         switch(computeType)
         {
@@ -167,7 +167,8 @@ namespace hiptensor
     }
     // @endcond
 
-    void writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value)
+    HIPTENSOR_EXPORT void
+        writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value)
     {
         switch(id)
         {
@@ -261,7 +262,7 @@ namespace hiptensor
         }
     }
 
-    std::string opTypeToString(hiptensorOperator_t opType)
+    HIPTENSOR_EXPORT std::string opTypeToString(hiptensorOperator_t opType)
     {
         switch(opType)
         {
@@ -326,7 +327,7 @@ namespace hiptensor
         }
     }
 
-    std::string algoTypeToString(hiptensorAlgo_t algoType)
+    HIPTENSOR_EXPORT std::string algoTypeToString(hiptensorAlgo_t algoType)
     {
         switch(algoType)
         {
@@ -341,7 +342,7 @@ namespace hiptensor
         }
     }
 
-    std::string logLevelToString(hiptensorLogLevel_t logLevel)
+    HIPTENSOR_EXPORT std::string logLevelToString(hiptensorLogLevel_t logLevel)
     {
         switch(logLevel)
         {
@@ -362,7 +363,7 @@ namespace hiptensor
         }
     }
 
-    std::string workSizePrefToString(hiptensorWorksizePreference_t workSize)
+    HIPTENSOR_EXPORT std::string workSizePrefToString(hiptensorWorksizePreference_t workSize)
     {
         switch(workSize)
         {

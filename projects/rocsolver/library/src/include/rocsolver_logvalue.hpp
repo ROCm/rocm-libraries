@@ -237,4 +237,14 @@ struct formatter<rocsolver_logvalue<rocblas_datatype>> : formatter<string_view>
     }
 };
 
+template <>
+struct formatter<rocsolver_logvalue<rocsolver_norm_type>> : formatter<char>
+{
+    template <typename FormatCtx>
+    auto format(rocsolver_logvalue<rocsolver_norm_type> wrapper, FormatCtx& ctx) ROCSOLVER_FMT_CONST
+    {
+        return formatter<char>::format(rocsolver::rocsolver2char_norm_type(wrapper.value), ctx);
+    }
+};
+
 ROCSOLVER_END_FORMATTER_NAMESPACE

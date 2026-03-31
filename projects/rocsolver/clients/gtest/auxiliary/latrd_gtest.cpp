@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "common/auxiliary/testing_latrd.hpp"
+#include "common/auxiliary/testing_latrd_forsytrd.hpp"
 
 using ::testing::Combine;
 using ::testing::TestWithParam;
@@ -56,7 +57,11 @@ const vector<vector<int>> matrix_size_range = {
     {35, 50, 50},
     {70, 100, 70},
     {130, 130, 150},
-    {150, 150, 150}};
+    {150, 150, 150},
+    {32, 64, 64},
+    {64, 128, 64},
+    {128, 128, 256},
+    {128, 128, 128}};
 
 const vector<vector<int>> op_range = {
     // quick return
@@ -65,10 +70,12 @@ const vector<vector<int>> op_range = {
     {-1, 0},
     {180, 0},
     // normal (valid) samples
-    {10, 0},
-    {25, 1},
+    {8, 0},
+    {10, 1},
+    {16, 0},
+    {18, 1},
     {30, 0},
-    {30, 1}};
+    {32, 1}};
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range
@@ -100,7 +107,7 @@ class LATRD : public ::TestWithParam<latrd_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <typename T>
@@ -112,6 +119,26 @@ protected:
             testing_latrd_bad_arg<T>();
 
         testing_latrd<T>(arg);
+    }
+};
+
+class LATRD_FORSYTRD : public ::TestWithParam<latrd_tuple>
+{
+protected:
+    void TearDown() override
+    {
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
+    }
+
+    template <typename T>
+    void run_tests()
+    {
+        Arguments arg = latrd_setup_arguments(GetParam());
+
+        if(arg.peek<rocblas_int>("k") == 0 && arg.peek<rocblas_int>("n") == 0)
+            testing_latrd_bad_arg<T>();
+
+        testing_latrd_forsytrd<T>(arg);
     }
 };
 
@@ -137,10 +164,38 @@ TEST_P(LATRD, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
+TEST_P(LATRD_FORSYTRD, __float)
+{
+    run_tests<float>();
+}
+
+TEST_P(LATRD_FORSYTRD, __double)
+{
+    run_tests<double>();
+}
+
+TEST_P(LATRD_FORSYTRD, __float_complex)
+{
+    run_tests<rocblas_float_complex>();
+}
+
+TEST_P(LATRD_FORSYTRD, __double_complex)
+{
+    run_tests<rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          LATRD,
                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(large_op_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          LATRD,
+                         Combine(ValuesIn(matrix_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         LATRD_FORSYTRD,
+                         Combine(ValuesIn(large_matrix_size_range), ValuesIn(large_op_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         LATRD_FORSYTRD,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(op_range)));

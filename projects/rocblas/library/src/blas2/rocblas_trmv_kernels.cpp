@@ -22,6 +22,7 @@
 
 #include "../blas1/rocblas_copy.hpp"
 #include "../blas1/rocblas_reduction.hpp"
+#include "asan_helpers.hpp"
 #include "device_macros.hpp"
 #include "rocblas.h"
 #include "rocblas_trmv.hpp"
@@ -235,7 +236,7 @@ rocblas_status rocblas_internal_trmv_launcher(rocblas_handle    handle,
 
     static constexpr rocblas_int NB          = ROCBLAS_TRMV_NB;
     constexpr int                TRMVN_DIM_X = 64;
-    constexpr int                TRMVN_DIM_Y = 16;
+    constexpr int                TRMVN_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
 
     dim3 trmvn_grid((n - 1) / TRMVN_DIM_X + 1, 1, batches);
     dim3 trmvn_threads(TRMVN_DIM_X, TRMVN_DIM_Y);

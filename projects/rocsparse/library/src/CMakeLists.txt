@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,12 @@ set(rocsparse_source
   src/auxiliary/rocsparse_error.cpp
 
 # Common
+  src/common/rocsparse_singularity.cpp
   src/common/rocsparse_common.cpp
+  src/common/rocsparse_valset.cpp
+  src/common/rocsparse_conjugate.cpp
+  src/common/rocsparse_dense_transpose_back.cpp
+  src/common/rocsparse_dense_transpose.cpp
   src/common/rocsparse_handle.cpp
   src/common/rocsparse_mat_info.cpp
   src/common/rocsparse_position_t.cpp
@@ -37,6 +42,8 @@ set(rocsparse_source
   src/common/rocsparse_pivot_info_t.cpp
   src/common/rocsparse_csric0_info.cpp
   src/common/rocsparse_csrilu0_info.cpp
+  src/common/rocsparse_bsric0_info.cpp
+  src/common/rocsparse_bsrilu0_info.cpp
   src/common/rocsparse_trm_info.cpp
   src/common/rocsparse_sorted_coo2csr_info.cpp
   src/common/rocsparse_indextype_utils.cpp
@@ -54,7 +61,7 @@ set(rocsparse_source
   src/common/rocsparse_trm_data_t.cpp
   src/common/rocsparse_message.cpp
   src/common/rocsparse_determine_indextype.cpp
-
+  src/common/rocsparse_numeric_boost.cpp
 
 # Primitives
   src/primitives/rocsparse_radix_sort_pairs.cpp
@@ -133,12 +140,14 @@ set(rocsparse_source
   src/level2/rocsparse_sellmv.cpp
   #
   src/level2/rocsparse_csrsv.cpp
-  src/level2/rocsparse_csrsv_analysis_impl.cpp
-  src/level2/rocsparse_csrsv_analysis.cpp
   src/level2/rocsparse_csrsv_buffer_size.cpp
-  src/level2/rocsparse_csrsv_buffer_size_impl.cpp
+  src/level2/rocsparse_xcsrsv_buffer_size.cpp
+  src/level2/rocsparse_csrsv_analysis_kernels.cpp
+  src/level2/rocsparse_csrsv_analysis.cpp
+  src/level2/rocsparse_xcsrsv_analysis.cpp
+  src/level2/rocsparse_csrsv_solve_kernels.cpp
   src/level2/rocsparse_csrsv_solve.cpp
-  src/level2/rocsparse_csrsv_solve_impl.cpp
+  src/level2/rocsparse_xcsrsv_solve.cpp
   src/level2/rocsparse_csritsv.cpp
   src/level2/rocsparse_csritsv_info.cpp
   src/level2/rocsparse_csritsv_buffer_size.cpp
@@ -146,9 +155,9 @@ set(rocsparse_source
   src/level2/rocsparse_csritsv_solve.cpp
   src/level2/rocsparse_csritsv_solve_ex.cpp
   #
-  src/level2/rocsparse_coosv_impl.cpp
-  src/level2/rocsparse_coosv_buffer_size.cpp
+  src/level2/rocsparse_coosv_analysis_buffer_size.cpp
   src/level2/rocsparse_coosv_analysis.cpp
+  src/level2/rocsparse_coosv_solve_buffer_size.cpp
   src/level2/rocsparse_coosv_solve.cpp
   #
   src/level2/rocsparse_ellmv.cpp
@@ -475,19 +484,75 @@ set(rocsparse_source
   src/extra/rocsparse_bsrgemm.cpp
   src/extra/rocsparse_spgemm.cpp
   src/extra/rocsparse_spgeam.cpp
-
-# Preconditioner
-  src/precond/rocsparse_bsric0.cpp
-  src/precond/rocsparse_bsrilu0.cpp
-  src/precond/rocsparse_csric0.cpp
-  src/precond/rocsparse_csrilu0_buffer_size.cpp
-  src/precond/rocsparse_csrilu0_analysis.cpp
-  src/precond/rocsparse_csrilu0.cpp
-  src/precond/rocsparse_gtsv.cpp
-  src/precond/rocsparse_gtsv_no_pivot.cpp
-  src/precond/rocsparse_gtsv_no_pivot_strided_batch.cpp
-  src/precond/rocsparse_gtsv_interleaved_batch.cpp
-  src/precond/rocsparse_gpsv_interleaved_batch.cpp
+  #
+  # Preconditioner
+  #
+  src/precond/csric0/rocsparse_csric0.cpp
+  src/precond/csric0/rocsparse_csric0_analysis.cpp
+  src/precond/csric0/rocsparse_csric0_buffer_size.cpp
+  src/precond/csric0/rocsparse_csric0_clear.cpp
+  src/precond/csric0/rocsparse_csric0_get_tolerance.cpp
+  src/precond/csric0/rocsparse_csric0_kernel_hash.cpp
+  src/precond/csric0/rocsparse_csric0_kernel_binsearch.cpp
+  src/precond/csric0/rocsparse_csric0_kernel_launch.cpp
+  src/precond/csric0/rocsparse_csric0_set_tolerance.cpp
+  src/precond/csric0/rocsparse_csric0_singular_pivot.cpp
+  src/precond/csric0/rocsparse_csric0_zero_pivot.cpp
+  src/precond/csric0/rocsparse_xcsric0_buffer_size.cpp
+  src/precond/csric0/rocsparse_xcsric0_analysis.cpp
+  src/precond/csric0/rocsparse_xcsric0.cpp
+  #
+  src/precond/bsric0/rocsparse_bsric0.cpp
+  src/precond/bsric0/rocsparse_bsric0_analysis.cpp
+  src/precond/bsric0/rocsparse_bsric0_buffer_size.cpp
+  src/precond/bsric0/rocsparse_bsric0_clear.cpp
+  src/precond/bsric0/rocsparse_bsric0_kernel_launch.cpp
+  src/precond/bsric0/rocsparse_bsric0_kernel_2_8_unrolled.cpp
+  src/precond/bsric0/rocsparse_bsric0_kernel_2_8.cpp
+  src/precond/bsric0/rocsparse_bsric0_kernel_9_16.cpp
+  src/precond/bsric0/rocsparse_bsric0_kernel_17_32.cpp
+  src/precond/bsric0/rocsparse_bsric0_kernel_general.cpp
+  src/precond/bsric0/rocsparse_bsric0_zero_pivot.cpp
+  src/precond/bsric0/rocsparse_xbsric0.cpp
+  src/precond/bsric0/rocsparse_xbsric0_analysis.cpp
+  src/precond/bsric0/rocsparse_xbsric0_buffer_size.cpp
+  #
+  src/precond/bsrilu0/rocsparse_bsrilu0.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_analysis.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_buffer_size.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_clear.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_kernel_launch.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_kernel_2_8.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_kernel_9_32.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_kernel_33_64.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_kernel_general.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_zero_pivot.cpp
+  src/precond/bsrilu0/rocsparse_xbsrilu0.cpp
+  src/precond/bsrilu0/rocsparse_xbsrilu0_buffer_size.cpp
+  src/precond/bsrilu0/rocsparse_xbsrilu0_analysis.cpp
+  src/precond/bsrilu0/rocsparse_xbsrilu0_numeric_boost.cpp
+  #
+  src/precond/csrilu0/rocsparse_csrilu0.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_analysis.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_buffer_size.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_clear.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_get_tolerance.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_set_tolerance.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_kernel_launch.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_kernel_hash.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_kernel_binsearch.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_singular_pivot.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_zero_pivot.cpp
+  src/precond/csrilu0/rocsparse_xcsrilu0.cpp
+  src/precond/csrilu0/rocsparse_xcsrilu0_numeric_boost.cpp
+  src/precond/csrilu0/rocsparse_xcsrilu0_buffer_size.cpp
+  src/precond/csrilu0/rocsparse_xcsrilu0_analysis.cpp
+  #
+  src/precond/gtsv/rocsparse_gtsv.cpp
+  src/precond/gtsv/rocsparse_gtsv_no_pivot.cpp
+  src/precond/gtsv/rocsparse_gtsv_no_pivot_strided_batch.cpp
+  src/precond/gtsv/rocsparse_gtsv_interleaved_batch.cpp
+  src/precond/gpsv/rocsparse_gpsv_interleaved_batch.cpp
   src/precond/itilu0/common.cpp
   src/precond/itilu0/rocsparse_csritilu0x_buffer_size.cpp
   src/precond/itilu0/rocsparse_csritilu0x_preprocess.cpp
@@ -603,4 +668,17 @@ set(rocsparse_source
   src/util/rocsparse_check_matrix_ell_buffer_size.cpp
   src/util/rocsparse_check_matrix_hyb_buffer_size.cpp
   src/util/rocsparse_check_spmat.cpp
+
+# Generic
+  src/generic/spilu0/rocsparse_spilu0_descr.cpp
+  src/generic/spilu0/rocsparse_spilu0_set_input.cpp
+  src/generic/spilu0/rocsparse_spilu0_get_output.cpp
+  src/generic/spilu0/rocsparse_spilu0.cpp
+  src/generic/spilu0/rocsparse_spilu0_buffer_size.cpp
+  src/generic/spic0/rocsparse_spic0_descr.cpp
+  src/generic/spic0/rocsparse_spic0_set_input.cpp
+  src/generic/spic0/rocsparse_spic0_get_output.cpp
+  src/generic/spic0/rocsparse_spic0.cpp
+  src/generic/spic0/rocsparse_spic0_buffer_size.cpp
+
 )

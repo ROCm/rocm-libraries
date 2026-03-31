@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
@@ -64,14 +41,14 @@ namespace rocRoller
             using namespace ControlGraph;
 
             /**
-           * @brief Delete Body edges from a parent node to all its children
-          *
-          * 
-          *
-          * @param graph The kernel graph
-          * @param parent The parent node
-          * @param children The children nodes
-          */
+             * @brief Delete Body edges from a parent node to all its children
+             *
+             *
+             *
+             * @param graph The kernel graph
+             * @param parent The parent node
+             * @param children The children nodes
+             */
             void deleteBodyEdges(KernelGraph& graph, int parent, std::vector<int> const& children)
             {
                 for(auto const& child : children)
@@ -83,19 +60,19 @@ namespace rocRoller
             }
 
             /**
-            * @brief Create a chain of Scopes connected by Sequence edges
-          *
-          * 
-          * Creates: parent -> Body -> Scope -> Sequence -> Scope -> Sequence -> ... -> Scope
-          *                             |                   |                          |
-          *                           Body                Body                        Body
-          *                             |                   |                          |
-          *                          children[0]         children[1]               children[n]
-          * 
-          * @param graph The kernel graph
-          * @param parent The parent node to attach the first Scope to
-          * @param children The children nodes to place under each Scope
-          */
+             * @brief Create a chain of Scopes connected by Sequence edges
+             *
+             *
+             * Creates: parent -> Body -> Scope -> Sequence -> Scope -> Sequence -> ... -> Scope
+             *                             |                   |                          |
+             *                           Body                Body                        Body
+             *                             |                   |                          |
+             *                          children[0]         children[1]               children[n]
+             *
+             * @param graph The kernel graph
+             * @param parent The parent node to attach the first Scope to
+             * @param children The children nodes to place under each Scope
+             */
             void createScopeChain(KernelGraph& graph, int parent, std::vector<int> const& children)
             {
                 if(children.empty())
@@ -142,19 +119,19 @@ namespace rocRoller
 
             /**
              * @brief Order fixup chains within unrolled RECEIVE loops
-             * 
+             *
              * This transformation finds fixup chains across different unrolled iterations
              * and orders them sequentially using Scopes and Sequence edges, similar to
              * how orderEpilogueBlocks orders epilogue blocks. This change reduces the register pressure
              * by avoiding overlapping the fixup chains.
-             * 
+             *
              * Before:
              *   ForLoop (within RECEIVE)
              *   |           |           |
              *   Body       Body       Body
              *   |           |           |
              *   Fixup1     Fixup2     Fixup3
-             * 
+             *
              * After:
              *   ForLoop (within RECEIVE)
              *   |
@@ -213,7 +190,7 @@ namespace rocRoller
                     auto neighbors = graph.control.getOutputNodeIndices<Sequence>(currentNode)
                                          .to<std::vector>();
                     if(std::find(neighbors.begin(), neighbors.end(), nextNode) == neighbors.end())
-                        AssertFatal(false, "Sequence edge not found");
+                        Throw<FatalError>("Sequence edge not found");
 
                     graph.control.deleteElement<Sequence>(std::vector<int>{currentNode},
                                                           std::vector<int>{nextNode});

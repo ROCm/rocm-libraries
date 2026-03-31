@@ -1,0 +1,82 @@
+# ########################################################################
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: hipsparse_common.yaml
+
+# Known bugs - tests matching these criteria will be moved to known_bug category
+# These tests fail due to rounding errors with large matrices
+Known bugs:
+  - function: csrilu02
+    filename: bmwcra_1
+  - function: csrilu02
+    filename: shipsec1
+
+Tests:
+- name: csrilu02_bad_arg
+  category: pre_checkin
+  function: csric02_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: csrilu02
+  category: quick
+  function: csrilu02
+  precision: *single_double_precisions_complex_real
+  M: [50, 647]
+  numericboost: [0, 1]
+  boosttol: [0.5]
+  boostval: [0.3]
+  boostvali: [0.2]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: csrilu02
+  category: pre_checkin
+  function: csrilu02
+  precision: *single_double_precisions
+  M: 1
+  numericboost: [0, 1]
+  boosttol: [0.5]
+  boostval: [0.3]
+  boostvali: [0.2]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+
+- name: csrilu02
+  category: nightly
+  function: csrilu02
+  precision: *double_only_precisions
+  M: 1
+  numericboost: [0, 1]
+  boosttol: [0.5]
+  boostval: [0.3]
+  boostvali: [0.2]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [bmwcra_1,
+             shipsec1]

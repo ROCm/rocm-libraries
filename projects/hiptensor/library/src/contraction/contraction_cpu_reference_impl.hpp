@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,12 +34,14 @@
 // CK includes
 #include <ck/library/tensor_operation_instance/gpu/contraction_bilinear.hpp>
 #include <ck/library/tensor_operation_instance/gpu/contraction_scale.hpp>
+#include <ck/library/utility/host_tensor.hpp>
 #include <ck/tensor_operation/gpu/device/device_contraction_multiple_d.hpp>
 #include <ck/tensor_operation/gpu/element/element_wise_operation.hpp>
-#include <host_tensor.hpp>
 
 #include "contraction_meta_traits.hpp"
 #include "contraction_solution.hpp"
+
+using namespace ck;
 
 namespace hiptensor
 {
@@ -63,8 +65,7 @@ namespace hiptensor
         typename ComputeDataType = ADataType,
         ck::enable_if_t<NumDimM == 6 && NumDimN == 6 && NumDimK == 6 && DsDataType::Size() <= 1
                             && !std::is_same_v<AccDataType, ck::bhalf_t>,
-                        bool>
-        = false>
+                        bool>    = false>
     struct ReferenceContraction_M2_N2_K2
         : public ck::tensor_operation::device::DeviceContractionMultipleD<NumDimM,
                                                                           NumDimN,
@@ -155,12 +156,13 @@ namespace hiptensor
                         indices.begin(), indices.end(), strides.begin(), std::size_t{0});
                 };
 
-                if constexpr((std::is_same_v<ADataType, hipFloatComplex>
-                              && std::is_same_v<BDataType, hipFloatComplex>
-                              && std::is_same_v<EDataType, hipFloatComplex>)
-                             || (std::is_same_v<ADataType, hipDoubleComplex>
-                                 && std::is_same_v<BDataType, hipDoubleComplex>
-                                 && std::is_same_v<EDataType, hipDoubleComplex>))
+                if constexpr(
+                    (std::is_same_v<
+                         ADataType,
+                         hipFloatComplex> && std::is_same_v<BDataType, hipFloatComplex> && std::is_same_v<EDataType, hipFloatComplex>)
+                    || (std::is_same_v<
+                            ADataType,
+                            hipDoubleComplex> && std::is_same_v<BDataType, hipDoubleComplex> && std::is_same_v<EDataType, hipDoubleComplex>))
                 {
                     auto f_ms_ns_complex = [&](auto m0,
                                                auto m1,
@@ -632,4 +634,3 @@ namespace hiptensor
     }
 
 } // namespace hiptensor
-

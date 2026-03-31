@@ -4,9 +4,10 @@
 
 #include <hip/hip_runtime.h>
 #include <hipdnn_backend.h>
+#include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
 
 #include <algorithm>
 #include <iostream>
@@ -15,7 +16,11 @@
 #include <random>
 #include <vector>
 
-using hipdnn_sdk::utilities::TensorLayout;
+using hipdnn_data_sdk::utilities::TensorLayout;
+
+// Use portable custom types instead of HIP types (works with any C++ compiler)
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
 
 #define HIP_CHECK(status)                                                                      \
     do                                                                                         \
@@ -51,17 +56,26 @@ using hipdnn_sdk::utilities::TensorLayout;
         }                                                                                 \
     } while(0)
 
-inline void printSampleHelp(const std::string& sampleName)
+enum class SampleType
+{
+    GENERIC,
+    BN_TRAINING
+};
+
+inline void printSampleHelp(const std::string& sampleName,
+                            SampleType sampleType = SampleType::GENERIC)
 {
     std::cout << "Usage: " << sampleName << " [OPTIONS]\n"
               << "Options:\n"
-              << "  --verify-cpu, -vc           Enable CPU reference validation\n"
-              << "  --batch-stats-only          Use batch statistics only (no running stats) [BN "
-                 "training only]\n"
-              << "  --full-training             Use full training with running statistics [BN "
-                 "training only]\n"
-              << "  --help, -h                  Show this help message\n"
-              << std::endl;
+              << "  --verify-cpu, -vc           Enable CPU reference validation\n";
+
+    if(sampleType == SampleType::BN_TRAINING)
+    {
+        std::cout << "  --batch-stats-only          Use batch statistics only (no running stats)\n"
+                  << "  --full-training             Use full training with running statistics\n";
+    }
+
+    std::cout << "  --help, -h                  Show this help message\n" << std::endl;
 }
 
 struct Config
@@ -70,7 +84,8 @@ struct Config
     bool useRunningStats = false;
 };
 
-inline Config parseCommandLineArgs(int argc, char* argv[])
+inline Config
+    parseCommandLineArgs(int argc, char* argv[], SampleType sampleType = SampleType::GENERIC)
 {
     auto config = Config{};
 
@@ -82,23 +97,23 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
         {
             config.cpuValidation = true;
         }
-        else if(arg == "--batch-stats-only")
+        else if(arg == "--batch-stats-only" && sampleType == SampleType::BN_TRAINING)
         {
             config.useRunningStats = false;
         }
-        else if(arg == "--full-training")
+        else if(arg == "--full-training" && sampleType == SampleType::BN_TRAINING)
         {
             config.useRunningStats = true;
         }
         else if(arg == "--help" || arg == "-h")
         {
-            printSampleHelp(argv[0]);
+            printSampleHelp(argv[0], sampleType);
             exit(EXIT_SUCCESS);
         }
         else
         {
             std::cerr << "Unknown argument: " << arg << std::endl;
-            printSampleHelp(argv[0]);
+            printSampleHelp(argv[0], sampleType);
             exit(EXIT_FAILURE);
         }
     }
@@ -107,14 +122,16 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
 }
 
 template <typename F>
-void run(F&& f)
+bool run(F&& f)
 {
-    f.template operator()<float, float>(TensorLayout::NCHW);
-    f.template operator()<half, float>(TensorLayout::NCHW);
-    f.template operator()<hip_bfloat16, float>(TensorLayout::NCHW);
-    f.template operator()<float, float>(TensorLayout::NHWC);
-    f.template operator()<half, float>(TensorLayout::NHWC);
-    f.template operator()<hip_bfloat16, float>(TensorLayout::NHWC);
+    bool allPassed = true;
+    allPassed &= f.template operator()<float, float>(TensorLayout::NCHW);
+    allPassed &= f.template operator()<half, float>(TensorLayout::NCHW);
+    allPassed &= f.template operator()<bfloat16, float>(TensorLayout::NCHW);
+    allPassed &= f.template operator()<float, float>(TensorLayout::NHWC);
+    allPassed &= f.template operator()<half, float>(TensorLayout::NHWC);
+    allPassed &= f.template operator()<bfloat16, float>(TensorLayout::NHWC);
+    return allPassed;
 }
 
 inline std::shared_ptr<hipdnn_frontend::graph::Tensor_attributes>
@@ -124,7 +141,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Tensor_attributes>
 {
     auto tensor = std::make_shared<hipdnn_frontend::graph::Tensor_attributes>();
     tensor->set_dim(dims).set_data_type(dataType);
-    tensor->set_stride(hipdnn_sdk::utilities::generateStrides(dims, layout.strideOrder));
+    tensor->set_stride(hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder));
 
     return tensor;
 }
@@ -146,5 +163,5 @@ struct SampleRunner
     Config config;
 
     template <typename InputType, typename IntermediateType>
-    void operator()(const TensorLayout& layout);
+    bool operator()(const TensorLayout& layout);
 };

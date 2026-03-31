@@ -6,9 +6,7 @@
 #include "plugin/EnginePluginResourceManager.hpp"
 #include <gmock/gmock.h>
 
-namespace hipdnn_backend
-{
-namespace plugin
+namespace hipdnn_backend::plugin
 {
 
 class MockEnginePluginResourceManager : public EnginePluginResourceManager
@@ -21,7 +19,7 @@ public:
                 (const, override));
     MOCK_METHOD(std::vector<int64_t>,
                 getApplicableEngineIds,
-                (const hipdnn_backend::GraphDescriptor* graphDesc),
+                (const hipdnn_backend::GraphDescriptor* graphDesc, bool findFirst),
                 (const, override));
     MOCK_METHOD(void,
                 getEngineDetails,
@@ -55,5 +53,4 @@ public:
                 (const, override));
 };
 
-}
-}
+} // namespace hipdnn_backend::plugin

@@ -470,10 +470,10 @@ struct TransformConvFwdToGemm
                                       bool>::type = false>
     CK_TILE_HOST auto MakeADescriptor_M_K() const
     {
+        IndexType NStrideTensorA_ = Wi_ * G_ * C_;
         IndexType WiStride_       = G_ * C_;
-        IndexType CStrideTensorA_ = 1;
-        IndexType NStrideTensorA_ = Di_ * Hi_ * Wi_ * G_ * C_;
         IndexType GStrideTensorA_ = C_;
+        IndexType CStrideTensorA_ = 1;
 
         if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter1x1Stride1Pad0)
         {
@@ -660,8 +660,8 @@ struct TransformConvFwdToGemm
             else
             {
                 const auto in_n_wi_c_desc = make_naive_tensor_descriptor(
-                    make_tuple(N_, Wi_, NumGroupsToMerge, C_),
-                    make_tuple(NStrideTensorA_, WiStride_, GStrideTensorA_, CStrideTensorA_),
+                    make_tuple(N_, Wi_, NumGroupsToMerge),
+                    make_tuple(NStrideTensorA_, WiStride_, GStrideTensorA_),
                     number<VectorSizeA>{},
                     I1);
 
@@ -669,26 +669,24 @@ struct TransformConvFwdToGemm
                     in_n_wi_c_desc,
                     make_tuple(make_pass_through_transform(N_),
                                make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
-                               make_pass_through_transform(NumGroupsToMerge),
-                               make_pass_through_transform(C_)),
-                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
-                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}));
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}));
 
                 const auto in_n_x_wo_c_desc = transform_tensor_descriptor(
                     in_n_wip_c_desc,
                     make_tuple(make_pass_through_transform(N_),
                                make_embed_transform(make_tuple(X_, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_)),
-                               make_pass_through_transform(NumGroupsToMerge),
-                               make_pass_through_transform(C_)),
-                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
-                    make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}, sequence<4>{}));
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
+                    make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}));
 
                 return transform_tensor_descriptor(
                     in_n_x_wo_c_desc,
                     make_tuple(make_merge_transform(make_tuple(N_, Wo_, NumGroupsToMerge)),
-                               make_merge_transform(make_tuple(X_, C_))),
-                    make_tuple(sequence<0, 2, 3>{}, sequence<1, 4>{}),
+                               make_merge_transform(make_tuple(X_))),
+                    make_tuple(sequence<0, 2, 3>{}, sequence<1>{}),
                     make_tuple(sequence<0>{}, sequence<1>{}));
             }
         }
@@ -701,11 +699,11 @@ struct TransformConvFwdToGemm
     CK_TILE_HOST auto MakeADescriptor_M_K() const
 
     {
+        IndexType NStrideTensorA_ = Hi_ * Wi_ * G_ * C_;
         IndexType HiStride_       = Wi_ * G_ * C_;
         IndexType WiStride_       = G_ * C_;
-        IndexType CStrideTensorA_ = 1;
-        IndexType NStrideTensorA_ = Di_ * Hi_ * Wi_ * G_ * C_;
         IndexType GStrideTensorA_ = C_;
+        IndexType CStrideTensorA_ = 1;
 
         if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter1x1Stride1Pad0)
         {
@@ -906,11 +904,10 @@ struct TransformConvFwdToGemm
             }
             else
             {
-
+                // IsSupported ensures C == 1 to allow reading on G dimension
                 const auto in_n_hi_wi_groups_c_desc = make_naive_tensor_descriptor(
-                    make_tuple(N_, Hi_, Wi_, NumGroupsToMerge, C_),
-                    make_tuple(
-                        NStrideTensorA_, HiStride_, WiStride_, GStrideTensorA_, CStrideTensorA_),
+                    make_tuple(N_, Hi_, Wi_, NumGroupsToMerge),
+                    make_tuple(NStrideTensorA_, HiStride_, WiStride_, GStrideTensorA_),
                     number<VectorSizeA>{},
                     I1);
 
@@ -919,12 +916,9 @@ struct TransformConvFwdToGemm
                     make_tuple(make_pass_through_transform(N_),
                                make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
                                make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
-                               make_pass_through_transform(NumGroupsToMerge),
-                               make_pass_through_transform(C_)),
-                    make_tuple(
-                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}),
-                    make_tuple(
-                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}));
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}));
 
                 const auto in_n_y_ho_x_wo_groups_c_desc = transform_tensor_descriptor(
                     in_n_hip_wip_groups_c_desc,
@@ -933,21 +927,15 @@ struct TransformConvFwdToGemm
                                                     make_tuple(ConvDilationH_, ConvStrideH_)),
                                make_embed_transform(make_tuple(X_, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_)),
-                               make_pass_through_transform(NumGroupsToMerge),
-                               make_pass_through_transform(C_)),
-                    make_tuple(
-                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}),
-                    make_tuple(sequence<0>{},
-                               sequence<1, 2>{},
-                               sequence<3, 4>{},
-                               sequence<5>{},
-                               sequence<6>{}));
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
+                    make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3, 4>{}, sequence<5>{}));
 
                 return transform_tensor_descriptor(
                     in_n_y_ho_x_wo_groups_c_desc,
                     make_tuple(make_merge_transform(make_tuple(N_, Ho_, Wo_, NumGroupsToMerge)),
-                               make_merge_transform(make_tuple(Y_, X_, C_))),
-                    make_tuple(sequence<0, 2, 4, 5>{}, sequence<1, 3, 6>{}),
+                               make_merge_transform(make_tuple(Y_, X_))),
+                    make_tuple(sequence<0, 2, 4, 5>{}, sequence<1, 3>{}),
                     make_tuple(sequence<0>{}, sequence<1>{}));
             }
         }
@@ -960,12 +948,12 @@ struct TransformConvFwdToGemm
     CK_TILE_HOST auto MakeADescriptor_M_K() const
 
     {
+        IndexType NStrideTensorA_ = Di_ * Hi_ * Wi_ * G_ * C_;
         IndexType DiStride_       = Hi_ * Wi_ * G_ * C_;
         IndexType HiStride_       = Wi_ * G_ * C_;
         IndexType WiStride_       = G_ * C_;
-        IndexType CStrideTensorA_ = 1;
-        IndexType NStrideTensorA_ = Di_ * Hi_ * Wi_ * G_ * C_;
         IndexType GStrideTensorA_ = C_;
+        IndexType CStrideTensorA_ = 1;
 
         if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter1x1Stride1Pad0)
         {
@@ -1214,14 +1202,10 @@ struct TransformConvFwdToGemm
             }
             else
             {
+                // IsSupported ensures C == 1 to allow reading on G dimension
                 const auto in_n_di_hi_wi_c_desc = make_naive_tensor_descriptor(
-                    make_tuple(N_, Di_, Hi_, Wi_, NumGroupsToMerge, C_),
-                    make_tuple(NStrideTensorA_,
-                               DiStride_,
-                               HiStride_,
-                               WiStride_,
-                               GStrideTensorA_,
-                               CStrideTensorA_),
+                    make_tuple(N_, Di_, Hi_, Wi_, NumGroupsToMerge),
+                    make_tuple(NStrideTensorA_, DiStride_, HiStride_, WiStride_, GStrideTensorA_),
                     number<VectorSizeA>{},
                     I1);
 
@@ -1231,20 +1215,11 @@ struct TransformConvFwdToGemm
                                make_pad_transform(Di_, InLeftPadD_, InRightPadD_),
                                make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
                                make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
-                               make_pass_through_transform(NumGroupsToMerge),
-                               make_pass_through_transform(C_)),
-                    make_tuple(sequence<0>{},
-                               sequence<1>{},
-                               sequence<2>{},
-                               sequence<3>{},
-                               sequence<4>{},
-                               sequence<5>{}),
-                    make_tuple(sequence<0>{},
-                               sequence<1>{},
-                               sequence<2>{},
-                               sequence<3>{},
-                               sequence<4>{},
-                               sequence<5>{}));
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(
+                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}),
+                    make_tuple(
+                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}));
 
                 const auto in_n_z_do_y_ho_x_wo_c_desc = transform_tensor_descriptor(
                     in_n_hip_wip_c_desc,
@@ -1255,27 +1230,21 @@ struct TransformConvFwdToGemm
                                                     make_tuple(ConvDilationH_, ConvStrideH_)),
                                make_embed_transform(make_tuple(X_, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_)),
-                               make_pass_through_transform(NumGroupsToMerge),
-                               make_pass_through_transform(C_)),
-                    make_tuple(sequence<0>{},
-                               sequence<1>{},
-                               sequence<2>{},
-                               sequence<3>{},
-                               sequence<4>{},
-                               sequence<5>{}),
+                               make_pass_through_transform(NumGroupsToMerge)),
+                    make_tuple(
+                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}),
                     make_tuple(sequence<0>{},
                                sequence<1, 2>{},
                                sequence<3, 4>{},
                                sequence<5, 6>{},
-                               sequence<7>{},
-                               sequence<8>{}));
+                               sequence<7>{}));
 
                 return transform_tensor_descriptor(
                     in_n_z_do_y_ho_x_wo_c_desc,
                     make_tuple(
                         make_merge_transform(make_tuple(N_, Do_, Ho_, Wo_, NumGroupsToMerge)),
-                        make_merge_transform(make_tuple(Z_, Y_, X_, C_))),
-                    make_tuple(sequence<0, 2, 4, 6, 7>{}, sequence<1, 3, 5, 8>{}),
+                        make_merge_transform(make_tuple(Z_, Y_, X_))),
+                    make_tuple(sequence<0, 2, 4, 6, 7>{}, sequence<1, 3, 5>{}),
                     make_tuple(sequence<0>{}, sequence<1>{}));
             }
         }
@@ -1289,9 +1258,9 @@ struct TransformConvFwdToGemm
                                 bool>::type = false>
     CK_TILE_HOST auto MakeBDescriptor_N_K() const
     {
-        IndexType CStrideTensorB_ = 1;
-        IndexType KStrideTensorB_ = Z_ * Y_ * X_ * C_;
         IndexType GStrideTensorB_ = K_ * Z_ * Y_ * X_ * C_;
+        IndexType KStrideTensorB_ = Z_ * Y_ * X_ * C_;
+        IndexType CStrideTensorB_ = 1;
 
         if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter3x3)
         {
@@ -1356,10 +1325,10 @@ struct TransformConvFwdToGemm
                                       bool>::type = false>
     CK_TILE_HOST auto MakeCDescriptor_M_N() const
     {
+        IndexType NStrideTensorC_ = Wo_ * G_ * K_;
         IndexType WoStride_       = G_ * K_;
-        IndexType KStrideTensorC_ = 1;
-        IndexType NStrideTensorC_ = Do_ * Ho_ * Wo_ * G_ * K_;
         IndexType GStrideTensorC_ = K_;
+        IndexType KStrideTensorC_ = 1;
 
         const IndexType NDoHoWo = N_ * Wo_;
         if constexpr(NumGroupsToMerge == 1)
@@ -1394,9 +1363,11 @@ struct TransformConvFwdToGemm
                           NumGroupsToMerge == 32 || NumGroupsToMerge == 64);
             const auto unmerged_padded_desc = transform_tensor_descriptor(
                 padded_desc,
-                make_tuple(make_pass_through_transform(NDoHoWo),
-                           make_xor_transform(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
-                           make_pass_through_transform(K_)),
+                make_tuple(
+                    make_pass_through_transform(NDoHoWo),
+                    make_xor_transform<decltype(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                                       false>(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                    make_pass_through_transform(K_)),
                 make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}),
                 make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}));
             // Merge To M, N
@@ -1417,11 +1388,11 @@ struct TransformConvFwdToGemm
                   bool>::type = false>
     CK_TILE_HOST auto MakeCDescriptor_M_N() const
     {
+        IndexType NStrideTensorC_ = Ho_ * Wo_ * G_ * K_;
         IndexType HoStride_       = Wo_ * G_ * K_;
         IndexType WoStride_       = G_ * K_;
-        IndexType KStrideTensorC_ = 1;
-        IndexType NStrideTensorC_ = Do_ * Ho_ * Wo_ * G_ * K_;
         IndexType GStrideTensorC_ = K_;
+        IndexType KStrideTensorC_ = 1;
 
         const IndexType NDoHoWo = N_ * Ho_ * Wo_;
         if constexpr(NumGroupsToMerge == 1)
@@ -1460,9 +1431,11 @@ struct TransformConvFwdToGemm
                           NumGroupsToMerge == 32 || NumGroupsToMerge == 64);
             const auto unmerged_padded_desc = transform_tensor_descriptor(
                 padded_desc,
-                make_tuple(make_pass_through_transform(NDoHoWo),
-                           make_xor_transform(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
-                           make_pass_through_transform(K_)),
+                make_tuple(
+                    make_pass_through_transform(NDoHoWo),
+                    make_xor_transform<decltype(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                                       false>(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                    make_pass_through_transform(K_)),
                 make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}),
                 make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}));
             // Merge To M, N
@@ -1482,12 +1455,12 @@ struct TransformConvFwdToGemm
                   bool>::type = false>
     CK_TILE_HOST auto MakeCDescriptor_M_N() const
     {
+        IndexType NStrideTensorC_ = Do_ * Ho_ * Wo_ * G_ * K_;
         IndexType DoStride_       = Ho_ * Wo_ * G_ * K_;
         IndexType HoStride_       = Wo_ * G_ * K_;
         IndexType WoStride_       = G_ * K_;
-        IndexType KStrideTensorC_ = 1;
-        IndexType NStrideTensorC_ = Do_ * Ho_ * Wo_ * G_ * K_;
         IndexType GStrideTensorC_ = K_;
+        IndexType KStrideTensorC_ = 1;
 
         const IndexType NDoHoWo = N_ * Do_ * Ho_ * Wo_;
         if constexpr(NumGroupsToMerge == 1)
@@ -1527,9 +1500,11 @@ struct TransformConvFwdToGemm
                           NumGroupsToMerge == 32 || NumGroupsToMerge == 64);
             const auto unmerged_padded_desc = transform_tensor_descriptor(
                 padded_desc,
-                make_tuple(make_pass_through_transform(NDoHoWo),
-                           make_xor_transform(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
-                           make_pass_through_transform(K_)),
+                make_tuple(
+                    make_pass_through_transform(NDoHoWo),
+                    make_xor_transform<decltype(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                                       false>(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                    make_pass_through_transform(K_)),
                 make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}),
                 make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}));
             // Merge To M, N

@@ -58,14 +58,14 @@
 #endif
 
 #if ROCWMMA_BENCHMARK_TESTS
-#ifndef CHECK_RSMI_ERROR
-#define CHECK_RSMI_ERROR(expression, smiErrorFlag)                                               \
-    if(auto status = (expression); status != RSMI_STATUS_SUCCESS)                                \
-    {                                                                                            \
-        const char* errName = nullptr;                                                           \
-        rsmi_status_string(status, &errName);                                                    \
-        fprintf(stderr, "rsmi error: '%s'(%d) at %s:%d\n", errName, status, __FILE__, __LINE__); \
-        smiErrorFlag = true;                                                                     \
+#ifndef CHECK_AMDSMI_ERROR
+#define CHECK_AMDSMI_ERROR(expression, smiErrorFlag)                                                 \
+    if(auto status = (expression); status != AMDSMI_STATUS_SUCCESS)                                  \
+    {                                                                                                \
+        const char* errName;                                                                         \
+        amdsmi_status_code_to_string(status, &errName);                                              \
+        fprintf(stderr, "amdsmi error: '%s'(%d) at %s:%d\n", errName, status, __FILE__, __LINE__);   \
+        smiErrorFlag = true;                                                                         \
     }
 #endif
 #endif // ROCWMMA_BENCHMARK_TESTS

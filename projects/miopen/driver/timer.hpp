@@ -139,11 +139,12 @@ private:
     std::chrono::time_point<std::chrono::steady_clock> et;
 };
 
-class RNNCombTimeLoger
+class RNNCombTimeLogger
 {
 public:
-    RNNCombTimeLoger(hipStream_t main_stream, size_t size, int mode)
-        : stream(main_stream), clockMode(static_cast<ClockMode>(mode))
+    RNNCombTimeLogger(hipStream_t main_stream, size_t size, int enabled, int mode)
+        : stream(main_stream),
+          clockMode(enabled == 0 ? ClockMode::Disabled : static_cast<ClockMode>(mode))
     {
         if(clockMode != ClockMode::Disabled)
         {
@@ -162,7 +163,9 @@ public:
     void Start()
     {
         if(clockMode == ClockMode::Disabled)
+        {
             return;
+        }
 
         auto launchCount = hostTimePerLaunch.size();
 
@@ -172,13 +175,15 @@ public:
             return;
         }
 
-        hipEventRecord(startEvent[launchCount].get(), stream);
+        (void)hipEventRecord(startEvent[launchCount].get(), stream);
         st = std::chrono::steady_clock::now();
     }
     void StopAndPush()
     {
         if(clockMode == ClockMode::Disabled)
+        {
             return;
+        }
 
         auto end         = std::chrono::steady_clock::now();
         auto launchCount = hostTimePerLaunch.size();
@@ -188,14 +193,14 @@ public:
             printf("Executed more iterations than planned\n");
             return;
         }
-        hipEventRecord(endEvent[launchCount].get(), stream);
+        (void)hipEventRecord(endEvent[launchCount].get(), stream);
 
         if(clockMode == ClockMode::OldWallClock)
         {
             std::chrono::time_point<std::chrono::steady_clock> st2 =
                 std::chrono::steady_clock::now();
 
-            hipEventSynchronize(endEvent[launchCount].get());
+            (void)hipEventSynchronize(endEvent[launchCount].get());
 
             std::chrono::time_point<std::chrono::steady_clock> end2 =
                 std::chrono::steady_clock::now();
@@ -209,7 +214,7 @@ public:
         else
         {
             if(clockMode == ClockMode::SeparateClocksSynced)
-                hipEventSynchronize(endEvent[launchCount].get());
+                (void)hipEventSynchronize(endEvent[launchCount].get());
 
             hostTimePerLaunch.push_back(
                 std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(end - st)
@@ -221,20 +226,23 @@ public:
     {
         auto n_iter = hostTimePerLaunch.size();
         if(clockMode == ClockMode::Disabled || n_iter == 0)
+        {
             return;
+        }
 
         float gpu_avg  = 0.0f;
         float host_avg = 0.0f;
         float gpu_time = 0.0f;
 
         if(clockMode == ClockMode::SeparateClocksNotSynced)
-            hipEventSynchronize(endEvent[n_iter - 1].get());
+            (void)hipEventSynchronize(endEvent[n_iter - 1].get());
 
         for(auto i = 0ull; i < n_iter; ++i)
         {
-            hipEventElapsedTime(&gpu_time, startEvent[i].get(), endEvent[i].get());
+            (void)hipEventElapsedTime(&gpu_time, startEvent[i].get(), endEvent[i].get());
 
-            if(clockMode != ClockMode::OldWallClock)
+            if(clockMode == ClockMode::SeparateClocksNotSynced ||
+               clockMode == ClockMode::SeparateClocksSynced)
             {
                 printf("launch#%llu, host_time= %f ms, gpu_time= %f ms\n",
                        i,
@@ -250,7 +258,7 @@ public:
         }
 
         if(n_iter == 1)
-            hipEventElapsedTime(&gpu_time, startEvent[0].get(), endEvent[0].get());
+            (void)hipEventElapsedTime(&gpu_time, startEvent[0].get(), endEvent[0].get());
 
         printf("GPU Kernel Time Elapsed: %f ms\n", n_iter > 1 ? gpu_avg / (n_iter - 1) : gpu_time);
         printf("Wall-clock Time Elapsed: %f ms\n",

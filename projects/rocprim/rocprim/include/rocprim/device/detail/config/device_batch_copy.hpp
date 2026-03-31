@@ -38,255 +38,350 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
+template<class Target, class value_type>
+constexpr auto batch_copy_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
+    batch_memcpy_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Default case if none of the conditions match
+    return batch_memcpy_config_params_base<value_type>();
+}
 
-template<unsigned int arch, class value_type, class enable = void>
-struct default_batch_copy_config : default_batch_memcpy_config_base<value_type>::type
-{};
+template<class Target, class value_type>
+constexpr auto batch_copy_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
+    batch_memcpy_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Default case if none of the conditions match
+    return batch_memcpy_config_params_base<value_type>();
+}
 
-// Based on value_type = int64_t
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
+template<class Target, class value_type>
+constexpr auto batch_copy_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
+    batch_memcpy_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Default case if none of the conditions match
+    return batch_memcpy_config_params_base<value_type>();
+}
 
-// Based on value_type = int
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
+template<class Target, class value_type>
+constexpr auto batch_copy_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
+    batch_memcpy_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Default case if none of the conditions match
+    return batch_memcpy_config_params_base<value_type>();
+}
 
-// Based on value_type = short
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
+template<class Target, class value_type>
+constexpr auto batch_copy_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
+    batch_memcpy_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Default case if none of the conditions match
+    return batch_memcpy_config_params_base<value_type>();
+}
 
-// Based on value_type = int8_t
-template<class value_type>
-struct default_batch_copy_config<static_cast<unsigned int>(target_arch::gfx906),
-                                 value_type,
-                                 std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
+template<class Target, class value_type>
+constexpr auto batch_copy_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
+    batch_memcpy_config_params>
+{
+    // Based on value_type = int64_t
+    if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = int
+    if constexpr(((sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = short
+    if constexpr(((sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Based on value_type = int8_t
+    if constexpr(((sizeof(value_type) <= 1)))
+    {
+        return batch_memcpy_config_params{
+            {256,  2},
+            8,
+            {128, 32},
+            128,
+            1024
+        };
+    }
+    // Default case if none of the conditions match
+    return batch_memcpy_config_params_base<value_type>();
+}
 
-// Based on value_type = int64_t
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
+template<class Target, class value_type>
+constexpr auto batch_copy_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
+    batch_memcpy_config_params>
+{
+    return batch_copy_config_picker<
+        comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+        value_type>();
+}
 
-// Based on value_type = int
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_batch_copy_config<static_cast<unsigned int>(target_arch::gfx908),
-                                 value_type,
-                                 std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_batch_copy_config<static_cast<unsigned int>(target_arch::gfx1030),
-                                 value_type,
-                                 std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_batch_copy_config<static_cast<unsigned int>(target_arch::gfx1100),
-                                 value_type,
-                                 std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_batch_copy_config<static_cast<unsigned int>(target_arch::unknown),
-                                 value_type,
-                                 std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_batch_copy_config<static_cast<unsigned int>(target_arch::gfx90a),
-                                 value_type,
-                                 std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_batch_copy_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    value_type,
-    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_batch_copy_config<static_cast<unsigned int>(target_arch::gfx942),
-                                 value_type,
-                                 std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : batch_copy_config<256, 2, 8, 128, 32, 128, 1024>
-{};
+// All the existing configs should be auto generated
+using batch_copy_targets
+    = comp_targets<comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>,
+                   comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+                   comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>,
+                   comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>,
+                   comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
+                   comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
+                   comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail
 

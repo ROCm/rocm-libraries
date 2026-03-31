@@ -1,21 +1,76 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file BatchnormAttributes.hpp
+ * @brief Attributes for batch normalization forward training operation
+ *
+ * This file defines the BatchnormAttributes class used to configure
+ * batch normalization operations during training, including computing
+ * mean and variance statistics.
+ */
+
 #pragma once
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
-namespace hipdnn_frontend
+namespace hipdnn_frontend::graph
 {
-namespace graph
-{
+
+/**
+ * @class BatchnormAttributes
+ * @brief Configuration attributes for batch normalization forward training
+ *
+ * BatchnormAttributes configures a batch normalization operation for training.
+ * This operation normalizes the input tensor across the batch dimension and
+ * computes running statistics for inference.
+ *
+ * **Tensor Shapes:**
+ * - **X** (input): `(N, C, H, W)` or `(N, C, D, H, W)` — batch, channels, spatial dims
+ * - **Scale, Bias**: `(1, C, 1, 1)` or `(1, C, 1, 1, 1)` — per-channel parameters
+ * - **Y** (output): Same shape as X
+ * - **Mean, Inv_variance**: `(1, C, 1, 1)` or `(1, C, 1, 1, 1)` — per-channel statistics
+ *
+ * **Required inputs:**
+ * - X: Input tensor to normalize
+ * - Scale: Per-channel scale (gamma) tensor
+ * - Bias: Per-channel bias (beta) tensor
+ *
+ * **Optional inputs (for running statistics):**
+ * - prev_running_mean: Previous running mean (for exponential moving average)
+ * - prev_running_variance: Previous running variance
+ * - momentum: Momentum for running statistics update
+ *
+ * **Outputs:**
+ * - Y: Normalized output tensor
+ * - Mean: Computed batch mean
+ * - Inv_variance: Computed inverse variance (1/sqrt(var + epsilon))
+ * - next_running_mean: Updated running mean (optional)
+ * - next_running_variance: Updated running variance (optional)
+ *
+ * @code{.cpp}
+ * BatchnormAttributes attr;
+ * attr.set_x(inputTensor)
+ *     .set_scale(scaleTensor)
+ *     .set_bias(biasTensor)
+ *     .set_epsilon(epsilonTensor);
+ *
+ * auto [y, mean, invVar, nextMean, nextVar] = graph.batchnorm(x, scale, bias, attr);
+ * @endcode
+ *
+ * @see BatchnormInferenceAttributes for inference-only batch normalization
+ * @see BatchnormBackwardAttributes for backward pass
+ */
 class BatchnormAttributes : public Attributes<BatchnormAttributes>
 {
 public:
+    BatchnormAttributes() = default;
+
     enum class InputNames
     {
         X = 0,
@@ -261,7 +316,7 @@ public:
             .set_momentum(std::move(momentum));
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::BatchnormAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto peerStatsVector = std::vector<int64_t>{};
@@ -281,7 +336,7 @@ public:
         auto nextRunningMean = get_next_running_mean();
         auto nextRunningVariance = get_next_running_variance();
 
-        return hipdnn_sdk::data_objects::CreateBatchnormAttributesDirect(
+        return hipdnn_data_sdk::data_objects::CreateBatchnormAttributesDirect(
             builder,
             get_x()->get_uid(),
             get_scale()->get_uid(),
@@ -303,50 +358,64 @@ public:
                                 : flatbuffers::nullopt);
     }
 
-private:
-    std::shared_ptr<TensorAttributes> getInput(InputNames name) const
+    static BatchnormAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::BatchnormAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        auto it = inputs.find(name);
-        if(it != inputs.end())
+        BatchnormAttributes attr;
+
+        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
+        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
+        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
+        attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
+
+        std::vector<std::shared_ptr<TensorAttributes>> peerStats;
+        if(fb->peer_stats_tensor_uid() != nullptr)
         {
-            return it->second;
+            for(auto uid : *fb->peer_stats_tensor_uid())
+            {
+                peerStats.push_back(tensorMap.at(uid));
+            }
         }
-        return nullptr;
-    }
+        attr.set_peer_stats(peerStats);
 
-    std::shared_ptr<TensorAttributes> getOutput(OutputNames name) const
-    {
-        auto it = outputs.find(name);
-        if(it != outputs.end())
+        if(fb->prev_running_mean_tensor_uid().has_value())
         {
-            return it->second;
+            attr.set_prev_running_mean(tensorMap.at(fb->prev_running_mean_tensor_uid().value()));
         }
-        return nullptr;
-    }
+        if(fb->prev_running_variance_tensor_uid().has_value())
+        {
+            attr.set_prev_running_variance(
+                tensorMap.at(fb->prev_running_variance_tensor_uid().value()));
+        }
+        if(fb->momentum_tensor_uid().has_value())
+        {
+            attr.set_momentum(tensorMap.at(fb->momentum_tensor_uid().value()));
+        }
 
-    BatchnormAttributes& setInput(InputNames name, const std::shared_ptr<TensorAttributes>& value)
-    {
-        inputs[name] = value;
-        return *this;
-    }
-    BatchnormAttributes& setInput(InputNames name, std::shared_ptr<TensorAttributes>&& value)
-    {
-        inputs[name] = std::move(value);
-        return *this;
-    }
+        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
 
-    BatchnormAttributes& setOutput(OutputNames name, const std::shared_ptr<TensorAttributes>& value)
-    {
-        outputs[name] = value;
-        return *this;
-    }
-    BatchnormAttributes& setOutput(OutputNames name, std::shared_ptr<TensorAttributes>&& value)
-    {
-        outputs[name] = std::move(value);
-        return *this;
+        if(fb->mean_tensor_uid().has_value())
+        {
+            attr.set_mean(tensorMap.at(fb->mean_tensor_uid().value()));
+        }
+        if(fb->inv_variance_tensor_uid().has_value())
+        {
+            attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid().value()));
+        }
+        if(fb->next_running_mean_tensor_uid().has_value())
+        {
+            attr.set_next_running_mean(tensorMap.at(fb->next_running_mean_tensor_uid().value()));
+        }
+        if(fb->next_running_variance_tensor_uid().has_value())
+        {
+            attr.set_next_running_variance(
+                tensorMap.at(fb->next_running_variance_tensor_uid().value()));
+        }
+
+        return attr;
     }
 };
 
 typedef BatchnormAttributes Batchnorm_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

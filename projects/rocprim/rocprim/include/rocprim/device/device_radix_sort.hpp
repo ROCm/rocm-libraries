@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,7 @@
 #include "../types.hpp"
 
 #include "../type_traits.hpp"
+#include "config_types.hpp"
 #include "detail/config/device_radix_sort_onesweep.hpp"
 #include "detail/device_radix_sort.hpp"
 #include "device_transform.hpp"
@@ -97,16 +98,12 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
 {
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    using config     = wrapped_radix_sort_onesweep_config<Config, key_type, value_type>;
 
-    detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const radix_sort_onesweep_config_params params
-        = dispatch_target_arch<config, false>(target_arch);
+    using Selector = radix_sort_onesweep_config_selector<key_type, value_type>;
+
+    const target current_target(stream);
+
+    const radix_sort_onesweep_config_params params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int items_per_block
         = params.histogram.block_size * params.histogram.items_per_thread;
@@ -133,9 +130,9 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
     }
 
     // Compute a histogram for each digit.
-    auto onesweep_histograms_kernel = [=](auto arch_config)
+    auto onesweep_histograms_kernel = [=](auto target_config)
     {
-        static constexpr radix_sort_onesweep_config_params params = decltype(arch_config)::params;
+        static constexpr radix_sort_onesweep_config_params params = decltype(target_config)::params;
         onesweep_histograms<params.histogram.block_size,
                             params.histogram.items_per_thread,
                             params.radix_bits_per_place,
@@ -147,15 +144,15 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
                                         begin_bit,
                                         end_bit);
     };
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config,
-                                                decltype(onesweep_histograms_kernel),
-                                                radix_sort_onesweep_histogram_config_selector>(
-        target_arch,
-        onesweep_histograms_kernel,
-        dim3(blocks),
-        dim3(params.histogram.block_size),
-        0,
-        stream));
+
+    ROCPRIM_RETURN_ON_ERROR(
+        execute_launch_plan<Config, Selector, radix_sort_onesweep_histogram_config_static_selector>(
+            current_target,
+            onesweep_histograms_kernel,
+            dim3(blocks),
+            dim3(params.histogram.block_size),
+            0,
+            stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("compute_global_digit_histograms", size, start);
 
     // Scan each histogram separately to get the final offsets.
@@ -164,21 +161,24 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
         start = std::chrono::steady_clock::now();
     }
 
-    auto onesweep_scan_histograms_kernel = [=](auto arch_config)
+    auto onesweep_scan_histograms_kernel = [=](auto target_config)
     {
-        static constexpr radix_sort_onesweep_config_params params = decltype(arch_config)::params;
-        onesweep_scan_histograms<params.histogram.block_size, params.radix_bits_per_place>(
-            global_digit_offsets);
+        using TargetConfig                                        = decltype(target_config);
+        static constexpr radix_sort_onesweep_config_params params = TargetConfig::params;
+        onesweep_scan_histograms<params.histogram.block_size,
+                                 params.radix_bits_per_place,
+                                 TargetConfig::wavefront>(global_digit_offsets);
     };
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config,
-                                                decltype(onesweep_scan_histograms_kernel),
-                                                radix_sort_onesweep_histogram_config_selector>(
-        target_arch,
-        onesweep_scan_histograms_kernel,
-        dim3(digit_places), // One block for every digit place.
-        dim3(params.histogram.block_size),
-        0,
-        stream));
+
+    ROCPRIM_RETURN_ON_ERROR(
+        execute_launch_plan<Config, Selector, radix_sort_onesweep_histogram_config_static_selector>(
+            current_target,
+            onesweep_scan_histograms_kernel,
+            dim3(digit_places), // One block for every digit place.
+            dim3(params.histogram.block_size),
+            0,
+            stream));
+
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_global_digit_histograms", bins, start);
     return hipSuccess;
 }
@@ -214,12 +214,12 @@ hipError_t radix_sort_onesweep_iteration(
 {
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    using config     = wrapped_radix_sort_onesweep_config<Config, key_type, value_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    const radix_sort_onesweep_config_params params
-        = dispatch_target_arch<config, false>(target_arch);
+    using Selector = radix_sort_onesweep_config_selector<key_type, value_type>;
+
+    const target current_target(stream);
+
+    const radix_sort_onesweep_config_params params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int items_per_block = params.sort.block_size * params.sort.items_per_thread;
     const unsigned int current_radix_bits
@@ -276,32 +276,35 @@ hipError_t radix_sort_onesweep_iteration(
         auto launch_onesweep_iteration
             = [&](auto keys_in, auto keys_out, auto values_in, auto values_out)
         {
-            auto onesweep_iteration_kernel = [=](auto arch_config)
+            auto onesweep_iteration_kernel = [=](auto target_config)
             {
-                static constexpr auto params = decltype(arch_config)::params;
+                using TargetConfig                                        = decltype(target_config);
+                static constexpr radix_sort_onesweep_config_params params = TargetConfig::params;
+                static constexpr auto wavefront                           = TargetConfig::wavefront;
 
                 onesweep_iteration<params.sort.block_size,
                                    params.sort.items_per_thread,
                                    params.radix_bits_per_place,
                                    Descending,
-                                   params.radix_rank_algorithm>(keys_in,
-                                                                keys_out,
-                                                                values_in,
-                                                                values_out,
-                                                                current_batch_size,
-                                                                global_digit_offsets_in,
-                                                                global_digit_offsets_out,
-                                                                lookback_states,
-                                                                decomposer,
-                                                                bit,
-                                                                current_radix_bits,
-                                                                full_blocks,
-                                                                ordered_bid);
+                                   params.radix_rank_algorithm,
+                                   wavefront>(keys_in,
+                                              keys_out,
+                                              values_in,
+                                              values_out,
+                                              current_batch_size,
+                                              global_digit_offsets_in,
+                                              global_digit_offsets_out,
+                                              lookback_states,
+                                              decomposer,
+                                              bit,
+                                              current_radix_bits,
+                                              full_blocks,
+                                              ordered_bid);
             };
-            return execute_launch_plan<config,
-                                       decltype(onesweep_iteration_kernel),
-                                       radix_sort_onesweep_sort_config_selector>(
-                target_arch,
+            return execute_launch_plan<Config,
+                                       Selector,
+                                       radix_sort_onesweep_sort_config_static_selector>(
+                current_target,
                 onesweep_iteration_kernel,
                 dim3(blocks),
                 dim3(params.sort.block_size),
@@ -373,6 +376,8 @@ hipError_t radix_sort_onesweep_impl(
     using value_type  = typename std::iterator_traits<ValuesInputIterator>::value_type;
     using offset_type = offset_type_t<Size>;
 
+    using Selector = radix_sort_onesweep_config_selector<key_type, value_type>;
+
     bool use_atomic_block_id;
     ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
     const auto use_atomic_block_id_variant
@@ -383,13 +388,11 @@ hipError_t radix_sort_onesweep_impl(
         [&](auto use_atomic_block_id)
         {
             using ordered_bid_type = block_id_wrapper<unsigned int, use_atomic_block_id>;
-            using config = wrapped_radix_sort_onesweep_config<Config, key_type, value_type>;
 
-            detail::target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+            const target current_target(stream);
 
             const radix_sort_onesweep_config_params params
-                = dispatch_target_arch<config, false>(target_arch);
+                = get_config<Selector>(Config{}, current_target);
 
             const unsigned int sort_items_per_block
                 = params.sort.block_size * params.sort.items_per_thread;
@@ -593,11 +596,11 @@ hipError_t
     constexpr bool use_default_small_block_sort
         = is_default_config
           || std::is_same<typename Config::single_sort_config, default_config>::value;
-    using default_radix_sort_block_sort_config =
-        typename radix_sort_block_sort_config_base<key_type, value_type>::type;
+    constexpr auto default_radix_sort_block_sort_config
+        = radix_sort_block_sort_config_params_base<key_type, value_type>();
     using default_block_sort_config
-        = kernel_config<rocprim::min(256u, default_radix_sort_block_sort_config::block_size),
-                        rocprim::min(4u, default_radix_sort_block_sort_config::items_per_thread)>;
+        = kernel_config<rocprim::min(256u, default_radix_sort_block_sort_config.block_size),
+                        rocprim::min(4u, default_radix_sort_block_sort_config.items_per_thread)>;
     using block_sort_config = typename std::conditional<use_default_small_block_sort,
                                                         default_block_sort_config,
                                                         typename Config::single_sort_config>::type;
@@ -785,7 +788,7 @@ hipError_t radix_sort_keys(void*              temporary_storage,
                            hipStream_t        stream            = 0,
                            bool               debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        ignored;
     return detail::radix_sort_impl<Config, false>(temporary_storage,
@@ -902,7 +905,7 @@ hipError_t radix_sort_keys(void*               temporary_storage,
                            hipStream_t         stream            = 0,
                            bool                debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        is_result_in_output;
     hipError_t  error = detail::radix_sort_impl<Config, false>(temporary_storage,
@@ -1052,7 +1055,7 @@ auto radix_sort_keys(void*              temporary_storage,
                      bool               debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        ignored;
     return detail::radix_sort_impl<Config, false>(temporary_storage,
@@ -1184,7 +1187,7 @@ auto radix_sort_keys(void*              temporary_storage,
                      bool               debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        ignored;
     return detail::radix_sort_impl<Config, false>(
@@ -1327,7 +1330,7 @@ auto radix_sort_keys(void*               temporary_storage,
                      bool                debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        is_result_in_output;
     hipError_t  error = detail::radix_sort_impl<Config, false>(temporary_storage,
@@ -1461,7 +1464,7 @@ auto radix_sort_keys(void*               temporary_storage,
                      bool                debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        is_result_in_output;
     hipError_t  error = detail::radix_sort_impl<Config, false>(
@@ -1586,7 +1589,7 @@ hipError_t radix_sort_keys_desc(void*              temporary_storage,
                                 hipStream_t        stream            = 0,
                                 bool               debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        ignored;
     return detail::radix_sort_impl<Config, true>(temporary_storage,
@@ -1703,7 +1706,7 @@ hipError_t radix_sort_keys_desc(void*               temporary_storage,
                                 hipStream_t         stream            = 0,
                                 bool                debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        is_result_in_output;
     hipError_t  error = detail::radix_sort_impl<Config, true>(temporary_storage,
@@ -1853,7 +1856,7 @@ auto radix_sort_keys_desc(void*              temporary_storage,
                           bool               debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        ignored;
     return detail::radix_sort_impl<Config, true>(temporary_storage,
@@ -1985,7 +1988,7 @@ auto radix_sort_keys_desc(void*              temporary_storage,
                           bool               debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        ignored;
     return detail::radix_sort_impl<Config, true>(
@@ -2128,7 +2131,7 @@ auto radix_sort_keys_desc(void*               temporary_storage,
                           bool                debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        is_result_in_output;
     hipError_t  error = detail::radix_sort_impl<Config, true>(temporary_storage,
@@ -2262,7 +2265,7 @@ auto radix_sort_keys_desc(void*               temporary_storage,
                           bool                debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        is_result_in_output;
     hipError_t  error
@@ -2406,7 +2409,7 @@ hipError_t radix_sort_pairs(void*                temporary_storage,
                             hipStream_t          stream            = 0,
                             bool                 debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, false>(temporary_storage,
                                                   storage_size,
@@ -2536,7 +2539,7 @@ hipError_t radix_sort_pairs(void*                 temporary_storage,
                             hipStream_t           stream            = 0,
                             bool                  debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, false>(temporary_storage,
                                                               storage_size,
@@ -2705,7 +2708,7 @@ auto radix_sort_pairs(void*                temporary_storage,
                       bool                 debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, false>(temporary_storage,
                                                   storage_size,
@@ -2851,7 +2854,7 @@ auto radix_sort_pairs(void*                temporary_storage,
                       bool                 debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, false>(
         temporary_storage,
@@ -3005,7 +3008,7 @@ auto radix_sort_pairs(void*                 temporary_storage,
                       bool                  debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, false>(temporary_storage,
                                                               storage_size,
@@ -3147,7 +3150,7 @@ auto radix_sort_pairs(void*                 temporary_storage,
                       bool                  debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, false>(
         temporary_storage,
@@ -3287,7 +3290,7 @@ hipError_t radix_sort_pairs_desc(void*                temporary_storage,
                                  hipStream_t          stream            = 0,
                                  bool                 debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, true>(temporary_storage,
                                                  storage_size,
@@ -3411,7 +3414,7 @@ hipError_t radix_sort_pairs_desc(void*                 temporary_storage,
                                  hipStream_t           stream            = 0,
                                  bool                  debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, true>(temporary_storage,
                                                              storage_size,
@@ -3580,7 +3583,7 @@ auto radix_sort_pairs_desc(void*                temporary_storage,
                            bool                 debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, true>(temporary_storage,
                                                  storage_size,
@@ -3726,7 +3729,7 @@ auto radix_sort_pairs_desc(void*                temporary_storage,
                            bool                 debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, true>(
         temporary_storage,
@@ -3880,7 +3883,7 @@ auto radix_sort_pairs_desc(void*                 temporary_storage,
                            bool                  debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, true>(temporary_storage,
                                                              storage_size,
@@ -4022,7 +4025,7 @@ auto radix_sort_pairs_desc(void*                 temporary_storage,
                            bool                  debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error
         = detail::radix_sort_impl<Config, true>(temporary_storage,

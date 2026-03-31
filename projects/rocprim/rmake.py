@@ -21,7 +21,7 @@ def parse_args():
     Checks build arguments
     """)
 
-    default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201'
+    default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1150,gfx1151,gfx1200,gfx1201'
 
     parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
                         help='Generate Debug build (default: False)')
@@ -176,7 +176,8 @@ def config_cmd():
         cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_DIR={build_dir}" )
 
     if args.build_clients:
-        cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_BENCHMARK=ON -DBUILD_EXAMPLE=ON -DBUILD_DIR={build_dir}" )
+        build_benchmarks = ("OFF" if OS_info["ID"] == "windows" else "ON")
+        cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_BENCHMARK={build_benchmarks} -DBUILD_EXAMPLE=ON -DBUILD_DIR={build_dir}" )
 
     if args.no_offload_compress:
         cmake_options.append( f"-DBUILD_OFFLOAD_COMPRESS=OFF" )

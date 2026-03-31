@@ -45,6 +45,10 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMPILE_ONLY)
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB_UPDATE)
 
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_SEARCH_CUTOFF, false)
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_FIND_SKIP_PCT, 130)
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_CONV_DIRECT_MAX_SIZE, 0)
+
 namespace miopen {
 
 namespace conv {
@@ -60,10 +64,11 @@ protected:
     }
 
     bool IsEnabled(const ExecutionContext& /*ctx*/,
-                   const ProblemDescription& /*problem*/,
+                   const ProblemDescription& problem,
                    const ConvFindParameters& parameters) const override
     {
-        return !parameters.use_winograd_only && !env::disabled(MIOPEN_DEBUG_CONV_DIRECT);
+        return (!parameters.use_winograd_only &&
+                !IsAlgorithmDisabled(miopenConvolutionAlgoDirect, problem));
     }
 
     std::vector<solver::ConvSolution> FindImpl(const ExecutionContext& ctx,
@@ -202,11 +207,11 @@ const std::vector<std::unique_ptr<ISolversFinder>>& GetConvSolverFinders()
 {
     static const auto finders = []() {
         auto tmp = std::vector<std::unique_ptr<ISolversFinder>>{};
-        tmp.emplace_back(std::make_unique<WinogradSolverFinder>());
-        tmp.emplace_back(std::make_unique<DirectSolverFinder>());
         tmp.emplace_back(std::make_unique<ImplicitGemmSolverFinder>());
         tmp.emplace_back(std::make_unique<GemmSolverFinder>());
+        tmp.emplace_back(std::make_unique<WinogradSolverFinder>());
         tmp.emplace_back(std::make_unique<FftSolverFinder>());
+        tmp.emplace_back(std::make_unique<DirectSolverFinder>());
         return tmp;
     }();
 
@@ -221,17 +226,19 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                                        const AlgorithmName& algorithm_name,
                                        const NetworkConfig& network_config,
                                        const AnyInvokeParams& invoke_ctx,
-                                       bool& is_result_optimal,
+                                       FindCoreResult& core_result,
                                        bool force_attach_binary)
 {
+    std::vector<Solution> ret;
+
     const auto arch = env::value(MIOPEN_DEVICE_ARCH);
     if(!arch.empty())
-        return {};
+        return ret;
 
-    auto selected     = miopen::solver::ConvSolution{miopenStatusUnknownError};
-    auto best         = std::numeric_limits<float>::max();
-    auto best_invoker = Invoker{};
-    auto ret          = std::vector<Solution>{};
+    bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
+    auto selected            = miopen::solver::ConvSolution{miopenStatusUnknownError};
+    auto best                = std::numeric_limits<float>::max();
+    auto best_invoker        = Invoker{};
     std::vector<float> samples;
 
     for(const auto& sol : solutions)
@@ -250,12 +257,27 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             // That is why we do not write sub-optimal results into persistent find-db (on disk)
             // unless this is explicitly enabled via environment setting.
             if(!env::enabled(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB_UPDATE))
-                is_result_optimal = false;
+                core_result.is_optimal = false;
             continue;
         }
 
         if(!sol.invoker_factory)
             MIOPEN_THROW("Invoker is not provided by solver " + sol.solver_id);
+
+        float skip_time = core_result.find_search_best_time;
+        if(skip_time < std::numeric_limits<float>::max())
+        {
+            // skip Naive if another solver has been timed and solution took more than 5ms.
+            if(using_search_cutoff && sol.solver_id.find("Naive") != std::string::npos &&
+               skip_time > 5.0f)
+            {
+                MIOPEN_LOG_I("Skipping Naive Solver: " << algorithm_name.ToString() << ":"
+                                                       << sol.solver_id);
+                continue;
+            }
+            skip_time *= env::value(MIOPEN_FIND_SKIP_PCT) / 100.0f;
+        }
+        MIOPEN_LOG_I("Evaluating Solver: " << algorithm_name.ToString() << ":" << sol.solver_id);
 
         std::vector<Program> programs;
         const auto invoker = handle.PrepareInvoker(*sol.invoker_factory,
@@ -272,6 +294,7 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             auto first_elapsed              = static_cast<elapsed_t>(0);
             int i                           = 0;
             samples.clear();
+
             while(i < N_RUNS_MAX && elapsed < TIME_MS_MAX)
             {
                 invoker(handle, invoke_ctx);
@@ -280,6 +303,14 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                 if(i > 0)
                 {
                     samples.push_back(handle.GetKernelTime());
+                    if(i == 1 && using_search_cutoff && samples.front() > 1.0f &&
+                       samples.front() > skip_time)
+                    {
+                        MIOPEN_LOG_I("Skipping (Slow) Solver: "
+                                     << algorithm_name.ToString() << ":" << sol.solver_id << " "
+                                     << samples.front() << " > " << skip_time);
+                        break;
+                    }
                 }
                 else
                 {
@@ -302,12 +333,15 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
             MIOPEN_THROW_IF(elapsed <= 0, "Invalid elapsed time detected in EvaluateInvokers");
 
-            MIOPEN_LOG_I(sol << ": " << elapsed << (elapsed < best ? " < " : " >= ") << best);
+            MIOPEN_LOG_I("solution(current vs best):" << sol << ": " << elapsed
+                                                      << (elapsed < best ? " < " : " >= ") << best);
             if(elapsed < best)
             {
                 best         = elapsed;
                 selected     = sol;
                 best_invoker = invoker;
+                if(best < core_result.find_search_best_time)
+                    core_result.find_search_best_time = best;
             }
 
             auto solution = Solution{solver::Id{sol.solver_id}, elapsed, sol.workspace_sz};
@@ -324,7 +358,10 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
     }
 
     if(!selected.Succeeded())
-        return {};
+    {
+        ret.clear();
+        return ret;
+    }
 
     handle.RegisterInvoker(best_invoker, network_config, selected.solver_id, algorithm_name);
     MIOPEN_LOG_I("Selected: " << selected << ": " << best
@@ -344,7 +381,7 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
     auto& handle = ctx.GetStream();
 
     // Find
-    auto solutions = std::map<AlgorithmName, std::vector<solver::ConvSolution>>{};
+    auto solutions = std::vector<std::pair<AlgorithmName, std::vector<solver::ConvSolution>>>{};
     std::transform(
         finders.begin(), finders.end(), std::inserter(solutions, solutions.end()), [&](auto&& f) {
             return std::make_pair(f->GetAlgorithmName(problem),
@@ -392,13 +429,8 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
 
     for(const auto& ss : solutions)
     {
-        auto evaluated = EvaluateInvokers(handle,
-                                          ss.second,
-                                          ss.first,
-                                          network_config,
-                                          invoke_ctx,
-                                          ret.is_optimal,
-                                          force_attach_binary);
+        auto evaluated = EvaluateInvokers(
+            handle, ss.second, ss.first, network_config, invoke_ctx, ret, force_attach_binary);
 
         ret.solutions.insert(ret.solutions.end(),
                              std::make_move_iterator(evaluated.begin()),
@@ -410,7 +442,37 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
 
 namespace conv {
 
-bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo)
+namespace detail {
+/// Determine if problem size exceeds threshold for Direct solver.
+///
+/// The result tensor is used to estimate problem size.
+/// The maximum size is determined by MIOPEN_CONV_DIRECT_MAX_SIZE environment variable.
+///
+/// @param problem The convolution problem description.
+bool IsDirectProblemTooLarge(const ProblemDescription& problem)
+{
+    const unsigned long long max_size = env::value(MIOPEN_CONV_DIRECT_MAX_SIZE);
+    // 0 means no limit
+    if(max_size == 0)
+        return false;
+
+    // For FWD/BWD: 'out' is the result (swapped in BWD)
+    // For WRW: 'weights' is the result (out is dy, not dw)
+    const size_t problem_size = problem.IsDirectionBackwardWrW()
+                                    ? problem.GetWeights().GetElementSize()
+                                    : problem.GetOut().GetElementSize();
+
+    // Problem size is within limit
+    if(problem_size <= max_size)
+        return false;
+
+    MIOPEN_LOG_I2("DirectSolverFinder disabled for problem size "
+                  << problem_size << " > " << max_size << " (MIOPEN_CONV_DIRECT_MAX_SIZE)");
+    return true;
+}
+} // namespace detail
+
+bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& problem)
 {
     switch(algo)
     { // clang-format off
@@ -419,7 +481,7 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo)
         return env::disabled(MIOPEN_DEBUG_CONV_GEMM);
 #endif
     case miopenConvolutionAlgoDirect:
-        return env::disabled(MIOPEN_DEBUG_CONV_DIRECT);
+        return env::disabled(MIOPEN_DEBUG_CONV_DIRECT) || detail::IsDirectProblemTooLarge(problem);
     case miopenConvolutionAlgoFFT:
         return env::disabled(MIOPEN_DEBUG_CONV_FFT);
     case miopenConvolutionAlgoWinograd:
@@ -434,7 +496,8 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo)
 bool IsEnoughWorkspace(std::string_view where,
                        const miopen::solver::Id& solver_id,
                        const std::size_t required_size,
-                       const miopen::AnyInvokeParams* const invokeParams)
+                       const miopen::AnyInvokeParams* const invokeParams,
+                       bool log_as_warning)
 {
     if(invokeParams != nullptr && required_size > 0)
     {
@@ -442,9 +505,14 @@ bool IsEnoughWorkspace(std::string_view where,
         const auto provided_ptr  = invokeParams->GetWorkspace();
         if(provided_ptr == nullptr || provided_size < required_size)
         {
-            MIOPEN_LOG_W("[" << where << "] Solver <" << solver_id.ToString() << ">"
-                             << ", workspace required: " << required_size
-                             << ", provided ptr: " << provided_ptr << " size: " << provided_size);
+            std::stringstream log;
+            log << "[" << where << "] Solver <" << solver_id.ToString() << ">"
+                << ", workspace required: " << required_size << ", provided ptr: " << provided_ptr
+                << " size: " << provided_size;
+            if(log_as_warning)
+                MIOPEN_LOG_W(log.str());
+            else
+                MIOPEN_LOG_I2(log.str());
             return false;
         }
     }

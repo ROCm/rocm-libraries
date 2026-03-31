@@ -467,46 +467,45 @@ const auto adhoc_nondefault_layout_complex_tokens = {
 
 const auto adhoc_nondefault_layout_real_tokens = {
     // clang-format off
-    // plan creation failures:
-    "real_inverse_len_25_8_double_ip_batch_7851_istride_11_1_HI_ostride_22_1_R_idist_825_odist_1650_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_9_54_single_ip_batch_2976_istride_106_1_HI_ostride_212_1_R_idist_3286_odist_6572_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_81_18_double_ip_batch_2790_istride_12_1_HI_ostride_24_1_R_idist_1884_odist_3768_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_25_16_double_ip_batch_5802_istride_13_1_HI_ostride_26_1_R_idist_650_odist_1300_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_8_18_single_ip_batch_904_istride_27_1_HI_ostride_54_1_R_idist_2052_odist_4104_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_64_8_double_ip_batch_2663_istride_20_1_HI_ostride_40_1_R_idist_2780_odist_5560_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_27_16_double_ip_batch_5966_istride_47_1_HI_ostride_94_1_R_idist_2303_odist_4606_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_25_32_double_ip_batch_4876_istride_56_1_HI_ostride_112_1_R_idist_4256_odist_8512_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_9_54_single_ip_batch_2468_istride_143_1_HI_ostride_286_1_R_idist_5005_odist_10010_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_9_16_single_ip_batch_7730_istride_22_1_HI_ostride_44_1_R_idist_396_odist_792_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_8_8_double_ip_batch_4302_istride_31_1_HI_ostride_62_1_R_idist_4402_odist_8804_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_9_32_single_ip_batch_5591_istride_20_1_HI_ostride_40_1_R_idist_1160_odist_2320_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_4_1_18_double_ip_batch_2265_istride_28_14_1_HI_ostride_56_28_1_R_idist_588_odist_1176_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_20_20_single_ip_batch_4737_istride_113_1_HI_ostride_226_1_R_idist_3729_odist_7458_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_16_8_double_ip_batch_2683_istride_13_1_HI_ostride_26_1_R_idist_442_odist_884_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_16_1_18_double_ip_batch_2970_istride_98_14_1_HI_ostride_196_28_1_R_idist_1568_odist_3136_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_20_20_single_ip_batch_6342_istride_99_1_HI_ostride_198_1_R_idist_3366_odist_6732_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_8_1_8_double_ip_batch_5635_istride_125_5_1_HI_ostride_250_10_1_R_idist_1375_odist_2750_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_32_8_double_ip_batch_1752_istride_35_1_HI_ostride_70_1_R_idist_8225_odist_16450_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_81_64_single_ip_batch_7187_istride_48_1_HI_ostride_96_1_R_idist_5088_odist_10176_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_64_16_double_ip_batch_7289_istride_46_1_HI_ostride_92_1_R_idist_3128_odist_6256_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_16_16_single_ip_batch_6600_istride_19_1_HI_ostride_38_1_R_idist_798_odist_1596_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_4_18_double_ip_batch_7484_istride_64_1_HI_ostride_128_1_R_idist_8192_odist_16384_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_9_8_double_ip_batch_6908_istride_7_1_HI_ostride_14_1_R_idist_462_odist_924_ioffset_0_0_ooffset_0_0",
-    // plan can be created but inaccurate results are produced:
-    "real_forward_len_486_double_op_batch_7014_istride_7014_R_ostride_7014_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0_flags_64",
+    "real_forward_len_25_8_double_ip_batch_7851_istride_22_1_R_ostride_11_1_HI_idist_1650_odist_825_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_9_54_single_ip_batch_2976_istride_212_1_R_ostride_106_1_HI_idist_6572_odist_3286_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_81_18_double_ip_batch_2790_istride_24_1_R_ostride_12_1_HI_idist_3768_odist_1884_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_25_16_double_ip_batch_5802_istride_26_1_R_ostride_13_1_HI_idist_1300_odist_650_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_8_18_single_ip_batch_904_istride_54_1_R_ostride_27_1_HI_idist_4104_odist_2052_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_64_8_double_ip_batch_2663_istride_40_1_R_ostride_20_1_HI_idist_5560_odist_2780_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_27_16_double_ip_batch_5966_istride_94_1_R_ostride_47_1_HI_idist_4606_odist_2303_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_25_32_double_ip_batch_4876_istride_112_1_R_ostride_56_1_HI_idist_8512_odist_4256_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_9_54_single_ip_batch_2468_istride_286_1_R_ostride_143_1_HI_idist_10010_odist_5005_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_9_16_single_ip_batch_7730_istride_44_1_R_ostride_22_1_HI_idist_792_odist_396_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_8_8_double_ip_batch_4302_istride_62_1_R_ostride_31_1_HI_idist_8804_odist_4402_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_9_32_single_ip_batch_5591_istride_40_1_R_ostride_20_1_HI_idist_2320_odist_1160_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_4_1_18_double_ip_batch_2265_istride_56_28_1_R_ostride_28_14_1_HI_idist_1176_odist_588_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_20_20_single_ip_batch_4737_istride_226_1_R_ostride_113_1_HI_idist_7458_odist_3729_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_16_8_double_ip_batch_2683_istride_26_1_R_ostride_13_1_HI_idist_884_odist_442_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_16_1_18_double_ip_batch_2970_istride_196_28_1_R_ostride_98_14_1_HI_idist_3136_odist_1568_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_20_20_single_ip_batch_6342_istride_198_1_R_ostride_99_1_HI_idist_6732_odist_3366_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_8_1_8_double_ip_batch_5635_istride_250_10_1_R_ostride_125_5_1_HI_idist_2750_odist_1375_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_32_8_double_ip_batch_1752_istride_70_1_R_ostride_35_1_HI_idist_16450_odist_8225_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_81_64_single_ip_batch_7187_istride_96_1_R_ostride_48_1_HI_idist_10176_odist_5088_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_64_16_double_ip_batch_7289_istride_92_1_R_ostride_46_1_HI_idist_6256_odist_3128_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_16_16_single_ip_batch_6600_istride_38_1_R_ostride_19_1_HI_idist_1596_odist_798_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_4_18_double_ip_batch_7484_istride_128_1_R_ostride_64_1_HI_idist_16384_odist_8192_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_9_8_double_ip_batch_6908_istride_14_1_R_ostride_7_1_HI_idist_924_odist_462_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_32_18_double_ip_batch_7083_istride_30_1_R_ostride_15_1_HI_idist_1830_odist_915_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_486_double_op_batch_7014_istride_7014_R_ostride_7014_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
     "real_forward_len_486_double_op_batch_910_istride_910_R_ostride_910_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
     "real_forward_len_15_12_76_single_ip_batch_125_istride_1280_80_1_R_ostride_640_40_1_HI_idist_32000_odist_16000_ioffset_0_0_ooffset_0_0",
     "real_forward_len_11_12_38_single_ip_batch_1253_istride_2128_56_1_R_ostride_1064_28_1_HI_idist_23408_odist_11704_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_36_13_46_single_ip_batch_91_istride_1170_39_1_HI_ostride_2340_78_1_R_idist_45630_odist_91260_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_20_8_38_double_ip_batch_846_istride_696_24_1_HI_ostride_1392_48_1_R_idist_33408_odist_66816_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_36_13_46_single_ip_batch_91_istride_2340_78_1_R_ostride_1170_39_1_HI_idist_91260_odist_45630_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_20_8_38_double_ip_batch_846_istride_1392_48_1_R_ostride_696_24_1_HI_idist_66816_odist_33408_ioffset_0_0_ooffset_0_0",
     "real_forward_len_2_5_46_double_ip_batch_281_istride_4340_70_1_R_ostride_2170_35_1_HI_idist_30380_odist_15190_ioffset_0_0_ooffset_0_0",
     "real_forward_len_5_12_38_single_ip_batch_2725_istride_1012_44_1_R_ostride_506_22_1_HI_idist_17204_odist_8602_ioffset_0_0_ooffset_0_0",
     "real_forward_len_6_24_38_single_ip_batch_830_istride_2688_64_1_R_ostride_1344_32_1_HI_idist_48384_odist_24192_ioffset_0_0_ooffset_0_0",
     "real_forward_len_6_25_38_single_ip_batch_2006_istride_1360_40_1_R_ostride_680_20_1_HI_idist_13600_odist_6800_ioffset_0_0_ooffset_0_0",
     "real_forward_len_26_26_134_double_ip_batch_41_istride_5934_138_1_R_ostride_2967_69_1_HI_idist_231426_odist_115713_ioffset_0_0_ooffset_0_0",
     "real_forward_len_2_40_62_single_op_batch_922_istride_62_124_1_R_ostride_1280_32_1_HI_idist_4960_odist_2560_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_6_12_46_single_op_batch_2312_istride_288_24_1_HI_ostride_46_276_1_R_idist_1728_odist_3312_ioffset_0_0_ooffset_0_0",
-    "real_inverse_len_7_14_76_double_ip_batch_202_istride_1794_39_1_HI_ostride_3588_78_1_R_idist_75348_odist_150696_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_6_12_46_single_op_batch_2312_istride_46_276_1_R_ostride_288_24_1_HI_idist_3312_odist_1728_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_7_14_76_double_ip_batch_202_istride_3588_78_1_R_ostride_1794_39_1_HI_idist_150696_odist_75348_ioffset_0_0_ooffset_0_0",
     "real_forward_len_2_14_46_single_ip_batch_499_istride_2050_50_1_R_ostride_1025_25_1_HI_idist_71750_odist_35875_ioffset_0_0_ooffset_0_0",
     "real_forward_len_26_52_double_op_batch_3899_istride_240_4_R_ostride_224_7_HI_idist_15600_odist_8960_ioffset_0_0_ooffset_0_0",
     // clang-format on
@@ -519,7 +518,124 @@ INSTANTIATE_TEST_SUITE_P(
     accuracy_test::TestName);
 
 INSTANTIATE_TEST_SUITE_P(
-    DISABLED_adhoc_nondefault_layout_real,
+    adhoc_nondefault_layout_real,
     accuracy_test,
     ::testing::ValuesIn(param_generator_token(test_prob, adhoc_nondefault_layout_real_tokens)),
     accuracy_test::TestName);
+
+inline auto param_even_real_odd_base_index()
+{
+    std::vector<fft_params> params;
+    // C2R/R2C of even (real) lengths with odd distances (1D)
+    // or odd strides along first non-contiguous dimension (>1D)
+
+    const std::vector<std::vector<size_t>> test_lengths = {
+        // 1D
+        {16},
+        {64},
+        {192},
+        {194},
+        {442},
+        //2D
+        {16, 16},
+        {25, 16},
+        {64, 64},
+        {75, 64},
+        {64, 192},
+        {225, 192},
+        {128, 194},
+        {225, 194},
+        {256, 442},
+        {625, 442},
+        // 3D
+        {16, 16, 16},
+        {16, 25, 16},
+        {25, 16, 16},
+        {25, 25, 16},
+        {64, 64, 64},
+        {64, 75, 64},
+        {75, 64, 64},
+        {75, 75, 64},
+        {128, 128, 192},
+        {128, 225, 192},
+        {225, 128, 192},
+        {225, 225, 192},
+        {128, 128, 194},
+        {128, 225, 194},
+        {225, 128, 194},
+        {225, 225, 194},
+    };
+
+    for(auto precision : precision_range_sp_dp)
+    {
+        for(const auto& len : test_lengths)
+        {
+            fft_params param;
+            param.precision      = precision;
+            param.transform_type = fft_transform_type_real_forward;
+            param.itype          = fft_array_type_real;
+            param.otype          = fft_array_type_hermitian_interleaved;
+            param.placement      = fft_placement_notinplace; // cannot be in-place by definition
+            param.length         = len;
+            if(len.size() == 1)
+            {
+                param.nbatch  = 2;
+                param.istride = {1};
+                param.ostride = {1};
+                param.idist   = len[0] + 1; // +1 for generating odd addresses for some rows
+                param.odist   = len[0] / 2 + 1;
+            }
+            else if(len.size() > 1)
+            {
+                param.nbatch = 1;
+                param.idist  = 0; // irrelevant for batch size 1
+                param.odist  = 0; // irrelevant for batch size 1
+                param.istride.resize(len.size());
+                param.ostride.resize(len.size());
+                // unit stride along fastest-varying dimension
+                param.istride.back() = param.ostride.back() = 1;
+                param.istride[len.size() - 2]
+                    = len.back() + 1; // +1 for generating odd addresses for some rows
+                param.ostride[len.size() - 2] = len.back() / 2 + 1;
+                for(auto dim = len.size() - 2; dim-- > 0;)
+                {
+                    param.istride[dim] = param.istride[dim + 1] * len[dim + 1];
+                    param.ostride[dim] = param.ostride[dim + 1] * len[dim + 1];
+                }
+            }
+            param.validate();
+
+            {
+                const double roll = hash_prob(random_seed, param.token());
+                const double run_prob
+                    = test_prob * (param.is_planar() ? complex_planar_prob_factor : 1.0)
+                      * (param.is_interleaved() ? complex_interleaved_prob_factor : 1.0)
+                      * (param.is_real() ? real_prob_factor : 1.0);
+
+                if(roll > run_prob)
+                {
+                    if(verbose > 4)
+                    {
+                        std::cout << "Test skipped (probability " << run_prob << " > " << roll
+                                  << ")\n";
+                    }
+                    continue;
+                }
+                else
+                {
+                    if(param.valid(0))
+                    {
+                        params.push_back(param);
+                    }
+                }
+            }
+        }
+    }
+
+    return params;
+}
+
+INSTANTIATE_TEST_SUITE_P(adhoc_real_even_length_odd_base_index,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_even_real_odd_base_index()),
+                         accuracy_test::TestName);

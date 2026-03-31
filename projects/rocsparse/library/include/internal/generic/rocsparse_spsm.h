@@ -110,6 +110,9 @@ extern "C" {
 *  Only the \ref rocsparse_spsm_stage_buffer_size stage and the \ref rocsparse_spsm_stage_compute stage
 *  support execution in a hipGraph context. The \ref rocsparse_spsm_stage_preprocess stage does not support hipGraph.
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.
 *  @param[in]

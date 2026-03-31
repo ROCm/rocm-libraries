@@ -41,8 +41,9 @@ struct device_callback_t
 // We do this because callbacks need to be specified in the execution
 // info in the order of the bricks specified in the transform, which
 // might not be in any sensible order.
-struct rocfft_execution_info_t;
+struct rocfft_execution_info_internal;
 struct rocfft_plan_description_t;
-std::map<int, device_callback_t> DeviceCallbackMap(const rocfft_execution_info_t*   info,
-                                                   const rocfft_plan_description_t& desc);
+std::map<int, device_callback_t> DeviceCallbackMap(const rocfft_execution_info_internal& exec_info,
+                                                   const rocfft_plan_description_t&      desc,
+                                                   int local_comm_rank);
 #endif

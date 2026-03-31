@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,7 @@ namespace hiptensor
         BILINEAR         = 1, ///< \f${D=\alpha\mathcal{A}\mathcal{B}+\beta\mathcal{C}}\f$
         SCALE_COMPLEX    = 2,
         BILINEAR_COMPLEX = 3,
+        BILINEAR_UNARY   = 4,
         UNKNOWN,
     };
 
@@ -67,4 +68,3 @@ namespace std
 } // namespace std
 
 #include "contraction_types_impl.hpp"
-

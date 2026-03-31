@@ -116,7 +116,7 @@ void testing_nrm2_batched(const Arguments& arg)
 
     int64_t sizeX = N * incx;
 
-    double gpu_time_used;
+    double gpu_time_used{0};
     double hipblas_error_host = 0, hipblas_error_device = 0;
 
     // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory, plz follow this practice

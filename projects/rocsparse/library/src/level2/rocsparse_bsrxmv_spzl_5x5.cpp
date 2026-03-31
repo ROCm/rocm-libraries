@@ -48,8 +48,20 @@ namespace rocsparse
         int const local_j = threadIdx.x / block_size;
 
         int row = blockIdx.x * blockDim.y + threadIdx.y;
-        if(bsr_mask_ptr != nullptr)
+
+        if(bsr_mask_ptr == nullptr)
         {
+            if(row >= mb)
+            {
+                return;
+            }
+        }
+        else
+        {
+            if(row >= size_of_mask)
+            {
+                return;
+            }
             row = bsr_mask_ptr[row] - idx_base;
         }
 
@@ -149,17 +161,6 @@ namespace rocsparse
         I row_begin = bsr_row_ptr[row] - idx_base;
         I row_end   = (bsr_end_ptr == nullptr) ? (bsr_row_ptr[row + 1] - idx_base)
                                                : (bsr_end_ptr[row] - idx_base);
-
-#if 0
-    // Each thread block processes a single BSR row
-    J row = bsr_mask_ptr[hipBlockIdx_x] - idx_base;
-
-
-
-    // BSR row entry and exit point
-    I row_begin = bsr_row_ptr[row] - idx_base;
-    I row_end   = bsr_end_ptr[row] - idx_base;
-#endif
 
         // BSR block row accumulator
         T sum = static_cast<T>(0);
@@ -573,9 +574,18 @@ INSTANTIATE_MIXED(float, int64_t, int64_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int32_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE_MIXED(float, int64_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE_MIXED(float, int64_t, int64_t, _Float16, _Float16, float);
+INSTANTIATE_MIXED(float, int32_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE_MIXED(float, int64_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE_MIXED(float, int64_t, int64_t, _Float16, _Float16, _Float16);
 INSTANTIATE_MIXED(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_MIXED(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_MIXED(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(
+    float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE_MIXED(
+    float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE_MIXED(
+    float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
 INSTANTIATE_MIXED(rocsparse_float_complex,
                   int32_t,
                   int32_t,

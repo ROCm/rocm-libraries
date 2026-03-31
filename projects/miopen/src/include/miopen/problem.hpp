@@ -210,7 +210,7 @@ private:
     void LogDriverCommand(const BatchnormDescriptor& descriptor) const;
 };
 
-struct MIOPEN_INTERNALS_EXPORT FusedProblem
+struct FusedProblem
 {
     std::vector<Problem> problems;
 
@@ -219,11 +219,10 @@ struct MIOPEN_INTERNALS_EXPORT FusedProblem
         // Not implemented, but silently
     }
 
-    [[nodiscard]] std::vector<Solution> FindSolutions(const Handle& handle,
-                                                      const FindOptions& options,
-                                                      std::size_t max_solutions) const;
+    [[nodiscard]] MIOPEN_INTERNALS_EXPORT std::vector<Solution> FindSolutions(
+        const Handle& handle, const FindOptions& options, std::size_t max_solutions) const;
 
-    void PropagateDescriptors();
+    MIOPEN_INTERNALS_EXPORT void PropagateDescriptors();
 
     [[nodiscard]] miopenTensorArgumentId_t GetInputId() const
     {
@@ -238,14 +237,15 @@ struct MIOPEN_INTERNALS_EXPORT FusedProblem
     [[nodiscard]] const TensorDescriptor& GetInput() const { return problems.front().GetInput(); }
     [[nodiscard]] const TensorDescriptor& GetOutput() const { return problems.back().GetOutput(); }
 
-    [[nodiscard]] FusionPlanDescriptor AsFusionPlan() const;
+    [[nodiscard]] MIOPEN_INTERNALS_EXPORT FusionPlanDescriptor AsFusionPlan() const;
 
     friend void to_json(nlohmann::json& j, const FusedProblem& problem);
     friend void from_json(const nlohmann::json& j, FusedProblem& problem);
 
-    [[nodiscard]] fusion::FusionInvokeParams
+    [[nodiscard]] MIOPEN_INTERNALS_EXPORT fusion::FusionInvokeParams
     MakeInvokeParams(const std::function<Data_t(miopenTensorArgumentId_t, const TensorDescriptor&)>&
                          buffer_getter,
+                     const std::function<FindOptions::Workspace()>& workspace_getter,
                      OperatorArgs& operator_args) const;
 
 private:

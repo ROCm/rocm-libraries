@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,7 +58,7 @@ hipError_t
                      = nullptr)
 {
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
-    using config   = wrapped_nth_element_config<Config, key_type>;
+    using selector = nth_element_config_selector<key_type>;
 
     bool use_atomic_block_id;
     ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
@@ -69,18 +69,12 @@ hipError_t
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_atomic_block_id)
         {
-            target_arch target_arch;
-            hipError_t  result = host_target_arch(stream, target_arch);
-            if(result != hipSuccess)
-            {
-                return result;
-            }
-            const nth_element_config_params params
-                = dispatch_target_arch<config, false>(target_arch);
+            const target current_target(stream);
 
-            constexpr unsigned int num_partitions        = 3;
-            const unsigned int     num_buckets           = params.number_of_buckets;
-            const unsigned int     num_splitters         = num_buckets - 1;
+            const auto             params         = get_config<selector>(Config{}, current_target);
+            constexpr unsigned int num_partitions = 3;
+            const unsigned int     num_buckets    = params.number_of_buckets;
+            const unsigned int     num_splitters  = num_buckets - 1;
             const unsigned int     stop_recursion_size   = params.stop_recursion_size;
             const unsigned int     num_items_per_threads = params.kernel_config.items_per_thread;
             const unsigned int     num_threads_per_block = params.kernel_config.block_size;
@@ -163,24 +157,24 @@ hipError_t
 
             auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
 
-            return nth_element_keys_impl<config, num_partitions>(target_arch,
-                                                                 keys,
-                                                                 keys_buffer,
-                                                                 tree,
-                                                                 nth,
-                                                                 size,
-                                                                 buckets,
-                                                                 equality_buckets,
-                                                                 lookback_states,
-                                                                 num_buckets,
-                                                                 stop_recursion_size,
-                                                                 num_threads_per_block,
-                                                                 num_items_per_threads,
-                                                                 nth_element_data,
-                                                                 compare_function,
-                                                                 stream,
-                                                                 debug_synchronous,
-                                                                 ordered_bid);
+            return nth_element_keys_impl<Config, selector, num_partitions>(current_target,
+                                                                           keys,
+                                                                           keys_buffer,
+                                                                           tree,
+                                                                           nth,
+                                                                           size,
+                                                                           buckets,
+                                                                           equality_buckets,
+                                                                           lookback_states,
+                                                                           num_buckets,
+                                                                           stop_recursion_size,
+                                                                           num_threads_per_block,
+                                                                           num_items_per_threads,
+                                                                           nth_element_data,
+                                                                           compare_function,
+                                                                           stream,
+                                                                           debug_synchronous,
+                                                                           ordered_bid);
         },
         use_atomic_block_id_variant));
     return hipSuccess;

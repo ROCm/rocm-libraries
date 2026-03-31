@@ -180,7 +180,7 @@ void testing_spsm_csr_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename J, typename T>
-hipsparseStatus_t testing_spsm_csr(Arguments argus)
+void testing_spsm_csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
     J                    m        = argus.M;
@@ -200,7 +200,7 @@ hipsparseStatus_t testing_spsm_csr(Arguments argus)
 #if(defined(CUDART_VERSION))
     if(orderB != orderC)
     {
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 #endif
 
@@ -222,16 +222,13 @@ hipsparseStatus_t testing_spsm_csr(Arguments argus)
     srand(12345ULL);
 
     I nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     if(m != n)
     {
         // Skip non-square matrices
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 
     // Some matrix properties
@@ -444,8 +441,6 @@ hipsparseStatus_t testing_spsm_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPSM_CSR_HPP

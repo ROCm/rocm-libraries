@@ -350,10 +350,7 @@ public:
             // Free device arrays if allocated
             if(device_arrays_allocated && gamma_device_array)
             {
-                // Using hipFree since we can't access handle here - this is a synchronous free
-                // The allocation/deallocation should be managed by the handle for async operations
-                hipError_t err = hipFree(gamma_device_array);
-                (void)err; // Suppress warning about unused return value
+                (void)rocsparse_hipFree(gamma_device_array);
                 gamma_device_array      = nullptr;
                 z_array                 = nullptr;
                 device_arrays_allocated = false;
@@ -412,7 +409,7 @@ public:
             device_array_size = count * sizeof(T) + count * sizeof(const Y*);
 
             // Allocate device memory
-            RETURN_IF_HIP_ERROR(hipMalloc(&gamma_device_array, device_array_size));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&gamma_device_array, device_array_size));
 
             // Setup pointers
             z_array = static_cast<char*>(gamma_device_array) + count * sizeof(T);
@@ -1080,6 +1077,10 @@ try
     ROCSPARSE_CHECKARG_ENUM(5, stage);
     ROCSPARSE_CHECKARG_POINTER(6, buffer_size_in_bytes);
 
+    ROCSPARSE_CHECKARG(2, mat, (mat->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+
     //
     // Validate spmv_inputs.
     //
@@ -1167,6 +1168,10 @@ try
                        buffer,
                        (buffer == nullptr && buffer_size_in_bytes > 0),
                        rocsparse_status_invalid_pointer);
+
+    ROCSPARSE_CHECKARG(3, mat, (mat->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(6, y, (y->batch_count != 1), rocsparse_status_not_implemented);
 
     //
     // Validate spmv_inputs.
@@ -1422,6 +1427,8 @@ INSTANTIATE_GAMMA_DEVICE_ARRAY(double)
 INSTANTIATE_GAMMA_DEVICE_ARRAY(rocsparse_float_complex)
 INSTANTIATE_GAMMA_DEVICE_ARRAY(rocsparse_double_complex)
 INSTANTIATE_GAMMA_DEVICE_ARRAY(int)
+INSTANTIATE_GAMMA_DEVICE_ARRAY(_Float16)
+INSTANTIATE_GAMMA_DEVICE_ARRAY(rocsparse_bfloat16)
 
 // ETI for z array
 INSTANTIATE_Z_ARRAY(float)
@@ -1429,6 +1436,8 @@ INSTANTIATE_Z_ARRAY(double)
 INSTANTIATE_Z_ARRAY(rocsparse_float_complex)
 INSTANTIATE_Z_ARRAY(rocsparse_double_complex)
 INSTANTIATE_Z_ARRAY(int)
+INSTANTIATE_Z_ARRAY(_Float16)
+INSTANTIATE_Z_ARRAY(rocsparse_bfloat16)
 
 // Cleanup macros
 #undef INSTANTIATE_GAMMA_DEVICE_ARRAY

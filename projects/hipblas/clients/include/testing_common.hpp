@@ -55,6 +55,7 @@
 #include "near.h"
 #include "norm.h"
 #include "testing_macros.hpp"
+#include "type_utils.h"
 #include "unit.h"
 #include "utility.h"
 

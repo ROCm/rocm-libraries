@@ -132,10 +132,10 @@ struct AnySolver
     std::string GenericSearch(const ExecutionContext& ctx,
                               const miopen::conv::ProblemDescription& problem,
                               const miopen::AnyInvokeParams& invoke_ctx,
-                              std::vector<miopen::solver::SolutionPerf>* perf_sols = nullptr) const
+                              std::vector<miopen::solver::SolutionPerf>* perf_solsp = nullptr) const
     {
         assert(ptr_value != nullptr);
-        return ptr_value->GenericSearch(ctx, problem, invoke_ctx, perf_sols);
+        return ptr_value->GenericSearch(ctx, problem, invoke_ctx, perf_solsp);
     }
 
     InvokerFactory GetInvokeFactory(const ExecutionContext& ctx,
@@ -213,7 +213,7 @@ struct AnySolver
         GenericSearch(const ExecutionContext& ctx,
                       const miopen::conv::ProblemDescription& problem,
                       const miopen::AnyInvokeParams& invoke_ctx,
-                      std::vector<miopen::solver::SolutionPerf>* perf_sols) const              = 0;
+                      std::vector<miopen::solver::SolutionPerf>* perf_solsp) const             = 0;
         virtual InvokerFactory GetInvokeFactory(const ExecutionContext& ctx,
                                                 const miopen::conv::ProblemDescription& problem,
                                                 const std::string& perf_cfg) const             = 0;
@@ -247,11 +247,12 @@ struct AnySolver
         struct LegacySolver
         {
             template <typename U>
-            static constexpr auto Test(U*) -> typename std::is_same<
-                LegacyPerformanceConfig,
-                decltype(std::declval<U>().GetDefaultPerformanceConfig(
-                    std::declval<const ExecutionContext&>(),
-                    std::declval<const miopen::conv::ProblemDescription&>()))>::type;
+            static constexpr auto Test(U*) ->
+                typename std::is_same<
+                    LegacyPerformanceConfig,
+                    decltype(std::declval<U>().GetDefaultPerformanceConfig(
+                        std::declval<const ExecutionContext&>(),
+                        std::declval<const miopen::conv::ProblemDescription&>()))>::type;
 
             template <typename U>
             static constexpr std::false_type Test(...);
@@ -457,11 +458,12 @@ struct AnySolver
         std::string GenericSearch(const ExecutionContext& ctx,
                                   const miopen::conv::ProblemDescription& problem,
                                   const miopen::AnyInvokeParams& invoke_ctx,
-                                  std::vector<miopen::solver::SolutionPerf>* perf_sols,
+                                  std::vector<miopen::solver::SolutionPerf>* perf_solsp,
                                   std::true_type,
                                   std::false_type) const
         {
-            auto config = miopen::solver::GenericSearch(value, ctx, problem, invoke_ctx, perf_sols);
+            auto config =
+                miopen::solver::GenericSearch(value, ctx, problem, invoke_ctx, perf_solsp);
             return config.ToString();
         }
 
@@ -490,12 +492,12 @@ struct AnySolver
         GenericSearch(const ExecutionContext& ctx,
                       const miopen::conv::ProblemDescription& problem,
                       const miopen::AnyInvokeParams& invoke_ctx,
-                      std::vector<miopen::solver::SolutionPerf>* perf_sols) const override
+                      std::vector<miopen::solver::SolutionPerf>* perf_solsp) const override
         {
             return GenericSearch(ctx,
                                  problem,
                                  invoke_ctx,
-                                 perf_sols,
+                                 perf_solsp,
                                  std::integral_constant<bool, TunableSolver::Is>(),
                                  std::integral_constant<bool, LegacySolver::Is>());
         }

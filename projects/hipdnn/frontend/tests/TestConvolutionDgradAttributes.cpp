@@ -102,7 +102,7 @@ TEST(TestConvolutionDgradAttributes, PackAttributes)
 
     auto buffer = builder.GetBufferPointer();
     auto convAttributesFb
-        = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>(buffer);
+        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>(buffer);
 
     // Verify packed tensor UIDs
     EXPECT_EQ(convAttributesFb->dy_tensor_uid(), 1);
@@ -126,12 +126,13 @@ TEST(TestConvolutionDgradAttributes, PackAttributes)
     EXPECT_EQ(convAttributesFb->dilation()->Get(0), 1);
     EXPECT_EQ(convAttributesFb->dilation()->Get(1), 1);
 
-    EXPECT_EQ(convAttributesFb->conv_mode(), hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+    EXPECT_EQ(convAttributesFb->conv_mode(),
+              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 }
 
 TEST(TestConvolutionDgradAttributes, DefaultValues)
 {
-    hipdnn_frontend::graph::ConvDgradAttributes convAttributes;
+    const hipdnn_frontend::graph::ConvDgradAttributes convAttributes;
 
     // Check default convolution mode
     EXPECT_EQ(convAttributes.get_convolution_mode(),
@@ -193,7 +194,7 @@ TEST(TestConvolutionDgradAttributes, SetPaddingBothPreAndPost)
 {
     hipdnn_frontend::graph::ConvDgradAttributes convAttributes;
 
-    std::vector<int64_t> padding = {5, 5};
+    const std::vector<int64_t> padding = {5, 5};
     convAttributes.set_padding(padding);
 
     // set_padding should set both pre and post padding to the same value

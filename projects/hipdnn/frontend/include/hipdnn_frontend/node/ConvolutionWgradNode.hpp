@@ -3,18 +3,17 @@
 #pragma once
 
 #include "Node.hpp"
-#include <algorithm>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
-#include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <numeric>
+#include <hipdnn_frontend/detail/ConvolutionWgradPacker.hpp>
+#include <hipdnn_frontend/detail/ConvolutionWgradUnpacker.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class ConvolutionWgradNode : public BaseNode<ConvolutionWgradNode>
+class ConvolutionWgradNode : public BaseNode<ConvolutionWgradNode, NodeType::CONVOLUTION_WGRAD>
 {
 public:
     ConvWgradAttributes attributes;
@@ -23,6 +22,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(convAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        ConvWgradAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackConvWgradOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 
     Error pre_validate_node() const override
@@ -48,7 +57,6 @@ public:
         auto& xDims = x->get_dim();
         auto& dyDims = dy->get_dim();
         auto& dwDims = dw->get_dim();
-        auto& dwStrides = dw->get_stride();
 
         auto spatialDims = dyDims.size() - 2; // N & C dimensions aren't spatial
         auto& prePadding = attributes.get_pre_padding();
@@ -72,22 +80,12 @@ public:
                               ErrorCode::ATTRIBUTE_NOT_SET,
                               "ConvolutionWgradNode missing dilation for pre-validation");
 
-        HIPDNN_RETURN_IF_FALSE(
-            x->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionWgradNode: x tensor dimensions and strides must be set and positive");
-
         // dy implicitly checked here too since they must be equal
         HIPDNN_RETURN_IF_LT(
             xDims.size(),
             3,
             ErrorCode::INVALID_VALUE,
             "ConvolutionWgradNode: x tensor must have at least 3 dimensions (N, C, spatial)");
-
-        HIPDNN_RETURN_IF_FALSE(
-            dy->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionWgradNode: dy tensor dimensions and strides must be set and positive");
 
         HIPDNN_RETURN_IF_NE(dyDims.size(),
                             xDims.size(),
@@ -132,22 +130,27 @@ public:
                 "ConvolutionWgradNode: dw tensor output channels must be divisible by "
                 "the number of groups");
 
-            HIPDNN_RETURN_IF_FALSE(
-                dw->validate_dims_set_and_positive(),
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionWgradNode: dw tensor dimensions must be set and positive");
-
             // Verifies that spatial dimensions are compatible
             for(size_t i = 0; i < spatialDims; ++i)
             {
                 auto spatialIdx = i + 2;
-                int64_t xDim = xDims[spatialIdx];
-                int64_t dyDim = dyDims[spatialIdx];
-                int64_t kernelDim = dwDims[spatialIdx];
+                const int64_t xDim = xDims[spatialIdx];
+                const int64_t dyDim = dyDims[spatialIdx];
+                const int64_t kernelDim = dwDims[spatialIdx];
 
-                int64_t kernelSize = (dilation[i] * (kernelDim - 1)) + 1;
-                int64_t expectedDyDim
-                    = ((xDim + prePadding[i] + postPadding[i] - kernelSize) / stride[i]) + 1;
+                const int64_t kernelSize = (dilation[i] * (kernelDim - 1)) + 1;
+                auto numerator = xDim + prePadding[i] + postPadding[i] - kernelSize;
+
+                HIPDNN_RETURN_IF_LT(numerator,
+                                    0,
+                                    ErrorCode::INVALID_VALUE,
+                                    "ConvolutionWgradNode: Input spatial dimension at index "
+                                        + std::to_string(i) + " (" + std::to_string(xDim)
+                                        + ") is too small for the kernel size ("
+                                        + std::to_string(kernelDim) + ") and dilation ("
+                                        + std::to_string(dilation[i]) + ")");
+
+                const int64_t expectedDyDim = (numerator / stride[i]) + 1;
 
                 // Verifying dy implicitly verifies dw and x
                 HIPDNN_RETURN_IF_NE(
@@ -159,14 +162,6 @@ public:
                         + ") does not match expected dimension (" + std::to_string(expectedDyDim)
                         + ") given x dimensions, kernel size, padding, stride, and dilation");
             }
-        }
-
-        if(!dwStrides.empty())
-        {
-            HIPDNN_RETURN_IF_FALSE(dw->validate_dims_and_strides_set_and_positive(),
-                                   ErrorCode::INVALID_VALUE,
-                                   "ConvolutionWgradNode: dw tensor dimensions and strides "
-                                   "must be set and positive");
         }
 
         HIPDNN_RETURN_IF_NE(
@@ -316,13 +311,20 @@ public:
                     ErrorCode::INVALID_VALUE,
                     "ConvolutionWgradNode: Invalid spatial dimensions for kernel size inference");
 
-                HIPDNN_RETURN_IF_NE(numerator % dilationVal,
-                                    0,
+                // Calculate the remainder of pixels that are "dropped" at the end of the convolution
+                // We want to find the smallest remainder r such that (numerator - r) is divisible by dilation
+                // and r < stride.
+                // r = numerator % dilation satisfies the divisibility.
+                // We check if it satisfies the stride constraint.
+                auto remainder = numerator % dilationVal;
+
+                HIPDNN_RETURN_IF_GE(remainder,
+                                    strideVal,
                                     ErrorCode::INVALID_VALUE,
                                     "ConvolutionWgradNode: Spatial dimensions incompatible with "
-                                    "dilation parameter");
+                                    "dilation and stride parameters for kernel size inference");
 
-                dwDims[i] = (numerator / dilationVal) + 1;
+                dwDims[i] = ((numerator - remainder) / dilationVal) + 1;
             }
 
             dw->set_dim(dwDims);
@@ -345,10 +347,10 @@ public:
                 "ConvolutionWgradNode: Stride dimension mismatch between x and dw tensors");
 
             // Extract stride order from x tensor and apply to dw tensor
-            auto strideOrder = hipdnn_sdk::utilities::extractStrideOrder(xStrides);
+            auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(xStrides);
 
             // Generate dw strides using the extracted stride order and dw dimensions
-            auto dwStrides = hipdnn_sdk::utilities::generateStrides(dwDimsFinal, strideOrder);
+            auto dwStrides = hipdnn_data_sdk::utilities::generateStrides(dwDimsFinal, strideOrder);
 
             dw->set_stride(dwStrides);
         }
@@ -356,15 +358,22 @@ public:
         return {};
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
         pack_node(flatbuffers::FlatBufferBuilder& builder) const override
     {
-        return hipdnn_sdk::data_objects::CreateNodeDirect(
+        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
             toSdkType(attributes.compute_data_type),
-            hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes,
+            hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createConvWgradOperation(attributes, tensorDescs, operations);
     }
 };
 

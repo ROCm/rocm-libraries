@@ -1,4 +1,7 @@
-if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a")
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
   set(EXAMPLE_CONV_COMPILE_OPTIONS)
   list(APPEND EXAMPLE_CONV_COMPILE_OPTIONS -mllvm -enable-noalias-to-md-conversion=0)
 
@@ -13,6 +16,12 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a")
 
   add_executable(tile_example_grouped_conv_bwd_weight grouped_convolution_backward_weight.cpp)
   target_compile_options(tile_example_grouped_conv_bwd_weight PRIVATE ${EXAMPLE_CONV_COMPILE_OPTIONS})
+
+  # StreamK requires cross-CU coherence (StreamKCoherency), CDNA only.
+  if(GPU_TARGETS MATCHES "gfx90a|gfx942|gfx950")
+    add_executable(tile_example_grouped_conv_bwd_weight_streamk grouped_convolution_backward_weight_streamk.cpp)
+    target_compile_options(tile_example_grouped_conv_bwd_weight_streamk PRIVATE ${EXAMPLE_CONV_COMPILE_OPTIONS})
+  endif()
 
   add_executable(tile_example_grouped_conv_bwd_weight_two_stage grouped_convolution_backward_weight_two_stage.cpp)
   target_compile_options(tile_example_grouped_conv_bwd_weight_two_stage PRIVATE ${EXAMPLE_CONV_COMPILE_OPTIONS})

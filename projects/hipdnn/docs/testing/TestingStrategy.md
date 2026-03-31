@@ -16,7 +16,9 @@ White box tests focus on internal implementation details of hipDNN components.
 |-----------|----------|---------|-------------|--------------|
 | **Backend** | `backend/tests/` | Test internal implementation of hipDNN backend | Minimal/None | Windows & Linux |
 | **Frontend** | `frontend/tests/` | Test internal implementation of hipDNN frontend | Minimal/None | Windows & Linux |
-| **SDK** | `sdk/tests/` | Test internal implementation of hipDNN SDK | Minimal/None | Windows & Linux |
+| **Data SDK** | `data_sdk/tests/` | Test internal implementation of Data SDK | Minimal/None | Windows & Linux |
+| **Plugin SDK** | `plugin_sdk/tests/` | Test internal implementation of Plugin SDK | Minimal/None | Windows & Linux |
+| **Test SDK** | `test_sdk/tests/` | Test internal implementation of Test SDK | Minimal/None | Windows & Linux |
 | **Plugin** | `plugins/<name>/tests/` | Test internal implementation of specific plugin | Minimal & fast | Windows & Linux |
 
 Note: If a test depends on the GPU then it needs to be marked with `SKIP_IF_NO_DEVICE()` so tests run and pass correctly on CPU only machines.
@@ -38,12 +40,19 @@ Note: If a test depends on the GPU then it needs to be marked with `SKIP_IF_NO_D
 - Graph construction & flow
 - Frontend utilities
 
-#### SDK
-- Plugins
+#### Data SDK
 - Data objects
 - Logging
 - SDK utilities
-- Reference implementations
+
+#### Plugin SDK
+- Plugin API utilities
+- Engine base classes
+
+#### Test SDK
+- CPU reference implementations
+- Test utilities
+- Validation helpers
 
 #### Plugin
 - TBD based on plugin implementation
@@ -119,7 +128,7 @@ Integration tests validate end-to-end functionality across components.
   - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
 ### Graph Validation
-We use reference implementations via the CPU Graph Executor to validate correctness of graph execution in integration tests. See the [CPU Graph Executor Design Document](./CpuGraphExecutorDesign.md) for more details.
+We use reference implementations via the CPU Graph Executor to validate correctness of graph execution in integration tests. See the [CPU Graph Executor Design Document](../rfcs/0001_CpuGraphExecutorDesign.md) for more details.
 
 ---
 
@@ -136,14 +145,14 @@ Tests must work in the following environments:
 
 | Environment Type | Supported Methods |
 |-----------------|-------------------|
-| **CLI Build Environment** | `ninja check`, `ninja check_ctest` |
+| **CLI Build Environment** | `ninja check`, `ninja check-verbose` |
 | **IDE** | Visual Studio Code and extensions like TestMate |
 | **Artifacts** | • Installed testing artifacts<br>• Running built test executables |
 | **Operating System** | • Windows<br>• Supported Linux distros |
 
 > [!TIP]
-> `ninja unit-check` runs fast, isolated unit and API tests.
-> `ninja integration-check` runs slower, end-to-end integration tests.
+> `ninja unit-check` runs fast, isolated unit and API tests (also: `unit-check-verbose`).<br>
+> `ninja integration-check` runs slower, end-to-end integration tests (also: `integration-check-verbose`).
 
 ### GPU Requirements
 - **Without GPU**: All GPU tests must be skippable (warnings, not errors)

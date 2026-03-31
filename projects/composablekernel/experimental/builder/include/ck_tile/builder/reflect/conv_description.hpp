@@ -1,6 +1,20 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+/// @file
+/// @brief Provides utilities to reflect on convolution kernel instances and generate
+/// human-readable descriptions of their configuration.
+///
+/// This file contains the necessary components to transform a convolution kernel's
+/// compile-time properties into a structured, descriptive format. This is primarily
+/// used for debugging, logging, and generating documentation.
+///
+/// Key components:
+/// - ck_tile::reflect::conv::ConvDescription: A struct that holds the extracted
+///   properties and provides methods to format them into strings.
+/// - ck_tile::reflect::conv::Describe(): A factory function that creates a
+///   ConvDescription from a given kernel instance type.
+
 #pragma once
 
 #include <concepts>
@@ -8,261 +22,198 @@
 #include <sstream>
 #include <type_traits>
 #include <variant>
+#include <functional>
 
 #include <ck_tile/builder/conv_signature_concepts.hpp>
-#include <ck_tile/builder/reflect/conv_traits.hpp>
+#include <ck_tile/builder/reflect/conv_types.hpp>
+#include <ck_tile/builder/reflect/description.hpp>
+#include <ck_tile/builder/reflect/instance_traits.hpp>
 #include <ck_tile/builder/reflect/tree_formatter.hpp>
+#include <ck_tile/builder/reflect/conv_traits.hpp>
 
-/// @file conv_description.hpp
-/// @brief Provides human-readable descriptions of ConvBuilder configurations
+namespace ck_tile::reflect {
 
-namespace ck_tile::reflect::conv {
+namespace conv {
 
-struct ConvSignatureInfo
+/// @brief Provides human-readable descriptions of convolution kernel instances
+/// Generates formatted text descriptions at various levels of detail for
+/// understanding and documenting convolution kernel configurations.
+class ConvDescription : public Description
 {
-    int spatial_dim;
-    builder::ConvDirection direction;
-    std::variant<builder::GroupConvLayout1D, builder::GroupConvLayout2D, builder::GroupConvLayout3D>
-        layout;
-    builder::DataType data_type;
-    builder::ElementwiseOperation input_element_op;
-    builder::ElementwiseOperation weight_element_op;
-    builder::ElementwiseOperation output_element_op;
-};
+    public:
+    /// @brief Constructor for ConvDescription
+    /// @param traits The ConvTraits object containing all relevant signature and algorithm
+    /// information
+    /// @param instance_string_getter A callable that returns a string representation of the
+    /// instance
+    ConvDescription(ConvTraits traits, std::function<std::string()> instance_string_getter)
+        : traits_(std::move(traits)), instance_string_getter_(std::move(instance_string_getter))
+    {
+    }
 
-// Algorithm information - groups all algorithm-related configuration
-struct GemmAlgorithmInfo
-{
-    int thread_block_size;
-    DataTileInfo tile_dims;
-    WarpGemmParams warp_gemm;
-    InputTileTransferInfo a_tile_transfer;
-    InputTileTransferInfo b_tile_transfer;
-    OutputTileTransferInfo c_tile_transfer;
-    builder::PipelineVersion pipeline_version;
-    builder::PipelineScheduler pipeline_scheduler;
-    std::variant<builder::ConvFwdSpecialization,
-                 builder::ConvBwdDataSpecialization,
-                 builder::ConvBwdWeightSpecialization>
-        conv_specialization;
-    builder::GemmPadding padding;
-};
-
-// Provides human-readable descriptions of ConvBuilder configurations.
-struct ConvDescription
-{
-    ConvSignatureInfo signature;
-    GemmAlgorithmInfo algorithm;
-
-    // Brief one-line summary
-    std::string brief() const
+    /// @brief Generate a brief one-line summary of the convolution
+    /// @return A concise description (e.g., "2D Forward convolution")
+    std::string brief() const override
     {
         std::ostringstream oss;
-        oss << signature.spatial_dim << "D " << signature.direction << " convolution";
+        oss << traits_.spatial_dim << "D " << traits_.direction << " convolution";
         return oss.str();
     }
 
-    // Detailed hierarchical description
-    std::string detailed() const
+    /// @brief Generate a detailed hierarchical description of the convolution
+    /// @return A multi-line tree-formatted description covering signature and algorithm details
+    std::string detailed() const override
     {
-        TreeFormatter f;
-        f.writeLine(0, signature.spatial_dim, "D ", signature.direction, " Convolution Kernel");
-        f.writeLine(1, "Signature");
-        f.writeLine(2, "Tensor Type: ", signature.data_type);
-        f.writeLine(2, "Memory Layout: ", signature.layout);
-        f.writeLine(2, "Input elementwise operation: ", signature.input_element_op);
-        f.writeLine(2, "Weights elementwise operation: ", signature.weight_element_op);
-        f.writeLast(2, "Output elementwise operation: ", signature.output_element_op);
+        TreeFormatter root(traits_.spatial_dim, "D ", traits_.direction, " Convolution Kernel");
 
-        f.writeLine(1, "Algorithm");
+        auto& sig = root.add("Signature");
+        sig.add("Tensor Type: ", traits_.data_type);
+        sig.add("Input Layout: ", traits_.layout[0]);
+        sig.add("Weight Layout: ", traits_.layout[1]);
+        sig.add("Output Layout: ", traits_.layout[2]);
+        sig.add("Input elementwise operation: ", traits_.input_element_op);
+        sig.add("Weights elementwise operation: ", traits_.weight_element_op);
+        sig.add("Output elementwise operation: ", traits_.output_element_op);
+
+        auto& algo = root.add("Algorithm");
         // Compute Block section
-        f.writeLine(2, "Thread block size: ", algorithm.thread_block_size);
-        f.writeLine(2,
-                    "Data tile size: ",
-                    algorithm.tile_dims.m,
-                    "×",
-                    algorithm.tile_dims.n,
-                    "×",
-                    algorithm.tile_dims.k);
-        f.writeLine(2, "Gemm padding: ", algorithm.padding);
-        f.writeLine(2, "Convolution specialization: ", algorithm.conv_specialization);
+        algo.add("Thread block size: ", traits_.thread_block_size);
+        algo.add("Data tile size: ",
+                 traits_.tile_dims.m,
+                 "×",
+                 traits_.tile_dims.n,
+                 "×",
+                 traits_.tile_dims.k);
+        if(traits_.gemm_padding)
+            algo.add("Gemm padding: ", *traits_.gemm_padding);
+        if(traits_.do_pad_gemm_m)
+            algo.add("Do Pad Gemm M: ", *traits_.do_pad_gemm_m);
+        if(traits_.do_pad_gemm_n)
+            algo.add("Do Pad Gemm N: ", *traits_.do_pad_gemm_n);
+        algo.add("Convolution specialization: ", traits_.conv_specialization);
         // Pipeline section
-        f.writeLine(2, "Pipeline version: ", algorithm.pipeline_version);
-        f.writeLine(2, "Pipeline scheduler: ", algorithm.pipeline_scheduler);
-        f.writeLine(2, "Warp Gemm parameters: ");
-        f.writeLine(
-            3, "subtile size: ", algorithm.warp_gemm.gemm_m, "×", algorithm.warp_gemm.gemm_n);
-        f.writeLast(3,
-                    "Number of warp gemm iterations: ",
-                    algorithm.warp_gemm.m_iter,
-                    "×",
-                    algorithm.warp_gemm.n_iter);
+        algo.add("Pipeline version: ", traits_.pipeline_version);
+        algo.add("Pipeline scheduler: ", traits_.pipeline_scheduler);
+        auto& warpGemm = algo.add("Warp Gemm parameters:");
+        warpGemm.add("subtile size: ", traits_.warp_gemm.gemm_m, "×", traits_.warp_gemm.gemm_n);
+        warpGemm.add("Number of warp gemm iterations: ",
+                     traits_.warp_gemm.m_iter,
+                     "×",
+                     traits_.warp_gemm.n_iter);
 
         // Memory Access section
-        f.writeLine(2, "Memory access:");
+        auto& memAccess = algo.add("Memory access:");
 
-        f.writeLine(3, "A Tile transfer: ");
-        f.writeLine(4,
-                    "Tile dimensions: ",
-                    algorithm.a_tile_transfer.tile_dimensions.k0,
-                    "×",
-                    algorithm.a_tile_transfer.tile_dimensions.m_or_n,
-                    "×",
-                    algorithm.a_tile_transfer.tile_dimensions.k1,
-                    "×");
-        f.writeLine(
-            4, "The innermost K subdimension size: ", algorithm.a_tile_transfer.transfer_params.k1);
-        f.writeLine(4,
-                    "Spatial thread distribution over the data tile: ",
-                    algorithm.a_tile_transfer.transfer_params.thread_cluster_order[0],
-                    "×",
-                    algorithm.a_tile_transfer.transfer_params.thread_cluster_order[1],
-                    "×",
-                    algorithm.a_tile_transfer.transfer_params.thread_cluster_order[2]);
-        f.writeLine(4,
-                    "The order of accessing data tile axes: ",
-                    algorithm.a_tile_transfer.transfer_params.src_access_order[0],
-                    "×",
-                    algorithm.a_tile_transfer.transfer_params.src_access_order[1],
-                    "×",
-                    algorithm.a_tile_transfer.transfer_params.src_access_order[2]);
-        f.writeLine(4,
-                    "Vectorized memory access axis index (with contiguous memory): ",
-                    algorithm.a_tile_transfer.transfer_params.src_vector_dim);
-        f.writeLine(4,
-                    "Vector access (GMEM read) instruction size: ",
-                    algorithm.a_tile_transfer.transfer_params.src_scalar_per_vector);
-        f.writeLine(4,
-                    "Vector access (LDS write) instruction size: ",
-                    algorithm.a_tile_transfer.transfer_params.dst_scalar_per_vector_k1);
-        f.writeLast(4,
-                    "LDS data layout padding (to prevent bank conflicts): ",
-                    algorithm.a_tile_transfer.transfer_params.dst_scalar_per_vector_k1);
+        auto& aTile = memAccess.add("A Tile transfer:");
+        aTile.add("Tile dimensions: ",
+                  traits_.a_tile_transfer.tile_dimensions.k0,
+                  "×",
+                  traits_.a_tile_transfer.tile_dimensions.m_or_n,
+                  "×",
+                  traits_.a_tile_transfer.tile_dimensions.k1);
+        aTile.add("The innermost K subdimension size: ",
+                  traits_.a_tile_transfer.transfer_params.k1);
+        aTile.add("Thread cluster lengths (threads per axis): ",
+                  traits_.a_tile_transfer.transfer_params.thread_cluster_dims[0],
+                  "×",
+                  traits_.a_tile_transfer.transfer_params.thread_cluster_dims[1],
+                  "×",
+                  traits_.a_tile_transfer.transfer_params.thread_cluster_dims[2]);
+        aTile.add("Spatial thread distribution over the data tile: ",
+                  traits_.a_tile_transfer.transfer_params.thread_cluster_order[0],
+                  "×",
+                  traits_.a_tile_transfer.transfer_params.thread_cluster_order[1],
+                  "×",
+                  traits_.a_tile_transfer.transfer_params.thread_cluster_order[2]);
+        aTile.add("The order of accessing data tile axes: ",
+                  traits_.a_tile_transfer.transfer_params.src_access_order[0],
+                  "×",
+                  traits_.a_tile_transfer.transfer_params.src_access_order[1],
+                  "×",
+                  traits_.a_tile_transfer.transfer_params.src_access_order[2]);
+        aTile.add("Vectorized memory access axis index (with contiguous memory): ",
+                  traits_.a_tile_transfer.transfer_params.src_vector_dim);
+        aTile.add("Vector access (GMEM read) instruction size: ",
+                  traits_.a_tile_transfer.transfer_params.src_scalar_per_vector);
+        aTile.add("Vector access (LDS write) instruction size: ",
+                  traits_.a_tile_transfer.transfer_params.dst_scalar_per_vector_k1);
+        aTile.add("LDS data layout padding (to prevent bank conflicts): ",
+                  traits_.a_tile_transfer.transfer_params.lds_padding);
 
-        f.writeLine(3, "B Tile transfer: ");
-        f.writeLine(4,
-                    "Tile dimensions: ",
-                    algorithm.b_tile_transfer.tile_dimensions.k0,
-                    "×",
-                    algorithm.b_tile_transfer.tile_dimensions.m_or_n,
-                    "×",
-                    algorithm.b_tile_transfer.tile_dimensions.k1,
-                    "×");
-        f.writeLine(
-            4, "The innermost K subdimension size: ", algorithm.b_tile_transfer.transfer_params.k1);
-        f.writeLine(4,
-                    "Spatial thread distribution over the data tile: ",
-                    algorithm.b_tile_transfer.transfer_params.thread_cluster_order[0],
-                    "×",
-                    algorithm.b_tile_transfer.transfer_params.thread_cluster_order[1],
-                    "×",
-                    algorithm.b_tile_transfer.transfer_params.thread_cluster_order[2]);
-        f.writeLine(4,
-                    "The order of accessing data tile axes: ",
-                    algorithm.b_tile_transfer.transfer_params.src_access_order[0],
-                    "×",
-                    algorithm.b_tile_transfer.transfer_params.src_access_order[1],
-                    "×",
-                    algorithm.b_tile_transfer.transfer_params.src_access_order[2]);
-        f.writeLine(4,
-                    "Vectorized memory access axis index (with contiguous memory): ",
-                    algorithm.b_tile_transfer.transfer_params.src_vector_dim);
-        f.writeLine(4,
-                    "Vector access (GMEM read) instruction size: ",
-                    algorithm.b_tile_transfer.transfer_params.src_scalar_per_vector);
-        f.writeLine(4,
-                    "Vector access (LDS write) instruction size: ",
-                    algorithm.b_tile_transfer.transfer_params.dst_scalar_per_vector_k1);
-        f.writeLast(4,
-                    "LDS data layout padding (to prevent bank conflicts): ",
-                    algorithm.b_tile_transfer.transfer_params.dst_scalar_per_vector_k1);
+        auto& bTile = memAccess.add("B Tile transfer:");
+        bTile.add("Tile dimensions: ",
+                  traits_.b_tile_transfer.tile_dimensions.k0,
+                  "×",
+                  traits_.b_tile_transfer.tile_dimensions.m_or_n,
+                  "×",
+                  traits_.b_tile_transfer.tile_dimensions.k1);
+        bTile.add("The innermost K subdimension size: ",
+                  traits_.b_tile_transfer.transfer_params.k1);
+        bTile.add("Thread cluster lengths (threads per axis): ",
+                  traits_.b_tile_transfer.transfer_params.thread_cluster_dims[0],
+                  "×",
+                  traits_.b_tile_transfer.transfer_params.thread_cluster_dims[1],
+                  "×",
+                  traits_.b_tile_transfer.transfer_params.thread_cluster_dims[2]);
+        bTile.add("Spatial thread distribution over the data tile: ",
+                  traits_.b_tile_transfer.transfer_params.thread_cluster_order[0],
+                  "×",
+                  traits_.b_tile_transfer.transfer_params.thread_cluster_order[1],
+                  "×",
+                  traits_.b_tile_transfer.transfer_params.thread_cluster_order[2]);
+        bTile.add("The order of accessing data tile axes: ",
+                  traits_.b_tile_transfer.transfer_params.src_access_order[0],
+                  "×",
+                  traits_.b_tile_transfer.transfer_params.src_access_order[1],
+                  "×",
+                  traits_.b_tile_transfer.transfer_params.src_access_order[2]);
+        bTile.add("Vectorized memory access axis index (with contiguous memory): ",
+                  traits_.b_tile_transfer.transfer_params.src_vector_dim);
+        bTile.add("Vector access (GMEM read) instruction size: ",
+                  traits_.b_tile_transfer.transfer_params.src_scalar_per_vector);
+        bTile.add("Vector access (LDS write) instruction size: ",
+                  traits_.b_tile_transfer.transfer_params.dst_scalar_per_vector_k1);
+        bTile.add("LDS data layout padding (to prevent bank conflicts): ",
+                  traits_.b_tile_transfer.transfer_params.lds_padding);
 
-        f.writeLast(3, "C Tile transfer: ");
-        f.writeLine(4,
-                    "Data shuffle (number of gemm instructions per iteration): ",
-                    algorithm.c_tile_transfer.shuffle_params.m_gemms_per_shuffle,
-                    "×",
-                    algorithm.c_tile_transfer.shuffle_params.n_gemms_per_shuffle);
-        f.writeLine(4,
-                    "Spatial thread distribution used to store data: ",
-                    algorithm.c_tile_transfer.thread_cluster_dims[0],
-                    "×",
-                    algorithm.c_tile_transfer.thread_cluster_dims[1],
-                    "×",
-                    algorithm.c_tile_transfer.thread_cluster_dims[2],
-                    "×",
-                    algorithm.c_tile_transfer.thread_cluster_dims[3]);
-        f.writeLast(4,
-                    "Vector access (GMEM write) instruction size: ",
-                    algorithm.c_tile_transfer.scalar_per_vector);
-        f.writeLast(2);
-        f.writeLast(1);
-        return f.getString();
+        auto& cTile = memAccess.add("C Tile transfer:");
+        cTile.add("Data shuffle (number of gemm instructions per iteration): ",
+                  traits_.c_tile_transfer.shuffle_params.m_gemms_per_shuffle,
+                  "×",
+                  traits_.c_tile_transfer.shuffle_params.n_gemms_per_shuffle);
+        cTile.add("Spatial thread distribution used to store data: ",
+                  traits_.c_tile_transfer.thread_cluster_dims[0],
+                  "×",
+                  traits_.c_tile_transfer.thread_cluster_dims[1],
+                  "×",
+                  traits_.c_tile_transfer.thread_cluster_dims[2],
+                  "×",
+                  traits_.c_tile_transfer.thread_cluster_dims[3]);
+        cTile.add("Vector access (GMEM write) instruction size: ",
+                  traits_.c_tile_transfer.scalar_per_vector);
+        if(traits_.num_gemm_k_prefetch_stage)
+            algo.add("Num gemm k prefetch stage: ", *traits_.num_gemm_k_prefetch_stage);
+        if(traits_.max_transpose_transfer_src_scalar_per_vector)
+            algo.add("Max Transpose transfer src scalar per vector: ",
+                     *traits_.max_transpose_transfer_src_scalar_per_vector);
+        if(traits_.max_transpose_transfer_dst_scalar_per_vector)
+            algo.add("Max Transpose dst scalar per vector: ",
+                     *traits_.max_transpose_transfer_dst_scalar_per_vector);
+        if(traits_.num_groups_to_merge)
+            algo.add("Num groups to merge: ", *traits_.num_groups_to_merge);
+
+        return root.getString();
     }
 
-    // Educational explanation of optimization choices
-    std::string explain() const
-    {
-        std::ostringstream oss;
-        // Placeholder for future implementation
-        return oss.str();
-    }
+    /// @brief Generate a string representation of the instance
+    /// @return A string that represents the instance
+    std::string instance_string() const override { return instance_string_getter_(); }
 
-    // Performance characteristics and use case guidance
-    std::string suggest() const
-    {
-        std::ostringstream oss;
-        // Placeholder for future implementation
-        return oss.str();
-    }
+    private:
+    ConvTraits traits_;
+    std::function<std::string()> instance_string_getter_;
 };
 
-// Helper concept to detect if a type has InstanceTraits specialization
-template <typename T>
-concept HasInstanceTraits = requires { typename InstanceTraits<T>; };
+} // namespace conv
 
-// Helper concept to detect ConvBuilder types
-template <typename T>
-concept IsConvBuilder = requires {
-    typename T::Factory;
-    typename T::Instance;
-};
-
-// Primary factory function: Create ConvDescription from Instance type directly
-template <typename Instance>
-    requires HasInstanceTraits<Instance>
-ConvDescription Describe()
-{
-    using Traits = ConvTraits<Instance>;
-
-    return ConvDescription{
-        .signature = ConvSignatureInfo{.spatial_dim       = Traits::spatial_dim,
-                                       .direction         = Traits::direction,
-                                       .layout            = Traits::layout,
-                                       .data_type         = Traits::data_type,
-                                       .input_element_op  = Traits::input_element_op,
-                                       .weight_element_op = Traits::weight_element_op,
-                                       .output_element_op = Traits::output_element_op},
-        .algorithm = GemmAlgorithmInfo{.thread_block_size   = Traits::thread_block_size,
-                                       .tile_dims           = Traits::tile_dims,
-                                       .warp_gemm           = Traits::warp_gemm,
-                                       .a_tile_transfer     = Traits::a_tile_transfer,
-                                       .b_tile_transfer     = Traits::b_tile_transfer,
-                                       .c_tile_transfer     = Traits::c_tile_transfer,
-                                       .pipeline_version    = Traits::pipeline_version,
-                                       .pipeline_scheduler  = Traits::pipeline_scheduler,
-                                       .conv_specialization = Traits::conv_specialization,
-                                       .padding             = Traits::gemm_padding}};
-}
-
-// Backward compatibility: Create ConvDescription from Builder type
-template <typename Builder>
-    requires IsConvBuilder<Builder> && (!HasInstanceTraits<Builder>)
-ConvDescription Describe()
-{
-    // Delegate to Instance-based version
-    using Instance = typename Builder::Instance;
-    return Describe<Instance>();
-}
-
-} // namespace ck_tile::reflect::conv
+} // namespace ck_tile::reflect

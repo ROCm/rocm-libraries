@@ -86,7 +86,7 @@ globalParameters["PreciseKernelTime"] = True      # T=On hip, use the timestamps
 globalParameters["CodeFromFiles"] = True          # if False byte arrays will be generated during Benchmarking phase as before
 globalParameters["SortProblems"] = False          # sort problems by size; else use order in YAML file
 globalParameters["PinClocks"] = False             # T=pin gpu clocks and fan, F=don't
-globalParameters["HardwareMonitor"] = True        # False: disable benchmarking client monitoring clocks using rocm-smi.
+globalParameters["HardwareMonitor"] = True        # False: disable benchmarking client monitoring clocks using amd-smi.
 globalParameters["NumBenchmarks"] = 1             # how many benchmark data points to collect per problem/solution
 globalParameters["NumWarmups"] = 0                # how many warmup runs to perform before benchmark
 globalParameters["SyncsPerBenchmark"] = 1         # how iterations of the stream synchronization for-loop to do per benchmark data point
@@ -248,9 +248,9 @@ globalParameters["MaxFileName"] = 64              # If a file name would be long
 globalParameters["SupportedISA"] = [(8,0,3),
                                     (9,0,0), (9,0,6), (9,0,8), (9,0,10),
                                     (9,4,2), (9,5,0),
-                                    (10,1,0), (10,1,1), (10,1,2), (10,3,0), (10,3,1), (10,3,2),
+                                    (10,1,0), (10,1,1), (10,1,2), (10,3,0), (10,3,1), (10,3,2), (10,3,3), (10,3,4), (10,3,5), (10,3,6),
                                     (11,0,0), (11,0,1), (11,0,2), (11,0,3),
-                                    (11,5,0), (11,5,1),
+                                    (11,5,0), (11,5,1), (11,5,2), (11,5,3),
                                     (12,0,0), (12,0,1)] # assembly kernels writer supports these architectures
 
 globalParameters["KeepBuildTmp"] = True                           # Do not remove build artifacts during the build process or build_tmp after build completes
@@ -268,7 +268,7 @@ globalParameters["DictLibraryLogic"] = False
 # internal, i.e., gets set during startup
 globalParameters["CurrentISA"] = (0,0,0)
 globalParameters["ROCmAgentEnumeratorPath"] = None      # /opt/rocm/bin/rocm_agent_enumerator
-globalParameters["ROCmSMIPath"] = None                  # /opt/rocm/bin/rocm-smi
+globalParameters["AMDSMIPath"] = None                  # /opt/rocm/bin/amd-smi
 globalParameters["AssemblerPath"] = None                # /opt/rocm/llvm/bin/clang++
 globalParameters["WorkingPath"] = os.getcwd()           # path where tensile called from
 globalParameters["IndexChars"] =  "IJKLMNOPQRSTUVWXYZ"  # which characters to use for C[ij]=Sum[k] A[ik]*B[jk]
@@ -324,9 +324,9 @@ architectureMap = {
   'gfx942':'aquavanjaram942', 'gfx942:xnack+':'aquavanjaram942', 'gfx942:xnack-':'aquavanjaram942',
   'gfx950':'gfx950', 'gfx950:xnack+':'gfx950', 'gfx950:xnack-':'gfx950',
   'gfx1010':'navi10', 'gfx1011':'navi12', 'gfx1012':'navi14',
-  'gfx1030':'navi21', 'gfx1031':'navi22', 'gfx1032':'navi23', 'gfx1034':'navi24', 'gfx1035':'rembrandt',
+  'gfx1030':'navi21', 'gfx1031':'navi22', 'gfx1032':'navi23', 'gfx1033':'van gogh', 'gfx1034':'navi24', 'gfx1035':'rembrandt', 'gfx1036':'raphael',
   'gfx1100':'navi31', 'gfx1101':'navi32', 'gfx1102':'navi33', 'gfx1103':'gfx1103',
-  'gfx1150':'strixpoint', 'gfx1151':'strixhalo',
+  'gfx1150':'strixpoint', 'gfx1151':'strixhalo', 'gfx1152':'gfx1152', 'gfx1153':'gfx1153',
   'gfx1200':'gfx1200',
   'gfx1201':'gfx1201'
 }
@@ -1994,7 +1994,7 @@ def printExit(message):
 
 ################################################################################
 # Locate Executables
-# rocm-smi, hip-clang, rocm_agent_enumerator, clang-offload-bundler
+# amd-smi, hip-clang, rocm_agent_enumerator, clang-offload-bundler
 ################################################################################
 def isExe( filePath ):
   return os.path.isfile(filePath) and os.access(filePath, os.X_OK)
@@ -2453,7 +2453,7 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
   else:
     raise ValueError("OffloadBundler not specified in config")
 
-  globalParameters["ROCmSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "rocm-smi")
+  globalParameters["AMDSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "amd-smi")
 
   globalParameters["ExtractKernelPath"] = locateExe(os.path.join(globalParameters["ROCmPath"], "hip/bin"), "extractkernel")
 
@@ -2466,7 +2466,7 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
     if os.name == "nt":
       globalParameters["CurrentISA"] = (9,0,6)
       printWarning("Failed to detect ISA so forcing (gfx906) on windows")
-  isasWithDisabledHWMonitor = ((9,4,2), (9,5,0), (11,0,0), (11,0,1), (11,0,2), (11,0,3), (11,5,0), (11,5,1), (12,0,0), (12,0,1))
+  isasWithDisabledHWMonitor = ((9,4,2), (9,5,0), (11,0,0), (11,0,1), (11,0,2), (11,0,3), (11,5,0), (11,5,1), (11,5,2), (11,5,3), (12,0,0), (12,0,1))
   if globalParameters["CurrentISA"] in isasWithDisabledHWMonitor:
     isaString = ', '.join(map(gfxName, isasWithDisabledHWMonitor))
     printWarning(f"HardwareMonitor currently disabled for {isaString}")
@@ -2528,9 +2528,9 @@ def setupRestoreClocks():
   import atexit
   def restoreClocks():
     if globalParameters["PinClocks"]:
-      rsmi = globalParameters["ROCmSMIPath"]
-      subprocess.call([rsmi, "-d", "0", "--resetclocks"])
-      subprocess.call([rsmi, "-d", "0", "--setfan", "50"])
+      asmi = globalParameters["AMDSMIPath"]
+      subprocess.call([asmi, "-d", "0", "--resetclocks"])
+      subprocess.call([asmi, "-d", "0", "--setfan", "50"])
   atexit.register(restoreClocks)
 setupRestoreClocks()
 
@@ -2663,7 +2663,7 @@ CMakeHeader = """###############################################################
 
 ###################################################
 # This file was generated by Tensile:             #
-# https://github.com/ROCmSoftwarePlatform/Tensile #
+# https://github.com/ROCm/Tensile                 #
 ###################################################
 
 
@@ -2692,7 +2692,7 @@ CHeader = """/******************************************************************
 
 /**************************************************
 * This file was generated by Tensile:             *
-* https://github.com/ROCmSoftwarePlatform/Tensile *
+* https://github.com/ROCm/Tensile                 *
 **************************************************/
 
 

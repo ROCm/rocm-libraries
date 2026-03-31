@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -4437,8 +4437,11 @@ void host_bsrgemm(rocsparse_direction  dir,
     std::vector<J> col(nnzb);
     std::vector<T> val(block_dim * block_dim * nnzb);
 
-    memcpy(col.data(), bsr_col_ind_C, sizeof(J) * nnzb);
-    memcpy(val.data(), bsr_val_C, sizeof(T) * block_dim * block_dim * nnzb);
+    if(nnzb > 0 && bsr_col_ind_C != nullptr && bsr_val_C != nullptr)
+    {
+        memcpy(col.data(), bsr_col_ind_C, sizeof(J) * nnzb);
+        memcpy(val.data(), bsr_val_C, sizeof(T) * block_dim * block_dim * nnzb);
+    }
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
@@ -5236,8 +5239,11 @@ void host_csrgemm(J                    M,
     std::vector<J> col(nnz);
     std::vector<T> val(nnz);
 
-    memcpy(col.data(), csr_col_ind_C, sizeof(J) * nnz);
-    memcpy(val.data(), csr_val_C, sizeof(T) * nnz);
+    if(nnz > 0 && csr_col_ind_C != nullptr && csr_val_C != nullptr)
+    {
+        memcpy(col.data(), csr_col_ind_C, sizeof(J) * nnz);
+        memcpy(val.data(), csr_val_C, sizeof(T) * nnz);
+    }
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
@@ -8533,8 +8539,7 @@ void host_csr_to_csr_compress(rocsparse_int                     M,
 
         for(rocsparse_int j = start; j < end; j++)
         {
-            if(std::abs(csr_val_A[j]) > std::real(tol)
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+            if(std::abs(csr_val_A[j]) > std::real(tol))
             {
                 count++;
             }
@@ -8575,8 +8580,7 @@ void host_csr_to_csr_compress(rocsparse_int                     M,
 
         for(rocsparse_int j = start; j < end; j++)
         {
-            if(std::abs(csr_val_A[j]) > std::real(tol)
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+            if(std::abs(csr_val_A[j]) > std::real(tol))
             {
                 csr_col_ind_C[index] = csr_col_ind_A[j];
                 csr_val_C[index]     = csr_val_A[j];
@@ -8614,8 +8618,7 @@ void host_prune_csr_to_csr(rocsparse_int                     M,
         for(rocsparse_int j = csr_row_ptr_A[i] - csr_base_A; j < csr_row_ptr_A[i + 1] - csr_base_A;
             j++)
         {
-            if(std::abs(csr_val_A[j]) > threshold
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+            if(std::abs(csr_val_A[j]) > threshold)
             {
                 csr_row_ptr_C[i + 1]++;
             }
@@ -8638,8 +8641,7 @@ void host_prune_csr_to_csr(rocsparse_int                     M,
         for(rocsparse_int j = csr_row_ptr_A[i] - csr_base_A; j < csr_row_ptr_A[i + 1] - csr_base_A;
             j++)
         {
-            if(std::abs(csr_val_A[j]) > threshold
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+            if(std::abs(csr_val_A[j]) > threshold)
             {
                 csr_col_ind_C[index] = (csr_col_ind_A[j] - csr_base_A) + csr_base_C;
                 csr_val_C[index]     = csr_val_A[j];
@@ -10237,9 +10239,18 @@ INSTANTIATE_IJAXYT(int64_t, int64_t, int8_t, int8_t, float, float);
 INSTANTIATE_IJAXYT(int32_t, int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_IJAXYT(int64_t, int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_IJAXYT(int64_t, int64_t, _Float16, _Float16, float, float);
+INSTANTIATE_IJAXYT(int32_t, int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_IJAXYT(int64_t, int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_IJAXYT(int64_t, int64_t, _Float16, _Float16, _Float16, float);
 INSTANTIATE_IJAXYT(int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_IJAXYT(int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_IJAXYT(int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_IJAXYT(
+    int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_IJAXYT(
+    int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_IJAXYT(
+    int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_IJAXYT(int32_t, int32_t, float, double, double, double);
 INSTANTIATE_IJAXYT(int64_t, int32_t, float, double, double, double);
 INSTANTIATE_IJAXYT(int64_t, int64_t, float, double, double, double);
@@ -10351,6 +10362,10 @@ INSTANTIATE_IABCT(int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_IABCT(int64_t, _Float16, _Float16, float, float);
 INSTANTIATE_IABCT(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_IABCT(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_IABCT(int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_IABCT(int64_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_IABCT(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_IABCT(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_IABCT(int32_t, float, float, float, float);
 INSTANTIATE_IABCT(int64_t, float, float, float, float);
 INSTANTIATE_IABCT(int32_t, double, double, double, double);
@@ -10388,6 +10403,15 @@ INSTANTIATE_IJABCT(int64_t, int64_t, _Float16, _Float16, float, float);
 INSTANTIATE_IJABCT(int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_IJABCT(int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_IJABCT(int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_IJABCT(int32_t, int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_IJABCT(int64_t, int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_IJABCT(int64_t, int64_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_IJABCT(
+    int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_IJABCT(
+    int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_IJABCT(
+    int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_IJABCT(int32_t, int32_t, float, float, float, float);
 INSTANTIATE_IJABCT(int64_t, int32_t, float, float, float, float);
 INSTANTIATE_IJABCT(int64_t, int64_t, float, float, float, float);
@@ -10437,8 +10461,12 @@ INSTANTIATE_IAXYT(int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_IAXYT(int64_t, int8_t, int8_t, float, float);
 INSTANTIATE_IAXYT(int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_IAXYT(int64_t, _Float16, _Float16, float, float);
+INSTANTIATE_IAXYT(int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_IAXYT(int64_t, _Float16, _Float16, _Float16, float);
 INSTANTIATE_IAXYT(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_IAXYT(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_IAXYT(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_IAXYT(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_IAXYT(
     int32_t, float, rocsparse_float_complex, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE_IAXYT(

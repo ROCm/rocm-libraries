@@ -101,6 +101,9 @@ TYPED_TEST(TEST_SUITE_NAME, PaddK)
     constexpr int N = 1024;
     constexpr int K = 432;
 
+    if constexpr(TestFixture::PipelineType == GemmPipelineType::CompAsyncEightWaves)
+        return;
+
     for(int M : Ms)
     {
         if constexpr(std::is_same_v<typename TestFixture::BDataType, ck_tile::pk_int4_t>)

@@ -6,6 +6,8 @@
 #ifdef _WIN32
 
 #include "HipdnnException.hpp"
+#include <spdlog/fmt/fmt.h>
+#include <winternl.h>
 
 namespace hipdnn_backend::platform_utilities
 {
@@ -74,6 +76,72 @@ void* getSymbol(PluginLibHandle handle, const char* symbolName)
     }
 
     return symbol;
+}
+
+std::string getSystemInfo()
+{
+    // Get Windows version using RtlGetVersion (more reliable than deprecated GetVersionEx)
+    typedef LONG(WINAPI * RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
+    RTL_OSVERSIONINFOW versionInfo = {};
+    versionInfo.dwOSVersionInfoSize = sizeof(versionInfo);
+
+    bool versionInfoValid = false;
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    if(ntdll != nullptr)
+    {
+        auto rtlGetVersion
+            = reinterpret_cast<RtlGetVersionPtr>(GetProcAddress(ntdll, "RtlGetVersion"));
+        if(rtlGetVersion != nullptr)
+        {
+            versionInfoValid = (rtlGetVersion(&versionInfo) == 0);
+        }
+    }
+
+    // Get computer name
+    std::array<char, MAX_COMPUTERNAME_LENGTH + 1> computerName;
+    auto size = static_cast<DWORD>(computerName.size());
+    if(GetComputerNameA(computerName.data(), &size) == FALSE)
+    {
+        strcpy_s(computerName.data(), computerName.size(), "Unknown");
+    }
+
+    // Get system architecture
+    SYSTEM_INFO sysInfo;
+    GetNativeSystemInfo(&sysInfo);
+
+    std::string architecture;
+    switch(sysInfo.wProcessorArchitecture)
+    {
+    case PROCESSOR_ARCHITECTURE_AMD64:
+        architecture = "x86_64";
+        break;
+    case PROCESSOR_ARCHITECTURE_ARM64:
+        architecture = "ARM64";
+        break;
+    case PROCESSOR_ARCHITECTURE_INTEL:
+        architecture = "x86";
+        break;
+    default:
+        architecture = "Unknown";
+    }
+
+    if(versionInfoValid)
+    {
+        return fmt::format(
+            "System Information: {{System Name: Windows, Node Name: {}, Release: {}.{}, "
+            "Version: {}, Machine: {}}}",
+            computerName.data(),
+            versionInfo.dwMajorVersion,
+            versionInfo.dwMinorVersion,
+            versionInfo.dwBuildNumber,
+            architecture);
+    }
+
+    return fmt::format(
+        "System Information: {{System Name: Windows, Node Name: {}, Release: unknown, "
+        "Version: unknown, Machine: {}}}",
+        computerName.data(),
+        architecture);
 }
 
 }

@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "check_numerics_matrix.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
@@ -790,6 +791,31 @@ rocblas_trsv_device(rocblas_int    n,
 #endif
 }
 
+// this file uses kernels some defined above so inlined here
+#include "rocblas_trsv_big_batch_kernel.hpp"
+
+/**
+ * @brief Heuristic to determine if big batch kernel should be used
+ * 
+ * The big batch kernel is beneficial when:
+ * - batch_count is much larger than N
+ * - N is not big
+ * 
+ * @param n Matrix dimension
+ * @param batch_count Number of batched operations
+ * @return true if big batch kernel should be used
+ */
+inline bool should_use_big_batch_kernel(rocblas_int n, rocblas_int batch_count)
+{
+    // Threshold: use big batch kernel when batch_count > 16*n
+    constexpr rocblas_int BIG_BATCH_TO_N_RATIO = 16;
+
+    // Don't use big batch kernel for large matrices (matrix split creates sufficient work)
+    constexpr rocblas_int MAX_N_FOR_BIG_BATCH = 128;
+
+    return (n < MAX_N_FOR_BIG_BATCH) && (batch_count > BIG_BATCH_TO_N_RATIO * n);
+}
+
 template <rocblas_int DIM_X, typename T, typename TConstPtr, typename TPtr>
 rocblas_status rocblas_internal_trsv_substitution_template(rocblas_handle    handle,
                                                            rocblas_fill      uplo,
@@ -811,15 +837,49 @@ rocblas_status rocblas_internal_trsv_substitution_template(rocblas_handle    han
     if(!n || !batch_count)
         return rocblas_status_success;
 
-    // Temporarily change the thread's default device ID to the handle's device ID
-    // cppcheck-suppress unreadVariable
-    auto saved_device_id = handle->push_device_id();
+    // Check if we should use the z-batched kernel
+    if(should_use_big_batch_kernel(n, batch_count))
+    {
+        // TODO: Select block size based on data type requires further tuning
+        constexpr rocblas_int SDCTRSV_BB_NB = 4;
+        constexpr rocblas_int ZTRSV_BB_NB   = 4;
+
+#define TRSV_BATCHED_TEMPLATE_PARAMS                                                       \
+    handle, uplo, transA, diag, n, dA, offset_A, lda, stride_A, alpha, dx, offset_x, incx, \
+        stride_x, batch_count, w_completed_sec
+
+        // Use z-dimension batched kernel for high batch count scenarios
+        if constexpr(std::is_same_v<T, float>)
+        {
+            return rocblas_internal_trsv_substitution_big_batch_template<SDCTRSV_BB_NB, T>(
+                TRSV_BATCHED_TEMPLATE_PARAMS);
+        }
+        else if constexpr(std::is_same_v<T, double>)
+        {
+            return rocblas_internal_trsv_substitution_big_batch_template<SDCTRSV_BB_NB, T>(
+                TRSV_BATCHED_TEMPLATE_PARAMS);
+        }
+        else if constexpr(std::is_same_v<T, rocblas_float_complex>)
+        {
+            return rocblas_internal_trsv_substitution_big_batch_template<SDCTRSV_BB_NB, T>(
+                TRSV_BATCHED_TEMPLATE_PARAMS);
+        }
+        else if constexpr(std::is_same_v<T, rocblas_double_complex>)
+        {
+            return rocblas_internal_trsv_substitution_big_batch_template<ZTRSV_BB_NB, T>(
+                TRSV_BATCHED_TEMPLATE_PARAMS);
+        }
+
+#undef TRSV_BATCHED_TEMPLATE_PARAMS
+
+        return rocblas_status_internal_error;
+    }
 
     offset_x = incx < 0 ? offset_x + incx * (1 - n) : offset_x;
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
-    constexpr rocblas_int DIM_Y  = 16;
+    constexpr rocblas_int DIM_Y  = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
     rocblas_int           blocks = (n + DIM_X - 1) / DIM_X;
     dim3                  threads(DIM_X, DIM_Y, 1);
     dim3                  grid(blocks, 1, batches);
@@ -987,14 +1047,12 @@ rocblas_status rocblas_internal_trsv_substitution_template(rocblas_handle    han
             }
         }
     }
+
 #undef TRSV_TEMPLATE_PARAMS
 
     return rocblas_status_success;
 }
 
-#define TRSV_TEMPLATE_PARAMS                                                                 \
-    handle, uplo, transA, diag, n, dA, offset_A, lda, stride_A, nullptr, dx, offset_x, incx, \
-        stride_x, batch_count, w_completed_sec
 template <typename T>
 ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
     rocblas_internal_trsv_template(rocblas_handle    handle,
@@ -1013,6 +1071,10 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
                                    rocblas_int       batch_count,
                                    rocblas_int*      w_completed_sec)
 {
+#define TRSV_TEMPLATE_PARAMS                                                                 \
+    handle, uplo, transA, diag, n, dA, offset_A, lda, stride_A, nullptr, dx, offset_x, incx, \
+        stride_x, batch_count, w_completed_sec
+
     if constexpr(std::is_same_v<T, float>)
         return rocblas_internal_trsv_substitution_template<ROCBLAS_SDCTRSV_NB, T>(
             TRSV_TEMPLATE_PARAMS);
@@ -1027,6 +1089,8 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
             TRSV_TEMPLATE_PARAMS);
 
     return rocblas_status_internal_error;
+
+#undef TRSV_TEMPLATE_PARAMS
 }
 
 template <typename T>
@@ -1047,23 +1111,27 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
                                            rocblas_int       batch_count,
                                            rocblas_int*      w_completed_sec)
 {
+#define TRSV_BATCHED_TEMPLATE_PARAMS                                                         \
+    handle, uplo, transA, diag, n, dA, offset_A, lda, stride_A, nullptr, dx, offset_x, incx, \
+        stride_x, batch_count, w_completed_sec
+
     if constexpr(std::is_same_v<T, float>)
         return rocblas_internal_trsv_substitution_template<ROCBLAS_SDCTRSV_NB, T>(
-            TRSV_TEMPLATE_PARAMS);
+            TRSV_BATCHED_TEMPLATE_PARAMS);
     else if constexpr(std::is_same_v<T, double>)
         return rocblas_internal_trsv_substitution_template<ROCBLAS_SDCTRSV_NB, T>(
-            TRSV_TEMPLATE_PARAMS);
+            TRSV_BATCHED_TEMPLATE_PARAMS);
     else if constexpr(std::is_same_v<T, rocblas_float_complex>)
         return rocblas_internal_trsv_substitution_template<ROCBLAS_SDCTRSV_NB, T>(
-            TRSV_TEMPLATE_PARAMS);
+            TRSV_BATCHED_TEMPLATE_PARAMS);
     else if constexpr(std::is_same_v<T, rocblas_double_complex>)
         return rocblas_internal_trsv_substitution_template<ROCBLAS_ZTRSV_NB, T>(
-            TRSV_TEMPLATE_PARAMS);
+            TRSV_BATCHED_TEMPLATE_PARAMS);
+
+#undef TRSV_BATCHED_TEMPLATE_PARAMS
 
     return rocblas_status_internal_error;
 }
-
-#undef TRSV_TEMPLATE_PARAMS
 
 template <typename T, typename U>
 rocblas_status rocblas_internal_trsv_check_numerics(const char*       function_name,
