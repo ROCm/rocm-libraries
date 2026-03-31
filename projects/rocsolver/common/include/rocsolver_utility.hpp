@@ -93,7 +93,7 @@ struct std::formatter<joinable_range<std::tuple<T...>>, CharT>
         return std::format_to(ctx.out(), "{}", result);
     }
 };
-#endif  // not USE_FMT_LIB
+#endif // not USE_FMT_LIB
 
 namespace rocsolver
 {
@@ -123,7 +123,7 @@ namespace formatting
     {
         return std::format(fmt_string, std::forward<Args>(args)...);
     }
-#else  // USE_FMT_LIB
+#else // USE_FMT_LIB
 
     template <class T, class... Args>
     void print(T&& fmt_string, Args&&... args)
@@ -148,7 +148,7 @@ namespace formatting
     {
         return fmt::format(std::forward<T>(fmt_string), std::forward<Args>(args)...);
     }
-#endif  // USE_FMT_LIB
+#endif // USE_FMT_LIB
     template <typename Range>
     std::string join(Range&& r, std::string_view sep)
     {
