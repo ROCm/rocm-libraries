@@ -20,7 +20,7 @@ namespace hipdnn_integration_tests::gpu_graph_executor::detail
 // by operation mode and data types, following the CPU PointwiseSignatureKey pattern.
 struct GpuPointwiseDummySignatureKey
 {
-    static constexpr auto nodeType
+    static constexpr auto NODE_TYPE
         = hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes;
 
     GpuPointwiseDummySignatureKey() = default;
@@ -35,14 +35,14 @@ struct GpuPointwiseDummySignatureKey
         // When real GPU plans are added, extract operation, data types, etc.
     }
 
-    constexpr std::size_t hashSelf() const
+    static constexpr std::size_t hashSelf()
     {
-        return static_cast<std::size_t>(static_cast<int>(nodeType));
+        return static_cast<std::size_t>(static_cast<int>(NODE_TYPE));
     }
 
-    std::size_t operator()(const GpuPointwiseDummySignatureKey& k) const noexcept
+    std::size_t operator()([[maybe_unused]] const GpuPointwiseDummySignatureKey& k) const noexcept
     {
-        return k.hashSelf();
+        return GpuPointwiseDummySignatureKey::hashSelf();
     }
 
     bool operator==(const GpuPointwiseDummySignatureKey& /*other*/) const noexcept

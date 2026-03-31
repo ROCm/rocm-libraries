@@ -74,9 +74,9 @@ flatbuffers::FlatBufferBuilder createCustomOpGraph()
     tensors.push_back(
         CreateTensorAttributesDirect(builder, 2, "out_0", DataType::FLOAT, &strides, &dims));
 
-    std::vector<int64_t> inputUids = {1};
-    std::vector<int64_t> outputUids = {2};
-    std::vector<uint8_t> data;
+    const std::vector<int64_t> inputUids = {1};
+    const std::vector<int64_t> outputUids = {2};
+    const std::vector<uint8_t> data;
 
     auto customOpAttrs
         = CreateCustomOpAttributesDirect(builder, "test.custom_op", &inputUids, &outputUids, &data);
@@ -158,7 +158,7 @@ TEST(TestGpuReferenceGraphExecutor, CanBeConstructed)
 {
     SKIP_IF_NO_DEVICES();
 
-    GpuReferenceGraphExecutor executor;
+    const GpuReferenceGraphExecutor executor;
     static_cast<void>(executor);
 }
 
@@ -168,7 +168,7 @@ TEST(TestGpuReferenceGraphExecutor, CustomOpThrows)
 
     auto builder = createCustomOpGraph();
 
-    std::unordered_map<int64_t, void*> variantPack;
+    const std::unordered_map<int64_t, void*> variantPack;
 
     GpuReferenceGraphExecutor executor;
     EXPECT_THROW(executor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack),
@@ -182,7 +182,7 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
     // BatchnormInference has no GPU plan yet - should throw
     auto builder = createBatchnormInferenceGraph();
 
-    std::unordered_map<int64_t, void*> variantPack;
+    const std::unordered_map<int64_t, void*> variantPack;
 
     GpuReferenceGraphExecutor executor;
     EXPECT_THROW(executor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack),
@@ -193,19 +193,19 @@ TEST(TestGpuReferenceGraphExecutor, PointwiseDummyAddOneExecutes)
 {
     SKIP_IF_NO_DEVICES();
 
-    constexpr int64_t inputUid = 1;
-    constexpr int64_t outputUid = 2;
+    constexpr int64_t INPUT_UID = 1;
+    constexpr int64_t OUTPUT_UID = 2;
     const std::vector<int64_t> dims = {4};
     const std::vector<int64_t> strides = {1};
 
-    auto builder = createSimplePointwiseGraph(inputUid, outputUid, dims, strides);
+    auto builder = createSimplePointwiseGraph(INPUT_UID, OUTPUT_UID, dims, strides);
 
     std::array<float, 4> input = {2.0f, 3.0f, 5.0f, 7.0f};
     std::array<float, 4> output = {};
 
     std::unordered_map<int64_t, void*> variantPack;
-    variantPack[inputUid] = input.data();
-    variantPack[outputUid] = output.data();
+    variantPack[INPUT_UID] = input.data();
+    variantPack[OUTPUT_UID] = output.data();
 
     GpuReferenceGraphExecutor executor;
     executor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
@@ -220,19 +220,19 @@ TEST(TestGpuReferenceGraphExecutor, PointwiseDummyAddOneMultiDimensional)
 {
     SKIP_IF_NO_DEVICES();
 
-    constexpr int64_t inputUid = 1;
-    constexpr int64_t outputUid = 2;
+    constexpr int64_t INPUT_UID = 1;
+    constexpr int64_t OUTPUT_UID = 2;
     const std::vector<int64_t> dims = {2, 3};
     const std::vector<int64_t> strides = {3, 1};
 
-    auto builder = createSimplePointwiseGraph(inputUid, outputUid, dims, strides);
+    auto builder = createSimplePointwiseGraph(INPUT_UID, OUTPUT_UID, dims, strides);
 
     std::array<float, 6> input = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
     std::array<float, 6> output = {};
 
     std::unordered_map<int64_t, void*> variantPack;
-    variantPack[inputUid] = input.data();
-    variantPack[outputUid] = output.data();
+    variantPack[INPUT_UID] = input.data();
+    variantPack[OUTPUT_UID] = output.data();
 
     GpuReferenceGraphExecutor executor;
     executor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);

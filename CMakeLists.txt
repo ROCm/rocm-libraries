@@ -51,6 +51,7 @@ set(AVAILABLE_COMPONENTS
     ${DEFAULT_COMPONENTS}
     # dnn
     hipdnn
+    hipdnn-integration-tests
     miopen-provider
     hipblaslt-provider
 )
@@ -168,6 +169,18 @@ if("hipdnn" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT hipdnn
         PREFIX_PATH projects
         EXPECT_TARGET hipdnn_backend
+    )
+endif()
+
+if("hipdnn-integration-tests" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    # This helps find_package find hipdnn_integration_tests in superbuild mode
+    set(hipdnn_integration_tests_DIR
+        "${CMAKE_BINARY_DIR}/dnn-providers/integration-tests")
+
+    add_subdirectory_with_message(
+        COMPONENT integration-tests
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET hipdnn_integration_tests
     )
 endif()
 

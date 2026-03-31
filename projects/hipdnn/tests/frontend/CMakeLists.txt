@@ -8,15 +8,21 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_public_frontend_tests
     main.cpp
+    IntegrationBatchnormBackwardDescriptorLifting.cpp
     IntegrationBatchnormBackwardDescriptorLowering.cpp
+    IntegrationBatchnormDescriptorLifting.cpp
     IntegrationBatchnormDescriptorLowering.cpp
     IntegrationBatchnormForwardInference.cpp
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
+    IntegrationBatchnormInferenceDescriptorLifting.cpp
     IntegrationBatchnormInferenceDescriptorLowering.cpp
+    IntegrationBatchnormInferenceNodeVarianceExtDescriptorLifting.cpp
     IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
     IntegrationBlockScaleDequantize.cpp
+    IntegrationBlockScaleDequantizeDescriptorLifting.cpp
     IntegrationBlockScaleDequantizeDescriptorLowering.cpp
     IntegrationBlockScaleQuantize.cpp
+    IntegrationBlockScaleQuantizeDescriptorLifting.cpp
     IntegrationBlockScaleQuantizeDescriptorLowering.cpp
     IntegrationConvForward.cpp
     IntegrationConvFpropDescriptorLifting.cpp
@@ -24,11 +30,13 @@ add_executable(
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
     IntegrationConvolutionDgradDescriptorLowering.cpp
+    IntegrationConvolutionDgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationCustomOpDescriptorLifting.cpp
     IntegrationCustomOpDescriptorLowering.cpp
     IntegrationGraphLifting.cpp
     IntegrationGraphSupportCheck.cpp
@@ -36,14 +44,17 @@ add_executable(
     IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp
+    IntegrationMatmulDescriptorLifting.cpp
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationRMSNormDescriptorLifting.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
     IntegrationSetPluginPathsExt.cpp
     IntegrationSdpaBpropDescriptorLowering.cpp
     IntegrationSdpaBpropLifting.cpp
+    IntegrationSdpaFpropDescriptorLifting.cpp
     IntegrationSdpaFpropDescriptorLowering.cpp
 )
 

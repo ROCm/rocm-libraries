@@ -50,6 +50,7 @@ class DescriptorGenerator:
             "fragments/operation_type_enum.j2": "operation_type_enum.txt",
             "fragments/node_unpack_override.j2": "node_unpack_override.txt",
             "fragments/packer_name_addition.j2": "packer_name_addition.txt",
+            "fragments/packer_name_test.j2": "packer_name_test.txt",
         }
 
         fragments_dir = output_dir / "fragments"
@@ -66,6 +67,10 @@ class DescriptorGenerator:
         additions_path = fragments_dir / "descriptor_lifting_additions.txt"
         additions_path.write_text(additions)
         written.append("fragments/descriptor_lifting_additions.txt")
+
+        # Generate constants file (when constants_include is not set — no pre-existing header)
+        if not config.test_data.constants_include:
+            written += self._render_constants(config, output_dir)
 
         return written
 
@@ -176,21 +181,19 @@ class DescriptorGenerator:
         )
         lines.append("")
         lines.append("=" * 72)
-        lines.append("# IMPORTANT: Graph Descriptor Test Update Required")
+        lines.append("# NOTE: Graph Descriptor Name Tests (Auto-Generated)")
         lines.append("=" * 72)
         lines.append("")
-        lines.append("# The existing graph descriptor test must be updated to verify")
         lines.append(
-            "# operation name round-trips through graph serialization and lifting."
+            "# The graph descriptor test template now auto-generates name tests:"
         )
+        lines.append("#   - OperationNamePreservedInSerialization")
+        lines.append("#   - OperationNameRoundTripThroughLifting")
+        lines.append("# These are generated unconditionally — no manual work needed.")
         lines.append(
-            "# Add a name parameter to the createFinalized*Op helper, and add:"
+            "# If the graph test file was generated fresh (backend or full mode),"
         )
-        lines.append("#   - OperationNamePreservedInSerialization test")
-        lines.append("#   - OperationNameRoundTripThroughLifting test")
-        lines.append(
-            f"# See the pointwise or batchnorm graph tests as reference patterns."
-        )
+        lines.append("# the name tests are already included.")
 
         return "\n".join(lines) + "\n"
 
@@ -280,6 +283,10 @@ class DescriptorGenerator:
         # Mode enum plumbing (only for fields with enum_def)
         if config.generatable_mode_fields:
             written += self.render_mode_enums(config, output_dir)
+
+        # Generate constants file (when constants_include is not set — no pre-existing header)
+        if not config.test_data.constants_include:
+            written += self._render_constants(config, output_dir)
 
         return written
 
@@ -386,6 +393,18 @@ class DescriptorGenerator:
             written.append(f"fragments/mode_frontend_tests_{df.name}.txt")
 
         return written
+
+    def _render_constants(self, config: OperationConfig, output_dir: Path) -> list[str]:
+        """Render the shared constants header. Returns list of written files."""
+        rel_path = (
+            Path("test_sdk/include/hipdnn_test_sdk/constants")
+            / f"{config.effective_constants_include}.hpp"
+        )
+        out_path = output_dir / rel_path
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        content = self._render_template("constants.hpp.j2", config)
+        out_path.write_text(content)
+        return [str(rel_path)]
 
     def _render_template(self, template_name: str, config: OperationConfig) -> str:
         try:
