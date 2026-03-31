@@ -24,8 +24,25 @@ from typing import Dict, List, Set, Tuple
 _THIS_DIR = Path(__file__).resolve().parent
 _DISPATCHER_ROOT = _THIS_DIR.parents[2] / "dispatcher"
 sys.path.insert(0, str(_DISPATCHER_ROOT / "python"))
+sys.path.insert(0, str(_DISPATCHER_ROOT / "codegen"))
 
 from grouped_conv_utils import GroupedConvKernelConfig  # noqa: E402
+
+# Import tile configurations from grouped_config_rules (single source of truth)
+try:
+    from grouped_config_rules import (
+        COMMON_TILES,
+        TILE_TO_WAVE,
+        TILE_TO_WARP,
+        TILE_TO_VECTOR,
+        VARIANT_PIPELINES,
+        BWD_WEIGHT_TILES,
+    )
+except ImportError as e:
+    raise ImportError(
+        f"Failed to import grouped_config_rules from dispatcher/codegen: {e}\n"
+        "This is the single source of truth for tile configurations."
+    )
 
 
 # =============================================================================
@@ -38,53 +55,6 @@ ARCH_DTYPES = {
     "gfx942": ["fp16", "bf16", "fp32", "fp8", "bf8", "int8"],
     "gfx90a": ["fp16", "bf16", "fp32"],
     "gfx908": ["fp16", "fp32"],
-}
-
-# Common tile configurations used across variants
-# Format: (tile_m, tile_n, tile_k)
-COMMON_TILES = [
-    (1, 64, 64),
-    (1, 128, 128),
-    (1, 256, 256),
-    (2, 128, 128),
-    (2, 256, 128),
-]
-
-# Wave configurations per tile
-# Key: (tile_m, tile_n, tile_k) -> (wave_m, wave_n, wave_k)
-TILE_TO_WAVE = {
-    (1, 64, 64): (2, 2, 1),
-    (1, 128, 128): (2, 2, 1),
-    (1, 256, 256): (2, 2, 1),
-    (2, 128, 128): (2, 2, 1),
-    (2, 256, 128): (2, 2, 1),
-}
-
-# Warp tile configurations
-# Key: (tile_m, tile_n, tile_k) -> (warp_m, warp_n, warp_k)
-TILE_TO_WARP = {
-    (1, 64, 64): (32, 32, 16),
-    (1, 128, 128): (32, 32, 16),
-    (1, 256, 256): (32, 32, 16),
-    (2, 128, 128): (32, 32, 16),
-    (2, 256, 128): (32, 32, 16),
-}
-
-# Vector sizes per tile
-# Key: (tile_m, tile_n, tile_k) -> (vec_a, vec_b, vec_c)
-TILE_TO_VECTOR = {
-    (1, 64, 64): (4, 8, 8),
-    (1, 128, 128): (4, 8, 8),
-    (1, 256, 256): (4, 8, 8),
-    (2, 128, 128): (4, 8, 8),
-    (2, 256, 128): (4, 8, 8),
-}
-
-# Valid pipelines per variant
-VARIANT_PIPELINES = {
-    "forward": ["compv3", "compv4"],
-    "bwd_data": ["compv3", "mem"],
-    "bwd_weight": ["compv3", "mem"],
 }
 
 # Valid schedulers

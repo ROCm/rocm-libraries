@@ -17,6 +17,7 @@ Based on the GEMM codegen pattern.
 
 import argparse
 import logging
+import sys
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 from dataclasses import dataclass
@@ -40,6 +41,26 @@ except ImportError:
     HAS_ARCH_FILTER = False
     ArchFilter = None
     OperatorType = None
+
+# Import tile configurations from grouped_config_rules (single source of truth)
+try:
+    from grouped_config_rules import (
+        COMMON_TILES,
+        TILE_TO_WAVE,
+        TILE_TO_WARP,
+        VARIANT_PIPELINES,
+        BWD_WEIGHT_TILES,
+        COMPV4_COMPATIBLE_TILES,
+    )
+    HAS_TILE_CONFIGS = True
+except ImportError:
+    HAS_TILE_CONFIGS = False
+    COMMON_TILES = []
+    TILE_TO_WAVE = {}
+    TILE_TO_WARP = {}
+    VARIANT_PIPELINES = {}
+    BWD_WEIGHT_TILES = []
+    COMPV4_COMPATIBLE_TILES = []
 
 
 # ============================================================================
@@ -772,7 +793,10 @@ def get_default_configs(
     variants: Optional[List[GroupedConvVariant]] = None,
     ndims: Optional[List[int]] = None,
 ) -> List[GroupedConvKernelConfig]:
-    """Get default grouped convolution configurations for target architecture"""
+    """Get default grouped convolution configurations for target architecture.
+
+    Uses tile configurations from grouped_conv_instance_builder.py as single source of truth.
+    """
     configs = []
 
     if variants is None:
@@ -780,26 +804,38 @@ def get_default_configs(
     if ndims is None:
         ndims = [2]
 
-    # Valid configurations per variant (based on CK Tile example configs)
-    # Forward and Backward Data: standard GEMM-like tiles
-    fwd_bwd_data_tiles = [
-        # (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k)
-        (128, 128, 32, 2, 2, 32, 32, 16),  # Standard 128x128
-        (256, 256, 32, 2, 2, 32, 32, 16),  # Large 256x256
-        (64, 64, 32, 1, 4, 16, 16, 16),  # Small 64x64
-        (128, 64, 32, 2, 2, 32, 32, 16),  # Rectangular
-        (16, 64, 64, 1, 4, 16, 16, 32),  # Tall and narrow
-    ]
+    # Import tile configs from instance builder (single source of truth)
+    if not HAS_TILE_CONFIGS or not COMMON_TILES:
+        log.warning("grouped_config_rules not available, using fallback tile configs")
+        # Fallback to minimal set if grouped_config_rules unavailable
+        fwd_bwd_data_tiles = [
+            (128, 128, 32, 2, 2, 32, 32, 16),
+            (64, 64, 32, 1, 4, 16, 16, 16),
+            (16, 64, 64, 1, 4, 16, 16, 32),
+        ]
+        bwd_weight_tiles = [(16, 64, 64, 1, 4, 16, 16, 32)]
+    else:
+        # Build tile list from COMMON_TILES with wave/warp mappings
+        fwd_bwd_data_tiles = []
+        for tile_m, tile_n, tile_k in COMMON_TILES:
+            tile_key = (tile_m, tile_n, tile_k)
+            if tile_key in TILE_TO_WAVE and tile_key in TILE_TO_WARP:
+                wave_m, wave_n, wave_k = TILE_TO_WAVE[tile_key]
+                warp_m, warp_n, warp_k = TILE_TO_WARP[tile_key]
+                fwd_bwd_data_tiles.append(
+                    (tile_m, tile_n, tile_k, wave_m, wave_n, warp_m, warp_n, warp_k)
+                )
 
-    # Backward Weight: VERY specific tile configs that work with CK Tile's bwd_weight kernel
-    # Based on ConvConfigComputeV3 from CK Tile examples (example/ck_tile/20_grouped_convolution/)
-    # Note: Backward weight has strict constraints on warp configurations due to transpose_tile2d
-    # Only specific warp configs work: (1, 4, 1) and (4, 1, 1) are known to work
-    bwd_weight_tiles = [
-        # (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k)
-        # ConvConfigComputeV3: The primary working config for backward weight
-        (16, 64, 64, 1, 4, 16, 16, 32),
-    ]
+        # Backward weight: use BWD_WEIGHT_TILES from config rules
+        bwd_weight_tiles = []
+        for tile_m, tile_n, tile_k in BWD_WEIGHT_TILES:
+            tile_key = (tile_m, tile_n, tile_k)
+            if tile_key in TILE_TO_WAVE and tile_key in TILE_TO_WARP:
+                wave_m, wave_n, wave_k = TILE_TO_WAVE[tile_key]
+                warp_m, warp_n, warp_k = TILE_TO_WARP[tile_key]
+                bwd_weight_tiles.append(
+                    (tile_m, tile_n, tile_k, wave_m, wave_n, warp_m, warp_n, warp_k)
+                )
 
     for variant in variants:
         # Select tile configs based on variant
@@ -827,6 +863,12 @@ def get_default_configs(
                     warp_tile_n,
                     warp_tile_k,
                 ) in tile_configs:
+                    # Skip tiles incompatible with compv4
+                    if pipeline == "compv4" and HAS_TILE_CONFIGS:
+                        tile_key = (tile_m, tile_n, tile_k)
+                        if tile_key not in COMPV4_COMPATIBLE_TILES:
+                            continue  # Skip this tile for compv4
+
                     # Adjust tile_k for compv4 (needs larger K for double buffering)
                     adj_tile_k = tile_k * 2 if pipeline == "compv4" else tile_k
 
@@ -1465,18 +1507,20 @@ def main():
         print(f"  Spatial dims: {args.ndim}")
         print(f"\nConfigurations ({len(filtered_configs)}):")
         for cfg in filtered_configs:
-            print(f"  - {cfg.name('fp16')}")
-            print(f"      Tile: {cfg.tile.tile_m}x{cfg.tile.tile_n}x{cfg.tile.tile_k}")
-            print(f"      Warp: {cfg.tile.warp_m}x{cfg.tile.warp_n}x{cfg.tile.warp_k}")
-            print(
-                f"      WarpTile: {cfg.tile.warp_tile_m}x{cfg.tile.warp_tile_n}x{cfg.tile.warp_tile_k}"
-            )
-            print(
-                f"      Pipeline: {cfg.trait.pipeline}, Epilogue: {cfg.trait.epilogue}, Scheduler: {cfg.trait.scheduler}"
-            )
-            print(
-                f"      Padding: M={cfg.trait.pad_m}, N={cfg.trait.pad_n}, K={cfg.trait.pad_k}"
-            )
+            # List configs for each requested datatype (fixes bf16 -> fp16 bug)
+            for dt in args.datatype:
+                print(f"  - {cfg.name(dt)}")
+                print(f"      Tile: {cfg.tile.tile_m}x{cfg.tile.tile_n}x{cfg.tile.tile_k}")
+                print(f"      Warp: {cfg.tile.warp_m}x{cfg.tile.warp_n}x{cfg.tile.warp_k}")
+                print(
+                    f"      WarpTile: {cfg.tile.warp_tile_m}x{cfg.tile.warp_tile_n}x{cfg.tile.warp_tile_k}"
+                )
+                print(
+                    f"      Pipeline: {cfg.trait.pipeline}, Epilogue: {cfg.trait.epilogue}, Scheduler: {cfg.trait.scheduler}"
+                )
+                print(
+                    f"      Padding: M={cfg.trait.pad_m}, N={cfg.trait.pad_n}, K={cfg.trait.pad_k}"
+                )
         return
 
     # Generate
