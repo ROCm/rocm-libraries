@@ -88,13 +88,13 @@ inline std::vector<LayernormTestCase> getLayernormFwd4DFullTestCases()
 {
     unsigned int seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
-    // Imported from MIOpen
+    // Imported from MIOpen, most commented out due to excessive testing time
     // clang-format off
     return {
         {{32, 4, 4, 256}, 1, false, seed},
-        {{64, 4, 4, 256}, 1, false, seed},
+        // {{64, 4, 4, 256}, 1, false, seed},
         {{32, 4, 4, 256}, 1, true, seed},
-        {{64, 4, 4, 256}, 1, true, seed}
+        // {{64, 4, 4, 256}, 1, true, seed}
     };
     // clang-format on
 }
@@ -103,67 +103,67 @@ inline std::vector<LayernormTestCase> getLayernormFwd5DFullTestCases()
 {
     unsigned int seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
-    // Imported from MIOpen
+    // Imported from MIOpen, most commented out due to excessive testing time
     // clang-format off
     return {
         {{32, 1, 32, 32, 32}, 4, false, seed}, // 32x32x32 based on VoxNet arch
-        {{32, 1, 14, 14, 14}, 4, false, seed},
-        {{32, 32, 14, 14, 14}, 4, false, seed},
-        {{32, 32, 12, 12, 12}, 4, false, seed},
-        {{32, 32, 6, 6, 6}, 4, false, seed},
-        {{256, 1, 32, 32, 32}, 4, false, seed}, // 32x32x32 based on VoxNet arch
-        {{256, 32, 14, 14, 14}, 4, false, seed},
-        {{256, 32, 12, 12, 12}, 4, false, seed},
-        {{256, 32, 6, 6, 6}, 4, false, seed},
-        {{512, 1, 32, 32, 32}, 4, false, seed}, // 32x32x32 based on VoxNet arch
-        {{512, 32, 14, 14, 14}, 4, false, seed},
-        {{512, 32, 12, 12, 12}, 4, false, seed},
-        {{512, 32, 6, 6, 6}, 4, false, seed},
-        {{32, 2, 32, 57, 125}, 4, false, seed}, // Hand-gesture recognition CVPR 2015 paper High Res Net Path
+        // {{32, 1, 14, 14, 14}, 4, false, seed},
+        // {{32, 32, 14, 14, 14}, 4, false, seed},
+        // {{32, 32, 12, 12, 12}, 4, false, seed},
+        // {{32, 32, 6, 6, 6}, 4, false, seed},
+        // {{256, 1, 32, 32, 32}, 4, false, seed}, // 32x32x32 based on VoxNet arch
+        // {{256, 32, 14, 14, 14}, 4, false, seed},
+        // {{256, 32, 12, 12, 12}, 4, false, seed},
+        // {{256, 32, 6, 6, 6}, 4, false, seed},
+        // {{512, 1, 32, 32, 32}, 4, false, seed}, // 32x32x32 based on VoxNet arch
+        // {{512, 32, 14, 14, 14}, 4, false, seed},
+        // {{512, 32, 12, 12, 12}, 4, false, seed},
+        // {{512, 32, 6, 6, 6}, 4, false, seed},
+        // {{32, 2, 32, 57, 125}, 4, false, seed}, // Hand-gesture recognition CVPR 2015 paper High Res Net Path
         {{32, 32, 14, 25, 59}, 4, false, seed},
-        {{32, 32, 6, 10, 27}, 4, false, seed},
-        {{32, 32, 4, 6, 11}, 4, false, seed},
-        {{32, 32, 2, 2, 3}, 4, false, seed},
-        {{32, 32, 32, 28, 62}, 4, false, seed}, // Hand-gesture recognition CVPR 2015 paper Low Res Net Path
-        {{32, 32, 14, 12, 29}, 4, false, seed},
-        {{32, 32, 6, 4, 12}, 4, false, seed},
-        {{32, 32, 4, 2, 2}, 4, false, seed},
-        {{16, 32, 6, 50, 50}, 4, false, seed}, // Multi-view 3D convnet
-        {{1, 3, 8, 240, 320}, 4, false, seed}, // 3D convet on video
-        {{1, 3, 16, 240, 320}, 4, false, seed}, // 3D convet on video
-        {{1, 3, 8, 128, 171}, 4, false, seed}, // 3D convet on video
-        {{1, 3, 16, 128, 171}, 4, false, seed}, // 3D convet on video
-        {{1, 3, 8, 112, 112}, 4, false, seed}, // 3D convet on video
-        {{1, 3, 16, 112, 112}, 4, false, seed}, // 3D convet on video
+        // {{32, 32, 6, 10, 27}, 4, false, seed},
+        // {{32, 32, 4, 6, 11}, 4, false, seed},
+        // {{32, 32, 2, 2, 3}, 4, false, seed},
+        // {{32, 32, 32, 28, 62}, 4, false, seed}, // Hand-gesture recognition CVPR 2015 paper Low Res Net Path
+        // {{32, 32, 14, 12, 29}, 4, false, seed},
+        // {{32, 32, 6, 4, 12}, 4, false, seed},
+        // {{32, 32, 4, 2, 2}, 4, false, seed},
+        // {{16, 32, 6, 50, 50}, 4, false, seed}, // Multi-view 3D convnet
+        // {{1, 3, 8, 240, 320}, 4, false, seed}, // 3D convet on video
+        // {{1, 3, 16, 240, 320}, 4, false, seed}, // 3D convet on video
+        // {{1, 3, 8, 128, 171}, 4, false, seed}, // 3D convet on video
+        // {{1, 3, 16, 128, 171}, 4, false, seed}, // 3D convet on video
+        // {{1, 3, 8, 112, 112}, 4, false, seed}, // 3D convet on video
+        // {{1, 3, 16, 112, 112}, 4, false, seed}, // 3D convet on video
         {{32, 1, 32, 32, 32}, 4, true, seed}, // 32x32x32 based on VoxNet arch
-        {{32, 1, 14, 14, 14}, 4, true, seed},
-        {{32, 32, 14, 14, 14}, 4, true, seed},
-        {{32, 32, 12, 12, 12}, 4, true, seed},
-        {{32, 32, 6, 6, 6}, 4, true, seed},
-        {{256, 1, 32, 32, 32}, 4, true, seed}, // 32x32x32 based on VoxNet arch
-        {{256, 32, 14, 14, 14}, 4, true, seed},
-        {{256, 32, 12, 12, 12}, 4, true, seed},
-        {{256, 32, 6, 6, 6}, 4, true, seed},
-        {{512, 1, 32, 32, 32}, 4, true, seed}, // 32x32x32 based on VoxNet arch
-        {{512, 32, 14, 14, 14}, 4, true, seed},
-        {{512, 32, 12, 12, 12}, 4, true, seed},
-        {{512, 32, 6, 6, 6}, 4, true, seed},
-        {{32, 2, 32, 57, 125}, 4, true, seed}, // Hand-gesture recognition CVPR 2015 paper High Res Net Path
+        // {{32, 1, 14, 14, 14}, 4, true, seed},
+        // {{32, 32, 14, 14, 14}, 4, true, seed},
+        // {{32, 32, 12, 12, 12}, 4, true, seed},
+        // {{32, 32, 6, 6, 6}, 4, true, seed},
+        // {{256, 1, 32, 32, 32}, 4, true, seed}, // 32x32x32 based on VoxNet arch
+        // {{256, 32, 14, 14, 14}, 4, true, seed},
+        // {{256, 32, 12, 12, 12}, 4, true, seed},
+        // {{256, 32, 6, 6, 6}, 4, true, seed},
+        // {{512, 1, 32, 32, 32}, 4, true, seed}, // 32x32x32 based on VoxNet arch
+        // {{512, 32, 14, 14, 14}, 4, true, seed},
+        // {{512, 32, 12, 12, 12}, 4, true, seed},
+        // {{512, 32, 6, 6, 6}, 4, true, seed},
+        // {{32, 2, 32, 57, 125}, 4, true, seed}, // Hand-gesture recognition CVPR 2015 paper High Res Net Path
         {{32, 32, 14, 25, 59}, 4, true, seed},
-        {{32, 32, 6, 10, 27}, 4, true, seed},
-        {{32, 32, 4, 6, 11}, 4, true, seed},
-        {{32, 32, 2, 2, 3}, 4, true, seed},
-        {{32, 32, 32, 28, 62}, 4, true, seed}, // Hand-gesture recognition CVPR 2015 paper Low Res Net Path
-        {{32, 32, 14, 12, 29}, 4, true, seed},
-        {{32, 32, 6, 4, 12}, 4, true, seed},
-        {{32, 32, 4, 2, 2}, 4, true, seed},
-        {{16, 32, 6, 50, 50}, 4, true, seed}, // Multi-view 3D convnet
-        {{1, 3, 8, 240, 320}, 4, true, seed}, // 3D convet on video
-        {{1, 3, 16, 240, 320}, 4, true, seed}, // 3D convet on video
-        {{1, 3, 8, 128, 171}, 4, true, seed}, // 3D convet on video
-        {{1, 3, 16, 128, 171}, 4, true, seed}, // 3D convet on video
-        {{1, 3, 8, 112, 112}, 4, true, seed}, // 3D convet on video
-        {{1, 3, 16, 112, 112}, 4, true, seed} // 3D convet on video
+        // {{32, 32, 6, 10, 27}, 4, true, seed},
+        // {{32, 32, 4, 6, 11}, 4, true, seed},
+        // {{32, 32, 2, 2, 3}, 4, true, seed},
+        // {{32, 32, 32, 28, 62}, 4, true, seed}, // Hand-gesture recognition CVPR 2015 paper Low Res Net Path
+        // {{32, 32, 14, 12, 29}, 4, true, seed},
+        // {{32, 32, 6, 4, 12}, 4, true, seed},
+        // {{32, 32, 4, 2, 2}, 4, true, seed},
+        // {{16, 32, 6, 50, 50}, 4, true, seed}, // Multi-view 3D convnet
+        // {{1, 3, 8, 240, 320}, 4, true, seed}, // 3D convet on video
+        // {{1, 3, 16, 240, 320}, 4, true, seed}, // 3D convet on video
+        // {{1, 3, 8, 128, 171}, 4, true, seed}, // 3D convet on video
+        // {{1, 3, 16, 128, 171}, 4, true, seed}, // 3D convet on video
+        // {{1, 3, 8, 112, 112}, 4, true, seed}, // 3D convet on video
+        // {{1, 3, 16, 112, 112}, 4, true, seed} // 3D convet on video
     };
     // clang-format on
 }
