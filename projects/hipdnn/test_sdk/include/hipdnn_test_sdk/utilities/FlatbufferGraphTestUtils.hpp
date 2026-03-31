@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_test_sdk::utilities
@@ -118,7 +119,7 @@ inline flatbuffers::FlatBufferBuilder
 }
 
 inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceGraph(
-    const std::vector<int64_t>& strides = {1, 3, 224, 224},
+    const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
     const std::vector<int64_t>& dims = {1, 3, 224, 224},
     hipdnn_data_sdk::data_objects::DataType inputDataType
     = hipdnn_data_sdk::data_objects::DataType::FLOAT,
@@ -129,9 +130,9 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceG
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    const std::vector<int64_t> derivedStrides
-        = hipdnn_data_sdk::utilities::getDerivedShape(strides);
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
@@ -219,7 +220,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceG
 }
 
 inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceActivGraph(
-    const std::vector<int64_t>& strides = {1, 3, 224, 224},
+    const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
     const std::vector<int64_t>& dims = {1, 3, 224, 224},
     hipdnn_data_sdk::data_objects::DataType inputDataType
     = hipdnn_data_sdk::data_objects::DataType::FLOAT,
@@ -230,9 +231,9 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceA
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    const std::vector<int64_t> derivedStrides
-        = hipdnn_data_sdk::utilities::getDerivedShape(strides);
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
     int64_t uid = 1;
 
@@ -2228,6 +2229,50 @@ inline flatbuffers::FlatBufferBuilder createValidCustomOpGraph()
         hipdnn_data_sdk::data_objects::DataType::FLOAT,
         hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes,
         customOpAttr.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder createValidReductionGraph()
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> inDims = {4, 8};
+    const std::vector<int64_t> inStrides = {8, 1};
+    const std::vector<int64_t> outDims = {1, 8};
+    const std::vector<int64_t> outStrides = {8, 1};
+
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "input", hipdnn_data_sdk::data_objects::DataType::FLOAT, &inStrides, &inDims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        2,
+        "output",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &outStrides,
+        &outDims));
+
+    auto reductionAttr = hipdnn_data_sdk::data_objects::CreateReductionAttributes(
+        builder, hipdnn_data_sdk::data_objects::ReductionMode::ADD, 1, 2);
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "reduction",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes,
+        reductionAttr.Union()));
 
     auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
         builder,

@@ -111,7 +111,7 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     for(const auto& pair : fdb_record)
     {
         const auto algo = static_cast<miopenConvAlgorithm_t>(algo_resolver(pair.second.algorithm));
-        if(conv::IsAlgorithmDisabled(algo))
+        if(conv::IsAlgorithmDisabled(algo, problem))
             continue;
 
         const auto solver_id = solver::Id{pair.first};
@@ -956,7 +956,7 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
                 const auto solver_id = solver::Id{kinder};
                 const auto sol       = solver_id.GetSolver();
                 const auto algo      = solver_id.GetAlgo();
-                if(conv::IsAlgorithmDisabled(algo))
+                if(conv::IsAlgorithmDisabled(algo, problem))
                     continue;
                 if(!sol.IsDynamic())
                     continue; // branch should never be taken
@@ -991,7 +991,7 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
             // solver_id is always valid here, because taken from registry.
             // Validity check is not required.
             const auto algo = solver_id.GetAlgo();
-            if(conv::IsAlgorithmDisabled(algo)) // Algos can be disabled globally.
+            if(conv::IsAlgorithmDisabled(algo, problem)) // Algos can be disabled globally.
                 continue;
             const auto& s = solver_id.GetSolver();
             // Let's allow non-dynamic later, if necessary.

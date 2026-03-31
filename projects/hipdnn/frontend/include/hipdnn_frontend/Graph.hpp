@@ -85,6 +85,7 @@
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
+#include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
@@ -113,6 +114,7 @@
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
+#include <hipdnn_frontend/node/ReductionNode.hpp>
 #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
 #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
@@ -884,6 +886,77 @@ protected:
         return {ErrorCode::OK, ""};
     }
 
+    /// Reconstruct the Graph from a finalized backend OperationGraph descriptor.
+    ///
+    /// Extracts operations and graph-level data types from a backend descriptor
+    /// and rebuilds the frontend Graph representation. Tensors are shared across
+    /// operations via UID-based lookup.
+    ///
+    /// NOTE: Will be renamed to `deserialize` and made public once the API
+    /// stabilizes.
+    ///
+    /// @param graphDesc A finalized backend OperationGraph descriptor
+    /// @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
+    ///         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message()
+    ///         for the specific failure reason.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error fromBackendDescriptor(hipdnnBackendDescriptor_t graphDesc)
+    {
+        std::vector<std::shared_ptr<graph::INode>> tempNodes;
+        graph::GraphAttributes tempAttrs;
+        std::optional<int64_t> tempEngineId;
+
+        HIPDNN_CHECK_ERROR(
+            detail::unpackGraphDescriptor(graphDesc, tempNodes, tempAttrs, tempEngineId));
+
+        _sub_nodes = std::move(tempNodes);
+        graph_attributes = std::move(tempAttrs);
+        _preferredEngineId = tempEngineId;
+        _graphDesc.reset();
+        _engineConfigDesc.reset();
+        _executionPlanDesc.reset();
+        return {};
+    }
+
+    /// Deserialize the graph from binary via the backend descriptor path.
+    ///
+    /// Creates a backend graph descriptor from serialized bytes and rebuilds
+    /// the frontend Graph. If a handle is provided, the descriptor is
+    /// finalized for full backend support. Graphs containing unsupported
+    /// operation types will fail.
+    ///
+    /// NOTE: This method will eventually replace the public
+    /// deserialize(hipdnnHandle_t, const std::vector<uint8_t>&) once the
+    /// FlatBuffer path is removed.
+    ///
+    /// @param handle The hipDNN handle (can be nullptr)
+    /// @param data The serialized graph bytes
+    /// @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
+    ///         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message()
+    ///         for the specific failure reason.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error deserialize_via_backend(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
+    {
+        std::vector<std::shared_ptr<graph::INode>> tempNodes;
+        graph::GraphAttributes tempAttrs;
+        std::optional<int64_t> tempEngineId;
+
+        auto [graphDesc, err]
+            = detail::deserializeAndUnpackGraph(handle, data, tempNodes, tempAttrs, tempEngineId);
+        if(err.is_bad())
+        {
+            return err;
+        }
+
+        _sub_nodes = std::move(tempNodes);
+        graph_attributes = std::move(tempAttrs);
+        _preferredEngineId = tempEngineId;
+        _graphDesc = std::move(graphDesc);
+        _engineConfigDesc.reset();
+        _executionPlanDesc.reset();
+        return {};
+    }
+
 public:
     /**
      * @brief Get available configuration knobs for a specific engine
@@ -1108,6 +1181,38 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Check if the graph is supported by any available engine plugin
+     * @param handle The hipDNN handle
+     * @param modes Heuristic modes for engine ranking
+     * @return Error with OK if supported, HIPDNN_BACKEND_ERROR if not
+     *
+     * Performs a lightweight check to determine if any engine plugin can
+     * handle this graph. If the graph has not yet been validated and built,
+     * those steps are performed automatically. The graph's internal state
+     * (operation graph descriptor) is preserved for subsequent operations.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error is_supported_ext(hipdnnHandle_t handle,
+                           const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+    {
+        HIPDNN_FE_LOG_INFO("Checking engine support for graph " << graph_attributes.get_name());
+
+        if(!_graphDesc || !_graphDesc->valid())
+        {
+            HIPDNN_CHECK_ERROR(validate());
+            HIPDNN_CHECK_ERROR(build_operation_graph(handle));
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
+            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/true));
+
+        HIPDNN_CHECK_ERROR(detail::hasEngineConfigs(engineHeuristicDesc.get()));
+
+        return {ErrorCode::OK, ""};
+    }
+
     /// @cond INTERNAL
     // Serialization APIs are hidden from public docs — these will be
     // removed in a future release.
@@ -1266,80 +1371,6 @@ public:
     }
 #endif
     /// @endcond
-
-    /**
-     * @brief Reconstruct the Graph from a finalized backend OperationGraph descriptor
-     *
-     * Extracts operations and graph-level data types from a backend descriptor
-     * and rebuilds the frontend Graph representation. Tensors are shared across
-     * operations via UID-based lookup.
-     *
-     * Currently supports: ConvolutionFprop operations (phased rollout —
-     * additional operation types will be added incrementally).
-     *
-     * @param graphDesc A finalized backend OperationGraph descriptor
-     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
-     *         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message()
-     *         for the specific failure reason.
-     */
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    Error fromBackendDescriptor(hipdnnBackendDescriptor_t graphDesc)
-    {
-        std::vector<std::shared_ptr<graph::INode>> tempNodes;
-        graph::GraphAttributes tempAttrs;
-        std::optional<int64_t> tempEngineId;
-
-        HIPDNN_CHECK_ERROR(
-            detail::unpackGraphDescriptor(graphDesc, tempNodes, tempAttrs, tempEngineId));
-
-        _sub_nodes = std::move(tempNodes);
-        graph_attributes = std::move(tempAttrs);
-        _preferredEngineId = tempEngineId;
-        _graphDesc.reset();
-        _engineConfigDesc.reset();
-        _executionPlanDesc.reset();
-        return {};
-    }
-
-    /**
-     * @brief Deserialize the graph from binary via the backend descriptor path
-     *
-     * Creates a backend graph descriptor from serialized bytes and rebuilds
-     * the frontend Graph. If a handle is provided, the descriptor is
-     * finalized for full backend support.
-     *
-     * Currently supports ConvolutionFprop operations (phased rollout —
-     * additional operation types will be added incrementally). Graphs
-     * containing unsupported operation types will fail.
-     *
-     * @param handle The hipDNN handle (can be nullptr)
-     * @param data The serialized graph bytes
-     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
-     *         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message()
-     *         for the specific failure reason.
-     */
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    Error deserialize_via_backend(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
-    {
-        std::vector<std::shared_ptr<graph::INode>> tempNodes;
-        graph::GraphAttributes tempAttrs;
-        std::optional<int64_t> tempEngineId;
-
-        auto [graphDesc, err]
-            = detail::deserializeAndUnpackGraph(handle, data, tempNodes, tempAttrs, tempEngineId);
-        if(err.is_bad())
-        {
-            return err;
-        }
-
-        _sub_nodes = std::move(tempNodes);
-        graph_attributes = std::move(tempAttrs);
-        _preferredEngineId = tempEngineId;
-        _graphDesc = std::move(graphDesc);
-        _engineConfigDesc.reset();
-        _executionPlanDesc.reset();
-        return {};
-    }
 
     /**
      * @brief Finalize the execution plan
@@ -2203,6 +2234,78 @@ public:
             std::make_shared<PointwiseNode>(std::move(attributes), graph_attributes));
 
         return out0;
+    }
+
+    /** @brief Reduction operation
+     *
+     * Reduces an input tensor along one or more dimensions using the specified
+     * reduction mode. Creates a new output tensor managed by the graph.
+     *
+     * @param x Input tensor (arbitrary shape)
+     * @param attributes Configuration specifying the reduction mode
+     * @return y: Output tensor (graph-managed, shape inferred during build)
+     *
+     * @see ReductionAttributes, ReductionMode
+     */
+    std::shared_ptr<TensorAttributes> reduction(std::shared_ptr<TensorAttributes> x,
+                                                ReductionAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Reduction_" + std::to_string(_sub_nodes.size()));
+        }
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ReductionNode>(std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
+    /** @brief Reduction operation with explicit output tensor
+     *
+     * Reduces an input tensor along one or more dimensions using the specified
+     * reduction mode. The caller provides the output tensor, allowing explicit
+     * control over output shape for partial reductions.
+     *
+     * @param x Input tensor (arbitrary shape)
+     * @param y Output tensor (caller-provided, reduced shape)
+     * @param attributes Configuration specifying the reduction mode
+     * @return y: The provided output tensor
+     *
+     * @see ReductionAttributes, ReductionMode
+     */
+    std::shared_ptr<TensorAttributes> reduction(std::shared_ptr<TensorAttributes> x,
+                                                std::shared_ptr<TensorAttributes> y,
+                                                ReductionAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Reduction_" + std::to_string(_sub_nodes.size()));
+        }
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        if(y->get_name().empty())
+        {
+            y->set_name(attributes.get_name() + "::Y");
+        }
+
+        attributes.set_x(std::move(x));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ReductionNode>(std::move(attributes), graph_attributes));
+
+        return y;
     }
 
     /** @brief Matrix multiplication
