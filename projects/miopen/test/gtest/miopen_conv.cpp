@@ -100,7 +100,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
 {
     std::string v = " --verbose " + precision;
 
-    std::vector<std::string> test_cases = {
+    return std::vector<std::string>{
         // clang-format off
     {v + "	--input	1	3	32	32	--weights	1	3	7	7	--pads_strides_dilations	1	1	1	1	1	1"},
     {v + "	--input	1	3	227	227	--weights	1	3	7	7	--pads_strides_dilations	1	1	1	1	1	1"},
@@ -144,8 +144,6 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     {v + "	--input	1	48	7	7	--weights	1	48	5	5	--pads_strides_dilations	0	0	4	4	1	1"}
         // clang-format on
     };
-
-    return test_cases;
 }
 
 } // namespace miopen_conv
