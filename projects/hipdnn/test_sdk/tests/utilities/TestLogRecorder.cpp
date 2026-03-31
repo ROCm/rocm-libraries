@@ -204,6 +204,33 @@ TEST_F(TestLogRecorder, GetRecordedLogsReturnsVector)
     EXPECT_EQ(logs[1].message, "message 2");
 }
 
+TEST_F(TestLogRecorder, SharedRecorderClearLogsEmptiesBuffer)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 1");
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_WARN, "log 2");
+    EXPECT_EQ(recorder.getRecordedLogCount(), 2);
+
+    recorder.clearLogs();
+
+    EXPECT_EQ(recorder.getRecordedLogCount(), 0);
+    EXPECT_FALSE(recorder.hasLogContaining("log 1"));
+    EXPECT_FALSE(recorder.hasLogContaining("log 2"));
+}
+
+TEST_F(TestLogRecorder, SharedRecorderClearLogsAllowsNewRecording)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "before clear");
+    recorder.clearLogs();
+
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_WARN, "after clear");
+
+    EXPECT_EQ(recorder.getRecordedLogCount(), 1);
+    EXPECT_FALSE(recorder.hasLogContaining("before clear"));
+    EXPECT_TRUE(recorder.hasLogContaining("after clear"));
+}
+
 // === getRecordedLogsAsString() ===
 
 TEST_F(TestLogRecorder, GetRecordedLogsAsStringShowsEmptyMessage)
@@ -621,6 +648,33 @@ TEST_F(TestLogRecorder, IsolatedUserCallbackIgnoresNullMessage)
     // Cleanup
     LogRecording::instance(LogRecording::Id::ISOLATED).stopRecording();
     LogRecording::instance(LogRecording::Id::ISOLATED).clearLogs();
+}
+
+TEST_F(TestLogRecorder, IsolatedRecorderClearLogsEmptiesBuffer)
+{
+    auto recorder = IsolatedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::ISOLATED).recordLog(HIPDNN_SEV_INFO, "log 1");
+    LogRecording::instance(LogRecording::Id::ISOLATED).recordLog(HIPDNN_SEV_WARN, "log 2");
+    EXPECT_EQ(recorder.getRecordedLogCount(), 2);
+
+    recorder.clearLogs();
+
+    EXPECT_EQ(recorder.getRecordedLogCount(), 0);
+    EXPECT_FALSE(recorder.hasLogContaining("log 1"));
+    EXPECT_FALSE(recorder.hasLogContaining("log 2"));
+}
+
+TEST_F(TestLogRecorder, IsolatedRecorderClearLogsAllowsNewRecording)
+{
+    auto recorder = IsolatedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::ISOLATED).recordLog(HIPDNN_SEV_INFO, "before clear");
+    recorder.clearLogs();
+
+    LogRecording::instance(LogRecording::Id::ISOLATED).recordLog(HIPDNN_SEV_WARN, "after clear");
+
+    EXPECT_EQ(recorder.getRecordedLogCount(), 1);
+    EXPECT_FALSE(recorder.hasLogContaining("before clear"));
+    EXPECT_TRUE(recorder.hasLogContaining("after clear"));
 }
 
 TEST_F(TestLogRecorder, IsolatedAndSharedInstancesAreIndependent)
