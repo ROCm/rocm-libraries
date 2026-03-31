@@ -207,7 +207,7 @@ class KernelWriterConversion(KernelWriterBase):
       # Additional argument batch_mode is added to distinguish between Strided Batch and General Batched GEMM
       # batch_mode will dictate how the GLOBAL_C and GLOBAL_D macros are defined and used in the kernel body
       # since the index calculation for Strided Batch and General Batch GEMM are different.
-      kStr += "  argument_%s arg, uint32_t batch_mode)" % ( self.kernelName ) + self.endLine
+      kStr += "  argument_%s arg, uint32_t batch_mode, uint32_t additionalPaddingPerBatch)" % ( self.kernelName ) + self.endLine
 
     return kStr
 
@@ -349,11 +349,27 @@ class KernelWriterConversion(KernelWriterBase):
     ########################################
     # kernel start
     kStr += self.endLine
+    if not self.state["ProblemType"]["GroupedGemm"]:
+      kStr += "  if(batch_mode == 0)" + self.endLine
+      kStr += "  {" + self.endLine    
     kStr += "  if (id*NUM_ELEMENT_LOAD >= (arg.size%s" % self.indexChars[0]
     for i in range(1, problemType["NumIndicesC"]):
       kStr += " * arg.size%s" % self.indexChars[i]
     kStr += "))%s" % self.endLine
     kStr += "    return;%s" % self.endLine
+    if not self.state["ProblemType"]["GroupedGemm"]:
+      kStr += "  }" + self.endLine
+      kStr += "  else" + self.endLine
+      kStr += "  {" + self.endLine
+      kStr += "    uint64_t index2 = ((id*NUM_ELEMENT_LOAD) / (arg.size%s" % self.indexChars[0]
+      for i in range(1, problemType["NumIndicesC"]-1):
+        kStr += " * arg.size%s" % self.indexChars[i]
+      kStr += " + additionalPaddingPerBatch));%s" % self.endLine
+      kStr += "    if (id*NUM_ELEMENT_LOAD >= ((index2+1) * (arg.size%s * arg.size%s)) + index2 * additionalPaddingPerBatch)%s" % (self.indexChars[0], self.indexChars[1], self.endLine)
+      kStr += "      return;%s" % self.endLine
+      kStr += "    if(index2 > 0)%s" % self.endLine
+      kStr += "      id = id - (index2 * additionalPaddingPerBatch) / NUM_ELEMENT_LOAD;%s" % self.endLine
+      kStr += "  }" + self.endLine
 
     kStr += self.endLine
     kStr += "  uint64_t id0"
@@ -806,7 +822,7 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  if(batch_mode == 0) {" + self.endLine
       kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, arg.D, idxD * sizeof(%s), 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, destTypeStr, self.endLine)
       kStr += "  } else {" + self.endLine
-      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(arg.D + id2));" % (storeTypeStr, storeTypeStr) + self.endLine
+      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(arg.D + id2));" % (destTypeStr, destTypeStr) + self.endLine
       kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, ptr, idxD * sizeof(%s), 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, destTypeStr, self.endLine)
       kStr += "  }" + self.endLine
     else:

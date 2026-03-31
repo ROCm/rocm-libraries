@@ -3144,6 +3144,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                     swizzle_tensor_type(tmp, hB[batchCount], TiB, arg, 1, N[i], K[i], ldb[i], false);
                     CHECK_HIP_ERROR(synchronize(dB[batchCount], tmp, block_count));
                 }
+                //// copy data from CPU to device end
+                if(size_D_copy[i])
+                {
+                    copy_buf(hC[batchCount], hD_gold[batchCount], To);
+                }                 
             }
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
             {
@@ -3224,11 +3229,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 CHECK_HIP_ERROR(synchronize(dScaleC[i], hScaleC[i]));
             if(arg.scaleD)
                 CHECK_HIP_ERROR(synchronize(dScaleD[i], hScaleD[i]));
-            //// copy data from CPU to device end
-            if(size_D_copy[i])
-            {
-                copy_buf(hC[i], hD_gold[i], To);
-            }            
+           
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
             {
                 hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
@@ -4938,7 +4939,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             continue;
                         }
                     }
-                    perf_monitor.start();
+                    perf_monitor->start();
                     pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
 
                     for(int i = 0; i < number_hot_calls; i++)
