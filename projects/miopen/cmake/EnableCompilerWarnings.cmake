@@ -95,18 +95,22 @@ set(__clang_cxx_compile_options
     -Wno-documentation
     -Wno-deprecated-builtins
     -Wno-unused-parameter
-    -Wmissing-noreturn
-    -Wno-nrvo
-    -Wno-lifetime-safety
-    -Wno-lifetime-safety-suggestions
-    -Wno-lifetime-safety-intra-tu-suggestions
-    -Wno-lifetime-safety-cross-tu-suggestions)
+    -Wmissing-noreturn)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
     list(APPEND __clang_cxx_compile_options
         -Wno-unique-object-duplication
         -Wno-switch-default
         -Wno-nontrivial-memcall)
+endif()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "23")
+    list(APPEND __clang_cxx_compile_options
+        -Wno-nrvo
+        -Wno-lifetime-safety
+        -Wno-lifetime-safety-suggestions
+        -Wno-lifetime-safety-intra-tu-suggestions
+        -Wno-lifetime-safety-cross-tu-suggestions)
 endif()
 
 if(WIN32)

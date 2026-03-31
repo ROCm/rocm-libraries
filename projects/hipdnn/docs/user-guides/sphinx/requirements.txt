@@ -183,7 +183,7 @@ pydata-sphinx-theme==0.16.1
     #   sphinx-book-theme
 pygithub==2.8.1
     # via rocm-docs-core
-pygments==2.19.2
+pygments==2.20.0
     # via
     #   accessible-pygments
     #   ipython
@@ -219,7 +219,7 @@ referencing==0.36.2
     # via
     #   jsonschema
     #   jsonschema-specifications
-requests==2.32.5
+requests==2.33.0
     # via
     #   pygithub
     #   sphinx
