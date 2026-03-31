@@ -1,8 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <exception>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <set>
 #include <string>
 
 #include "RMSnormBwdPlanBuilder.hpp"
@@ -82,7 +85,7 @@ size_t RMSnormBwdPlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const HipKernelSettings& executionSettings) const
 {
-    // RMSnorm plan builder does not require workspace size - TODO ??
+    // RMSnorm backward plan currently does not require any workspace.
     return 0u;
 }
 

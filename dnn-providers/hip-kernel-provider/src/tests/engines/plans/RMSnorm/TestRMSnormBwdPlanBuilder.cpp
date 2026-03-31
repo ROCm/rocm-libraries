@@ -12,6 +12,7 @@
 #include "mocks/MockRunnableKernel.hpp"
 
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 
@@ -92,8 +93,8 @@ TEST_F(TestRMSnormBwdPlanBuilder, BuildPlanSetsPlanForSingleNodeGraph)
     EXPECT_CALL(_mockDevicePropertyProvider, getDeviceProperties())
         .WillOnce(::testing::Return(hipDeviceProp_t{}));
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
-    EXPECT_TRUE(ctx.hasValidPlan());
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================

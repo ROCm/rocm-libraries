@@ -77,20 +77,26 @@ RMSnormBwdPlan::RMSnormBwdPlan(RMSnormBwdParams&& params)
 
 size_t RMSnormBwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& handle) const
 {
-    // No workspace needed for RMS norrm
+    // No workspace needed for RMS norm
     return 0;
 }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompiler,
                              [[maybe_unused]] const hipDeviceProp_t& deviceProperties)
 {
+    throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                   "RMSNorm backward compile not yet implemented");
 }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void RMSnormBwdPlan::execute([[maybe_unused]] const HipKernelHandle& handle,
                              [[maybe_unused]] const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                              [[maybe_unused]] uint32_t numDeviceBuffers,
                              [[maybe_unused]] void* workspace) const
 {
+    throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                   "RMSNorm backward execute not yet implemented");
 }
 
 } // namespace hip_kernel_provider
