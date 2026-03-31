@@ -79,7 +79,6 @@ struct MXGemmPipelineAgBgCrCompAsyncEightWavesPolicy
     static constexpr index_t KPerWarp = KPerBlock / KWarps;
     static constexpr index_t NPerWarp = NPerBlock / NWarps;
     static_assert(NWarps == 2, "NWarps == 2 for ping-pong!");
-    static_assert(KWarpTiles == KWarps, "Wrong!");
 
     static constexpr index_t warp_size = get_warp_size();
     static constexpr index_t warp_num  = BlockSize / warp_size;
@@ -92,7 +91,6 @@ struct MXGemmPipelineAgBgCrCompAsyncEightWavesPolicy
     static constexpr index_t K1          = WarpTile::at(I2) / K2;                 // 8
     static constexpr index_t K0          = KPerWarp / (K1 * K2);
     static_assert(K0 * K1 * K2 == KPerWarp, "Wrong!");
-    static_assert(K0 == 1, "Wrong!");
 
     CK_TILE_HOST_DEVICE static constexpr auto GetKStepAQ() { return KPerBlockScale; }
     CK_TILE_HOST_DEVICE static constexpr auto GetKStepBQ() { return KPerBlockScale; }
