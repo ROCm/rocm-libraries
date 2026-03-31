@@ -489,7 +489,7 @@ def parse_bwd_weight_instances(instances, problem_name):
             continue
         native = try_parse_native_instance(instance, instance_id, problem_name)
         if native is not None:
-            if native.streamk_enabled and get_dtype(problem_name) == "float" and pipeline_version.find("ASYNC") != -1:
+            if native.streamk_enabled and get_dtype(problem_name) == "float" and native.pipeline_version.find("ASYNC") != -1:
                 print(f"Skipping instance {instance_id} with streamk, async, float since it's not supported yet.")
                 continue
             convs.append(native)
