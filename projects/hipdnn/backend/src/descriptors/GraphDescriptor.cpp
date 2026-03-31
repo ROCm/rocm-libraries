@@ -266,28 +266,8 @@ void GraphDescriptor::getOperations(hipdnnBackendAttributeType_t attributeType,
         *elementCount = count;
     }
 
-    auto outputArray = static_cast<HipdnnBackendDescriptor**>(arrayOfElements);
-
-    // Build into a local vector so no pointers leak if a later iteration fails.
-    std::vector<HipdnnBackendDescriptor*> packed;
-    packed.reserve(_operations.size());
-    try
-    {
-        for(const auto& operation : _operations)
-        {
-            packed.push_back(HipdnnBackendDescriptor::packDescriptor(operation));
-        }
-    }
-    catch(...)
-    {
-        for(auto* p : packed)
-        {
-            delete p;
-        }
-        throw;
-    }
-
-    std::copy(packed.begin(), packed.end(), outputArray);
+    HipdnnBackendDescriptor::packDescriptorArray(
+        _operations, static_cast<HipdnnBackendDescriptor**>(arrayOfElements));
 }
 
 void GraphDescriptor::getPreferredEngineId(hipdnnBackendAttributeType_t attributeType,

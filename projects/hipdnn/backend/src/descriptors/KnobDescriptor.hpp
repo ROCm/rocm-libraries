@@ -38,6 +38,11 @@ public:
     /// Maximum length of a string default value (characters, excluding null terminator).
     static constexpr int64_t MAX_STRING_VALUE_LENGTH = 65536;
 
+    /// Construct a finalized KnobDescriptor from a deserialized KnobT.
+    /// Returns nullptr if the knob has an unsupported default value type.
+    static std::shared_ptr<KnobDescriptor>
+        fromKnobT(const hipdnn_data_sdk::data_objects::KnobT& knobNative);
+
     void finalize() override;
 
     void getAttribute(hipdnnBackendAttributeName_t attributeName,

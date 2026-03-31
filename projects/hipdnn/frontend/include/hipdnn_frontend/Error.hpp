@@ -249,4 +249,19 @@ typedef Error error_t; ///< @brief Type alias for Error
             return {error_status, message};              \
         }                                                \
     } while(0)
+
+/// Evaluate an expression that returns Error and early-return
+/// \c {err, {}} when the error is bad. Works with any function whose
+/// return type is \c std::pair<Error, T> because \c {} value-initialises
+/// the second element (std::nullopt for optionals, default-constructed
+/// pairs, etc.).
+#define HIPDNN_FE_TRY(expr)           \
+    do                                \
+    {                                 \
+        auto _fe_try_err = (expr);    \
+        if(_fe_try_err.is_bad())      \
+        {                             \
+            return {_fe_try_err, {}}; \
+        }                             \
+    } while(0)
 }

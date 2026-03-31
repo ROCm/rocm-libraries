@@ -1457,6 +1457,167 @@ TEST_F(TestKnobDescriptor, SetAttributeUnsupportedAttributeFails)
 }
 
 // ============================================================================
+// fromKnobT factory method
+// ============================================================================
+
+TEST(TestKnobDescriptorFromKnobT, IntKnobWithConstraints)
+{
+    hipdnn_data_sdk::data_objects::KnobT knobT;
+    knobT.knob_id = "test.int_knob";
+    knobT.description = "An int knob";
+    knobT.deprecated = false;
+    hipdnn_data_sdk::data_objects::IntValueT intDefault;
+    intDefault.value = 50;
+    knobT.default_value.Set(intDefault);
+
+    hipdnn_data_sdk::data_objects::IntConstraintT intConstraint;
+    intConstraint.min_value = 0;
+    intConstraint.max_value = 100;
+    intConstraint.step = 10;
+    knobT.constraint.Set(std::move(intConstraint));
+
+    auto desc = KnobDescriptor::fromKnobT(knobT);
+    ASSERT_NE(desc, nullptr);
+    ASSERT_TRUE(desc->isFinalized());
+
+    auto roundTrip = desc->toKnobT();
+    ASSERT_NE(roundTrip, nullptr);
+    EXPECT_EQ(roundTrip->knob_id, "test.int_knob");
+    EXPECT_EQ(roundTrip->description, "An int knob");
+    EXPECT_FALSE(roundTrip->deprecated);
+    EXPECT_EQ(roundTrip->default_value.AsIntValue()->value, 50);
+
+    const auto* c = roundTrip->constraint.AsIntConstraint();
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(c->min_value, 0);
+    EXPECT_EQ(c->max_value, 100);
+    EXPECT_EQ(c->step, 10);
+    EXPECT_TRUE(c->valid_values.empty());
+}
+
+TEST(TestKnobDescriptorFromKnobT, FloatKnobWithConstraints)
+{
+    hipdnn_data_sdk::data_objects::KnobT knobT;
+    knobT.knob_id = "test.float_knob";
+    knobT.description = "A float knob";
+    hipdnn_data_sdk::data_objects::FloatValueT floatDefault;
+    floatDefault.value = 0.5;
+    knobT.default_value.Set(floatDefault);
+
+    hipdnn_data_sdk::data_objects::FloatConstraintT floatConstraint;
+    floatConstraint.min_value = 0.0;
+    floatConstraint.max_value = 1.0;
+    knobT.constraint.Set(floatConstraint);
+
+    auto desc = KnobDescriptor::fromKnobT(knobT);
+    ASSERT_NE(desc, nullptr);
+
+    auto roundTrip = desc->toKnobT();
+    ASSERT_NE(roundTrip, nullptr);
+    EXPECT_EQ(roundTrip->knob_id, "test.float_knob");
+    EXPECT_DOUBLE_EQ(roundTrip->default_value.AsFloatValue()->value, 0.5);
+
+    const auto* c = roundTrip->constraint.AsFloatConstraint();
+    ASSERT_NE(c, nullptr);
+    EXPECT_DOUBLE_EQ(c->min_value, 0.0);
+    EXPECT_DOUBLE_EQ(c->max_value, 1.0);
+}
+
+TEST(TestKnobDescriptorFromKnobT, StringKnobWithConstraints)
+{
+    hipdnn_data_sdk::data_objects::KnobT knobT;
+    knobT.knob_id = "test.string_knob";
+    knobT.description = "A string knob";
+    hipdnn_data_sdk::data_objects::StringValueT stringDefault;
+    stringDefault.value = "fast";
+    knobT.default_value.Set(std::move(stringDefault));
+
+    hipdnn_data_sdk::data_objects::StringConstraintT stringConstraint;
+    stringConstraint.max_length = 32;
+    stringConstraint.valid_values = {"fast", "slow", "balanced"};
+    knobT.constraint.Set(std::move(stringConstraint));
+
+    auto desc = KnobDescriptor::fromKnobT(knobT);
+    ASSERT_NE(desc, nullptr);
+
+    auto roundTrip = desc->toKnobT();
+    ASSERT_NE(roundTrip, nullptr);
+    EXPECT_EQ(roundTrip->knob_id, "test.string_knob");
+    EXPECT_EQ(roundTrip->default_value.AsStringValue()->value, "fast");
+
+    const auto* c = roundTrip->constraint.AsStringConstraint();
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(c->max_length, 32);
+    EXPECT_EQ(c->valid_values.size(), 3u);
+}
+
+TEST(TestKnobDescriptorFromKnobT, DeprecatedKnob)
+{
+    hipdnn_data_sdk::data_objects::KnobT knobT;
+    knobT.knob_id = "test.deprecated";
+    knobT.deprecated = true;
+    hipdnn_data_sdk::data_objects::IntValueT intDefault;
+    intDefault.value = 0;
+    knobT.default_value.Set(intDefault);
+
+    auto desc = KnobDescriptor::fromKnobT(knobT);
+    ASSERT_NE(desc, nullptr);
+
+    auto roundTrip = desc->toKnobT();
+    ASSERT_NE(roundTrip, nullptr);
+    EXPECT_TRUE(roundTrip->deprecated);
+}
+
+TEST(TestKnobDescriptorFromKnobT, IntKnobNoConstraint)
+{
+    hipdnn_data_sdk::data_objects::KnobT knobT;
+    knobT.knob_id = "test.unconstrained";
+    hipdnn_data_sdk::data_objects::IntValueT intDefault;
+    intDefault.value = 42;
+    knobT.default_value.Set(intDefault);
+
+    auto desc = KnobDescriptor::fromKnobT(knobT);
+    ASSERT_NE(desc, nullptr);
+
+    auto roundTrip = desc->toKnobT();
+    ASSERT_NE(roundTrip, nullptr);
+    EXPECT_EQ(roundTrip->default_value.AsIntValue()->value, 42);
+    EXPECT_EQ(roundTrip->constraint.type, hipdnn_data_sdk::data_objects::KnobConstraint::NONE);
+}
+
+TEST(TestKnobDescriptorFromKnobT, IntKnobWithValidValues)
+{
+    hipdnn_data_sdk::data_objects::KnobT knobT;
+    knobT.knob_id = "test.valid_values";
+    hipdnn_data_sdk::data_objects::IntValueT intDefault;
+    intDefault.value = 16;
+    knobT.default_value.Set(intDefault);
+
+    hipdnn_data_sdk::data_objects::IntConstraintT intConstraint;
+    intConstraint.valid_values = {8, 16, 32, 64};
+    knobT.constraint.Set(std::move(intConstraint));
+
+    auto desc = KnobDescriptor::fromKnobT(knobT);
+    ASSERT_NE(desc, nullptr);
+
+    auto roundTrip = desc->toKnobT();
+    ASSERT_NE(roundTrip, nullptr);
+    const auto* c = roundTrip->constraint.AsIntConstraint();
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(c->valid_values, (std::vector<int64_t>{8, 16, 32, 64}));
+}
+
+TEST(TestKnobDescriptorFromKnobT, UnknownValueTypeReturnsNull)
+{
+    hipdnn_data_sdk::data_objects::KnobT knobT;
+    knobT.knob_id = "test.unknown_type";
+    // default_value is NONE by default (no Set called)
+
+    auto desc = KnobDescriptor::fromKnobT(knobT);
+    EXPECT_EQ(desc, nullptr);
+}
+
+// ============================================================================
 // DescriptorFactory
 // ============================================================================
 

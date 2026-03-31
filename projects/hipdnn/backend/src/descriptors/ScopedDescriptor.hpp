@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "hipdnn_backend.h"
+#include "BackendDescriptor.hpp"
 
 namespace hipdnn_backend
 {

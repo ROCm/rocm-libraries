@@ -11,6 +11,7 @@ namespace hipdnn_backend
 {
 
 class GraphDescriptor;
+class KnobDescriptor;
 
 namespace plugin
 {
@@ -48,6 +49,14 @@ private:
                      int64_t requestedElementCount,
                      int64_t* elementCount,
                      void* arrayOfElements) const;
+
+    void getKnobInfoDescriptors(hipdnnBackendAttributeType_t attributeType,
+                                int64_t requestedElementCount,
+                                int64_t* elementCount,
+                                void* arrayOfElements) const;
+
+    /// Populated during finalize() from _knobSerializedBuffers.
+    std::vector<std::shared_ptr<KnobDescriptor>> _knobDescriptors;
 
 public:
     void finalize() override;
