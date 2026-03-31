@@ -387,6 +387,7 @@ operation:
       attr_name: "HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT"
       type: "bool"
       required: false
+      fbs_optional: true
       frontend_getter: "get_is_inference()"
 
     - name: "alibi_mask"

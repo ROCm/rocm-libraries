@@ -15,6 +15,7 @@ using namespace hipdnn_plugin_sdk;
 // NOLINTNEXTLINE
 thread_local char PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH] = "";
 static hipdnnCallback_t loggingCallback = nullptr;
+static hipdnnSeverity_t pluginLogLevel = HIPDNN_SEV_OFF;
 
 #ifdef THROW_IF_NULL
 #error "THROW_IF_NULL is already defined"
@@ -68,6 +69,21 @@ extern "C" hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t 
     loggingCallback = callback;
     loggingCallback(HIPDNN_SEV_INFO, "Logging callback successfully set for test plugin.");
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
+}
+
+extern "C" hipdnnPluginStatus_t hipdnnPluginSetLogLevel(hipdnnSeverity_t level)
+{
+    pluginLogLevel = level;
+    if(loggingCallback != nullptr)
+    {
+        loggingCallback(HIPDNN_SEV_INFO, "pluginSetLogLevel called");
+    }
+    return HIPDNN_PLUGIN_STATUS_SUCCESS;
+}
+
+extern "C" HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnSeverity_t testPluginGetLogLevel()
+{
+    return pluginLogLevel;
 }
 
 extern "C" void hipdnnPluginGetLastErrorString(const char** errorStr)
