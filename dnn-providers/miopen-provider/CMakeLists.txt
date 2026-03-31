@@ -57,7 +57,7 @@ option(MIOPENPROVIDER_SKIP_TESTS "Skip building tests" OFF)
 option(MIOPENPROVIDER_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
-option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" OFF)
+option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 if(NOT ENABLE_CLANG_FORMAT)
     message(WARNING "Clang-Format checks are disabled. CI requires passing clang-format checks.")
 endif()
@@ -67,7 +67,7 @@ if(WIN32)
         message(WARNING "Clang-Tidy enabled on Windows - this significantly increases build time.")
     endif()
 else()
-    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
     if(NOT ENABLE_CLANG_TIDY)
         message(WARNING "Clang-Tidy checks are disabled. CI requires passing clang-tidy checks.")
     endif()
@@ -169,6 +169,7 @@ add_library(
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 
+target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
 target_compile_options(miopen_plugin_impl PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
 set_target_properties(miopen_plugin_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden
@@ -223,6 +224,21 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     # For standalone builds we need to install the ctest files
     if(NOT ROCM_LIBS_SUPERBUILD)
         install_miopen_plugin_ctest_files()
+    endif()
+
+    find_package(hipdnn_integration_tests CONFIG QUIET)
+    if(hipdnn_integration_tests_FOUND)
+        add_external_integration_test_target(
+            TARGET_NAME   ${PROJECT_NAME}-external-integration-check
+            PLUGIN_TARGET miopen_plugin
+            ENGINE_NAME   MIOPEN_ENGINE
+            GTEST_FILTER
+                *IsSupported*
+                *ConvFwd*
+        )
+        message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
+    else()
+        message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
     endif()
 endif()
 

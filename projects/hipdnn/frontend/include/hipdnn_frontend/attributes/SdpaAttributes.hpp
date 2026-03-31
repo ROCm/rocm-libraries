@@ -62,6 +62,8 @@ namespace hipdnn_frontend::graph
 class SdpaAttributes : public Attributes<SdpaAttributes>
 {
 public:
+    SdpaAttributes() = default;
+
     // NOLINTBEGIN(readability-identifier-naming)
     enum class InputNames
     {
@@ -601,6 +603,12 @@ public:
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_dropout_probability(float probability)
+    {
+        dropout_probability = probability;
+        return *this;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_attn_scale_value(float value)
     {
         attn_scale_value = value;
@@ -624,6 +632,7 @@ public:
         max_seq_len_kv = value;
         return *this;
     }
+    /// @brief Set the diagonal alignment for causal masking
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_diagonal_alignment(DiagonalAlignment value)
     {
@@ -636,6 +645,7 @@ public:
         mma_core_mode = value;
         return *this;
     }
+    /// @brief Set the execution strategy for SDPA
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_implementation(AttentionImplementation value)
     {

@@ -28,6 +28,7 @@ class TestableGraph : public Graph
 public:
     using Graph::build_operation_graph;
     using Graph::deserialize_via_backend;
+    using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
     const std::vector<std::shared_ptr<INode>>& getSubNodes() const
@@ -166,6 +167,7 @@ TEST_F(IntegrationGraphLifting, ConvFpropRoundTripViaCApi)
     EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
     EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
     EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
+    EXPECT_EQ(convNode->attributes.get_name(), "conv_fprop_op");
 }
 
 // Verifies that tensors are accessible by UID on the reconstructed graph,
@@ -239,7 +241,7 @@ TEST_F(IntegrationGraphLifting, PreferredEngineIdPreservedThroughCApi)
 // Verifies that fromBackendDescriptor(nullptr) returns an error.
 TEST_F(IntegrationGraphLifting, NullDescriptorReturnsError)
 {
-    auto graph = std::make_shared<Graph>();
+    auto graph = std::make_shared<TestableGraph>();
     auto result = graph->fromBackendDescriptor(nullptr);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
         << "fromBackendDescriptor(nullptr) should return INVALID_VALUE";

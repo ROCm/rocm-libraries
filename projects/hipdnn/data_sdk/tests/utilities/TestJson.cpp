@@ -137,6 +137,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid rmsnorm graph)";
             break;
+        case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid rmsnorm backward graph)";
+            break;
         case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidBlockScaleDequantizeGraph();
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
@@ -156,6 +161,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graphBuilder = hipdnn_test_sdk::utilities::createValidCustomOpGraph();
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid custom op graph)";
+            break;
+        case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid reduction graph)";
             break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";

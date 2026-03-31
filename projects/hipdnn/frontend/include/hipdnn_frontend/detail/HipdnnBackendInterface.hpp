@@ -65,20 +65,35 @@ public:
         = 0;
 
     // HIPDNN_HIDDEN on accessor functions ensures each shared object has its own backendInstance
-    static inline std::shared_ptr<IHipdnnBackend> backendInstance;
     HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend> getInstance()
     {
-        return backendInstance;
+        const std::lock_guard<std::mutex> lock(backendMutex());
+        return backendInstance();
     }
 
     HIPDNN_HIDDEN static void setInstance(std::shared_ptr<IHipdnnBackend> instance)
     {
-        backendInstance = std::move(instance);
+        const std::lock_guard<std::mutex> lock(backendMutex());
+        backendInstance() = std::move(instance);
     }
 
     HIPDNN_HIDDEN static void resetInstance()
     {
-        backendInstance.reset();
+        const std::lock_guard<std::mutex> lock(backendMutex());
+        backendInstance().reset();
+    }
+
+private:
+    HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend>& backendInstance()
+    {
+        static std::shared_ptr<IHipdnnBackend> s_instance;
+        return s_instance;
+    }
+
+    HIPDNN_HIDDEN static std::mutex& backendMutex()
+    {
+        static std::mutex s_mtx;
+        return s_mtx;
     }
 };
 

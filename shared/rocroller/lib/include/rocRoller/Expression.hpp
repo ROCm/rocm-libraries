@@ -857,10 +857,14 @@ namespace rocRoller
         Register::Type resultRegisterType(Expression const& expr);
         Register::Type resultRegisterType(ExpressionPtr const& expr);
 
+        size_t resultValueCount(Expression const& expr);
+        size_t resultValueCount(ExpressionPtr const& expr);
+
         struct ResultType
         {
             Register::Type regType;
             VariableType   varType;
+            size_t         valueCount;
             bool           operator==(ResultType const&) const = default;
         };
         ResultType resultType(ExpressionPtr const& expr);
