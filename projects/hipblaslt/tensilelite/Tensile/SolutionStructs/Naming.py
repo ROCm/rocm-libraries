@@ -183,12 +183,15 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     components.append('CMS')
 
   components.append('SN')
-  for key in sorted(state.keys()):
-    # Skip SFA tag if using default wgm algo
-    if key == "SpaceFillingAlgo" and len(state[key]) == 0:
+
+  # Skip SFA tag if using default wgm algo
+  if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
+    requiredParametersTemp.discard("SpaceFillingAlgo")
+
+  for key in sorted(requiredParametersTemp):
+    if key not in state:
       continue
-    if key[0] != '_' and key != "CustomKernelName" and key in requiredParametersTemp:
-        components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
+    components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
 
   state["GlobalSplitU"] = gsuBackup
   state["ProblemType"]["GroupedGemm"] = ggBackup
