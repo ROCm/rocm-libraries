@@ -43,10 +43,6 @@
 
 #  include <thrust/system/hip/detail/util.h>
 
-#  include <new>
-#  include <type_traits>
-#  include <utility>
-
 THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
@@ -136,49 +132,6 @@ hipError_t THRUST_HIP_RUNTIME_FUNCTION parallel_for(Size num_items, F f, hipStre
   return hipSuccess;
 }
 
-template <class F>
-class managed_callable_guard
-{
-public:
-  explicit managed_callable_guard(F&& f)
-  {
-    hipError_t status = ::hipMallocManaged(reinterpret_cast<void**>(&f_ptr_), sizeof(F));
-    hip_rocprim::throw_on_error(status, "parallel_for: failed to allocate managed callable");
-    ::new (static_cast<void*>(f_ptr_)) F(::std::move(f));
-  }
-
-  managed_callable_guard(const managed_callable_guard&)            = delete;
-  managed_callable_guard& operator=(const managed_callable_guard&) = delete;
-
-  ~managed_callable_guard()
-  {
-    if (f_ptr_ != nullptr)
-    {
-      f_ptr_->~F();
-      (void) ::hipFree(f_ptr_);
-    }
-  }
-
-  F* get() const noexcept
-  {
-    return f_ptr_;
-  }
-
-private:
-  F* f_ptr_ = nullptr;
-};
-
-template <class F>
-struct callable_proxy
-{
-  F* f_ptr;
-
-  template <class... Args>
-  THRUST_HIP_FUNCTION auto operator()(Args&&... args) const -> decltype((*f_ptr)(::std::forward<Args>(args)...))
-  {
-    return (*f_ptr)(::std::forward<Args>(args)...);
-  }
-};
 } // namespace __parallel_for
 
 THRUST_EXEC_CHECK_DISABLE
@@ -197,17 +150,7 @@ void THRUST_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Siz
     THRUST_HOST static void par(execution_policy<Derived>& policy, F f, Size count)
     {
       hipStream_t stream = hip_rocprim::stream(policy);
-      if constexpr (!::std::is_trivially_destructible_v<F>)
-      {
-        __parallel_for::managed_callable_guard<F> guard(::std::move(f));
-        hipError_t status = __parallel_for::parallel_for(count, __parallel_for::callable_proxy<F>{guard.get()}, stream);
-        hip_rocprim::throw_on_error(status, "parallel_for failed");
-        status = hip_rocprim::synchronize_optional(policy);
-        hip_rocprim::throw_on_error(status, "parallel_for: failed to synchronize");
-        return;
-      }
-
-      hipError_t status = __parallel_for::parallel_for(count, f, stream);
+      hipError_t status  = __parallel_for::parallel_for(count, f, stream);
       hip_rocprim::throw_on_error(status, "parallel_for failed");
       status = hip_rocprim::synchronize_optional(policy);
       hip_rocprim::throw_on_error(status, "parallel_for: failed to synchronize");
