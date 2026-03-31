@@ -439,7 +439,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
               << "] b:" << batch << ", h:" << nhead << "/" << nhead_k << ", s:" << seqlen_qs[0]
               << "/" << seqlen_ks[0] << ", d:" << hdim_q << "/" << hdim_v << ", scale:" << scale
               << ", bias:" << bias << ", dbias:" << use_dbias << ", p_drop:" << p_drop
-              << ", sink:(rand[30,60], " << (sink_grad ? "grad" : "const") << ")"
+              << (sink_grad ? ", sink:(rand[30,60], grad)" : "")
               << ", s_randval:" << s_randval << ", deterministic:" << deterministic
               << (deterministic
                       ? std::string(", workspace:") + std::to_string(workspace_size_in_megabytes) +

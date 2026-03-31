@@ -150,7 +150,10 @@ struct BlockFmhaBwdOGradDotO
             for(index_t offset = warp_sz >> 1; offset > 0; offset >>= 1)
                 thread_sum += warp_shuffle_down(thread_sum, offset);
 
-            // Only lane 0 of each warp writes to global memory
+            // Only lane 0 of each warp writes to global memory.
+            // Note: this atomicAdd is non-deterministic across runs regardless of the
+            // -deterministic flag, because d_sink is a single scalar per head accumulated
+            // across all thread-blocks. The practical impact is negligible for this value.
             if(get_lane_id() == 0)
                 atomicAdd(reinterpret_cast<float*>(atomic_sink_grad_ptr), thread_sum);
 #endif
