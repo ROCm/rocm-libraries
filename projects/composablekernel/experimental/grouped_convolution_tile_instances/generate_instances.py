@@ -265,7 +265,7 @@ STREAMK_REDUCTION_STRATEGY = {
 }
 
 
-def parse_native_bwd_weight_instance(args, instance_id):
+def parse_native_bwd_weight_instance(args, instance_id, problem_name):
     """Parse a native CK Tile instance string (GroupedConvolutionBackwardWeightKernel<...>).
 
     Fields (0-indexed after splitting on commas inside <>):
@@ -301,6 +301,7 @@ def parse_native_bwd_weight_instance(args, instance_id):
     is_streamk = int(args[31]) != 0
     streamk_reduction_strategy = None
     streamk_persistent = False
+    is_two_stage = get_dtype(problem_name) != "float" and scalar_per_vector[2] == 1
     if is_streamk:
         reduction_int = int(args[32])
         streamk_reduction_strategy = STREAMK_REDUCTION_STRATEGY.get(
@@ -315,7 +316,7 @@ def parse_native_bwd_weight_instance(args, instance_id):
         warp_tile,
         double_smem_buffer,
         num_wave_groups,
-        False,  # is_two_stage_instance (TODO: detect from instance string if needed)
+        is_two_stage,
         pipeline_version,
         scheduler,
         scalar_per_vector,
@@ -329,12 +330,12 @@ def parse_native_bwd_weight_instance(args, instance_id):
     )
 
 
-def parse_native_fwd_instance(args, instance_id):
+def parse_native_fwd_instance(args, instance_id, problem_name):
     """Parse a native CK Tile forward conv instance string."""
     raise NotImplementedError("Native forward instance parsing is not yet implemented.")
 
 
-def parse_native_bwd_data_instance(args, instance_id):
+def parse_native_bwd_data_instance(args, instance_id, problem_name):
     """Parse a native CK Tile backward data instance string."""
     raise NotImplementedError(
         "Native backward data instance parsing is not yet implemented."
@@ -349,7 +350,7 @@ NATIVE_PARSERS = {
 }
 
 
-def try_parse_native_instance(instance, instance_id):
+def try_parse_native_instance(instance, instance_id, problem_name):
     """Try to parse an instance line as a native CK Tile instance string.
 
     Returns a ConvInstanceTemplateParams if the line matches a native format,
@@ -362,7 +363,7 @@ def try_parse_native_instance(instance, instance_id):
             end = stripped.rindex(">")
             params_str = stripped[start:end]
             args = parse_instance_string(params_str)
-            return parser(args, instance_id)
+            return parser(args, instance_id, problem_name)
     return None
 
 
@@ -371,7 +372,7 @@ def parse_fwd_instances(instances, problem_name):
     for instance_id, instance in enumerate(instances):
         if instance.find("#") != -1 or instance.find(";") != -1:
             continue
-        native = try_parse_native_instance(instance, instance_id)
+        native = try_parse_native_instance(instance, instance_id, problem_name)
         if native is not None:
             convs.append(native)
             continue
@@ -486,8 +487,11 @@ def parse_bwd_weight_instances(instances, problem_name):
     for instance_id, instance in enumerate(instances):
         if instance.find("#") != -1 or instance.find(";") != -1:
             continue
-        native = try_parse_native_instance(instance, instance_id)
+        native = try_parse_native_instance(instance, instance_id, problem_name)
         if native is not None:
+            if native.streamk_enabled and get_dtype(problem_name) == "float" and pipeline_version.find("ASYNC") != -1:
+                print(f"Skipping instance {instance_id} with streamk, async, float since it's not supported yet.")
+                continue
             convs.append(native)
             continue
 
@@ -702,7 +706,7 @@ def parse_bwd_data_instances(instances, problem_name):
     for instance_id, instance in enumerate(instances):
         if instance.find("#") != -1 or instance.find(";") != -1:
             continue
-        native = try_parse_native_instance(instance, instance_id)
+        native = try_parse_native_instance(instance, instance_id, problem_name)
         if native is not None:
             convs.append(native)
             continue
@@ -939,7 +943,6 @@ if __name__ == "__main__":
         "ndhwgc_bf16",
     ]
 
-    # FP32 doesn't work for bwd weigth currently
     bwd_weight_configs = [
         "nhwgc_fp32",
         "nhwgc_fp16",
@@ -947,8 +950,12 @@ if __name__ == "__main__":
         "ndhwgc_fp32",
         "ndhwgc_fp16",
         "ndhwgc_bf16",
+        "nhwgc_fp32_streamk",
         "nhwgc_fp16_streamk",
         "nhwgc_bf16_streamk",
+        "ndhwgc_fp32_streamk",
+        "ndhwgc_fp16_streamk",
+        "ndhwgc_bf16_streamk",
     ]
 
     bwd_data_configs = [

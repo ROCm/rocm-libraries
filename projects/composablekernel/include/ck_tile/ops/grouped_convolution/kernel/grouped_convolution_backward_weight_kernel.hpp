@@ -1272,11 +1272,26 @@ struct GroupedConvolutionBackwardWeightKernel
     {
         if constexpr(IsStreamK)
         {
+            if constexpr(GemmPipeline_::Async)
+            {
+#if defined(__gfx950__)
             RunStreamK(kargs);
+#endif
+            } else {
+            RunStreamK(kargs);
+            }
         }
         else if constexpr(GroupedConvTraitsType_::ExplicitGemm)
         {
+            if constexpr(GemmPipeline_::Async)
+            {
+#if defined(__gfx950__)
             CallExplicitGemm(kargs);
+#endif
+            } else {
+                CallExplicitGemm(kargs);
+
+            }
         }
         else
         {
