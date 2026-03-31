@@ -16,6 +16,7 @@ add_library(
 target_include_directories(
     hipdnn_gpu_ref
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+           $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/kernels/types>
     PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/kernels
 )
 

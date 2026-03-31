@@ -13,6 +13,7 @@
 #include <array>
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -65,83 +66,8 @@ struct HipRtcTypeName<double>
     static constexpr const char* VALUE = "double";
 };
 
-// --- Argument and stride structs (must match device-side layout in GpuRefTypes.h) ---
-// C-style arrays required for ABI compatibility with HipRTC-compiled device code.
-
-// NOLINTBEGIN(modernize-avoid-c-arrays)
-struct Strides3
-{
-    long long s[3];
-};
-
-struct Strides4
-{
-    long long s[4];
-};
-
-struct Strides5
-{
-    long long s[5];
-};
-
-// NOLINTBEGIN(misc-non-private-member-variables-in-classes,
-//             readability-identifier-naming)
-struct ConvFwdArgs1d
-{
-    const void* x;
-    const void* w;
-    void* y;
-    Strides3 xStr;
-    Strides3 wStr;
-    Strides3 yStr;
-    long long N, C, Wi;
-    long long K, Wo;
-    long long Kw;
-    long long strideW;
-    long long dilW;
-    long long padW;
-    long long groups;
-    double alpha, beta;
-};
-
-struct ConvFwdArgs2d
-{
-    const void* x;
-    const void* w;
-    void* y;
-    Strides4 xStr;
-    Strides4 wStr;
-    Strides4 yStr;
-    long long N, C, Hi, Wi;
-    long long K, Ho, Wo;
-    long long Kh, Kw;
-    long long strideH, strideW;
-    long long dilH, dilW;
-    long long padH, padW;
-    long long groups;
-    double alpha, beta;
-};
-
-struct ConvFwdArgs3d
-{
-    const void* x;
-    const void* w;
-    void* y;
-    Strides5 xStr;
-    Strides5 wStr;
-    Strides5 yStr;
-    long long N, C, Di, Hi, Wi;
-    long long K, Do, Ho, Wo;
-    long long Kd, Kh, Kw;
-    long long strideD, strideH, strideW;
-    long long dilD, dilH, dilW;
-    long long padD, padH, padW;
-    long long groups;
-    double alpha, beta;
-};
-// NOLINTEND(misc-non-private-member-variables-in-classes,
-//           readability-identifier-naming)
-// NOLINTEND(modernize-avoid-c-arrays)
+// Shared argument and stride structs — single definition used by both host and device (HipRTC).
+#include <GpuRefConvArgs.h> // NOLINT(misc-include-cleaner)
 
 // --- Helpers ---
 
@@ -195,6 +121,11 @@ inline void
 {
     const int64_t blockSize = 256;
     auto gridSize = (totalElements + blockSize - 1) / blockSize;
+
+    if(gridSize > static_cast<int64_t>(std::numeric_limits<unsigned int>::max()))
+    {
+        throw std::runtime_error("Grid size exceeds hipModuleLaunchKernel limit");
+    }
 
     // NOLINTNEXTLINE(modernize-avoid-c-arrays)
     void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
