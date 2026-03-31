@@ -11,6 +11,7 @@
 #include <rocRoller/Operations/Scratch_fwd.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
+#include <functional>
 #include <map>
 #include <optional>
 
@@ -72,6 +73,34 @@ private:
     hipModule_t module;
 };
 
+struct ShapeCondition
+{
+    std::optional<size_t> minM, maxM;
+    std::optional<size_t> minN, maxN;
+    std::optional<size_t> minK, maxK;
+
+    std::function<bool(size_t, size_t, size_t)> customMatcher;
+
+    bool matches(size_t m, size_t n, size_t k) const
+    {
+        if(minM && m < *minM)
+            return false;
+        if(maxM && m >= *maxM)
+            return false;
+        if(minN && n < *minN)
+            return false;
+        if(maxN && n >= *maxN)
+            return false;
+        if(minK && k < *minK)
+            return false;
+        if(maxK && k >= *maxK)
+            return false;
+        if(customMatcher && !customMatcher(m, n, k))
+            return false;
+        return true;
+    }
+};
+
 /**
  * @brief GemmKernel
  *
@@ -103,6 +132,9 @@ public:
     int occupancy;
 
     std::optional<GemmHipModuleWrapper> module;
+
+    std::optional<std::array<int, 3>> customBlockSize;
+    std::optional<ShapeCondition>     shapeCondition;
 
     bool isCustomKernel() const
     {
