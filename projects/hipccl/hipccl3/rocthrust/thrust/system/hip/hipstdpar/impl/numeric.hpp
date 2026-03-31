@@ -51,6 +51,7 @@
 
 #  include <algorithm>
 #  include <execution>
+#  include <type_traits>
 #  include <utility>
 
 #  include "hipstd.hpp"
@@ -265,9 +266,32 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
 
   auto lo = ::thrust::inclusive_scan(::thrust::device, fi, li, fo, op);
 
-  return ::thrust::transform(::thrust::device, fo, lo, fo, [op = ::std::move(op), x = ::std::move(x)](auto&& y) {
-    return op(x, y);
-  });
+  auto fn   = [op = ::std::move(op), x = ::std::move(x)](auto&& y) { return op(x, y); };
+  using fn_t = decltype(fn);
+
+  if constexpr (::std::is_trivially_destructible_v<fn_t>)
+  {
+    return ::thrust::transform(::thrust::device, fo, lo, fo, ::std::move(fn));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+    O result;
+    try
+    {
+      result = ::thrust::transform(
+        ::thrust::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    ::thrust::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar inclusive_scan: failed to synchronize");
+    guard.destroy_and_free();
+    return result;
+  }
 }
 
 template <typename I,
@@ -459,9 +483,32 @@ inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, 
 
   auto lo = ::thrust::transform_inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op1), op0);
 
-  return ::thrust::transform(::thrust::device, fo, lo, fo, [op0 = ::std::move(op0), x = ::std::move(x)](auto&& y) {
-    return op0(x, y);
-  });
+  auto fn    = [op0 = ::std::move(op0), x = ::std::move(x)](auto&& y) { return op0(x, y); };
+  using fn_t = decltype(fn);
+
+  if constexpr (::std::is_trivially_destructible_v<fn_t>)
+  {
+    return ::thrust::transform(::thrust::device, fo, lo, fo, ::std::move(fn));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+    O result;
+    try
+    {
+      result = ::thrust::transform(
+        ::thrust::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    ::thrust::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar transform_inclusive_scan: failed to synchronize");
+    guard.destroy_and_free();
+    return result;
+  }
 }
 
 template <
