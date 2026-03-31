@@ -144,7 +144,7 @@ int main() {
 |-------------|------|------------|-----------|
 | gfx942 | MI325X, MI300X, MI300A | ✔️ | ✔️ |
 | gfx950 | MI355X, MI350X | ✔️ | ✔️ |
-| gfx1100 | RX 7900 XTX/XT/GRE, Radeon PRO W7900 (Dual Slot), Radeon PRO W7800 (48GB) | ✔️ | |
+| gfx1100 | Radeon RX 7900 XTX/XT/GRE, Radeon PRO W7900 (Dual Slot), Radeon PRO W7800 (48GB) | ✔️ | |
 | gfx1150 | Radeon 890M/880M iGPU | ✔️ | |
 | gfx1151 | Radeon 8060S/8050S/8040S iGPU | ✔️ | |
 | gfx1152 | Radeon 860M/840M iGPU | ✔️ | |
