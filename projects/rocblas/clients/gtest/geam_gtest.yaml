@@ -22,6 +22,7 @@ Definitions:
 
   - &large_matrix_size_range
     - { M:   192, N:   193, lda:   194, ldb:   195, ldc:   196 }
+    - { M:   192, N:   192, lda:   192, ldb:   192, ldc:   192 }
     - { M:   640, N:   641, lda:   960, ldb:   961, ldc:   962 }
     - { M:  1001, N:  1000, lda:  1003, ldb:  1002, ldc:  1001 }
 
@@ -51,6 +52,7 @@ Definitions:
 
   - &large_complex_alpha_beta_range
     - { alpha:  1, beta:  2, alphai:  3, betai:  4 }
+    - { alpha:  1, beta:  0, alphai:  5, betai:  0 }
 
   - &huge_complex_alpha_beta_range
     - { alpha:  4, beta:  3, alphai:  2, betai:  1 }
@@ -212,7 +214,6 @@ Tests:
   transA_transB: *transA_transB_range
   matrix_size: *large_matrix_size_range
   alpha_beta: *large_alpha_beta_range
-  pointer_mode_device: false
 
 - name: geam_large_complex
   category: pre_checkin
@@ -221,7 +222,7 @@ Tests:
   transA_transB: *transA_transB_range
   matrix_size: *large_matrix_size_range
   alpha_beta: *large_complex_alpha_beta_range
-  pointer_mode_device: false
+  pointer_mode_device: false # more kernels for host only 
 
 - name: geam_batched_large_complex
   category: pre_checkin
@@ -231,7 +232,7 @@ Tests:
   matrix_size: *large_matrix_size_range
   alpha_beta: *large_complex_alpha_beta_range
   batch_count: [ 2 ]
-  pointer_mode_host: false
+  pointer_mode_device: false
 
 - name: geam_strided_batched_large_complex
   category: pre_checkin
@@ -242,7 +243,6 @@ Tests:
   alpha_beta: *large_complex_alpha_beta_range
   stride_scale: [ 2 ]
   batch_count: [ 2 ]
-  pointer_mode_host: false
 
 - name: geam_huge
   category: nightly
