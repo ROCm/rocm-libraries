@@ -334,7 +334,7 @@ if(MIOPEN_ENABLE_SQLITE AND MIOPEN_ENABLE_SQLITE_KERN_CACHE)
     list(APPEND MIOpen_Source kern_db.cpp bz2.cpp)
 endif()
 
-if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if(MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND MATCHES "^HIP")
     include(${PROJECT_SOURCE_DIR}/cmake/CopyExternalHeader.cmake)
     find_path(ROCRAND_INCLUDE_DIR "rocrand/rocrand_xorwow.h")
     if(ROCRAND_INCLUDE_DIR)
@@ -363,7 +363,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
     file(GLOB_RECURSE GPU_BATCHED_TRANSPOSE_KERNEL_HIP "kernels/gpu_batched_transpose_kernel/*.cpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_INCLUDE "kernels/gpu_general_tensor_reorder_kernel/*.hpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE "kernels/gpu_general_tensor_reorder_kernel/*.cpp")
-
 
     set(MIOPEN_KERNEL_INCLUDES
         ${STATIC_COMPOSABLE_KERNEL_INCLUDE}
@@ -781,7 +780,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
         )
 endif()
 
-if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if(MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND MATCHES "^HIP")
     set(KERNELS_SRC_BATCH_FACTOR 50 CACHE STRING "Amount of kernel source files to inline to a single object file.")
     set(KERNELS_BATCH_ID 0)
 
@@ -979,19 +978,19 @@ endif()
 
 ############################################################
 # MIOpen depends on OpenCL
-if( MIOPEN_BACKEND STREQUAL "OpenCL")
-    MESSAGE( STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}" )
-    target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS} )
-    target_link_libraries( MIOpen PUBLIC ${OPENCL_LIBRARIES} )
+if(MIOPEN_BACKEND STREQUAL "OpenCL")
+    message(STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}")
+    target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS})
+    target_link_libraries(MIOpen PUBLIC ${OPENCL_LIBRARIES})
     list(APPEND PACKAGE_DEPENDS PACKAGE OpenCL)
-elseif(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
+elseif(MIOPEN_BACKEND MATCHES "^HIP")
     target_link_libraries( MIOpen PRIVATE hip::device )
     target_link_libraries( MIOpen INTERFACE hip::host )
     if(MIOPEN_USE_HIPRTC)
         if(WIN32)
             target_link_libraries( MIOpen PRIVATE hiprtc::hiprtc )
         else()
-            target_link_libraries( MIOpen PRIVATE hiprtc)
+            target_link_libraries( MIOpen PRIVATE hiprtc )
         endif()
     endif()
     if(ENABLE_HIP_WORKAROUNDS)
