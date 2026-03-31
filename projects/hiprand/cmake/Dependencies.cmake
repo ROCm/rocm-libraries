@@ -25,9 +25,6 @@
 # HIP dependency is handled earlier in the project cmake file
 # when VerifyCompiler.cmake is included.
 
-# For downloading, building, and installing required dependencies
-include(cmake/DownloadProject.cmake)
-
 # This function checks to see if the download branch given by "branch" exists in the repository.
 # It does so using the git ls-remote command.
 # If the branch cannot be found, the variable described by "branch" is changed to "develop" in the host scope.

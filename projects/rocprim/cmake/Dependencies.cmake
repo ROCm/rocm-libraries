@@ -61,9 +61,6 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Global flag to cause add_library() to crea
 
 include(FetchContent)
 
-# For downloading, building, and installing required dependencies
-include(cmake/DownloadProject.cmake)
-
 # Test dependencies
 if(BUILD_TEST)
   # NOTE1: Google Test has created a mess with legacy FindGTest.cmake and newer GTestConfig.cmake
@@ -165,22 +162,23 @@ if(WITH_ROCRAND)
 endif()
 if(WITH_ROCRAND AND NOT rocrand_FOUND)
   message(STATUS "Downloading and building rocrand.")
-  set(ROCRAND_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand CACHE PATH "")
+  set(rocrand_LOCAL_DIR ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand CACHE PATH "")
 
   set(EXTRA_CMAKE_ARGS "-DGPU_TARGETS=${GPU_TARGETS}")
-  # CMAKE_ARGS of download_project (or ExternalProject_Add) can't contain ; so another separator
-  # is needed and LIST_SEPARATOR is passed to download_project()
+  # CMAKE_ARGS of FetchContent_Declare (or ExternalProject_Add) can't contain ; so another separator
+  # is needed and LIST_SEPARATOR is passed
   string(REPLACE ";" "|" EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS}")
   # Pass launcher so sccache can be used to speed up building rocRAND
   if(CMAKE_CXX_COMPILER_LAUNCHER)
     set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
   endif()
-  download_project(
-    PROJ                  rocrand
+
+  FetchContent_Declare(
+    rocrand
     GIT_REPOSITORY        https://github.com/ROCmSoftwarePlatform/rocRAND.git
     GIT_TAG               develop
     GIT_SHALLOW           TRUE
-    INSTALL_DIR           ${ROCRAND_ROOT}
+    INSTALL_DIR           ${rocrand_LOCAL_DIR}
     LIST_SEPARATOR        |
     CMAKE_ARGS            -DCMAKE_CXX_COMPILER=hipcc -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
     LOG_DOWNLOAD          TRUE
@@ -188,10 +186,11 @@ if(WITH_ROCRAND AND NOT rocrand_FOUND)
     LOG_BUILD             TRUE
     LOG_INSTALL           TRUE
     LOG_OUTPUT_ON_FAILURE TRUE
-    BUILD_PROJECT         TRUE
     UPDATE_DISCONNECTED   TRUE
   )
-  find_package(rocrand REQUIRED CONFIG PATHS ${ROCRAND_ROOT})
+  FetchContent_MakeAvailable(rocrand)
+
+  find_package(rocrand REQUIRED CONFIG PATHS ${rocrand_LOCAL_DIR})
 endif()
 
 
