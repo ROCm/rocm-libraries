@@ -23,6 +23,7 @@ from tests.helpers import (
     make_frontend_tensor_config,
     make_minimal_config,
     make_tensor_field,
+    make_test_data,
 )
 
 
@@ -359,6 +360,76 @@ class TestDataField:
     def test_is_optional_scalar_false_when_non_scalar(self):
         df = make_data_field(type="vector_int64", required=False)
         assert df.is_optional_scalar is False
+
+    def test_is_optional_scalar_bool_default_is_false(self):
+        """Plain bool (FBS bool field = false) is NOT optional scalar."""
+        df = make_data_field(type="bool", required=False, fbs_optional=False)
+        assert df.is_optional_scalar is False
+
+    def test_is_optional_scalar_bool_fbs_optional_is_true(self):
+        """FBS optional bool (bool field (optional)) IS optional scalar."""
+        df = make_data_field(type="bool", required=False, fbs_optional=True)
+        assert df.is_optional_scalar is True
+
+    def test_is_optional_scalar_bool_required_is_false(self):
+        """Required bool is never optional scalar regardless of fbs_optional."""
+        df = make_data_field(type="bool", required=True, fbs_optional=False)
+        assert df.is_optional_scalar is False
+
+    def test_is_optional_scalar_bool_required_fbs_optional(self):
+        """Required bool with fbs_optional=True: fbs_optional takes priority for bool."""
+        df = make_data_field(type="bool", required=True, fbs_optional=True)
+        assert df.is_optional_scalar is True
+
+    # --- frontend_getter_returns_optional ---
+
+    def test_frontend_getter_returns_optional_default_false(self):
+        df = make_data_field()
+        assert df.frontend_getter_returns_optional is False
+
+    def test_frontend_getter_returns_optional_set_true(self):
+        df = make_data_field(frontend_getter_returns_optional=True)
+        assert df.frontend_getter_returns_optional is True
+
+    # --- effective_sentinel_value ---
+
+    def test_effective_sentinel_value_with_sdk_name(self):
+        """Sentinel with sdk_name uses effective_sdk_name."""
+        enum_def = EnumDef(
+            values=[
+                EnumValue(name="UNSET", value=0, sentinel=True, sdk_name="UNSET"),
+                EnumValue(name="ADD", value=1),
+            ]
+        )
+        df = make_data_field(type="mode", enum_def=enum_def)
+        assert df.effective_sentinel_value == "UNSET"
+
+    def test_effective_sentinel_value_without_sdk_name(self):
+        """Sentinel without sdk_name falls back to name."""
+        enum_def = EnumDef(
+            values=[
+                EnumValue(name="NOT_SET", value=0, sentinel=True),
+                EnumValue(name="ADD", value=1),
+            ]
+        )
+        df = make_data_field(type="mode", enum_def=enum_def)
+        assert df.effective_sentinel_value == "NOT_SET"
+
+    def test_effective_sentinel_value_no_enum_def(self):
+        """No enum_def returns default 'NOT_SET'."""
+        df = make_data_field(type="mode")
+        assert df.effective_sentinel_value == "NOT_SET"
+
+    def test_effective_sentinel_value_no_sentinel_in_enum_def(self):
+        """enum_def with no sentinel value returns default 'NOT_SET'."""
+        enum_def = EnumDef(
+            values=[
+                EnumValue(name="ADD", value=1),
+                EnumValue(name="MUL", value=2),
+            ]
+        )
+        df = make_data_field(type="mode", enum_def=enum_def)
+        assert df.effective_sentinel_value == "NOT_SET"
 
     # --- cpp_type ---
 
@@ -1433,3 +1504,36 @@ class TestOperationConfigEdgeCases:
             cfg.test_integration_lifting_filename
             == "IntegrationBatchNormFwdDescriptorLifting.cpp"
         )
+
+
+class TestEffectiveConstantsInclude:
+    """Tests for effective_constants_include and constants_namespace properties."""
+
+    def test_returns_constants_include_when_set(self):
+        td = make_test_data(constants_include="ConvFpropConstants")
+        cfg = make_minimal_config(test_data=td)
+        assert cfg.effective_constants_include == "ConvFpropConstants"
+
+    def test_derives_from_name_when_not_set(self):
+        td = make_test_data(constants_include="")
+        cfg = make_minimal_config(name="BatchnormInference", test_data=td)
+        assert cfg.effective_constants_include == "BatchnormInferenceConstants"
+
+    def test_derives_from_name_when_default(self):
+        cfg = make_minimal_config(name="ConvolutionBwd")
+        assert cfg.effective_constants_include == "ConvolutionBwdConstants"
+
+
+class TestTensorConstPrefix:
+    """Tests for OperationConfig.tensor_const_prefix property."""
+
+    def test_with_constants_include(self):
+        """Pre-existing constants header uses short 'K_' prefix."""
+        td = make_test_data(constants_include="ConvFpropConstants")
+        cfg = make_minimal_config(test_data=td)
+        assert cfg.tensor_const_prefix == "K_"
+
+    def test_without_constants_include(self):
+        """No constants_include derives prefix from operation name."""
+        cfg = make_minimal_config()
+        assert cfg.tensor_const_prefix == "K_TESTOP_"
