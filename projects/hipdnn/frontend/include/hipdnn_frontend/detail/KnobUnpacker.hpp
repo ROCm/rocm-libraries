@@ -26,55 +26,35 @@ namespace hipdnn_frontend::detail
     unpackIntKnobFields(hipdnnBackendDescriptor_t knobDesc)
 {
     int64_t intVal = 0;
-    auto err = getDescriptorAttrScalar(knobDesc,
-                                       HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT,
-                                       HIPDNN_TYPE_INT64,
-                                       intVal,
-                                       "knob info default value (int64)");
-    if(err.is_bad())
-    {
-        return {err, {}};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrScalar(knobDesc,
+                                           HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT,
+                                           HIPDNN_TYPE_INT64,
+                                           intVal,
+                                           "knob info default value (int64)"));
 
     std::optional<int64_t> minVal;
-    err = getDescriptorAttrOptionalScalar(knobDesc,
-                                          HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT,
-                                          HIPDNN_TYPE_INT64,
-                                          minVal,
-                                          "knob info min value (int64)");
-    if(err.is_bad())
-    {
-        return {err, {}};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrOptionalScalar(knobDesc,
+                                                   HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT,
+                                                   HIPDNN_TYPE_INT64,
+                                                   minVal,
+                                                   "knob info min value (int64)"));
 
     std::optional<int64_t> maxVal;
-    err = getDescriptorAttrOptionalScalar(knobDesc,
-                                          HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT,
-                                          HIPDNN_TYPE_INT64,
-                                          maxVal,
-                                          "knob info max value (int64)");
-    if(err.is_bad())
-    {
-        return {err, {}};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrOptionalScalar(knobDesc,
+                                                   HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT,
+                                                   HIPDNN_TYPE_INT64,
+                                                   maxVal,
+                                                   "knob info max value (int64)"));
 
     std::optional<int64_t> stride;
-    err = getDescriptorAttrOptionalScalar(
-        knobDesc, HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT, HIPDNN_TYPE_INT64, stride, "knob info stride");
-    if(err.is_bad())
-    {
-        return {err, {}};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrOptionalScalar(
+        knobDesc, HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT, HIPDNN_TYPE_INT64, stride, "knob info stride"));
 
     std::vector<int64_t> validValuesVec;
-    err = getDescriptorAttrVec(knobDesc,
-                               HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT,
-                               validValuesVec,
-                               "knob info valid values (int64)");
-    if(err.is_bad())
-    {
-        return {err, {}};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrVec(knobDesc,
+                                        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT,
+                                        validValuesVec,
+                                        "knob info valid values (int64)"));
 
     std::shared_ptr<IConstraint> constraint = std::make_shared<EmptyConstraint>();
     if(minVal.has_value() || maxVal.has_value() || stride.has_value() || !validValuesVec.empty())
@@ -92,37 +72,25 @@ namespace hipdnn_frontend::detail
     unpackFloatKnobFields(hipdnnBackendDescriptor_t knobDesc)
 {
     double doubleVal = 0.0;
-    auto err = getDescriptorAttrScalar(knobDesc,
-                                       HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT,
-                                       HIPDNN_TYPE_DOUBLE,
-                                       doubleVal,
-                                       "knob info default value (double)");
-    if(err.is_bad())
-    {
-        return {err, {}};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrScalar(knobDesc,
+                                           HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT,
+                                           HIPDNN_TYPE_DOUBLE,
+                                           doubleVal,
+                                           "knob info default value (double)"));
 
     std::optional<double> minVal;
-    err = getDescriptorAttrOptionalScalar(knobDesc,
-                                          HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT,
-                                          HIPDNN_TYPE_DOUBLE,
-                                          minVal,
-                                          "knob info min value (double)");
-    if(err.is_bad())
-    {
-        return {err, {}};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrOptionalScalar(knobDesc,
+                                                   HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT,
+                                                   HIPDNN_TYPE_DOUBLE,
+                                                   minVal,
+                                                   "knob info min value (double)"));
 
     std::optional<double> maxVal;
-    err = getDescriptorAttrOptionalScalar(knobDesc,
-                                          HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT,
-                                          HIPDNN_TYPE_DOUBLE,
-                                          maxVal,
-                                          "knob info max value (double)");
-    if(err.is_bad())
-    {
-        return {err, {}};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrOptionalScalar(knobDesc,
+                                                   HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT,
+                                                   HIPDNN_TYPE_DOUBLE,
+                                                   maxVal,
+                                                   "knob info max value (double)"));
 
     std::shared_ptr<IConstraint> constraint = std::make_shared<EmptyConstraint>();
     if(minVal.has_value() || maxVal.has_value())
@@ -138,23 +106,15 @@ namespace hipdnn_frontend::detail
     unpackStringKnobFields(hipdnnBackendDescriptor_t knobDesc, const std::string& knobId)
 {
     std::string strVal;
-    auto err = getDescriptorAttrString(
-        knobDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, strVal, "knob info default value (string)");
-    if(err.is_bad())
-    {
-        return {err, {}};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrString(
+        knobDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, strVal, "knob info default value (string)"));
 
     std::optional<int32_t> stringMaxLength;
-    err = getDescriptorAttrOptionalScalar(knobDesc,
-                                          HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT,
-                                          HIPDNN_TYPE_INT32,
-                                          stringMaxLength,
-                                          "knob info string max length");
-    if(err.is_bad())
-    {
-        return {err, {}};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrOptionalScalar(knobDesc,
+                                                   HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT,
+                                                   HIPDNN_TYPE_INT32,
+                                                   stringMaxLength,
+                                                   "knob info string max length"));
 
     // Read valid values string - uses the raw C-API since the format
     // is a null-separated buffer
@@ -237,7 +197,8 @@ namespace hipdnn_frontend::detail
 [[nodiscard]] inline std::pair<Error, std::optional<Knob>>
     unpackKnobDescriptor(hipdnnBackendDescriptor_t knobDesc)
 {
-    // Read knob ID
+    // Read knob ID — cannot use HIPDNN_FE_TRY because we need knobId
+    // for the empty-check immediately after.
     std::string knobId;
     auto err
         = getDescriptorAttrString(knobDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, knobId, "knob info ID");
@@ -253,36 +214,24 @@ namespace hipdnn_frontend::detail
 
     // Read description
     std::string description;
-    err = getDescriptorAttrString(
-        knobDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, description, "knob info description");
-    if(err.is_bad())
-    {
-        return {err, std::nullopt};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrString(
+        knobDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, description, "knob info description"));
 
     // Read deprecated flag
     bool deprecated = false;
-    err = getDescriptorAttrScalar(knobDesc,
-                                  HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT,
-                                  HIPDNN_TYPE_BOOLEAN,
-                                  deprecated,
-                                  "knob info deprecated flag");
-    if(err.is_bad())
-    {
-        return {err, std::nullopt};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrScalar(knobDesc,
+                                           HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT,
+                                           HIPDNN_TYPE_BOOLEAN,
+                                           deprecated,
+                                           "knob info deprecated flag"));
 
     // Read the default value type first
     int64_t defaultValueTypeRaw = 0;
-    err = getDescriptorAttrScalar(knobDesc,
-                                  HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
-                                  HIPDNN_TYPE_INT64,
-                                  defaultValueTypeRaw,
-                                  "knob info default value type");
-    if(err.is_bad())
-    {
-        return {err, std::nullopt};
-    }
+    HIPDNN_FE_TRY(getDescriptorAttrScalar(knobDesc,
+                                           HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                                           HIPDNN_TYPE_INT64,
+                                           defaultValueTypeRaw,
+                                           "knob info default value type"));
 
     const auto defaultValueType = static_cast<hipdnnBackendAttributeType_t>(defaultValueTypeRaw);
     KnobValueVariant defaultValue;
@@ -396,8 +345,10 @@ namespace hipdnn_frontend::detail
 
     if(skippedCount > 0)
     {
-        HIPDNN_FE_LOG_WARN("Loaded " << outKnobs.size() << " knobs, skipped " << skippedCount
-                                      << " invalid/duplicate knobs");
+        std::string summary = "Loaded " + std::to_string(outKnobs.size()) + " knobs, skipped "
+                              + std::to_string(skippedCount) + " invalid/duplicate knobs";
+        HIPDNN_FE_LOG_WARN(summary);
+        return {ErrorCode::OK, std::move(summary)};
     }
 
     return {ErrorCode::OK, ""};
