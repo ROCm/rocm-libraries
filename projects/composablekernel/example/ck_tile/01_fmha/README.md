@@ -180,7 +180,7 @@ The following quantization scale modes are available via `-qscale`:
 | `n` or `0` | No quantization scale (default) |
 | `pt` or `1` | Per-tensor quantization scale — a single scale factor is applied to the entire tensor |
 | `bs` or `2` | Per-block quantization scale — a scale factor is applied per block of elements |
-| `kvbs` or `3` | only in bath_prefill, only in bath_prefill, you can't use this in fwd, |
+| `kvbs` or `3` | Only valid in bath_prefill, not in fwd |
 | `mx` or `4` | Microscaling (MX format), exclusively for `mxfp8` and `mxfp4` data types |
 
 Currently only `-vlayout=r` (`seqlen*hdim` for V matrix) is supported for fp8 data types.
