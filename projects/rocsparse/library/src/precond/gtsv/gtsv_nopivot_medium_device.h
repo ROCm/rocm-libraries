@@ -32,7 +32,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_no_pivot_pcr_tiled_forward_kernel(rocsparse_int m,
                                                 rocsparse_int n,
-                                                rocsparse_int ldb,
+                                                int64_t       ldb,
                                                 rocsparse_int num_spikes,
                                                 const T* __restrict__ dl,
                                                 const T* __restrict__ d,
@@ -330,7 +330,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_no_pivot_pcr_tiled_backward_kernel(rocsparse_int m,
                                                  rocsparse_int n,
-                                                 rocsparse_int ldb,
+                                                 int64_t       ldb,
                                                  int           num_spikes,
                                                  const T* __restrict__ dl_modified,
                                                  const T* __restrict__ d_modified,

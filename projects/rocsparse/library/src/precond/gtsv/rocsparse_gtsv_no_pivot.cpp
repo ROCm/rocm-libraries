@@ -96,7 +96,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
         *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // dl_modified
         *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // d_modified
         *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // du_modified
-        *buffer_size += ((sizeof(T) * m * n - 1) / 256 + 1) * 256; // B_modified
+        *buffer_size += ((sizeof(T) * int64_t(m) * n - 1) / 256 + 1) * 256; // B_modified
 
         constexpr int BLOCKSIZE  = determine_spike_solver_blocksize();
         const int     nblocks    = ((m - 1) / BLOCKSIZE + 1);
@@ -105,7 +105,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
         *buffer_size += ((sizeof(T) * num_spikes - 1) / 256 + 1) * 256; // dl_spike
         *buffer_size += ((sizeof(T) * num_spikes - 1) / 256 + 1) * 256; // d_spike
         *buffer_size += ((sizeof(T) * num_spikes - 1) / 256 + 1) * 256; // du_spike
-        *buffer_size += ((sizeof(T) * num_spikes * n - 1) / 256 + 1) * 256; // B_spike
+        *buffer_size += ((sizeof(T) * int64_t(num_spikes) * n - 1) / 256 + 1) * 256; // B_spike
     }
     else
     {
@@ -117,8 +117,8 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
         *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // db1
         *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // dc0
         *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // dc1
-        *buffer_size += ((sizeof(T) * m * n - 1) / 256 + 1) * 256; // drhs0
-        *buffer_size += ((sizeof(T) * m * n - 1) / 256 + 1) * 256; // drhs1
+        *buffer_size += ((sizeof(T) * int64_t(m) * n - 1) / 256 + 1) * 256; // drhs0
+        *buffer_size += ((sizeof(T) * int64_t(m) * n - 1) / 256 + 1) * 256; // drhs1
     }
 
     return rocsparse_status_success;
@@ -129,7 +129,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_cramer_rule_kernel(rocsparse_handle handle,
                                                rocsparse_int    n,
-                                               rocsparse_int    ldb,
+                                               int64_t          ldb,
                                                const T*         dl,
                                                const T*         d,
                                                const T*         du,
@@ -152,7 +152,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_3(rocsparse_handle handle,
                                             rocsparse_int    n,
-                                            rocsparse_int    ldb,
+                                            int64_t          ldb,
                                             const T*         dl,
                                             const T*         d,
                                             const T*         du,
@@ -175,7 +175,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_4(rocsparse_handle handle,
                                             rocsparse_int    n,
-                                            rocsparse_int    ldb,
+                                            int64_t          ldb,
                                             const T*         dl,
                                             const T*         d,
                                             const T*         du,
@@ -198,7 +198,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_5(rocsparse_handle handle,
                                             rocsparse_int    n,
-                                            rocsparse_int    ldb,
+                                            int64_t          ldb,
                                             const T*         dl,
                                             const T*         d,
                                             const T*         du,
@@ -221,7 +221,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_6(rocsparse_handle handle,
                                             rocsparse_int    n,
-                                            rocsparse_int    ldb,
+                                            int64_t          ldb,
                                             const T*         dl,
                                             const T*         d,
                                             const T*         du,
@@ -244,7 +244,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_7(rocsparse_handle handle,
                                             rocsparse_int    n,
-                                            rocsparse_int    ldb,
+                                            int64_t          ldb,
                                             const T*         dl,
                                             const T*         d,
                                             const T*         du,
@@ -267,7 +267,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, uint32_t M, typename T>
     rocsparse_status launch_thomas_kernel_m(rocsparse_handle handle,
                                             rocsparse_int    n,
-                                            rocsparse_int    ldb,
+                                            int64_t          ldb,
                                             const T*         dl,
                                             const T*         d,
                                             const T*         du,
@@ -311,7 +311,7 @@ namespace rocsparse
     rocsparse_status launch_pcr_wavefront_kernel(rocsparse_handle handle,
                                                  rocsparse_int    m,
                                                  rocsparse_int    n,
-                                                 rocsparse_int    ldb,
+                                                 int64_t          ldb,
                                                  const T*         dl,
                                                  const T*         d,
                                                  const T*         du,
@@ -340,7 +340,7 @@ namespace rocsparse
     rocsparse_status launch_pcr_shared_kernel(rocsparse_handle handle,
                                               rocsparse_int    m,
                                               rocsparse_int    n,
-                                              rocsparse_int    ldb,
+                                              int64_t          ldb,
                                               const T*         dl,
                                               const T*         d,
                                               const T*         du,
@@ -368,7 +368,7 @@ namespace rocsparse
     rocsparse_status launch_crpcr_pow2_shared_kernel(rocsparse_handle handle,
                                                      rocsparse_int    m,
                                                      rocsparse_int    n,
-                                                     rocsparse_int    ldb,
+                                                     int64_t          ldb,
                                                      const T*         dl,
                                                      const T*         d,
                                                      const T*         du,
@@ -408,7 +408,7 @@ namespace rocsparse
 
         using thomas_kernel_func_ptr = rocsparse_status (*)(rocsparse_handle handle,
                                                             rocsparse_int    n,
-                                                            rocsparse_int    ldb,
+                                                            int64_t          ldb,
                                                             const T*         dl,
                                                             const T*         d,
                                                             const T*         du,
@@ -449,7 +449,7 @@ namespace rocsparse
         using pcr_kernel_func_ptr = rocsparse_status (*)(rocsparse_handle handle,
                                                          rocsparse_int    m,
                                                          rocsparse_int    n,
-                                                         rocsparse_int    ldb,
+                                                         int64_t          ldb,
                                                          const T*         dl,
                                                          const T*         d,
                                                          const T*         du,
@@ -487,7 +487,7 @@ namespace rocsparse
     rocsparse_status launch_backward_substitution_kernel(rocsparse_handle handle,
                                                          rocsparse_int    m,
                                                          rocsparse_int    n,
-                                                         rocsparse_int    ldb,
+                                                         int64_t          ldb,
                                                          int              num_spikes,
                                                          const T*         dl_modified,
                                                          const T*         d_modified,
@@ -519,7 +519,7 @@ namespace rocsparse
     rocsparse_status launch_forward_elimination_kernel(rocsparse_handle handle,
                                                        rocsparse_int    m,
                                                        rocsparse_int    n,
-                                                       rocsparse_int    ldb,
+                                                       int64_t          ldb,
                                                        rocsparse_int    num_spikes,
                                                        const T*         dl,
                                                        const T*         d,
@@ -607,7 +607,7 @@ namespace rocsparse
         T* du_modified = reinterpret_cast<T*>(ptr);
         ptr += ((sizeof(T) * m - 1) / 256 + 1) * 256;
         T* B_modified = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * m * n - 1) / 256 + 1) * 256;
+        ptr += ((sizeof(T) * int64_t(m) * n - 1) / 256 + 1) * 256;
 
         constexpr int BLOCKSIZE  = determine_spike_solver_blocksize();
         const int     nblocks    = ((m - 1) / BLOCKSIZE + 1);
@@ -620,7 +620,7 @@ namespace rocsparse
         T* du_spike = reinterpret_cast<T*>(ptr);
         ptr += ((sizeof(T) * num_spikes - 1) / 256 + 1) * 256;
         T* B_spike = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * num_spikes * n - 1) / 256 + 1) * 256;
+        ptr += ((sizeof(T) * int64_t(num_spikes) * n - 1) / 256 + 1) * 256;
 
         constexpr int NUM_RHS = 8;
 
@@ -810,9 +810,9 @@ namespace rocsparse
         T* dc1 = reinterpret_cast<T*>(ptr);
         ptr += ((sizeof(T) * m - 1) / 256 + 1) * 256;
         T* drhs0 = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * m * n - 1) / 256 + 1) * 256;
+        ptr += ((sizeof(T) * int64_t(m) * n - 1) / 256 + 1) * 256;
         T* drhs1 = reinterpret_cast<T*>(ptr);
-        // ptr += ((sizeof(T) * m * n - 1) / 256 + 1) * 256;
+        // ptr += ((sizeof(T) * int64_t(m) * n - 1) / 256 + 1) * 256;
 
         // Run special algorithm if m is power of 2
         if((m & (m - 1)) == 0)

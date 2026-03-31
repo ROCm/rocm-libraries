@@ -87,7 +87,7 @@ void testing_gtsv_no_pivot(const Arguments& arg)
 {
     rocsparse_int m   = arg.M;
     rocsparse_int n   = arg.N;
-    rocsparse_int ldb = arg.denseld;
+    int64_t       ldb = arg.denseld;
 
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
@@ -160,14 +160,16 @@ void testing_gtsv_no_pivot(const Arguments& arg)
 
         // Check
         std::vector<T> hresult(ldb * n, static_cast<T>(7));
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1024)
+#endif
         for(rocsparse_int j = 0; j < n; j++)
         {
             hresult[ldb * j] = hd[0] * hB[ldb * j] + hdu[0] * hB[ldb * j + 1];
             hresult[ldb * j + m - 1]
                 = hdl[m - 1] * hB[ldb * j + m - 2] + hd[m - 1] * hB[ldb * j + m - 1];
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic, 1024)
-#endif
+
             for(rocsparse_int i = 1; i < m - 1; i++)
             {
                 hresult[ldb * j + i] = hdl[i] * hB[ldb * j + i - 1] + hd[i] * hB[ldb * j + i]

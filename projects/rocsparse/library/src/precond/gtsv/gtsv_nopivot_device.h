@@ -33,7 +33,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_2x2_kernel(rocsparse_int n,
-                                 rocsparse_int ldb,
+                                 int64_t       ldb,
                                  const T* __restrict__ dl,
                                  const T* __restrict__ d,
                                  const T* __restrict__ du,
@@ -73,7 +73,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_3x3_kernel(rocsparse_int n,
-                                 rocsparse_int ldb,
+                                 int64_t       ldb,
                                  const T* __restrict__ dl,
                                  const T* __restrict__ d,
                                  const T* __restrict__ du,
@@ -143,7 +143,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_4x4_kernel(rocsparse_int n,
-                                 rocsparse_int ldb,
+                                 int64_t       ldb,
                                  const T* __restrict__ dl,
                                  const T* __restrict__ d,
                                  const T* __restrict__ du,
@@ -224,7 +224,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_5x5_kernel(rocsparse_int n,
-                                 rocsparse_int ldb,
+                                 int64_t       ldb,
                                  const T* __restrict__ dl,
                                  const T* __restrict__ d,
                                  const T* __restrict__ du,
@@ -318,7 +318,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_6x6_kernel(rocsparse_int n,
-                                 rocsparse_int ldb,
+                                 int64_t       ldb,
                                  const T* __restrict__ dl,
                                  const T* __restrict__ d,
                                  const T* __restrict__ du,
@@ -425,7 +425,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_7x7_kernel(rocsparse_int n,
-                                 rocsparse_int ldb,
+                                 int64_t       ldb,
                                  const T* __restrict__ dl,
                                  const T* __restrict__ d,
                                  const T* __restrict__ du,
@@ -583,7 +583,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, uint32_t M, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_thomas_kernel(rocsparse_int n,
-                                    rocsparse_int ldb,
+                                    int64_t       ldb,
                                     const T* __restrict__ dl,
                                     const T* __restrict__ d,
                                     const T* __restrict__ du,
@@ -633,7 +633,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_pcr_wavefront_kernel(rocsparse_int m,
                                            rocsparse_int n,
-                                           rocsparse_int ldb,
+                                           int64_t       ldb,
                                            const T* __restrict__ dl,
                                            const T* __restrict__ d,
                                            const T* __restrict__ du,
@@ -750,7 +750,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_no_pivot_pcr_shared_kernel(rocsparse_int m,
                                          rocsparse_int n,
-                                         rocsparse_int ldb,
+                                         int64_t       ldb,
                                          const T* __restrict__ dl,
                                          const T* __restrict__ d,
                                          const T* __restrict__ du,
@@ -947,7 +947,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_crpcr_shared_kernel(rocsparse_int m,
                                           rocsparse_int n,
-                                          rocsparse_int ldb,
+                                          int64_t       ldb,
                                           const T* __restrict__ dl,
                                           const T* __restrict__ d,
                                           const T* __restrict__ du,
