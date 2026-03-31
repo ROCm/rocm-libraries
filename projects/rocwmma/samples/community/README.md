@@ -217,7 +217,7 @@ For questions about contributing community samples:
 ### SwiGLU Fused Dual GEMM
 - **File**: `simple_gemm_swiglu.cpp`
 - **Description**: Fused dual-GEMM + SwiGLU activation implementing the LLaMA/Mistral FFN gate layer. Computes `D = silu(A * B_gate) * (A * B_up)` in a single kernel using cooperative global read, LDS double buffering with three segments (A / B_gate / B_up), and register-level SiLU + Hadamard product fusion.
-- **Requirements**: ROCm 6.0+; CDNA3 gfx942 (MI300X),RDNA4 gfx1201 (RX 9070); float16 I/O, float32 compute
+- **Requirements**: ROCm 6.0+; CDNA3 gfx942 (MI300X), RDNA4 gfx1201 (RX 9070); float16 I/O, float32 compute
 - **Limitations**: M must be a multiple of MACRO_TILE_X (64), N must be a multiple of MACRO_TILE_Y (64), K must be a multiple of ROCWMMA_K (16); row_major only; not production-optimized
 - **Author**: Odin.Yang
 

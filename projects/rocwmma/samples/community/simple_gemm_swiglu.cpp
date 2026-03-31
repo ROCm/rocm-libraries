@@ -208,6 +208,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <string>
 #include <vector>
 
 #include <hip/hip_ext.h>
@@ -254,7 +255,7 @@ namespace gfx11Params
     };
 }
 
-#if(ROCWMMA_ARCH_GFX9)
+#if (ROCWMMA_ARCH_GFX9)
 using namespace gfx9Params;
 #else
 using namespace gfx11Params;
@@ -265,15 +266,15 @@ using namespace gfx11Params;
 // NOTE: Both B_gate and B_up use row_major to match fillRand's row-major fill
 //       convention (fillRand writes mat[i*n+j]).
 // ---------------------------------------------------------------------------
-using InputT  = float16_t;
-using OutputT = float16_t;
+using InputT   = float16_t;
+using OutputT  = float16_t;
 using ComputeT = float32_t;
 
-using DataLayoutA   = row_major;
-using DataLayoutBGate  = row_major; // B_gate : [K x N] row_major, ldb = N
-using DataLayoutBUp  = row_major; // B_up   : [K x N] row_major, ldb = N
-using DataLayoutD   = row_major;
-using DataLayoutLds = col_major;
+using DataLayoutA     = row_major;
+using DataLayoutBGate = row_major; // B_gate : [K x N] row_major, ldb = N
+using DataLayoutBUp   = row_major; // B_up   : [K x N] row_major, ldb = N
+using DataLayoutD     = row_major;
+using DataLayoutLds   = col_major;
 
 // ---------------------------------------------------------------------------
 // Tile dimensions
@@ -291,14 +292,15 @@ constexpr uint32_t MACRO_TILE_K = ROCWMMA_K;
 // ---------------------------------------------------------------------------
 
 // Per-block MFMA fragments (warp tile element)
-using MfmaFragA   = fragment<matrix_a,    ROCWMMA_M, ROCWMMA_N, ROCWMMA_K, InputT,  DataLayoutA>;
-using MfmaFragBGate  = fragment<matrix_b,    ROCWMMA_M, ROCWMMA_N, ROCWMMA_K, InputT,  DataLayoutBGate>;
-using MfmaFragBUp  = fragment<matrix_b,    ROCWMMA_M, ROCWMMA_N, ROCWMMA_K, InputT,  DataLayoutBUp>;
+using MfmaFragA     = fragment<matrix_a, ROCWMMA_M, ROCWMMA_N, ROCWMMA_K, InputT, DataLayoutA>;
+using MfmaFragBGate = fragment<matrix_b, ROCWMMA_M, ROCWMMA_N, ROCWMMA_K, InputT, DataLayoutBGate>;
+using MfmaFragBUp   = fragment<matrix_b, ROCWMMA_M, ROCWMMA_N, ROCWMMA_K, InputT, DataLayoutBUp>;
 // MfmaFragComputeOut: keep as ComputeT to avoid cross-type fragment register mapping issues.
 // We use a separate MfmaFragStoreOut (OutputT) only at the final store step, matching
 // the pattern used in perf_hgemm.cpp (MmaFragAcc -> MmaFragD cast).
-using MfmaFragComputeOut   = fragment<accumulator, ROCWMMA_M, ROCWMMA_N, ROCWMMA_K, ComputeT>;
-using MfmaFragStoreOut = fragment<accumulator, ROCWMMA_M, ROCWMMA_N, ROCWMMA_K, OutputT, DataLayoutD>;
+using MfmaFragComputeOut = fragment<accumulator, ROCWMMA_M, ROCWMMA_N, ROCWMMA_K, ComputeT>;
+using MfmaFragStoreOut
+    = fragment<accumulator, ROCWMMA_M, ROCWMMA_N, ROCWMMA_K, OutputT, DataLayoutD>;
 using MfmaFragAcc = MfmaFragComputeOut; // gate/up accumulators are the same type as D
 
 // Cooperative global read (macro tile)
@@ -306,27 +308,31 @@ using CoopScheduler = fragment_scheduler::coop_row_major_2d<TBLOCK_X, TBLOCK_Y>;
 
 using GRBuffA
     = fragment<matrix_a, MACRO_TILE_X, ROCWMMA_N, ROCWMMA_K, InputT, DataLayoutA, CoopScheduler>;
-using GRBuffBGate
-    = fragment<matrix_b, ROCWMMA_M, MACRO_TILE_Y, ROCWMMA_K, InputT, DataLayoutBGate, CoopScheduler>;
+using GRBuffBGate = fragment<matrix_b,
+                             ROCWMMA_M,
+                             MACRO_TILE_Y,
+                             ROCWMMA_K,
+                             InputT,
+                             DataLayoutBGate,
+                             CoopScheduler>;
 using GRBuffBUp
     = fragment<matrix_b, ROCWMMA_M, MACRO_TILE_Y, ROCWMMA_K, InputT, DataLayoutBUp, CoopScheduler>;
 
 // Local write (macro tile) -- apply col_major LDS layout; B must be transposed
-using LWBuffA  = apply_data_layout_t<GRBuffA,                     DataLayoutLds>;
+using LWBuffA     = apply_data_layout_t<GRBuffA, DataLayoutLds>;
 using LWBuffBGate = apply_data_layout_t<apply_transpose_t<GRBuffBGate>, DataLayoutLds>;
-using LWBuffBUp = apply_data_layout_t<apply_transpose_t<GRBuffBUp>, DataLayoutLds>;
+using LWBuffBUp   = apply_data_layout_t<apply_transpose_t<GRBuffBUp>, DataLayoutLds>;
 
 // Local read (MFMA fragment-level) -- matches LDS col_major layout
-using LRFragA  = apply_data_layout_t<MfmaFragA,                      DataLayoutLds>;
-using LRFragBGate = apply_data_layout_t<apply_transpose_t<MfmaFragBGate>,  DataLayoutLds>;
-using LRFragBUp = apply_data_layout_t<apply_transpose_t<MfmaFragBUp>,  DataLayoutLds>;
+using LRFragA     = apply_data_layout_t<MfmaFragA, DataLayoutLds>;
+using LRFragBGate = apply_data_layout_t<apply_transpose_t<MfmaFragBGate>, DataLayoutLds>;
+using LRFragBUp   = apply_data_layout_t<apply_transpose_t<MfmaFragBUp>, DataLayoutLds>;
 
 // ---------------------------------------------------------------------------
 // Device helper functions
 // ---------------------------------------------------------------------------
 
-ROCWMMA_DEVICE static inline void
-    globalReadCoopA(GRBuffA& gr, InputT const* addr, uint32_t ld)
+ROCWMMA_DEVICE static inline void globalReadCoopA(GRBuffA& gr, InputT const* addr, uint32_t ld)
 {
     load_matrix_sync(gr, addr, ld);
 }
@@ -337,8 +343,7 @@ ROCWMMA_DEVICE static inline void
     load_matrix_sync(gr, addr, ld);
 }
 
-ROCWMMA_DEVICE static inline void
-    globalReadCoopBUp(GRBuffBUp& gr, InputT const* addr, uint32_t ld)
+ROCWMMA_DEVICE static inline void globalReadCoopBUp(GRBuffBUp& gr, InputT const* addr, uint32_t ld)
 {
     load_matrix_sync(gr, addr, ld);
 }
@@ -367,31 +372,32 @@ ROCWMMA_DEVICE static inline void
 {
     using Mapper1d  = GetDataLayout_t<LRFragA>;
     using FragShape = GetIOShape_t<LRFragA>;
-    auto blockStep = Mapper1d::fromMatrixCoord(make_coord2d(FragShape::BlockHeight, 0u), ldsld);
+    auto blockStep  = Mapper1d::fromMatrixCoord(make_coord2d(FragShape::BlockHeight, 0u), ldsld);
 #pragma unroll
     for(int i = 0; i < BLOCKS_X; i++)
     {
         LRFragA tmp;
         load_matrix_sync(tmp, ldsAddrA, ldsld);
-        fragsA[i]  = apply_data_layout<DataLayoutA>(tmp);
-        ldsAddrA  += blockStep;
+        fragsA[i] = apply_data_layout<DataLayoutA>(tmp);
+        ldsAddrA += blockStep;
     }
 }
 
 // Read BLOCKS_Y B_gate-blocks from LDS
-ROCWMMA_DEVICE static inline void
-    localReadBGate(MfmaFragBGate (&fragsBGate)[BLOCKS_Y], InputT const* ldsAddrBGate, uint32_t ldsld)
+ROCWMMA_DEVICE static inline void localReadBGate(MfmaFragBGate (&fragsBGate)[BLOCKS_Y],
+                                                 InputT const* ldsAddrBGate,
+                                                 uint32_t      ldsld)
 {
     using Mapper1d  = GetDataLayout_t<LRFragBGate>;
     using FragShape = GetIOShape_t<LRFragBGate>;
-    auto blockStep = Mapper1d::fromMatrixCoord(make_coord2d(FragShape::BlockHeight, 0u), ldsld);
+    auto blockStep  = Mapper1d::fromMatrixCoord(make_coord2d(FragShape::BlockHeight, 0u), ldsld);
 #pragma unroll
     for(int i = 0; i < BLOCKS_Y; i++)
     {
         LRFragBGate tmp;
         load_matrix_sync(tmp, ldsAddrBGate, ldsld);
-        fragsBGate[i]  = apply_data_layout<DataLayoutBGate>(apply_transpose(tmp));
-        ldsAddrBGate  += blockStep;
+        fragsBGate[i] = apply_data_layout<DataLayoutBGate>(apply_transpose(tmp));
+        ldsAddrBGate += blockStep;
     }
 }
 
@@ -401,20 +407,20 @@ ROCWMMA_DEVICE static inline void
 {
     using Mapper1d  = GetDataLayout_t<LRFragBUp>;
     using FragShape = GetIOShape_t<LRFragBUp>;
-    auto blockStep = Mapper1d::fromMatrixCoord(make_coord2d(FragShape::BlockHeight, 0u), ldsld);
+    auto blockStep  = Mapper1d::fromMatrixCoord(make_coord2d(FragShape::BlockHeight, 0u), ldsld);
 #pragma unroll
     for(int i = 0; i < BLOCKS_Y; i++)
     {
         LRFragBUp tmp;
         load_matrix_sync(tmp, ldsAddrBUp, ldsld);
-        fragsBUp[i]  = apply_data_layout<DataLayoutBUp>(apply_transpose(tmp));
-        ldsAddrBUp  += blockStep;
+        fragsBUp[i] = apply_data_layout<DataLayoutBUp>(apply_transpose(tmp));
+        ldsAddrBUp += blockStep;
     }
 }
 
 // Fill all BLOCKS_X x BLOCKS_Y accumulator fragments with a scalar
-ROCWMMA_DEVICE static inline void
-    clear_acc_fragments(MfmaFragAcc (&frags)[BLOCKS_X][BLOCKS_Y], ComputeT val)
+ROCWMMA_DEVICE static inline void clear_acc_fragments(MfmaFragAcc (&frags)[BLOCKS_X][BLOCKS_Y],
+                                                      ComputeT val)
 {
 #pragma unroll
     for(int i = 0; i < BLOCKS_X; i++)
@@ -425,11 +431,10 @@ ROCWMMA_DEVICE static inline void
 
 // MFMA accumulation across the warp tile: acc += fragsA * fragsB
 template <typename FragB>
-ROCWMMA_DEVICE static inline void
-    mfma_warp_tile(MfmaFragAcc (&accOut)[BLOCKS_X][BLOCKS_Y],
-                   MfmaFragA const (&fragsA)[BLOCKS_X],
-                   FragB const (&fragsB)[BLOCKS_Y],
-                   MfmaFragAcc const (&accIn)[BLOCKS_X][BLOCKS_Y])
+ROCWMMA_DEVICE static inline void mfma_warp_tile(MfmaFragAcc (&accOut)[BLOCKS_X][BLOCKS_Y],
+                                                 MfmaFragA const (&fragsA)[BLOCKS_X],
+                                                 FragB const (&fragsB)[BLOCKS_Y],
+                                                 MfmaFragAcc const (&accIn)[BLOCKS_X][BLOCKS_Y])
 {
 #pragma unroll
     for(int i = 0; i < BLOCKS_X; i++)
@@ -453,10 +458,9 @@ ROCWMMA_DEVICE static inline ComputeT silu(ComputeT x)
 // Fused SwiGLU: D[i][j] = silu(gate[i][j]) * up[i][j]  (in ComputeT, no cast)
 // fragsD has the SAME type as fragsGate/fragsUp (ComputeT = MfmaFragAcc),
 // so element indices are guaranteed to correspond to the same output positions.
-ROCWMMA_DEVICE static inline void
-    apply_swiglu(MfmaFragComputeOut (&fragsD)[BLOCKS_X][BLOCKS_Y],
-                    MfmaFragAcc const (&fragsGate)[BLOCKS_X][BLOCKS_Y],
-                    MfmaFragAcc const (&fragsUp)[BLOCKS_X][BLOCKS_Y])
+ROCWMMA_DEVICE static inline void apply_swiglu(MfmaFragComputeOut (&fragsD)[BLOCKS_X][BLOCKS_Y],
+                                               MfmaFragAcc const (&fragsGate)[BLOCKS_X][BLOCKS_Y],
+                                               MfmaFragAcc const (&fragsUp)[BLOCKS_X][BLOCKS_Y])
 {
 #pragma unroll
     for(int i = 0; i < BLOCKS_X; i++)
@@ -465,20 +469,20 @@ ROCWMMA_DEVICE static inline void
 #pragma unroll
             for(int e = 0; e < (int)fragsGate[i][j].num_elements; e++)
                 fragsD[i][j].x[e] = silu(fragsGate[i][j].x[e]) * fragsUp[i][j].x[e];
-                // No cast here: stays in ComputeT (float32) to preserve precision.
-                // The OutputT cast happens in globalWriteD via MfmaFragStoreOut.
+    // No cast here: stays in ComputeT (float32) to preserve precision.
+    // The OutputT cast happens in globalWriteD via MfmaFragStoreOut.
 }
 
 // Write the D warp tile to global memory (ComputeT -> OutputT via intermediate fragment)
 // Pattern: fragsD (ComputeT) -> fragsOut (OutputT) -> store_matrix_sync with OutputT*
 // This matches the perf_hgemm.cpp convention and ensures type-safe store.
-ROCWMMA_DEVICE static inline void
-    globalWriteD(OutputT* gAddrD, MfmaFragComputeOut const (&fragsD)[BLOCKS_X][BLOCKS_Y], uint32_t ldd)
+ROCWMMA_DEVICE static inline void globalWriteD(
+    OutputT* gAddrD, MfmaFragComputeOut const (&fragsD)[BLOCKS_X][BLOCKS_Y], uint32_t ldd)
 {
     using Mapper1d  = GetDataLayout_t<MfmaFragStoreOut>;
     using FragShape = GetIOShape_t<MfmaFragStoreOut>;
     auto blockStepX = Mapper1d::fromMatrixCoord(make_coord2d(FragShape::BlockHeight, 0u), ldd);
-    auto blockStepY = Mapper1d::fromMatrixCoord(make_coord2d(0u, FragShape::BlockWidth),  ldd);
+    auto blockStepY = Mapper1d::fromMatrixCoord(make_coord2d(0u, FragShape::BlockWidth), ldd);
 #pragma unroll
     for(int i = 0; i < BLOCKS_X; i++)
     {
@@ -501,25 +505,24 @@ ROCWMMA_DEVICE static inline void
 // ---------------------------------------------------------------------------
 // Main SwiGLU kernel
 //
-//   D = silu(A * B_gate)  ?  (A * B_up)
+//   D = silu(A * B_gate)  *  (A * B_up)
 //
 //   A      [M x K] row_major
 //   B_gate [K x N] row_major
 //   B_up   [K x N] row_major
 //   D      [M x N] row_major
 // ---------------------------------------------------------------------------
-ROCWMMA_KERNEL void __launch_bounds__(256)
-    gemm_swiglu_fused(uint32_t       m,
-                         uint32_t       n,
-                         uint32_t       k,
-                         InputT const*  a,
-                         InputT const*  b_gate,
-                         InputT const*  b_up,
-                         OutputT*       d,
-                         uint32_t       lda,
-                         uint32_t       ldBGate,
-                         uint32_t       ldBUp,
-                         uint32_t       ldd)
+ROCWMMA_KERNEL void __launch_bounds__(256) gemm_swiglu_fused(uint32_t      m,
+                                                             uint32_t      n,
+                                                             uint32_t      k,
+                                                             InputT const* a,
+                                                             InputT const* b_gate,
+                                                             InputT const* b_up,
+                                                             OutputT*      d,
+                                                             uint32_t      lda,
+                                                             uint32_t      ldBGate,
+                                                             uint32_t      ldBUp,
+                                                             uint32_t      ldd)
 {
     if constexpr(!ROCWMMA_ARCH_HOST)
     {
@@ -548,9 +551,9 @@ ROCWMMA_KERNEL void __launch_bounds__(256)
         // ------------------------------------------------------------------
         // Global read address setup
         // ------------------------------------------------------------------
-        using GRBuffAMap1d  = GetDataLayout_t<GRBuffA>;
+        using GRBuffAMap1d     = GetDataLayout_t<GRBuffA>;
         using GRBuffBGateMap1d = GetDataLayout_t<GRBuffBGate>;
-        using GRBuffBUpMap1d = GetDataLayout_t<GRBuffBUp>;
+        using GRBuffBUpMap1d   = GetDataLayout_t<GRBuffBUp>;
 
         auto globalReadOffsetA
             = GRBuffAMap1d::fromMatrixCoord(make_coord2d(get<0>(macroTileCoord), 0u), lda);
@@ -559,9 +562,11 @@ ROCWMMA_KERNEL void __launch_bounds__(256)
         auto globalReadOffsetBUp
             = GRBuffBUpMap1d::fromMatrixCoord(make_coord2d(0u, get<1>(macroTileCoord)), ldBUp);
 
-        auto kStepOffsetA  = GRBuffAMap1d::fromMatrixCoord(make_coord2d(0u, MACRO_TILE_K), lda);
-        auto kStepOffsetBGate = GRBuffBGateMap1d::fromMatrixCoord(make_coord2d(MACRO_TILE_K, 0u), ldBGate);
-        auto kStepOffsetBUp = GRBuffBUpMap1d::fromMatrixCoord(make_coord2d(MACRO_TILE_K, 0u), ldBUp);
+        auto kStepOffsetA = GRBuffAMap1d::fromMatrixCoord(make_coord2d(0u, MACRO_TILE_K), lda);
+        auto kStepOffsetBGate
+            = GRBuffBGateMap1d::fromMatrixCoord(make_coord2d(MACRO_TILE_K, 0u), ldBGate);
+        auto kStepOffsetBUp
+            = GRBuffBUpMap1d::fromMatrixCoord(make_coord2d(MACRO_TILE_K, 0u), ldBUp);
 
         // ------------------------------------------------------------------
         // Initial global pre-fetch
@@ -570,15 +575,15 @@ ROCWMMA_KERNEL void __launch_bounds__(256)
         // before the K-loop begins, establishing the first "Lo" buffer
         // for the double-buffering scheme.
         // ------------------------------------------------------------------
-        GRBuffA  grBuffA;
+        GRBuffA     grBuffA;
         GRBuffBGate grBuffBGate;
-        GRBuffBUp grBuffBUp;
+        GRBuffBUp   grBuffBUp;
 
-        globalReadCoopA(grBuffA,   a      + globalReadOffsetA,  lda);
+        globalReadCoopA(grBuffA, a + globalReadOffsetA, lda);
         globalReadCoopBGate(grBuffBGate, b_gate + globalReadOffsetBGate, ldBGate);
-        globalReadCoopBUp(grBuffBUp, b_up   + globalReadOffsetBUp, ldBUp);
+        globalReadCoopBUp(grBuffBUp, b_up + globalReadOffsetBUp, ldBUp);
 
-        globalReadOffsetA  += kStepOffsetA;
+        globalReadOffsetA += kStepOffsetA;
         globalReadOffsetBGate += kStepOffsetBGate;
         globalReadOffsetBUp += kStepOffsetBUp;
 
@@ -591,54 +596,51 @@ ROCWMMA_KERNEL void __launch_bounds__(256)
         // all three, and the col_major layout lets each warp read its
         // own row-slice with a simple offset.
         //
-        //   Segment  | rows            | height      | content
-        //   ---------+-----------------+-------------+---------
-        //      A     | [0 .. MtX)      | MACRO_TILE_X| A tile
-        //     B_gate | [MtX .. 2*MtY)  | MACRO_TILE_Y| Bg^T tile
-        //     B_up   | [2*MtY .. 3*MtY)| MACRO_TILE_Y| Bu^T tile
+        //   Segment  | rows                  | height       | content
+        //   ---------+-----------------------+--------------+---------
+        //      A     | [0 .. MtX)            | MACRO_TILE_X | A tile
+        //     B_gate | [MtX .. MtX+MtY)      | MACRO_TILE_Y | Bg^T tile
+        //     B_up   | [MtX+MtY .. MtX+2*MtY)| MACRO_TILE_Y | Bu^T tile
         //
         //   width  = MACRO_TILE_K
         //   ldsld  = ldsHeight  (col_major leading dim = number of rows)
         // ------------------------------------------------------------------
         HIP_DYNAMIC_SHARED(void*, localMemPtr);
 
-        using LWBuffAShape  = GetIOShape_t<LWBuffA>;
+        using LWBuffAShape     = GetIOShape_t<LWBuffA>;
         using LWBuffBGateShape = GetIOShape_t<LWBuffBGate>;
-        using LWBuffBUpShape = GetIOShape_t<LWBuffBUp>;
-        using LWBuffAMap1d  = GetDataLayout_t<LWBuffA>;
+        using LWBuffBUpShape   = GetIOShape_t<LWBuffBUp>;
+        using LWBuffAMap1d     = GetDataLayout_t<LWBuffA>;
         using LWBuffBGateMap1d = GetDataLayout_t<LWBuffBGate>;
 
         constexpr uint32_t ldsWidth  = MACRO_TILE_K;
-        constexpr uint32_t ldsHeight = LWBuffAShape::BlockHeight
-                                       + LWBuffBGateShape::BlockHeight
+        constexpr uint32_t ldsHeight = LWBuffAShape::BlockHeight + LWBuffBGateShape::BlockHeight
                                        + LWBuffBUpShape::BlockHeight;
-        constexpr uint32_t sizeLds   = ldsHeight * ldsWidth;
-        constexpr uint32_t ldsld
-            = std::is_same_v<DataLayoutLds, row_major> ? ldsWidth : ldsHeight;
+        constexpr uint32_t sizeLds = ldsHeight * ldsWidth;
+        constexpr uint32_t ldsld = std::is_same_v<DataLayoutLds, row_major> ? ldsWidth : ldsHeight;
 
         auto* ldsPtrLo = reinterpret_cast<InputT*>(localMemPtr);
         auto* ldsPtrHi = ldsPtrLo + sizeLds;
 
         // Absolute write offsets for each segment (from the buffer base ptr)
-        auto ldsWriteOffsetA
-            = 0u;
+        auto ldsWriteOffsetA = 0u;
         auto ldsWriteOffsetBGate
             = LWBuffAMap1d::fromMatrixCoord(make_coord2d(LWBuffAShape::BlockHeight, 0u), ldsld);
-        auto ldsWriteOffsetBUp
-            = ldsWriteOffsetBGate
-              + LWBuffBGateMap1d::fromMatrixCoord(make_coord2d(LWBuffBGateShape::BlockHeight, 0u), ldsld);
+        auto ldsWriteOffsetBUp = ldsWriteOffsetBGate
+                                 + LWBuffBGateMap1d::fromMatrixCoord(
+                                     make_coord2d(LWBuffBGateShape::BlockHeight, 0u), ldsld);
 
         // Per-warp read offsets (warp selects its row/col slice within the segment)
-        using LWBuffAMap1d2  = GetDataLayout_t<LWBuffA>;
+        using LWBuffAMap1d2     = GetDataLayout_t<LWBuffA>;
         using LWBuffBGateMap1d2 = GetDataLayout_t<LWBuffBGate>;
-        using LWBuffBUpMap1d2 = GetDataLayout_t<LWBuffBUp>;
+        using LWBuffBUpMap1d2   = GetDataLayout_t<LWBuffBUp>;
 
         auto ldsReadOffsetA
             = ldsWriteOffsetA
               + LWBuffAMap1d2::fromMatrixCoord(make_coord2d(get<0>(localWarpOffset), 0u), ldsld);
-        auto ldsReadOffsetBGate
-            = ldsWriteOffsetBGate
-              + LWBuffBGateMap1d2::fromMatrixCoord(make_coord2d(get<1>(localWarpOffset), 0u), ldsld);
+        auto ldsReadOffsetBGate = ldsWriteOffsetBGate
+                                  + LWBuffBGateMap1d2::fromMatrixCoord(
+                                      make_coord2d(get<1>(localWarpOffset), 0u), ldsld);
         auto ldsReadOffsetBUp
             = ldsWriteOffsetBUp
               + LWBuffBUpMap1d2::fromMatrixCoord(make_coord2d(get<1>(localWarpOffset), 0u), ldsld);
@@ -646,7 +648,7 @@ ROCWMMA_KERNEL void __launch_bounds__(256)
         // ------------------------------------------------------------------
         // Write initial prefetch to Lo buffer
         // ------------------------------------------------------------------
-        localWriteCoopA(ldsPtrLo  + ldsWriteOffsetA,  grBuffA,  ldsld);
+        localWriteCoopA(ldsPtrLo + ldsWriteOffsetA, grBuffA, ldsld);
         localWriteCoopBGate(ldsPtrLo + ldsWriteOffsetBGate, grBuffBGate, ldsld);
         localWriteCoopBUp(ldsPtrLo + ldsWriteOffsetBUp, grBuffBUp, ldsld);
 
@@ -656,7 +658,7 @@ ROCWMMA_KERNEL void __launch_bounds__(256)
         MfmaFragAcc fragsAccGate[BLOCKS_X][BLOCKS_Y];
         MfmaFragAcc fragsAccUp[BLOCKS_X][BLOCKS_Y];
         clear_acc_fragments(fragsAccGate, ComputeT(0));
-        clear_acc_fragments(fragsAccUp,   ComputeT(0));
+        clear_acc_fragments(fragsAccUp, ComputeT(0));
 
         synchronize_workgroup();
 
@@ -680,30 +682,30 @@ ROCWMMA_KERNEL void __launch_bounds__(256)
         // ------------------------------------------------------------------
         for(uint32_t currentK = MACRO_TILE_K; currentK < k; currentK += MACRO_TILE_K)
         {
-            MfmaFragA  fragsA[BLOCKS_X];
+            MfmaFragA     fragsA[BLOCKS_X];
             MfmaFragBGate fragsBGate[BLOCKS_Y];
-            MfmaFragBUp fragsBUp[BLOCKS_Y];
+            MfmaFragBUp   fragsBUp[BLOCKS_Y];
 
             // Read current tile from Lo buffer
-            localReadA(fragsA,   ldsPtrLo + ldsReadOffsetA,  ldsld);
+            localReadA(fragsA, ldsPtrLo + ldsReadOffsetA, ldsld);
             localReadBGate(fragsBGate, ldsPtrLo + ldsReadOffsetBGate, ldsld);
             localReadBUp(fragsBUp, ldsPtrLo + ldsReadOffsetBUp, ldsld);
 
             // Prefetch next K-step from global memory
-            globalReadCoopA(grBuffA,   a      + globalReadOffsetA,  lda);
+            globalReadCoopA(grBuffA, a + globalReadOffsetA, lda);
             globalReadCoopBGate(grBuffBGate, b_gate + globalReadOffsetBGate, ldBGate);
-            globalReadCoopBUp(grBuffBUp, b_up   + globalReadOffsetBUp, ldBUp);
+            globalReadCoopBUp(grBuffBUp, b_up + globalReadOffsetBUp, ldBUp);
 
-            globalReadOffsetA  += kStepOffsetA;
+            globalReadOffsetA += kStepOffsetA;
             globalReadOffsetBGate += kStepOffsetBGate;
             globalReadOffsetBUp += kStepOffsetBUp;
 
             // Accumulate
             mfma_warp_tile(fragsAccGate, fragsA, fragsBGate, fragsAccGate);
-            mfma_warp_tile(fragsAccUp,   fragsA, fragsBUp, fragsAccUp);
+            mfma_warp_tile(fragsAccUp, fragsA, fragsBUp, fragsAccUp);
 
             // Write prefetch to Hi buffer
-            localWriteCoopA(ldsPtrHi  + ldsWriteOffsetA,  grBuffA,  ldsld);
+            localWriteCoopA(ldsPtrHi + ldsWriteOffsetA, grBuffA, ldsld);
             localWriteCoopBGate(ldsPtrHi + ldsWriteOffsetBGate, grBuffBGate, ldsld);
             localWriteCoopBUp(ldsPtrHi + ldsWriteOffsetBUp, grBuffBUp, ldsld);
 
@@ -719,16 +721,16 @@ ROCWMMA_KERNEL void __launch_bounds__(256)
         // Tail: accumulate the last K-step still in Lo
         // ------------------------------------------------------------------
         {
-            MfmaFragA  fragsA[BLOCKS_X];
+            MfmaFragA     fragsA[BLOCKS_X];
             MfmaFragBGate fragsBGate[BLOCKS_Y];
-            MfmaFragBUp fragsBUp[BLOCKS_Y];
+            MfmaFragBUp   fragsBUp[BLOCKS_Y];
 
-            localReadA(fragsA,   ldsPtrLo + ldsReadOffsetA,  ldsld);
+            localReadA(fragsA, ldsPtrLo + ldsReadOffsetA, ldsld);
             localReadBGate(fragsBGate, ldsPtrLo + ldsReadOffsetBGate, ldsld);
             localReadBUp(fragsBUp, ldsPtrLo + ldsReadOffsetBUp, ldsld);
 
             mfma_warp_tile(fragsAccGate, fragsA, fragsBGate, fragsAccGate);
-            mfma_warp_tile(fragsAccUp,   fragsA, fragsBUp, fragsAccUp);
+            mfma_warp_tile(fragsAccUp, fragsA, fragsBUp, fragsAccUp);
         }
 
         // ------------------------------------------------------------------
@@ -755,17 +757,17 @@ ROCWMMA_KERNEL void __launch_bounds__(256)
 // CPU reference: D[i,j] = silu(sum_k A[i,k]*BGate[k,j]) * sum_k A[i,k]*BUp[k,j]
 // Both A, BGate, BUp are row_major; D is row_major.
 // ---------------------------------------------------------------------------
-static void swiglu_cpu_ref(uint32_t       m,
-                            uint32_t       n,
-                            uint32_t       k,
-                            InputT const*  a,
-                            InputT const*  b_gate,
-                            InputT const*  b_up,
-                            OutputT*       d,
-                            uint32_t       lda,
-                            uint32_t       ldBGate,
-                            uint32_t       ldBUp,
-                            uint32_t       ldd)
+static void swiglu_cpu_ref(uint32_t      m,
+                           uint32_t      n,
+                           uint32_t      k,
+                           InputT const* a,
+                           InputT const* b_gate,
+                           InputT const* b_up,
+                           OutputT*      d,
+                           uint32_t      lda,
+                           uint32_t      ldBGate,
+                           uint32_t      ldBUp,
+                           uint32_t      ldd)
 {
     // row_major index: element(row, col) = ptr[row * ld + col]
     auto rowMjr = [](uint32_t r, uint32_t c, uint32_t ld) { return r * ld + c; };
@@ -789,9 +791,9 @@ static void swiglu_cpu_ref(uint32_t       m,
             float up_acc   = 0.0f;
             for(int h = 0; h < (int)k; h++)
             {
-                float a_val  = static_cast<float>(a[rowMjr(i, h, lda)]);
-                gate_acc    += a_val * static_cast<float>(b_gate[rowMjr(h, j, ldBGate)]);
-                up_acc      += a_val * static_cast<float>(b_up[rowMjr(h, j, ldBUp)]);
+                float a_val = static_cast<float>(a[rowMjr(i, h, lda)]);
+                gate_acc += a_val * static_cast<float>(b_gate[rowMjr(h, j, ldBGate)]);
+                up_acc += a_val * static_cast<float>(b_up[rowMjr(h, j, ldBUp)]);
             }
             d[rowMjr(i, j, ldd)] = static_cast<OutputT>(silu_f(gate_acc) * up_acc);
         }
@@ -816,7 +818,11 @@ static void printDeviceInfo()
               << "  Global memory   : " << (props.totalGlobalMem >> 20) << " MiB\n"
               << "  Shared mem/blk  : " << (props.sharedMemPerBlock >> 10) << " KiB\n"
               << "  Max clock (MHz) : " << (props.clockRate / 1000) << "\n"
-              << "  Memory bw (GB/s): " << (props.memoryBusWidth / 8 * props.memoryClockRate * 2) / 1000000 << "\n"
+              << "  Memory bw (GB/s): "
+              << (static_cast<double>(props.memoryBusWidth) / 8.0
+                  * static_cast<double>(props.memoryClockRate) * 2.0)
+                     / 1.0e6
+              << "\n"
               << "========================\n\n";
 }
 
@@ -828,13 +834,13 @@ ROCWMMA_HOST void run_swiglu_sample(uint32_t m, uint32_t n, uint32_t k)
     printDeviceInfo();
 
     // Runtime arch selection mirrors compile-time namespace
-    uint32_t hTBLOCK_X  = isGfx9() ? gfx9Params::TBLOCK_X  : gfx11Params::TBLOCK_X;
-    uint32_t hTBLOCK_Y  = isGfx9() ? gfx9Params::TBLOCK_Y  : gfx11Params::TBLOCK_Y;
+    uint32_t hTBLOCK_X  = isGfx9() ? gfx9Params::TBLOCK_X : gfx11Params::TBLOCK_X;
+    uint32_t hTBLOCK_Y  = isGfx9() ? gfx9Params::TBLOCK_Y : gfx11Params::TBLOCK_Y;
     uint32_t hROCWMMA_M = isGfx9() ? gfx9Params::ROCWMMA_M : gfx11Params::ROCWMMA_M;
     uint32_t hROCWMMA_N = isGfx9() ? gfx9Params::ROCWMMA_N : gfx11Params::ROCWMMA_N;
     uint32_t hROCWMMA_K = isGfx9() ? gfx9Params::ROCWMMA_K : gfx11Params::ROCWMMA_K;
-    uint32_t hBLOCKS_X  = isGfx9() ? gfx9Params::BLOCKS_X  : gfx11Params::BLOCKS_X;
-    uint32_t hBLOCKS_Y  = isGfx9() ? gfx9Params::BLOCKS_Y  : gfx11Params::BLOCKS_Y;
+    uint32_t hBLOCKS_X  = isGfx9() ? gfx9Params::BLOCKS_X : gfx11Params::BLOCKS_X;
+    uint32_t hBLOCKS_Y  = isGfx9() ? gfx9Params::BLOCKS_Y : gfx11Params::BLOCKS_Y;
 
     uint32_t hWARP_TILE_X = hBLOCKS_X * hROCWMMA_M;
     uint32_t hWARP_TILE_Y = hBLOCKS_Y * hROCWMMA_N;
@@ -870,18 +876,17 @@ ROCWMMA_HOST void run_swiglu_sample(uint32_t m, uint32_t n, uint32_t k)
 
     if(m % get<0>(macroTileSize) || n % get<1>(macroTileSize) || k % hROCWMMA_K)
     {
-        std::cout << "Unsupported matrix size!"
-                  << " M must be a multiple of " << get<0>(macroTileSize)
-                  << ", N must be a multiple of " << get<1>(macroTileSize)
+        std::cout << "Unsupported matrix size!" << " M must be a multiple of "
+                  << get<0>(macroTileSize) << ", N must be a multiple of " << get<1>(macroTileSize)
                   << ", K must be a multiple of " << hROCWMMA_K << "\n";
         return;
     }
 
     // Leading dimensions -- all row_major
-    uint32_t lda  = k; // A  [M x K] row_major
+    uint32_t lda     = k; // A  [M x K] row_major
     uint32_t ldBGate = n; // Bg [K x N] row_major
-    uint32_t ldBUp = n; // Bu [K x N] row_major
-    uint32_t ldd  = n; // D  [M x N] row_major
+    uint32_t ldBUp   = n; // Bu [K x N] row_major
+    uint32_t ldd     = n; // D  [M x N] row_major
 
     std::cout << "Initializing host data (m=" << m << " n=" << n << " k=" << k << ")...\n";
 
@@ -895,12 +900,15 @@ ROCWMMA_HOST void run_swiglu_sample(uint32_t m, uint32_t n, uint32_t k)
     // Without scaling: K=128, max|gate| ~ 128*4*4 = 2048, silu(2048)*2048 = 4M >> 65504.
     // With 1/16 scale: max|gate| ~ 128*(4/16)^2 = 2, silu(2)*2 ~ 3.8, safe in FP16.
     constexpr float kScale = 1.0f / 16.0f;
-    fillRand(matA.data(),     m, k);
+    fillRand(matA.data(), m, k);
     fillRand(matBgate.data(), k, n);
-    fillRand(matBup.data(),   k, n);
-    for(auto& x : matA)     x = static_cast<InputT>(static_cast<float>(x) * kScale);
-    for(auto& x : matBgate) x = static_cast<InputT>(static_cast<float>(x) * kScale);
-    for(auto& x : matBup)   x = static_cast<InputT>(static_cast<float>(x) * kScale);
+    fillRand(matBup.data(), k, n);
+    for(auto& x : matA)
+        x = static_cast<InputT>(static_cast<float>(x) * kScale);
+    for(auto& x : matBgate)
+        x = static_cast<InputT>(static_cast<float>(x) * kScale);
+    for(auto& x : matBup)
+        x = static_cast<InputT>(static_cast<float>(x) * kScale);
 
     std::cout << "Allocating device memory...\n";
 
@@ -909,32 +917,32 @@ ROCWMMA_HOST void run_swiglu_sample(uint32_t m, uint32_t n, uint32_t k)
     InputT*  d_bup;
     OutputT* d_d;
 
-    CHECK_HIP_ERROR(hipMalloc(&d_a,     m * k * sizeof(InputT)));
+    CHECK_HIP_ERROR(hipMalloc(&d_a, m * k * sizeof(InputT)));
     CHECK_HIP_ERROR(hipMalloc(&d_bgate, k * n * sizeof(InputT)));
-    CHECK_HIP_ERROR(hipMalloc(&d_bup,   k * n * sizeof(InputT)));
-    CHECK_HIP_ERROR(hipMalloc(&d_d,     m * n * sizeof(OutputT)));
+    CHECK_HIP_ERROR(hipMalloc(&d_bup, k * n * sizeof(InputT)));
+    CHECK_HIP_ERROR(hipMalloc(&d_d, m * n * sizeof(OutputT)));
 
-    CHECK_HIP_ERROR(hipMemcpy(d_a,     matA.data(),     m * k * sizeof(InputT),  hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(d_bgate, matBgate.data(), k * n * sizeof(InputT),  hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(d_bup,   matBup.data(),   k * n * sizeof(InputT),  hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(d_d,     matD.data(),     m * n * sizeof(OutputT), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(d_a, matA.data(), m * k * sizeof(InputT), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(d_bgate, matBgate.data(), k * n * sizeof(InputT), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(d_bup, matBup.data(), k * n * sizeof(InputT), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(d_d, matD.data(), m * n * sizeof(OutputT), hipMemcpyHostToDevice));
 
     auto blockDim = dim3(hTBLOCK_X, hTBLOCK_Y);
     auto gridDim  = dim3(rocwmma::ceil_div(m, get<0>(macroTileSize)),
-                         rocwmma::ceil_div(n, get<1>(macroTileSize)));
+                        rocwmma::ceil_div(n, get<1>(macroTileSize)));
 
-    std::cout << "gridDim  (" << gridDim.x  << " " << gridDim.y  << ")"
-              << "  blockDim (" << blockDim.x << " " << blockDim.y << ")\n";
+    std::cout << "gridDim  (" << gridDim.x << " " << gridDim.y << ")" << "  blockDim ("
+              << blockDim.x << " " << blockDim.y << ")\n";
 
     // LDS: 2 ping-pong buffers, each = (3 segments) * MACRO_TILE_K columns
-    using LWBuffAShape  = GetIOShape_t<LWBuffA>;
+    using LWBuffAShape     = GetIOShape_t<LWBuffA>;
     using LWBuffBGateShape = GetIOShape_t<LWBuffBGate>;
-    using LWBuffBUpShape = GetIOShape_t<LWBuffBUp>;
-    constexpr uint32_t ldsSegHeight = LWBuffAShape::BlockHeight
-                                      + LWBuffBGateShape::BlockHeight
-                                      + LWBuffBUpShape::BlockHeight;
+    using LWBuffBUpShape   = GetIOShape_t<LWBuffBUp>;
+    constexpr uint32_t ldsSegHeight
+        = LWBuffAShape::BlockHeight + LWBuffBGateShape::BlockHeight + LWBuffBUpShape::BlockHeight;
     int ldsUsage = 2 * sizeof(InputT) * ldsSegHeight * MACRO_TILE_K;
-    std::cout << "LDS usage: " << ldsUsage << " bytes (" << ldsUsage/1024 << " KiB)\n";
+    std::cout << "LDS usage: " << ldsUsage << " bytes (" << ldsUsage / 1024 << " KiB)\n";
 
     auto kernelLambda = [&]() {
         hipExtLaunchKernelGGL(gemm_swiglu_fused,
@@ -945,9 +953,17 @@ ROCWMMA_HOST void run_swiglu_sample(uint32_t m, uint32_t n, uint32_t k)
                               nullptr,
                               nullptr,
                               0,
-                              m, n, k,
-                              d_a, d_bgate, d_bup, d_d,
-                              lda, ldBGate, ldBUp, ldd);
+                              m,
+                              n,
+                              k,
+                              d_a,
+                              d_bgate,
+                              d_bup,
+                              d_d,
+                              lda,
+                              ldBGate,
+                              ldBUp,
+                              ldd);
         CHECK_HIP_ERROR(hipGetLastError());
     };
 
@@ -975,42 +991,25 @@ ROCWMMA_HOST void run_swiglu_sample(uint32_t m, uint32_t n, uint32_t k)
     CHECK_HIP_ERROR(hipEventDestroy(evStop));
 
     // Performance: count 2 GEMMs (each 2MNK FLOPs) + MN elementwise (negligible)
-    double gFlopsPerRun = 2.0 * 2.0
-                          * static_cast<double>(m)
-                          * static_cast<double>(n)
-                          * static_cast<double>(k)
-                          * 1e-9;
-    double tFlopsPerSec = gFlopsPerRun * recordRuns
-                          / (static_cast<double>(elapsedMs) * 1e-3)
-                          * 1e-3;
+    double gFlopsPerRun = 2.0 * 2.0 * static_cast<double>(m) * static_cast<double>(n)
+                          * static_cast<double>(k) * 1e-9;
+    double tFlopsPerSec
+        = gFlopsPerRun * recordRuns / (static_cast<double>(elapsedMs) * 1e-3) * 1e-3;
 
-    std::cout << std::left
-              << std::setw(8)  << "TBlkX"  << std::setw(8)  << "TBlkY"
-              << std::setw(6)  << "BlkM"   << std::setw(6)  << "BlkN"
-              << std::setw(6)  << "BlkK"   << std::setw(8)  << "MatM"
-              << std::setw(8)  << "MatN"   << std::setw(8)  << "MatK"
-              << std::setw(8)  << "lda"    << std::setw(8)  << "ldBGate"
-              << std::setw(8)  << "ldBUp"   << std::setw(8)  << "ldd"
-              << std::setw(14) << "elapsedMs"
-              << std::setw(22) << "GFlops(2xGEMM)"
-              << std::setw(12) << "TFlops/s"
-              << std::setw(10) << "Warmups"
-              << std::setw(10) << "Runs"
-              << "\n";
+    std::cout << std::left << std::setw(8) << "TBlkX" << std::setw(8) << "TBlkY" << std::setw(6)
+              << "BlkM" << std::setw(6) << "BlkN" << std::setw(6) << "BlkK" << std::setw(8)
+              << "MatM" << std::setw(8) << "MatN" << std::setw(8) << "MatK" << std::setw(8) << "lda"
+              << std::setw(8) << "ldBGate" << std::setw(8) << "ldBUp" << std::setw(8) << "ldd"
+              << std::setw(14) << "elapsedMs" << std::setw(22) << "GFlops(2xGEMM)" << std::setw(12)
+              << "TFlops/s" << std::setw(10) << "Warmups" << std::setw(10) << "Runs" << "\n";
 
-    std::cout << std::left
-              << std::setw(8)  << hTBLOCK_X  << std::setw(8) << hTBLOCK_Y
-              << std::setw(6)  << hROCWMMA_M << std::setw(6) << hROCWMMA_N
-              << std::setw(6)  << hROCWMMA_K << std::setw(8) << m
-              << std::setw(8)  << n          << std::setw(8) << k
-              << std::setw(8)  << lda        << std::setw(8) << ldBGate
-              << std::setw(8)  << ldBUp       << std::setw(8) << ldd
-              << std::setw(14) << elapsedMs
-              << std::setw(22) << (gFlopsPerRun * recordRuns)
-              << std::setw(12) << tFlopsPerSec
-              << std::setw(10) << warmups
-              << std::setw(10) << recordRuns
-              << "\n";
+    std::cout << std::left << std::setw(8) << hTBLOCK_X << std::setw(8) << hTBLOCK_Y << std::setw(6)
+              << hROCWMMA_M << std::setw(6) << hROCWMMA_N << std::setw(6) << hROCWMMA_K
+              << std::setw(8) << m << std::setw(8) << n << std::setw(8) << k << std::setw(8) << lda
+              << std::setw(8) << ldBGate << std::setw(8) << ldBUp << std::setw(8) << ldd
+              << std::setw(14) << elapsedMs << std::setw(22) << (gFlopsPerRun * recordRuns)
+              << std::setw(12) << tFlopsPerSec << std::setw(10) << warmups << std::setw(10)
+              << recordRuns << "\n";
 
 #if !NDEBUG
     std::cout << "\nValidating against CPU reference...\n";
@@ -1018,10 +1017,17 @@ ROCWMMA_HOST void run_swiglu_sample(uint32_t m, uint32_t n, uint32_t k)
     CHECK_HIP_ERROR(hipMemcpy(matD.data(), d_d, m * n * sizeof(OutputT), hipMemcpyDeviceToHost));
 
     std::vector<OutputT> matDref(m * n, std::numeric_limits<OutputT>::signaling_NaN());
-    swiglu_cpu_ref(m, n, k,
-                   matA.data(), matBgate.data(), matBup.data(),
+    swiglu_cpu_ref(m,
+                   n,
+                   k,
+                   matA.data(),
+                   matBgate.data(),
+                   matBup.data(),
                    matDref.data(),
-                   lda, ldBGate, ldBUp, ldd);
+                   lda,
+                   ldBGate,
+                   ldBUp,
+                   ldd);
 
     auto res = compareEqual(matD.data(), matDref.data(), m * n);
     std::cout << (std::get<0>(res) ? "PASSED" : "FAILED") << "\n";
@@ -1036,35 +1042,49 @@ ROCWMMA_HOST void run_swiglu_sample(uint32_t m, uint32_t n, uint32_t k)
     std::cout << "Finished!\n";
 }
 
+// ---------------------------------------------------------------------------
+// Usage:
+//   ./simple_gemm_swiglu          # Quick validation only (64 x 256 x 128)
+//   ./simple_gemm_swiglu --all    # Also run full LLaMA-2 7b/13b/70b sizes
+// ---------------------------------------------------------------------------
 int main(int argc, char** argv)
 {
     std::cout << "Community Sample: SwiGLU Fused Dual GEMM" << std::endl;
     std::cout << "This sample demonstrates: fused dual-GEMM + SiLU activation"
               << " (LLaMA/Mistral FFN gate layer) using rocWMMA" << std::endl;
 
-    // LLaMA-style FFN dimensions (M x N x K):
-    //   M=64  (seq_len)      -- A is [64 x 128]
-    //   N=256 (intermediate)  -- B_gate, B_up are [128 x 256]
-    //   K=128 (hidden_dim)    -- shared reduction dimension
-    // (small enough for quick validation, all multiples of tile size 16)
+    // Check for --all flag
+    bool runAll = false;
+    for(int i = 1; i < argc; ++i)
+    {
+        std::string arg(argv[i]);
+        if(arg == "--all")
+            runAll = true;
+    }
 
-
-    // sample test
+    // Quick validation case (small enough for any GPU, all multiples of tile size 16)
     // run_swiglu_sample(seq_len, intermediate, hidden_dim);
     run_swiglu_sample(64, 256, 128);
 
-    // Llama-2-7b
-    // https://huggingface.co/meta-llama/Llama-2-7b-chat-hf/blob/main/config.json
-    run_swiglu_sample(64, 11008, 4096);
+    // Full LLaMA-2 configurations (require significant GPU memory)
+    if(runAll)
+    {
+        // Llama-2-7b
+        // https://huggingface.co/meta-llama/Llama-2-7b-chat-hf/blob/main/config.json
+        run_swiglu_sample(64, 11008, 4096);
 
-    // Llama-2-13b
-    // https://huggingface.co/meta-llama/Llama-2-13b-chat-hf/blob/main/config.json
-    run_swiglu_sample(64, 13824, 5120);
+        // Llama-2-13b
+        // https://huggingface.co/meta-llama/Llama-2-13b-chat-hf/blob/main/config.json
+        run_swiglu_sample(64, 13824, 5120);
 
-    // Llama-2-70b
-    // https://huggingface.co/meta-llama/Llama-2-70b-chat-hf/blob/main/config.json
-    run_swiglu_sample(64, 28672, 8192);
-
+        // Llama-2-70b
+        // https://huggingface.co/meta-llama/Llama-2-70b-chat-hf/blob/main/config.json
+        run_swiglu_sample(64, 28672, 8192);
+    }
+    else
+    {
+        std::cout << "\nTip: pass --all to also run full LLaMA-2 7b/13b/70b sizes.\n";
+    }
 
     std::cout << "Sample completed successfully!" << std::endl;
     return 0;
