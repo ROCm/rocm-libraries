@@ -93,7 +93,6 @@ namespace TensileLite
 
         float  elementSize;
         size_t packing;
-        size_t segmentSize;
 
         bool isComplex;
         bool isIntegral;
@@ -129,13 +128,11 @@ namespace TensileLite
     {
         constexpr static rocisa::DataType Enum = T_Enum;
 
-        /// Bytes of one element.  May contain multiple segments.
+        /// Bytes of one element.
         constexpr static float ElementSize = float(sizeof(T)) / float(T_Packing);
-        ;
-        /// Segments per element.
+        
+        /// Number of elements packed.
         constexpr static size_t Packing = T_Packing;
-        /// Bytes per segment.
-        constexpr static float SegmentSize = ElementSize / Packing;
 
         constexpr static bool IsComplex  = T_IsComplex;
         constexpr static bool IsIntegral = T_IsIntegral;
@@ -168,12 +165,6 @@ namespace TensileLite
               bool             T_IsComplex,
               bool             T_IsIntegral>
     constexpr size_t BaseTypeInfo<T, T_Enum, T_Packing, T_IsComplex, T_IsIntegral>::Packing;
-    template <typename T,
-              rocisa::DataType T_Enum,
-              int              T_Packing,
-              bool             T_IsComplex,
-              bool             T_IsIntegral>
-    constexpr float BaseTypeInfo<T, T_Enum, T_Packing, T_IsComplex, T_IsIntegral>::SegmentSize;
 
     template <typename T,
               rocisa::DataType T_Enum,

@@ -53,15 +53,13 @@ using InputTypes = ::testing::Types<std::tuple<float>,
 
 TYPED_TEST_SUITE(TypedDataTypesTest, InputTypes);
 
-// TYPED_TEST(TypedDataTypesTest, TypeInfo_Sizing)
-// {
-//     using TheType    = typename TestFixture::DataType;
-//     using MyTypeInfo = TensileLite::TypeInfo<TheType>;
+TYPED_TEST(TypedDataTypesTest, TypeInfo_Sizing)
+{
+    using TheType    = typename TestFixture::DataType;
+    using MyTypeInfo = TensileLite::TypeInfo<TheType>;
 
-//     static_assert(MyTypeInfo::ElementSize == sizeof(TheType), "Sizeof");
-//     static_assert(MyTypeInfo::ElementSize == MyTypeInfo::SegmentSize * MyTypeInfo::Packing,
-//                     "Packing");
-// }
+    EXPECT_EQ(MyTypeInfo::ElementSize * MyTypeInfo::Packing, sizeof(TheType));
+}
 
 TYPED_TEST(TypedDataTypesTest, TypeInfo_Consistency)
 {
@@ -74,7 +72,6 @@ TYPED_TEST(TypedDataTypesTest, TypeInfo_Consistency)
     EXPECT_EQ(fromEnum.dataType, MyTypeInfo::Enum);
     EXPECT_EQ(fromEnum.elementSize, sizeof(TheType));
     EXPECT_EQ(fromEnum.packing, MyTypeInfo::Packing);
-    EXPECT_EQ(fromEnum.segmentSize, MyTypeInfo::SegmentSize);
 
     EXPECT_EQ(fromEnum.isComplex, MyTypeInfo::IsComplex);
     EXPECT_EQ(fromEnum.isIntegral, MyTypeInfo::IsIntegral);
