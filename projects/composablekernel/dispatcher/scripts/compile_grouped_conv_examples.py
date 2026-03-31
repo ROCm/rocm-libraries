@@ -78,16 +78,22 @@ def extract_grouped_conv_declarations(source_file: Path) -> list:
             r'\.add\s*\(\s*"(\w+)"\s*,\s*"(\w+)"\s*,\s*"(\w+)"\s*,\s*(\d+)\s*,\s*(\d+)'
         )
         for add_match in re.finditer(simple_add, set_body):
+            conv_type = add_match.group(3)
+            default_pipeline = (
+                "compv3"
+                if conv_type in ("bwd_data", "bwd_weight")
+                else "compv4"
+            )
             declarations.append(
                 {
                     "set": set_name,
                     "dtype": add_match.group(1),
                     "layout": add_match.group(2),
-                    "conv_type": add_match.group(3),
+                    "conv_type": conv_type,
                     "tile_k": int(add_match.group(4)),
                     "tile_c": int(add_match.group(5)),
                     "num_dims": 2,
-                    "pipeline": "compv4",
+                    "pipeline": default_pipeline,
                     "scheduler": "intrawave",
                     "wave_m": 2,
                     "wave_n": 2,

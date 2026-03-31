@@ -143,7 +143,7 @@ class TestGroupedConvKernelConfig(unittest.TestCase):
             vector_sizes=(4, 4, 4),
         )
         name = config.name("fp16")
-        self.assertIn("bwdd", name)  # Naming scheme uses "bwdd" for backward data
+        self.assertIn("bwd_data", name)
 
     def test_is_valid_for_arch_supported(self):
         config = GroupedConvKernelConfig(

@@ -6,7 +6,7 @@
 """Generate the conv_python_dispatch.hpp header for the Python conv library.
 
 Reads the include_all headers to find available kernels and creates dispatch
-aliases for 2D/3D x fwd/bwdd/bwdw.
+aliases for 2D/3D x fwd/bwd_data/bwd_weight.
 """
 
 import argparse
@@ -33,11 +33,11 @@ def main():
     kdir = Path(args.kernel_dir)
 
     fwd_3d = find_3d_launcher(kdir / "include_all_grouped_conv_fwd_kernels.hpp", "fwd")
-    bwdd_3d = find_3d_launcher(
-        kdir / "include_all_grouped_conv_bwdd_kernels.hpp", "bwdd"
+    bwd_data_3d = find_3d_launcher(
+        kdir / "include_all_grouped_conv_bwd_data_kernels.hpp", "bwd_data"
     )
-    bwdw_3d = find_3d_launcher(
-        kdir / "include_all_grouped_conv_bwdw_kernels.hpp", "bwdw"
+    bwd_weight_3d = find_3d_launcher(
+        kdir / "include_all_grouped_conv_bwd_weight_kernels.hpp", "bwd_weight"
     )
 
     lines = [
@@ -56,24 +56,24 @@ def main():
     lines += [
         "",
         "// Backward data kernels",
-        '#include "include_all_grouped_conv_bwdd_kernels.hpp"',
-        "#define CONV_BWDD_2D_AVAILABLE 1",
+        '#include "include_all_grouped_conv_bwd_data_kernels.hpp"',
+        "#define CONV_BWD_DATA_2D_AVAILABLE 1",
     ]
-    if bwdd_3d:
+    if bwd_data_3d:
         lines += [
-            "#define CONV_BWDD_3D_AVAILABLE 1",
-            f"using ConvBwdData3dLauncher = {bwdd_3d};",
+            "#define CONV_BWD_DATA_3D_AVAILABLE 1",
+            f"using ConvBwdData3dLauncher = {bwd_data_3d};",
         ]
     lines += [
         "",
         "// Backward weight kernels",
-        '#include "include_all_grouped_conv_bwdw_kernels.hpp"',
-        "#define CONV_BWDW_2D_AVAILABLE 1",
+        '#include "include_all_grouped_conv_bwd_weight_kernels.hpp"',
+        "#define CONV_BWD_WEIGHT_2D_AVAILABLE 1",
     ]
-    if bwdw_3d:
+    if bwd_weight_3d:
         lines += [
-            "#define CONV_BWDW_3D_AVAILABLE 1",
-            f"using ConvBwdWeight3dLauncher = {bwdw_3d};",
+            "#define CONV_BWD_WEIGHT_3D_AVAILABLE 1",
+            f"using ConvBwdWeight3dLauncher = {bwd_weight_3d};",
         ]
 
     # Kernel name table for Python introspection
@@ -82,14 +82,14 @@ def main():
         names.append('"fwd_2d"')
     if fwd_3d:
         names.append('"fwd_3d"')
-    if True:  # bwdd 2D
-        names.append('"bwdd_2d"')
-    if bwdd_3d:
-        names.append('"bwdd_3d"')
-    if True:  # bwdw 2D
-        names.append('"bwdw_2d"')
-    if bwdw_3d:
-        names.append('"bwdw_3d"')
+    if True:  # bwd_data 2D
+        names.append('"bwd_data_2d"')
+    if bwd_data_3d:
+        names.append('"bwd_data_3d"')
+    if True:  # bwd_weight 2D
+        names.append('"bwd_weight_2d"')
+    if bwd_weight_3d:
+        names.append('"bwd_weight_3d"')
 
     lines += [
         "",

@@ -27,6 +27,7 @@ from ctypes_utils import (
     Dispatcher,
     setup_gemm_dispatcher,
     cleanup_gemm,
+    reset_for_example,
     detect_gpu_arch,
 )
 

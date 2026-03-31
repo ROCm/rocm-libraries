@@ -35,6 +35,13 @@ extern "C" {
 // =========================================================================
 // Problem definition (matches Python ctypes struct exactly)
 // =========================================================================
+enum ConvDirection
+{
+    CONV_FORWARD    = 0,
+    CONV_BWD_DATA   = 1,
+    CONV_BWD_WEIGHT = 2
+};
+
 struct ConvProblemC
 {
     int N, G, C, K;
@@ -43,7 +50,8 @@ struct ConvProblemC
     int stride_d, stride_h, stride_w;
     int pad_d, pad_h, pad_w;
     int dilation_d, dilation_h, dilation_w;
-    int direction; // 0=forward, 1=bwd_data, 2=bwd_weight
+    int direction;
+    int split_k;
 };
 
 // =========================================================================
@@ -68,7 +76,7 @@ int conv_dispatcher_has_kernels()
 
 int conv_dispatcher_has_bwd_data()
 {
-#if defined(CONV_BWDD_2D_AVAILABLE) || defined(CONV_BWDD_3D_AVAILABLE)
+#if defined(CONV_BWD_DATA_2D_AVAILABLE) || defined(CONV_BWD_DATA_3D_AVAILABLE)
     return 1;
 #else
     return 0;
@@ -77,7 +85,7 @@ int conv_dispatcher_has_bwd_data()
 
 int conv_dispatcher_has_bwd_weight()
 {
-#if defined(CONV_BWDW_2D_AVAILABLE) || defined(CONV_BWDW_3D_AVAILABLE)
+#if defined(CONV_BWD_WEIGHT_2D_AVAILABLE) || defined(CONV_BWD_WEIGHT_3D_AVAILABLE)
     return 1;
 #else
     return 0;
@@ -101,44 +109,44 @@ int conv_dispatcher_get_kernel_name(int index, char* buffer, int buffer_size)
 // =========================================================================
 // Support query
 // =========================================================================
-int conv_dispatcher_is_supported(const ConvProblemC* prob)
+bool conv_dispatcher_is_supported(const ConvProblemC* prob)
 {
     if(!prob)
-        return 0;
+        return false;
     const bool is_3d = (prob->input_d > 1 || prob->filter_z > 1);
     switch(prob->direction)
     {
-    case 0: // forward
+    case CONV_FORWARD:
 #if defined(CONV_FWD_3D_AVAILABLE)
         if(is_3d)
-            return 1;
+            return true;
 #endif
 #if defined(CONV_FWD_2D_AVAILABLE)
         if(!is_3d)
-            return 1;
+            return true;
 #endif
-        return 0;
-    case 1: // bwd_data
-#if defined(CONV_BWDD_3D_AVAILABLE)
+        return false;
+    case CONV_BWD_DATA:
+#if defined(CONV_BWD_DATA_3D_AVAILABLE)
         if(is_3d)
-            return 1;
+            return true;
 #endif
-#if defined(CONV_BWDD_2D_AVAILABLE)
+#if defined(CONV_BWD_DATA_2D_AVAILABLE)
         if(!is_3d)
-            return 1;
+            return true;
 #endif
-        return 0;
-    case 2: // bwd_weight
-#if defined(CONV_BWDW_3D_AVAILABLE)
+        return false;
+    case CONV_BWD_WEIGHT:
+#if defined(CONV_BWD_WEIGHT_3D_AVAILABLE)
         if(is_3d)
-            return 1;
+            return true;
 #endif
-#if defined(CONV_BWDW_2D_AVAILABLE)
+#if defined(CONV_BWD_WEIGHT_2D_AVAILABLE)
         if(!is_3d)
-            return 1;
+            return true;
 #endif
-        return 0;
-    default: return 0;
+        return false;
+    default: return false;
     }
 }
 
@@ -201,21 +209,20 @@ launch_fwd_3d(const void* in, const void* wei, void* out, const ConvProblemC* p,
 }
 #endif
 
-#ifdef CONV_BWDD_2D_AVAILABLE
+#ifdef CONV_BWD_DATA_2D_AVAILABLE
 static float
-launch_bwdd_2d(const void* dy, const void* wei, void* dx, const ConvProblemC* p, hipStream_t stream)
+launch_bwd_data_2d(const void* dy, const void* wei, void* dx, const ConvProblemC* p, hipStream_t stream)
 {
     auto param = make_param_2d(p);
-    // CK Tile bwd_data: in_ptr=dX(output), wei_ptr=W, out_ptr=dY(input)
     ck_tile::GroupedConvBwdDataHostArgs args(param, dx, wei, {}, dy, 1);
     ck_tile::stream_config sc{stream, true, 1, 3, 10};
     return SelectedConvBwdDataLauncher::launch(args, sc);
 }
 #endif
 
-#ifdef CONV_BWDD_3D_AVAILABLE
+#ifdef CONV_BWD_DATA_3D_AVAILABLE
 static float
-launch_bwdd_3d(const void* dy, const void* wei, void* dx, const ConvProblemC* p, hipStream_t stream)
+launch_bwd_data_3d(const void* dy, const void* wei, void* dx, const ConvProblemC* p, hipStream_t stream)
 {
     auto param = make_param_3d(p);
     ck_tile::GroupedConvBwdDataHostArgs args(param, dx, wei, {}, dy, 1);
@@ -224,24 +231,25 @@ launch_bwdd_3d(const void* dy, const void* wei, void* dx, const ConvProblemC* p,
 }
 #endif
 
-#ifdef CONV_BWDW_2D_AVAILABLE
+#ifdef CONV_BWD_WEIGHT_2D_AVAILABLE
 static float
-launch_bwdw_2d(const void* x, const void* dy, void* dw, const ConvProblemC* p, hipStream_t stream)
+launch_bwd_weight_2d(const void* x, const void* dy, void* dw, const ConvProblemC* p, hipStream_t stream)
 {
     auto param = make_param_2d(p);
-    // CK Tile bwd_weight: in_ptr=X, wei_ptr=dW(output), out_ptr=dY(input)
-    ck_tile::GroupedConvBwdWeightHostArgs args(param, x, dw, {}, dy, 1);
+    const int k_batch = (p->split_k > 1) ? p->split_k : 1;
+    ck_tile::GroupedConvBwdWeightHostArgs args(param, x, dw, {}, dy, k_batch);
     ck_tile::stream_config sc{stream, true, 1, 3, 10};
     return SelectedConvBwdWeightLauncher::launch(args, sc);
 }
 #endif
 
-#ifdef CONV_BWDW_3D_AVAILABLE
+#ifdef CONV_BWD_WEIGHT_3D_AVAILABLE
 static float
-launch_bwdw_3d(const void* x, const void* dy, void* dw, const ConvProblemC* p, hipStream_t stream)
+launch_bwd_weight_3d(const void* x, const void* dy, void* dw, const ConvProblemC* p, hipStream_t stream)
 {
     auto param = make_param_3d(p);
-    ck_tile::GroupedConvBwdWeightHostArgs args(param, x, dw, {}, dy, 1);
+    const int k_batch = (p->split_k > 1) ? p->split_k : 1;
+    ck_tile::GroupedConvBwdWeightHostArgs args(param, x, dw, {}, dy, k_batch);
     ck_tile::stream_config sc{stream, true, 1, 3, 10};
     return ConvBwdWeight3dLauncher::launch(args, sc);
 }
@@ -267,7 +275,7 @@ float conv_dispatcher_run(
     {
         switch(prob->direction)
         {
-        case 0: // Forward
+        case CONV_FORWARD:
 #ifdef CONV_FWD_3D_AVAILABLE
             if(is_3d)
                 return launch_fwd_3d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
@@ -278,25 +286,25 @@ float conv_dispatcher_run(
 #endif
             return -2.0f;
 
-        case 1: // Backward data
-#ifdef CONV_BWDD_3D_AVAILABLE
+        case CONV_BWD_DATA:
+#ifdef CONV_BWD_DATA_3D_AVAILABLE
             if(is_3d)
-                return launch_bwdd_3d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
+                return launch_bwd_data_3d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
 #endif
-#ifdef CONV_BWDD_2D_AVAILABLE
+#ifdef CONV_BWD_DATA_2D_AVAILABLE
             if(!is_3d)
-                return launch_bwdd_2d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
+                return launch_bwd_data_2d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
 #endif
             return -2.0f;
 
-        case 2: // Backward weight
-#ifdef CONV_BWDW_3D_AVAILABLE
+        case CONV_BWD_WEIGHT:
+#ifdef CONV_BWD_WEIGHT_3D_AVAILABLE
             if(is_3d)
-                return launch_bwdw_3d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
+                return launch_bwd_weight_3d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
 #endif
-#ifdef CONV_BWDW_2D_AVAILABLE
+#ifdef CONV_BWD_WEIGHT_2D_AVAILABLE
             if(!is_3d)
-                return launch_bwdw_2d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
+                return launch_bwd_weight_2d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
 #endif
             return -2.0f;
 

@@ -22,6 +22,7 @@
 #include "ck_tile/dispatcher/kernel_instance.hpp"
 #include "ck_tile/dispatcher/registry.hpp"
 #include "ck_tile/dispatcher/dispatcher.hpp"
+#include "ck_tile/dispatcher/json_export.hpp"
 #include "ck_tile/dispatcher/arch_filter.hpp"
 #include "ck_tile/dispatcher/backends/tile_backend.hpp"
 #include "ck_tile/dispatcher/backends/generated_tile_backend.hpp"

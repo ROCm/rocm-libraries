@@ -300,6 +300,7 @@ class GroupedConvProblem:
     dilation_d: int = 1
 
     direction: str = "forward"
+    split_k: int = 1
 
     @property
     def Ho(self) -> int:
@@ -318,7 +319,7 @@ class GroupedConvProblem:
 
     @property
     def is_3d(self) -> bool:
-        return self.Di > 1 or self.Z > 1
+        return self.Di > 1 or self.Z > 1 or self.pad_d > 0
 
     @property
     def ndim_spatial(self) -> int:
@@ -414,6 +415,7 @@ class GroupedConvProblemC(ctypes.Structure):
         ("dilation_h", ctypes.c_int),
         ("dilation_w", ctypes.c_int),
         ("direction", ctypes.c_int),
+        ("split_k", ctypes.c_int),
     ]
 
     @classmethod
@@ -430,6 +432,7 @@ class GroupedConvProblemC(ctypes.Structure):
             p.dilation_w,
         )
         c.direction = DIRECTION_MAP.get(p.direction, 0)
+        c.split_k = getattr(p, "split_k", 1)
         return c
 
 
@@ -1240,13 +1243,15 @@ def _list_arch_valid_grouped_conv_configs(
     # Example:
     # grouped_conv_fwd_fp16_nhwgc_2d_compv3_cshuffle_intrawave_128x128x32_2x2x1_32x32x16
     name_re = re.compile(
-        r"^grouped_conv_(fwd|bwdd|bwdw)_([a-z0-9]+)_([a-z0-9]+)_([123])d_"
+        r"^grouped_conv_(fwd|bwd_data|bwd_weight|bwdd|bwdw)_([a-z0-9]+)_([a-z0-9]+)_([123])d_"
         r"([a-z0-9]+)_([a-z0-9]+)_([a-z0-9]+)_"
         r"([0-9]+x[0-9]+x[0-9]+)_([0-9]+x[0-9]+x[0-9]+)_([0-9]+x[0-9]+x[0-9]+)"
         r"(?:_.*)?$"
     )
     short_to_variant = {
         "fwd": "forward",
+        "bwd_data": "bwd_data",
+        "bwd_weight": "bwd_weight",
         "bwdd": "bwd_data",
         "bwdw": "bwd_weight",
     }
@@ -1350,19 +1355,19 @@ def _write_single_conv_dispatch_header(
     elif config.variant == "bwd_data":
         kernel_name_symbol = "CONV_BWD_DATA_KERNEL_NAME"
         if config.ndim_spatial == 3:
-            macros.append("#define CONV_BWDD_3D_AVAILABLE 1")
+            macros.append("#define CONV_BWD_DATA_3D_AVAILABLE 1")
             aliases.append("using ConvBwdData3dLauncher = SelectedConvBwdDataLauncher;")
         else:
-            macros.append("#define CONV_BWDD_2D_AVAILABLE 1")
+            macros.append("#define CONV_BWD_DATA_2D_AVAILABLE 1")
     else:
         kernel_name_symbol = "CONV_BWD_WEIGHT_KERNEL_NAME"
         if config.ndim_spatial == 3:
-            macros.append("#define CONV_BWDW_3D_AVAILABLE 1")
+            macros.append("#define CONV_BWD_WEIGHT_3D_AVAILABLE 1")
             aliases.append(
                 "using ConvBwdWeight3dLauncher = SelectedConvBwdWeightLauncher;"
             )
         else:
-            macros.append("#define CONV_BWDW_2D_AVAILABLE 1")
+            macros.append("#define CONV_BWD_WEIGHT_2D_AVAILABLE 1")
 
     content = (
         "// Auto-generated single-kernel dispatch header for Python JIT\n"

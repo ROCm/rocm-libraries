@@ -68,6 +68,9 @@ class BaseRegistry
     BaseRegistry(const BaseRegistry&)            = delete;
     BaseRegistry& operator=(const BaseRegistry&) = delete;
 
+    /// Register a kernel. If the key already exists, the new entry replaces it
+    /// unless the existing entry has strictly higher priority.
+    /// Same-priority registration overwrites (last-writer-wins at equal priority).
     bool
     register_kernel(const KeyType& key, InstancePtr instance, Priority priority = Priority::Normal)
     {

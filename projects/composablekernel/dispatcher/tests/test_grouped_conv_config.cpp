@@ -15,9 +15,9 @@ void test_grouped_conv_direction_enum()
     assert(GroupedConvSignatureInfo::direction_str(GroupedConvDirection::FORWARD) ==
            std::string("fwd"));
     assert(GroupedConvSignatureInfo::direction_str(GroupedConvDirection::BACKWARD_DATA) ==
-           std::string("bwdd"));
+           std::string("bwd_data"));
     assert(GroupedConvSignatureInfo::direction_str(GroupedConvDirection::BACKWARD_WEIGHT) ==
-           std::string("bwdw"));
+           std::string("bwd_weight"));
     std::cout << "PASSED\n";
 }
 

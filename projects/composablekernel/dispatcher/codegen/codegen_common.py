@@ -136,20 +136,30 @@ class CommonTypeMappings:
         "int8": "DataType::INT8",
     }
 
-    LAYOUT_TO_CK = {
+    # GEMM-specific layout mappings ("r"/"c" for row/column major).
+    # Convolution layouts (NHWGC, GKYXC, etc.) are handled by
+    # unified_grouped_conv_codegen.py via GroupedConvLayout / GroupedConvTypeMappings.
+    GEMM_LAYOUT_TO_CK = {
         "r": "tensor_layout::gemm::RowMajor",
         "c": "tensor_layout::gemm::ColumnMajor",
     }
+    LAYOUT_TO_CK = GEMM_LAYOUT_TO_CK  # backward compat alias
 
-    LAYOUT_TO_DISPATCHER = {
+    GEMM_LAYOUT_TO_DISPATCHER = {
         "r": "LayoutTag::RowMajor",
         "c": "LayoutTag::ColMajor",
     }
+    LAYOUT_TO_DISPATCHER = GEMM_LAYOUT_TO_DISPATCHER  # backward compat alias
 
+    # GEMM pipeline mappings.
+    # For convolution pipelines, see GroupedConvTypeMappings in
+    # unified_grouped_conv_codegen.py. Conv supports: mem, compv3, compv4,
+    # compv5 (forward only). Backward ops are restricted to compv3/mem.
     PIPELINE_TO_CK = {
         "mem": "GemmPipelineAgBgCrMem",
         "compv3": "GemmPipelineAgBgCrCompV3",
         "compv4": "GemmPipelineAgBgCrCompV4",
+        "compv5": "GemmPipelineAgBgCrCompV5",
         "preshufflev2": "WeightPreshufflePipelineAGmemBGmemCRegV2",
     }
 
@@ -157,6 +167,7 @@ class CommonTypeMappings:
         "mem": "BaseGemmPipelineAgBgCrMem",
         "compv3": "BaseGemmPipelineAgBgCrCompV3",
         "compv4": "BaseGemmPipelineAgBgCrCompV4",
+        "compv5": "BaseGemmPipelineAgBgCrCompV5",
         "preshufflev2": "BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
     }
 
@@ -164,6 +175,7 @@ class CommonTypeMappings:
         "mem": "Pipeline::Mem",
         "compv3": "Pipeline::CompV3",
         "compv4": "Pipeline::CompV4",
+        "compv5": "Pipeline::CompV5",
         "preshufflev2": "Pipeline::PreShuffleV2",
     }
 

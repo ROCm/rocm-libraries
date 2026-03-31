@@ -119,9 +119,9 @@ class GroupedConvSignature
         if(conv_op_ == "forward")
             return "fwd";
         if(conv_op_ == "bwd_data")
-            return "bwdd";
+            return "bwd_data";
         if(conv_op_ == "bwd_weight")
-            return "bwdw";
+            return "bwd_weight";
         return conv_op_;
     }
 };
@@ -168,10 +168,10 @@ class GroupedConvAlgorithm
     int num_groups_to_merge_ = 1;
     bool double_smem_buffer_ = false;
 
-    // Padding
-    bool pad_m_ = true;
-    bool pad_n_ = true;
-    bool pad_k_ = true;
+    // Padding -- always enabled for convolution (MNK padding assumed)
+    static constexpr bool pad_m_ = true;
+    static constexpr bool pad_n_ = true;
+    static constexpr bool pad_k_ = true;
 
     // Tile setter (M, N, K)
     GroupedConvAlgorithm& tile(int m, int n, int k)
@@ -256,15 +256,6 @@ class GroupedConvAlgorithm
         return *this;
     }
 
-    // Padding setters
-    GroupedConvAlgorithm& padding(bool m, bool n, bool k)
-    {
-        pad_m_ = m;
-        pad_n_ = n;
-        pad_k_ = k;
-        return *this;
-    }
-
     bool needs_expansion() const
     {
         return wave_m_ == ANY_INT || warp_m_ == ANY_INT || pipeline_ == "*" || scheduler_ == "*";
@@ -316,7 +307,9 @@ class GroupedConvAlgorithm
         return {{32, 32, 16}}; // Default
     }
 
-    /// Get all valid pipeline/scheduler combinations
+    /// Get all valid pipeline/scheduler combinations for forward conv.
+    /// Backward operations (bwd_data/bwd_weight) only support compv3 and mem
+    /// due to transpose_tile2d and get_length constraints in CK Tile.
     static std::vector<std::pair<std::string, std::string>> valid_trait_configs()
     {
         return {

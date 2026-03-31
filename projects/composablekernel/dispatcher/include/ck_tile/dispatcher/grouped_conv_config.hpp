@@ -206,8 +206,8 @@ struct GroupedConvSignatureInfo
         switch(dir)
         {
         case GroupedConvDirection::FORWARD: return "fwd";
-        case GroupedConvDirection::BACKWARD_DATA: return "bwdd";
-        case GroupedConvDirection::BACKWARD_WEIGHT: return "bwdw";
+        case GroupedConvDirection::BACKWARD_DATA: return "bwd_data";
+        case GroupedConvDirection::BACKWARD_WEIGHT: return "bwd_weight";
         default: return "unknown";
         }
     }

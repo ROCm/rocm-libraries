@@ -50,6 +50,11 @@ struct GroupedConvProblem
     // Operation type
     GroupedConvOp op = GroupedConvOp::Forward;
 
+    // Split-K for backward weight (k_batch parameter in CK Tile).
+    // Values > 1 split the reduction dimension across multiple thread blocks
+    // and use atomic accumulation.
+    int split_k = 1;
+
     // Default constructor for 2D convolution
     GroupedConvProblem()
         : N(1),

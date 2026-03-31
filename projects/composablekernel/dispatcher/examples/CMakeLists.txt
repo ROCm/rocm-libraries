@@ -454,7 +454,7 @@ add_declarative_gpu_example(fmha_35_generic_mask fmha/cpp/35_generic_mask_fmha.c
 set(CONV_FALLBACK_KERNEL_DIR "${CMAKE_CURRENT_BINARY_DIR}/conv_python_fallback")
 set(CONV_DISPATCH_HEADER "${CONV_FALLBACK_KERNEL_DIR}/conv_python_dispatch.hpp")
 
-# Generate ALL conv kernels (fwd/bwdd/bwdw x 2D/3D x multiple tile configs)
+# Generate ALL conv kernels (fwd/bwd_data/bwd_weight x 2D/3D x multiple tile configs)
 # then create the dispatch header with 2D/3D aliases
 add_custom_command(
     OUTPUT ${CONV_DISPATCH_HEADER}
@@ -466,7 +466,7 @@ add_custom_command(
     COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/generate_conv_dispatch_header.py
             --kernel-dir ${CONV_FALLBACK_KERNEL_DIR}
             --output ${CONV_DISPATCH_HEADER}
-    COMMENT "Generating conv kernels (fwd/bwdd/bwdw x 2D/3D) for Python library..."
+    COMMENT "Generating conv kernels (fwd/bwd_data/bwd_weight x 2D/3D) for Python library..."
     VERBATIM
 )
 
