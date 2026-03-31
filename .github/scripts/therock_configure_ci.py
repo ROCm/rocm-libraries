@@ -153,8 +153,8 @@ def retrieve_projects(args):
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
 
-    # by default, we select full tests
-    test_type = "full"
+    # by default, we select standard tests
+    test_type = "standard"
 
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
@@ -193,6 +193,7 @@ def retrieve_projects(args):
     # for nightly runs, run everything with full tests
     if args.get("is_nightly"):
         subtrees = list(subtree_to_project_map.keys())
+        test_type = "comprehensive"
 
     project_to_run = collect_projects_to_run(subtrees)
 

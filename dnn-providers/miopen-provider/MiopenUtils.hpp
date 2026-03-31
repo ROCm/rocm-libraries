@@ -161,6 +161,19 @@ MiopenTensor createTensor(
         tensorMap,
     int64_t uid);
 
+/// @brief Creates a MiopenTensor with automatic 3D→4D padding for batchnorm.
+///
+/// If the tensor has 3 dimensions, it will be padded to 4D before creating
+/// the MIOpen descriptor. 4D and 5D tensors are passed through unchanged.
+///
+/// @param tensorMap Map of tensor UIDs to TensorAttributes
+/// @param uid The tensor UID to look up
+/// @return MiopenTensor with potentially padded descriptor
+MiopenTensor createBatchnormTensor(
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    int64_t uid);
+
 size_t getSpatialDimCount(const hipdnn_data_sdk::data_objects::TensorAttributes& attr);
 
 using hipdnn_data_sdk::utilities::extractDoubleFromTensorValue;

@@ -23,10 +23,6 @@
 # SOFTWARE.
 #
 ################################################################################
-# - Enable warning all for gcc/clang or use /W4 for visual studio
-
-## Strict warning level
-set(__msvc_cxx_compile_options /W4)
 
 set(__default_cxx_compile_options
     -Wall
@@ -112,7 +108,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION
         -Wno-nontrivial-memcall)
 endif()
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "23")
     list(APPEND __clang_cxx_compile_options
         -Wno-nrvo
         -Wno-lifetime-safety
@@ -127,17 +123,9 @@ if(WIN32)
         -fms-compatibility)
 endif()
 
-set(__gnu_cxx_compile_options
-    -Wno-missing-field-initializers
-)
-
 add_compile_options(
-    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:${__msvc_cxx_compile_options}>"
     "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:${__default_cxx_compile_options};${__clang_cxx_compile_options}>"
-    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:${__default_cxx_compile_options};${__gnu_cxx_compile_options}>"
 )
 
-unset(__msvc_cxx_compile_options)
 unset(__default_cxx_compile_options)
-unset(__gnu_cxx_compile_options)
 unset(__clang_cxx_compile_options)

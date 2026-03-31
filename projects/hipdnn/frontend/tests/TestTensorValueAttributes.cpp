@@ -237,6 +237,36 @@ TEST(TestTensorValueAttributes, PackUnpackInt32Value)
     EXPECT_EQ(int32Val->value(), K_INT32_VALUE);
 }
 
+TEST(TestTensorValueAttributes, PackUnpackInt64Value)
+{
+    constexpr int64_t K_INT64_VALUE = 123456789012345LL;
+
+    hipdnn_frontend::graph::TensorAttributes tensor;
+    tensor.set_uid(13)
+        .set_name("int64_tensor")
+        .set_data_type(hipdnn_frontend::DataType::INT64)
+        .set_is_virtual(false)
+        .set_value(K_INT64_VALUE);
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto fbOffset = tensor.pack_attributes(builder);
+    builder.Finish(fbOffset);
+
+    auto bufferPointer = builder.GetBufferPointer();
+    auto fbTensor = flatbuffers::GetRoot<TensorAttributes>(bufferPointer);
+
+    EXPECT_EQ(fbTensor->value_type(), TensorValue::Int64Value);
+    auto i64val = fbTensor->value_as_Int64Value();
+    ASSERT_NE(i64val, nullptr);
+    EXPECT_EQ(i64val->value(), K_INT64_VALUE);
+
+    auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
+    ASSERT_EQ(unpacked->value.type, TensorValue::Int64Value);
+    auto* int64Val = unpacked->value.AsInt64Value();
+    ASSERT_NE(int64Val, nullptr);
+    EXPECT_EQ(int64Val->value(), K_INT64_VALUE);
+}
+
 TEST(TestTensorValueAttributes, PackUnpackEmptyValue)
 {
     hipdnn_frontend::graph::TensorAttributes tensor;
@@ -275,15 +305,26 @@ TEST(TestTensorValueAttributes, TypeSafety)
     EXPECT_FALSE(tensor.get_pass_by_value<bfloat16>().has_value());
     EXPECT_FALSE(tensor.get_pass_by_value<uint8_t>().has_value());
     EXPECT_FALSE(tensor.get_pass_by_value<int32_t>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<int64_t>().has_value());
     EXPECT_FALSE(tensor.get_pass_by_value<double>().has_value());
 
     tensor.set_value(int32_t{123});
 
     EXPECT_FALSE(tensor.get_pass_by_value<float>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<int64_t>().has_value());
 
     auto intOpt = tensor.get_pass_by_value<int32_t>();
     ASSERT_TRUE(intOpt.has_value());
     EXPECT_EQ(intOpt.value(), 123);
+
+    tensor.set_value(int64_t{456789012345LL});
+
+    EXPECT_FALSE(tensor.get_pass_by_value<float>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<int32_t>().has_value());
+
+    auto int64Opt = tensor.get_pass_by_value<int64_t>();
+    ASSERT_TRUE(int64Opt.has_value());
+    EXPECT_EQ(int64Opt.value(), 456789012345LL);
 }
 
 TEST(TestTensorValueAttributes, NumericLimits)
@@ -299,6 +340,11 @@ TEST(TestTensorValueAttributes, NumericLimits)
     auto intOpt = tensor.get_pass_by_value<int32_t>();
     ASSERT_TRUE(intOpt.has_value());
     EXPECT_EQ(intOpt.value(), std::numeric_limits<int32_t>::min());
+
+    tensor.set_value(std::numeric_limits<int64_t>::min());
+    auto int64Opt = tensor.get_pass_by_value<int64_t>();
+    ASSERT_TRUE(int64Opt.has_value());
+    EXPECT_EQ(int64Opt.value(), std::numeric_limits<int64_t>::min());
 
     tensor.set_value(std::numeric_limits<uint8_t>::max());
     auto uint8Opt = tensor.get_pass_by_value<uint8_t>();
