@@ -455,4 +455,62 @@ hipdnnNormFwdPhase_t fromSdkNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdP
     }
 }
 
+hipdnn_data_sdk::data_objects::ReductionMode toSdkReductionMode(hipdnnReduceTensorOp_t mode)
+{
+    using hipdnn_data_sdk::data_objects::ReductionMode;
+
+    switch(mode)
+    {
+    case HIPDNN_REDUCE_TENSOR_ADD:
+        return ReductionMode::ADD;
+    case HIPDNN_REDUCE_TENSOR_MUL:
+        return ReductionMode::MUL;
+    case HIPDNN_REDUCE_TENSOR_MIN:
+        return ReductionMode::MIN_OP;
+    case HIPDNN_REDUCE_TENSOR_MAX:
+        return ReductionMode::MAX_OP;
+    case HIPDNN_REDUCE_TENSOR_AMAX:
+        return ReductionMode::AMAX;
+    case HIPDNN_REDUCE_TENSOR_AVG:
+        return ReductionMode::AVG;
+    case HIPDNN_REDUCE_TENSOR_NORM1:
+        return ReductionMode::NORM1;
+    case HIPDNN_REDUCE_TENSOR_NORM2:
+        return ReductionMode::NORM2;
+    case HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS:
+        return ReductionMode::MUL_NO_ZEROS;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnReduceTensorOp_t value");
+    }
+}
+
+hipdnnReduceTensorOp_t fromSdkReductionMode(hipdnn_data_sdk::data_objects::ReductionMode mode)
+{
+    using hipdnn_data_sdk::data_objects::ReductionMode;
+
+    switch(mode)
+    {
+    case ReductionMode::ADD:
+        return HIPDNN_REDUCE_TENSOR_ADD;
+    case ReductionMode::MUL:
+        return HIPDNN_REDUCE_TENSOR_MUL;
+    case ReductionMode::MIN_OP:
+        return HIPDNN_REDUCE_TENSOR_MIN;
+    case ReductionMode::MAX_OP:
+        return HIPDNN_REDUCE_TENSOR_MAX;
+    case ReductionMode::AMAX:
+        return HIPDNN_REDUCE_TENSOR_AMAX;
+    case ReductionMode::AVG:
+        return HIPDNN_REDUCE_TENSOR_AVG;
+    case ReductionMode::NORM1:
+        return HIPDNN_REDUCE_TENSOR_NORM1;
+    case ReductionMode::NORM2:
+        return HIPDNN_REDUCE_TENSOR_NORM2;
+    case ReductionMode::MUL_NO_ZEROS:
+        return HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK ReductionMode value");
+    }
+}
+
 } // namespace hipdnn_backend

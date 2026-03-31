@@ -24,6 +24,7 @@
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
+#include <hipdnn_frontend/node/ReductionNode.hpp>
 #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
 #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 
@@ -444,6 +445,16 @@ TEST(TestCreateNodeForType, CreatesBlockScaleDequantizeNode)
     ASSERT_NE(node, nullptr);
     auto bsdNode = std::dynamic_pointer_cast<BlockScaleDequantizeNode>(node);
     EXPECT_NE(bsdNode, nullptr);
+}
+
+TEST(TestCreateNodeForType, CreatesReductionNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_REDUCTION, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<ReductionNode>(node);
+    EXPECT_NE(typedNode, nullptr);
 }
 
 TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)

@@ -10,10 +10,12 @@
 #include "HipdnnException.hpp"
 #include "HipdnnNormFwdPhase.h"
 #include "HipdnnPointwiseMode.h"
+#include "HipdnnReduceTensorOp.h"
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 
 namespace hipdnn_backend
@@ -50,5 +52,9 @@ hipdnnAttentionImplementation_t
 // Converts between C-API hipdnnNormFwdPhase_t and SDK NormFwdPhase enum values.
 hipdnn_data_sdk::data_objects::NormFwdPhase toSdkNormFwdPhase(hipdnnNormFwdPhase_t phase);
 hipdnnNormFwdPhase_t fromSdkNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase phase);
+
+// Converts between C-API hipdnnReduceTensorOp_t and SDK ReductionMode enum values.
+hipdnn_data_sdk::data_objects::ReductionMode toSdkReductionMode(hipdnnReduceTensorOp_t mode);
+hipdnnReduceTensorOp_t fromSdkReductionMode(hipdnn_data_sdk::data_objects::ReductionMode mode);
 
 } // namespace hipdnn_backend

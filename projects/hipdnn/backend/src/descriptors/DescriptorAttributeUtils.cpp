@@ -375,6 +375,50 @@ void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
     std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
 }
 
+void setReductionMode(hipdnn_data_sdk::data_objects::ReductionMode& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnReduceTensorOp_t tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdkReductionMode(tmp);
+}
+
+void getReductionMode(hipdnn_data_sdk::data_objects::ReductionMode source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    auto tmp = fromSdkReductionMode(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
+
 void getOperationType(hipdnnOperationType_t source,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t requestedElementCount,

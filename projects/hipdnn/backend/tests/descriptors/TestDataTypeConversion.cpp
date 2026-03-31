@@ -1,9 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "HipdnnReduceTensorOp.h"
 #include "TestMacros.hpp"
 #include "descriptors/DataTypeConversion.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 
 #include <string>
 
@@ -15,6 +17,7 @@ namespace testing
 using hipdnn_data_sdk::data_objects::ConvMode;
 using hipdnn_data_sdk::data_objects::DataType;
 using hipdnn_data_sdk::data_objects::PointwiseMode;
+using hipdnn_data_sdk::data_objects::ReductionMode;
 
 // =============================================================================
 // Parameterized Data Type Conversion Tests
@@ -323,6 +326,72 @@ TEST(TestPointwiseModeConversionRoundTrip, InvalidEnumThrows)
 TEST(TestPointwiseModeConversionRoundTrip, UnsetSdkModeThrows)
 {
     ASSERT_THROW_HIPDNN_STATUS(fromSdkPointwiseMode(PointwiseMode::UNSET), HIPDNN_STATUS_BAD_PARAM);
+}
+
+// =============================================================================
+// Parameterized Reduction Mode Conversion Tests
+// =============================================================================
+
+struct ReductionModeConversionParam
+{
+    hipdnnReduceTensorOp_t apiMode;
+    ReductionMode sdkMode;
+    std::string name;
+};
+
+class TestReductionModeConversionRoundTrip
+    : public ::testing::TestWithParam<ReductionModeConversionParam>
+{
+};
+
+TEST_P(TestReductionModeConversionRoundTrip, ToSdkReductionMode)
+{
+    const auto& param = GetParam();
+    ASSERT_EQ(toSdkReductionMode(param.apiMode), param.sdkMode);
+}
+
+TEST_P(TestReductionModeConversionRoundTrip, FromSdkReductionMode)
+{
+    const auto& param = GetParam();
+    ASSERT_EQ(fromSdkReductionMode(param.sdkMode), param.apiMode);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ReductionModes,
+    TestReductionModeConversionRoundTrip,
+    ::testing::Values(
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_ADD, ReductionMode::ADD, "Add"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_MUL, ReductionMode::MUL, "Mul"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_MIN, ReductionMode::MIN_OP, "Min"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_MAX, ReductionMode::MAX_OP, "Max"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_AMAX, ReductionMode::AMAX, "Amax"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_AVG, ReductionMode::AVG, "Avg"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_NORM1, ReductionMode::NORM1, "Norm1"},
+        ReductionModeConversionParam{HIPDNN_REDUCE_TENSOR_NORM2, ReductionMode::NORM2, "Norm2"},
+        ReductionModeConversionParam{
+            HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS, ReductionMode::MUL_NO_ZEROS, "MulNoZeros"}),
+    [](const ::testing::TestParamInfo<ReductionModeConversionParam>& info) {
+        return info.param.name;
+    });
+
+// =============================================================================
+// toSdkReductionMode Edge Cases
+// =============================================================================
+
+TEST(TestReductionModeConversionRoundTrip, InvalidEnumThrows)
+{
+    ASSERT_THROW_HIPDNN_STATUS(toSdkReductionMode(static_cast<hipdnnReduceTensorOp_t>(-1)),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+// =============================================================================
+// fromSdkReductionMode Edge Cases
+// =============================================================================
+
+TEST(TestReductionModeConversionRoundTrip, NotSetSdkModeThrows)
+{
+    ASSERT_THROW_HIPDNN_STATUS(fromSdkReductionMode(ReductionMode::NOT_SET),
+                               HIPDNN_STATUS_BAD_PARAM);
 }
 
 } // namespace testing

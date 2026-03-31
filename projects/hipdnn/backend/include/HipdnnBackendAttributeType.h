@@ -105,6 +105,9 @@ typedef enum
     /** @brief Attention implementation mode enumeration (hipdnnAttentionImplementation_t) */
     HIPDNN_TYPE_ATTENTION_IMPLEMENTATION = 27,
 
+    /** @brief Reduce tensor operator enumeration (hipdnnReduceTensorOp_t) */
+    HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE = 28,
+
     /**
      * @name Extension Types
      * hipDNN-specific extension types

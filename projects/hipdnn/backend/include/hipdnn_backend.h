@@ -54,6 +54,7 @@
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
+#include "HipdnnReduceTensorOp.h"
 #include "HipdnnStatus.h"
 
 // NOLINTBEGIN
