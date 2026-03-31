@@ -4,8 +4,8 @@
 #pragma once
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <stdexcept>
 #include <thread>

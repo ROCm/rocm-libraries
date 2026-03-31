@@ -5,10 +5,10 @@
 
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
-#include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
 
 #include <array>
 #include <cstdint>
