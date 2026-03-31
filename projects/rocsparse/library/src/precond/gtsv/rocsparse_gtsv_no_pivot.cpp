@@ -82,7 +82,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
     {
         *buffer_size = 0;
     }
-    else if(m <= 131072)
+    else if(m <= 131072) //2^17
     {
         *buffer_size = 0;
 
@@ -119,7 +119,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
 
 namespace rocsparse
 {
-    template <typename T>
+    template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_cramer_rule_kernel(rocsparse_handle handle,
                                                rocsparse_int    n,
                                                rocsparse_int    ldb,
@@ -128,9 +128,9 @@ namespace rocsparse
                                                const T*         du,
                                                T*               B)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_2x2_kernel<256>),
-                                           dim3((n - 1) / 256 + 1),
-                                           dim3(256),
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_2x2_kernel<BLOCKSIZE>),
+                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
                                            n,
@@ -142,7 +142,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <typename T>
+    template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_3(rocsparse_handle handle,
                                             rocsparse_int    n,
                                             rocsparse_int    ldb,
@@ -151,9 +151,9 @@ namespace rocsparse
                                             const T*         du,
                                             T*               B)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_3x3_kernel<256>),
-                                           dim3((n - 1) / 256 + 1),
-                                           dim3(256),
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_3x3_kernel<BLOCKSIZE>),
+                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
                                            n,
@@ -165,7 +165,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <typename T>
+    template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_4(rocsparse_handle handle,
                                             rocsparse_int    n,
                                             rocsparse_int    ldb,
@@ -174,9 +174,9 @@ namespace rocsparse
                                             const T*         du,
                                             T*               B)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_4x4_kernel<256>),
-                                           dim3((n - 1) / 256 + 1),
-                                           dim3(256),
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_4x4_kernel<BLOCKSIZE>),
+                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
                                            n,
@@ -188,7 +188,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <typename T>
+    template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_5(rocsparse_handle handle,
                                             rocsparse_int    n,
                                             rocsparse_int    ldb,
@@ -197,9 +197,9 @@ namespace rocsparse
                                             const T*         du,
                                             T*               B)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_5x5_kernel<256>),
-                                           dim3((n - 1) / 256 + 1),
-                                           dim3(256),
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_5x5_kernel<BLOCKSIZE>),
+                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
                                            n,
@@ -211,7 +211,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <typename T>
+    template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_6(rocsparse_handle handle,
                                             rocsparse_int    n,
                                             rocsparse_int    ldb,
@@ -220,9 +220,9 @@ namespace rocsparse
                                             const T*         du,
                                             T*               B)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_6x6_kernel<256>),
-                                           dim3((n - 1) / 256 + 1),
-                                           dim3(256),
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_6x6_kernel<BLOCKSIZE>),
+                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
                                            n,
@@ -234,7 +234,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <typename T>
+    template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_7(rocsparse_handle handle,
                                             rocsparse_int    n,
                                             rocsparse_int    ldb,
@@ -243,9 +243,9 @@ namespace rocsparse
                                             const T*         du,
                                             T*               B)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_7x7_kernel<256>),
-                                           dim3((n - 1) / 256 + 1),
-                                           dim3(256),
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_7x7_kernel<BLOCKSIZE>),
+                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
                                            n,
@@ -257,7 +257,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <uint32_t M, typename T>
+    template <uint32_t BLOCKSIZE, uint32_t M, typename T>
     rocsparse_status launch_thomas_kernel_m(rocsparse_handle handle,
                                             rocsparse_int    n,
                                             rocsparse_int    ldb,
@@ -266,9 +266,9 @@ namespace rocsparse
                                             const T*         du,
                                             T*               B)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_thomas_kernel<256, M>),
-                                           dim3((n - 1) / 256 + 1),
-                                           dim3(256),
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_thomas_kernel<BLOCKSIZE, M>),
+                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
                                            n,
@@ -282,7 +282,7 @@ namespace rocsparse
 
     // LCOV_EXCL_START
     template <typename T>
-    constexpr uint32_t determine_num_rhs()
+    static constexpr uint32_t determine_num_rhs()
     {
         if constexpr(std::is_same<T, float>())
         {
@@ -409,21 +409,21 @@ namespace rocsparse
 
         // Kernel dispatch table for thomas solver
         static const std::map<int, thomas_kernel_func_ptr> s_thomas_kernel_dispatch
-            = {{2, launch_cramer_rule_kernel},
-               {3, launch_thomas_kernel_3},
-               {4, launch_thomas_kernel_4},
-               {5, launch_thomas_kernel_5},
-               {6, launch_thomas_kernel_6},
-               {7, launch_thomas_kernel_7},
-               {8, launch_thomas_kernel_m<8>},
-               {9, launch_thomas_kernel_m<9>},
-               {10, launch_thomas_kernel_m<10>},
-               {11, launch_thomas_kernel_m<11>},
-               {12, launch_thomas_kernel_m<12>},
-               {13, launch_thomas_kernel_m<13>},
-               {14, launch_thomas_kernel_m<14>},
-               {15, launch_thomas_kernel_m<15>},
-               {16, launch_thomas_kernel_m<16>}};
+            = {{2, launch_cramer_rule_kernel<256>},
+               {3, launch_thomas_kernel_3<256>},
+               {4, launch_thomas_kernel_4<256>},
+               {5, launch_thomas_kernel_5<256>},
+               {6, launch_thomas_kernel_6<256>},
+               {7, launch_thomas_kernel_7<256>},
+               {8, launch_thomas_kernel_m<256, 8>},
+               {9, launch_thomas_kernel_m<256, 9>},
+               {10, launch_thomas_kernel_m<256, 10>},
+               {11, launch_thomas_kernel_m<256, 11>},
+               {12, launch_thomas_kernel_m<256, 12>},
+               {13, launch_thomas_kernel_m<256, 13>},
+               {14, launch_thomas_kernel_m<256, 14>},
+               {15, launch_thomas_kernel_m<256, 15>},
+               {16, launch_thomas_kernel_m<256, 16>}};
 
         if(m <= 16)
         {
@@ -435,7 +435,7 @@ namespace rocsparse
             }
             else
             {
-                return rocsparse_status_not_implemented;
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
         }
 
@@ -448,7 +448,7 @@ namespace rocsparse
                                                          const T*         du,
                                                          T*               B);
 
-        // Kernel dispatch table for thomas solver
+        // Kernel dispatch table for PCR solver
         static const std::map<int, pcr_kernel_func_ptr> s_pcr_kernel_dispatch
             = {{8, launch_pcr_wavefront_kernel<8>},
                {16, launch_pcr_wavefront_kernel<16>},
@@ -469,7 +469,7 @@ namespace rocsparse
             }
             else
             {
-                return rocsparse_status_not_implemented;
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
         }
 
@@ -670,12 +670,12 @@ namespace rocsparse
             }
             else
             {
-                return rocsparse_status_not_implemented;
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
         }
         else
         {
-            return rocsparse_status_not_implemented;
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
 
         RETURN_IF_ROCSPARSE_ERROR(
@@ -906,7 +906,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_template(rocsparse_handle handle,
             rocsparse::gtsv_no_pivot_small_template(handle, m, n, dl, d, du, B, ldb, temp_buffer));
         return rocsparse_status_success;
     }
-    else if(m <= 131072)
+    else if(m <= 131072) //2^17
     {
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::gtsv_no_pivot_medium_template(handle, m, n, dl, d, du, B, ldb, temp_buffer));
