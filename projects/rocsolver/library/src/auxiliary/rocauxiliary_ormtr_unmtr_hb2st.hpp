@@ -49,7 +49,7 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_side side,
                                                size_t* size_workArr)
 {
     // if quick return no workspace needed
-    if(m == 0 || n == 0 || batch_count == 0)
+    if(m == 0 || n == 0 || kd == 0 || batch_count == 0)
     {
         *size_scalars = 0;
         *size_work = 0;
@@ -87,7 +87,7 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_side side,
     *optim_mem = true;
 
     // if quick return no workspace needed
-    if(m == 0 || n == 0 || batch_count == 0)
+    if(m == 0 || n == 0 || kd == 0 || batch_count == 0)
     {
         return;
     }
@@ -106,27 +106,24 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(rocblas_handle handle,
                                               const rocblas_int ldc,
                                               T V,
                                               T C,
-                                              U tau)
+                                              U tau)  // why U and last?
 {
     // order is important for unit tests:
 
     // 1. invalid/non-supported values
     if(side != rocblas_side_left && side != rocblas_side_right)
         return rocblas_status_invalid_value;
-    if(!COMPLEX && trans == rocblas_operation_conjugate_transpose)
-        return rocblas_status_invalid_value;
+    // rocblas_operation_conjugate_transpose ok for both real and complex.
     if(COMPLEX && trans == rocblas_operation_transpose)
         return rocblas_status_invalid_value;
-    if(trans != rocblas_operation_none && trans != rocblas_operation_transpose
+    if(trans != rocblas_operation_none
+       && trans != rocblas_operation_transpose
        && trans != rocblas_operation_conjugate_transpose)
         return rocblas_status_invalid_value;
 
     // 2. invalid size
-    if(m < 0 || n < 0 || kd < 0 || ldc < m)
-        return rocblas_status_invalid_size;
-
-    // TODO: add ldv validation
-    if(ldv < m)
+    // todo: fix ldv validation
+    if(m < 0 || n < 0 || kd < 0 || ldv < m || ldc < m)
         return rocblas_status_invalid_size;
 
     // skip pointer check if querying memory size
@@ -134,12 +131,14 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(rocblas_handle handle,
         return rocblas_status_continue;
 
     // 3. invalid pointers
+    // todo: if (m > 0 && n > 0 && kd > 0 && (!V || !tau || !C))
     if((m > 0 && n > 0 && !V) || (kd > 0 && !tau) || (m && n && !C))
         return rocblas_status_invalid_pointer;
 
     return rocblas_status_continue;
 }
 
+// todo: why are there 2 templates?
 template <bool BATCHED, bool STRIDED, typename T, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                                                     const rocblas_side side,
@@ -162,12 +161,14 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                                                     T* work,
                                                     T** workArr)
 {
-    ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "side:", side, "trans:", trans, "m:", m, "n:", n, "kd:",
-                    kd, "shiftV:", shiftV, "ldv:", ldv, "shiftC:", shiftC, "ldc:", ldc, "bc:",
-                    batch_count);
+    ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "side:", side, "trans:", trans,
+                    "m:", m, "n:", n, "kd:", kd, "shiftV:", shiftV,
+                    "ldv:", ldv, "shiftC:", shiftC, "ldc:", ldc,
+                    "bc:", batch_count);
 
     // quick return
-    if(!n || !m || !batch_count)
+    // todo: x == 0 instead of !x ?
+    if(!m || !n || !kd || !batch_count)
         return rocblas_status_success;
 
     hipStream_t stream;
@@ -206,12 +207,13 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                                                     T** workArr,
                                                     bool optim_mem)
 {
-    ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "side:", side, "trans:", trans, "m:", m, "n:", n, "kd:",
-                    kd, "shiftV:", shiftV, "ldv:", ldv, "shiftC:", shiftC, "ldc:", ldc, "bc:",
-                    batch_count);
+    ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "side:", side, "trans:", trans,
+                    "m:", m, "n:", n, "kd:", kd, "shiftV:", shiftV,
+                    "ldv:", ldv, "shiftC:", shiftC, "ldc:", ldc,
+                    "bc:", batch_count);
 
     // quick return
-    if(!n || !m || !batch_count)
+    if(!m || !n || !kd || !batch_count)
         return rocblas_status_success;
 
     hipStream_t stream;

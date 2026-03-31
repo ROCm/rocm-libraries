@@ -3856,9 +3856,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmbr(rocblas_handle handle,
 
     \f[
         \begin{array}{cl}
-        QC & \: \text{No transpose from the left,}\\
+        QC   & \: \text{No transpose from the left,}\\
         Q^TC & \: \text{Transpose from the left,}\\
-        CQ & \: \text{No transpose from the right, and}\\
+        CQ   & \: \text{No transpose from the right, and}\\
         CQ^T & \: \text{Transpose from the right.}
         \end{array}
     \f]
@@ -4061,9 +4061,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
 
     \f[
         \begin{array}{cl}
-        QC & \: \text{No transpose from the left,}\\
+        QC   & \: \text{No transpose from the left,}\\
         Q^TC & \: \text{Transpose from the left,}\\
-        CQ & \: \text{No transpose from the right, and}\\
+        CQ   & \: \text{No transpose from the right, and}\\
         CQ^T & \: \text{Transpose from the right.}
         \end{array}
     \f]
@@ -4078,6 +4078,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
     @param[in]
     trans       rocblas_operation.
                 Specifies whether the matrix Q or its transpose is to be applied.
+                Conjugate transpose is interpreted to mean transpose.
     @param[in]
     m           rocblas_int. m >= 0.
                 Number of rows of matrix C.
@@ -4093,6 +4094,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
     @param[in]
     ldv         rocblas_int.
                 Leading dimension of V.
+                todo: restriction: ldv >= ...
     @param[in]
     tau         pointer to type. Array on the GPU containing the Householder scalars
                 as returned by HB2ST.
@@ -4142,9 +4144,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr_hb2st(rocblas_handle handle,
 
     \f[
         \begin{array}{cl}
-        QC & \: \text{No transpose from the left,}\\
+        QC   & \: \text{No transpose from the left,}\\
         Q^HC & \: \text{Conjugate transpose from the left,}\\
-        CQ & \: \text{No transpose from the right, and}\\
+        CQ   & \: \text{No transpose from the right, and}\\
         CQ^H & \: \text{Conjugate transpose from the right.}
         \end{array}
     \f]
@@ -4174,6 +4176,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr_hb2st(rocblas_handle handle,
     @param[in]
     ldv         rocblas_int.
                 Leading dimension of V.
+                todo: restriction: ldv >= ...
     @param[in]
     tau         pointer to type. Array on the GPU containing the Householder scalars
                 as returned by HB2ST.

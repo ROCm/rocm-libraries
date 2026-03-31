@@ -43,15 +43,16 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
                                                 const rocblas_int ldc)
 {
     const char* name = (!rocblas_is_complex<T> ? "ormtr_hb2st" : "unmtr_hb2st");
-    ROCSOLVER_ENTER_TOP(name, "--side", side, "--trans", trans, "-m", m, "-n", n, "--kd", kd,
+    ROCSOLVER_ENTER_TOP(name, "--side", side, "--trans", trans,
+                        "-m", m, "-n", n, "--kd", kd,
                         "--ldv", ldv, "--ldc", ldc);
 
     if(!handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_ormtr_hb2st_argCheck<COMPLEX>(handle, side, trans, m, n, kd, ldv,
-                                                                ldc, V, C, tau);
+    rocblas_status st = rocsolver_ormtr_hb2st_argCheck<COMPLEX>(
+        handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
     if(st != rocblas_status_continue)
         return st;
 
@@ -71,17 +72,22 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
     size_t size_work, size_work2, size_work3, size_work4;
     size_t size_workArr;
     rocsolver_ormtr_unmtr_hb2st_getMemorySize<false, false, T>(
-        side, trans, m, n, kd, batch_count, &size_scalars, &size_work, &size_work2, &size_work3,
+        side, trans, m, n, kd, batch_count,
+        &size_scalars, &size_work, &size_work2, &size_work3,
         &size_work4, &size_workArr, &optim_mem);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work, size_work2,
-                                                      size_work3, size_work4, size_workArr);
+    {
+        return rocblas_set_optimal_device_memory_size(
+            handle, size_scalars, size_work, size_work2,
+            size_work3, size_work4, size_workArr);
+    }
 
     // memory workspace allocation
     void *scalars, *work, *work2, *work3, *work4, *workArr;
-    rocblas_device_malloc mem(handle, size_scalars, size_work, size_work2, size_work3, size_work4,
-                              size_workArr);
+    rocblas_device_malloc mem(
+        handle, size_scalars, size_work, size_work2, size_work3, size_work4,
+        size_workArr);
     if(!mem)
         return rocblas_status_memory_error;
 
@@ -96,8 +102,12 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
 
     // execution
     return rocsolver_ormtr_unmtr_hb2st_template<false, false, T>(
-        handle, side, trans, m, n, kd, V, shiftV, ldv, strideV, tau, strideT, C, shiftC, ldc,
-        strideC, batch_count, (T*)scalars, (T*)work, work2, work3, work4, (T**)workArr, optim_mem);
+        handle, side, trans, m, n, kd,
+        V, shiftV, ldv, strideV,
+        tau, strideT,
+        C, shiftC, ldc, strideC,
+        batch_count,
+        (T*)scalars, (T*)work, work2, work3, work4, (T**)workArr, optim_mem);
 }
 
 ROCSOLVER_END_NAMESPACE
@@ -122,8 +132,8 @@ rocblas_status rocsolver_sormtr_hb2st(rocblas_handle handle,
                                       float* C,
                                       const rocblas_int ldc)
 {
-    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<float>(handle, side, trans, m, n, kd, V,
-                                                              ldv, tau, C, ldc);
+    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<float>(
+        handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
 rocblas_status rocsolver_dormtr_hb2st(rocblas_handle handle,
@@ -138,8 +148,8 @@ rocblas_status rocsolver_dormtr_hb2st(rocblas_handle handle,
                                       double* C,
                                       const rocblas_int ldc)
 {
-    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<double>(handle, side, trans, m, n, kd, V,
-                                                               ldv, tau, C, ldc);
+    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<double>(
+        handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
 rocblas_status rocsolver_cunmtr_hb2st(rocblas_handle handle,

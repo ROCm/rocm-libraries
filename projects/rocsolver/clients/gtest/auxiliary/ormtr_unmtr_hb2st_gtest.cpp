@@ -41,11 +41,14 @@ typedef std::tuple<vector<int>, vector<int>> ormtr_hb2st_tuple;
 // if ldv = -1, then ldv < limit (invalid size)
 // if ldv = 0, then ldv = limit
 // if ldv = 1, then ldv > limit
+//
 // if ldc = -1, then ldc < limit (invalid size)
 // if ldc = 0, then ldc = limit
 // if ldc = 1, then ldc > limit
+//
 // if side = 0, then side = 'L'
 // if side = 1, then side = 'R'
+//
 // if trans = 0, then trans = 'N'
 // if trans = 1, then trans = 'T' or 'C' (transpose or conjugate transpose)
 
@@ -53,23 +56,24 @@ typedef std::tuple<vector<int>, vector<int>> ormtr_hb2st_tuple;
 // will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
+// todo: should ldv, ldc be in size_range? what does "limit" mean?
 const vector<vector<int>> store_range = {
     // invalid
     {-1, 0, 0, 0},
     {0, -1, 0, 0},
     // normal (valid) samples
-    {1, 1, 0, 0},
-    {1, 1, 1, 0},
-    {0, 0, 0, 0},
-    {0, 0, 1, 0},
-    {0, 0, 0, 1},
-    {0, 0, 1, 1},
+    {1, 1, 0, 0},  // left,  no-trans   // also bad args
+    {1, 1, 1, 0},  // right, no-trans
+    {0, 0, 0, 0},  // left,  no-trans   // also bad args
+    {0, 0, 1, 0},  // right, no-trans
+    {0, 0, 0, 1},  // left,  conj-trans
+    {0, 0, 1, 1},  // right, conj-trans
 };
 
 // for checkin_lapack tests
 const vector<vector<int>> size_range = {
     // quick return
-    {0, 1, 0},
+    {0, 1, 0},  // also bad args
     {1, 0, 0},
     // invalid
     {-1, 1, 0},
@@ -102,10 +106,11 @@ Arguments ormtr_hb2st_setup_arguments(ormtr_hb2st_tuple tup)
     arg.set<rocblas_int>("n", n);
     arg.set<rocblas_int>("kd", kd);
 
+    // todo: set ldv based on kd.
     arg.set<rocblas_int>("ldv", m + store[0] * 10);
     arg.set<rocblas_int>("ldc", m + store[1] * 10);
     arg.set<char>("side", store[2] == 0 ? 'L' : 'R');
-    arg.set<char>("trans", store[3] == 0 ? 'N' : 'T');
+    arg.set<char>("trans", store[3] == 0 ? 'N' : 'C');
 
     arg.timing = 0;
 
@@ -125,10 +130,15 @@ protected:
     {
         Arguments arg = ormtr_hb2st_setup_arguments(GetParam());
 
-        if(arg.peek<rocblas_int>("m") == 0 && arg.peek<rocblas_int>("n") == 1
-           && arg.peek<rocblas_int>("kd") == 0 && arg.peek<char>("side") == 'L'
+        // todo: is bad_arg getting called 2x?
+        if(arg.peek<rocblas_int>("m") == 0
+           && arg.peek<rocblas_int>("n") == 1
+           && arg.peek<rocblas_int>("kd") == 0
+           && arg.peek<char>("side") == 'L'
            && arg.peek<char>("trans") == 'N')
+        {
             testing_ormtr_unmtr_hb2st_bad_arg<T>();
+        }
 
         testing_ormtr_unmtr_hb2st<T>(arg);
     }
