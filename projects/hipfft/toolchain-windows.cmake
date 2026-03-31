@@ -39,12 +39,12 @@ if( NOT DEFINED CMAKE_C_COMPILER )
 endif()
 
 # our usage flags
-set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -DWIN32 -D_CRT_SECURE_NO_WARNINGS")
+set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -D_CRT_SECURE_NO_WARNINGS")
 
 # flags for clang direct use
 
 # -Wno-ignored-attributes to avoid warning: __declspec attribute 'dllexport' is not supported [-Wignored-attributes] which is used by msvc compiler
-set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -Wno-ignored-attributes)
+set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -Wno-ignored-attributes")
 set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -DHIP_CLANG_HCC_COMPAT_MODE=1 -DNOMINMAX")
 
 # args also in hipcc.bat

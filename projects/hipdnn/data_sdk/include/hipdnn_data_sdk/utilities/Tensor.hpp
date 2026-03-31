@@ -3,35 +3,58 @@
 
 #pragma once
 
+#include <functional>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
-#include <typeindex>
+#include <variant>
 #include <vector>
 
 namespace hipdnn_data_sdk::utilities
 {
 
+/**
+ * @brief Describes a tensor memory layout via stride ordering
+ *
+ * TensorLayout encodes how tensor dimensions map to memory. The `strideOrder` vector
+ * specifies the priority of each dimension in memory layout (lower values = tighter
+ * packing in memory).
+ *
+ * @note TensorLayout is primarily used with convolution and batch normalization tensors,
+ * which follow (N, C, H, W) / (N, C, D, H, W) dimension ordering. Other operations
+ * such as matmul and pointwise have their own dimension conventions. The TensorLayout
+ * controls how dimensions map to contiguous memory via strides computed by
+ * `generateStrides()`.
+ *
+ * For example, for a convolution input with dims = {1, 64, 28, 28} (N=1, C=64, H=28, W=28):
+ * - TensorLayout::NCHW (stride order {3,2,1,0}) produces strides {50176, 784, 28, 1} (channel-first; N=50176, C=784, H=28, W=1)
+ * - TensorLayout::NHWC (stride order {3,0,2,1}) produces strides {50176, 1, 1792, 64} (channel-last; N=50176, C=1, H=1792, W=64)
+ */
 struct TensorLayout
 {
-    std::string name;
-    std::vector<int64_t> strideOrder;
+    std::string name; ///< Human-readable layout name (e.g., "NCHW", "NHWC")
+    std::vector<int64_t> strideOrder; ///< Stride priority per dimension (lower = tighter packing)
 
-    static const TensorLayout NCHW;
-    static const TensorLayout NHWC;
-    static const TensorLayout NCDHW;
-    static const TensorLayout NDHWC;
+    static const TensorLayout NCL; ///< 3D channel-first layout
+    static const TensorLayout NLC; ///< 3D channel-last layout
+    static const TensorLayout NCHW; ///< 4D channel-first layout
+    static const TensorLayout NHWC; ///< 4D channel-last layout
+    static const TensorLayout NCDHW; ///< 5D channel-first layout
+    static const TensorLayout NDHWC; ///< 5D channel-last layout
 };
 
+// NOLINTBEGIN(bugprone-throwing-static-initialization) fixed-size layout constants
+inline const TensorLayout TensorLayout::NCL{"NCL", {2, 1, 0}};
+inline const TensorLayout TensorLayout::NLC{"NLC", strideOrderNhwc(3)};
 inline const TensorLayout TensorLayout::NCHW{"NCHW", {3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NHWC{"NHWC", strideOrderNhwc(4)};
 inline const TensorLayout TensorLayout::NCDHW{"NCDHW", {4, 3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NDHWC{"NDHWC", strideOrderNhwc(5)};
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 inline std::ostream& operator<<(std::ostream& os, const TensorLayout& layout)
 {
@@ -53,84 +76,56 @@ template <bool IsConst = false>
 class ITensorIterator
 {
 public:
+    // forward declarations
+    struct LinearIndex;
+    struct CompositeIndex;
+
     using iterator_category = std::forward_iterator_tag;
     using value_type = std::conditional_t<IsConst, const void*, void*>;
     using difference_type = std::ptrdiff_t;
     using pointer = std::conditional_t<IsConst, const void*, void*>;
     using reference = std::conditional_t<IsConst, const void*, void*>;
 
-    using TensorType = std::conditional_t<IsConst, const ITensor&, ITensor&>;
+    using TensorType = std::conditional_t<IsConst,
+                                          std::reference_wrapper<const ITensor>,
+                                          std::reference_wrapper<ITensor>>;
+    using IndexType = std::variant<LinearIndex, CompositeIndex>;
 
     ITensorIterator() = default;
 
     template <bool C = IsConst, std::enable_if_t<!C, int> = 0>
     ITensorIterator(ITensor& tensor, bool isEnd = false)
         : _tensor(tensor)
-        , _indices(_tensor.dims().size(), 0)
+        , _index(makeIndex(_tensor, isEnd))
     {
-        if(isEnd && !_tensor.dims().empty())
-        {
-            _indices[0] = _tensor.dims()[0];
-        }
     }
 
     template <bool C = IsConst, std::enable_if_t<C, int> = 0>
     ITensorIterator(const ITensor& tensor, bool isEnd = false)
         : _tensor(tensor)
-        , _indices(_tensor.dims().size(), 0)
+        , _index(makeIndex(_tensor, isEnd))
     {
-        if(isEnd && !_tensor.dims().empty())
-        {
-            _indices[0] = _tensor.dims()[0];
-        }
     }
 
-    ITensorIterator(const ITensorIterator& other)
-        : _tensor(other._tensor)
-        , _indices(other._indices)
-    {
-    }
+    ITensorIterator(const ITensorIterator& other) = default;
 
     ITensorIterator(ITensorIterator&&) = default;
 
-    ITensorIterator& operator=(const ITensorIterator& other)
-    {
-        if(this != &other)
-        {
-            _tensor = other._tensor;
-            _indices = other._indices;
-        }
-        return *this;
-    }
+    ITensorIterator& operator=(const ITensorIterator& other) = default;
 
     ITensorIterator& operator=(ITensorIterator&&) = default;
 
     value_type operator*()
     {
         throwIfOutOfBounds("Cannot dereference end iterator");
-
-        return _tensor.hostDataOffsetFromIndex(_tensor.getIndex(_indices));
+        return _tensor.get().hostDataOffsetFromIndex(
+            std::visit([](auto& idx) { return idx.getValue(); }, _index));
     }
 
     ITensorIterator& operator++()
     {
         throwIfOutOfBounds("Iterator cannot be incremented past the end");
-
-        const auto& dims = _tensor.dims();
-        for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
-        {
-            auto dimIdx = static_cast<size_t>(dim);
-            _indices[dimIdx]++;
-            if(_indices[dimIdx] < dims[dimIdx])
-            {
-                return *this;
-            }
-            _indices[dimIdx] = 0;
-        }
-
-        //set 1 past end.
-        _indices[0] = dims[0];
-
+        std::visit([](auto& idx) { ++idx; }, _index);
         return *this;
     }
 
@@ -143,7 +138,7 @@ public:
 
     bool operator==(const ITensorIterator& other) const
     {
-        return (&_tensor == &other._tensor) && (_indices == other._indices);
+        return (&_tensor.get() == &other._tensor.get()) && (_index == other._index);
     }
 
     bool operator!=(const ITensorIterator& other) const
@@ -151,23 +146,159 @@ public:
         return !(*this == other);
     }
 
-    std::vector<int64_t> indices() const
+    IndexType index() const
     {
-        return _indices;
+        return _index;
     }
+
+    struct LinearIndex
+    {
+        LinearIndex(TensorType tensor, bool isEnd)
+            : tensor(tensor)
+
+        {
+            if(isEnd && !tensor.get().dims().empty())
+            {
+                index = static_cast<decltype(index)>(tensor.get().elementCount());
+            }
+        }
+
+        LinearIndex(const LinearIndex& other) = default;
+
+        LinearIndex(LinearIndex&&) = default;
+
+        LinearIndex& operator=(const LinearIndex& other) = default;
+
+        LinearIndex& operator=(LinearIndex&& other) = default;
+
+        LinearIndex& operator++()
+        {
+            ++index;
+            return *this;
+        }
+
+        LinearIndex operator++(int)
+        {
+            auto temp{*this};
+            ++(*this);
+            return temp;
+        }
+
+        bool operator==(const LinearIndex& other) const
+        {
+            return index == other.index && &tensor.get() == &other.tensor.get();
+        }
+
+        bool operator!=(const LinearIndex& other) const
+        {
+            return !((*this) == other);
+        }
+
+        bool isOutOfBounds() const
+        {
+            return index == static_cast<decltype(index)>(tensor.get().elementCount());
+        }
+
+        int64_t getValue() const
+        {
+            return index;
+        }
+
+        int64_t index{0};
+        TensorType tensor;
+    };
+
+    struct CompositeIndex
+    {
+        CompositeIndex(TensorType tensor, bool isEnd)
+            : indices(tensor.get().dims().size(), 0)
+            , tensor(tensor)
+        {
+            if(isEnd && !tensor.get().dims().empty())
+            {
+                indices[0] = tensor.get().dims()[0];
+            }
+        }
+
+        CompositeIndex(const CompositeIndex& other) = default;
+
+        CompositeIndex(CompositeIndex&&) = default;
+
+        CompositeIndex& operator=(const CompositeIndex& other) = default;
+
+        CompositeIndex& operator=(CompositeIndex&& other) = default;
+
+        CompositeIndex& operator++()
+        {
+            const auto& dims = tensor.get().dims();
+            for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
+            {
+                auto dimIdx = static_cast<size_t>(dim);
+                indices[dimIdx]++;
+                if(indices[dimIdx] < dims[dimIdx])
+                {
+                    return *this;
+                }
+                indices[dimIdx] = 0;
+            }
+
+            //set 1 past end.
+            indices[0] = dims[0];
+            return *this;
+        }
+
+        CompositeIndex operator++(int)
+        {
+            auto temp{*this};
+            ++(*this);
+            return temp;
+        }
+
+        bool operator==(const CompositeIndex& other) const
+        {
+            return indices == other.indices && &tensor.get() == &other.tensor.get();
+        }
+
+        bool operator!=(const CompositeIndex& other) const
+        {
+            return !((*this) == other);
+        }
+
+        bool isOutOfBounds() const
+        {
+            const auto& dims = tensor.get().dims();
+            return dims.empty() || indices[0] == dims[0];
+        }
+
+        int64_t getValue() const
+        {
+            return tensor.get().getIndex(indices);
+        }
+
+        std::vector<int64_t> indices;
+        TensorType tensor;
+    };
 
 private:
     void throwIfOutOfBounds(const std::string& reason) const
     {
-        const auto& dims = _tensor.dims();
-        if(dims.empty() || _indices[0] == dims[0])
+        if(std::visit([](const auto& idx) { return idx.isOutOfBounds(); }, _index))
         {
             throw std::out_of_range(reason);
         }
     }
 
+    IndexType makeIndex(TensorType tensor, bool isEnd)
+    {
+        if(tensor.get().isPacked())
+        {
+            return LinearIndex(tensor, isEnd);
+        }
+        return CompositeIndex(tensor, isEnd);
+    }
+
     TensorType _tensor;
-    std::vector<int64_t> _indices;
+    IndexType _index;
 };
 
 class ITensor
@@ -191,6 +322,7 @@ public:
     virtual void
         fillTensorWithRandomValues(float min, float max, unsigned int seed = std::random_device{}())
         = 0;
+    virtual void fillWithSentinelValue() = 0;
     virtual size_t fillWithData(const void* data, size_t bytesCopied) = 0;
 
     template <typename... Args>
@@ -199,16 +331,13 @@ public:
         static_assert(AllOfTypes<std::is_integral, Args...>::value,
                       "Indices must be an integral type!");
 
-        std::vector<int64_t> indexVector = {static_cast<int64_t>(indices)...};
+        const std::vector<int64_t> indexVector = {static_cast<int64_t>(indices)...};
 
         return getIndex(indexVector);
     }
 
-    template <typename IndexType>
-    int64_t getIndex(const std::vector<IndexType>& indices) const
+    int64_t getIndex(const std::vector<int64_t>& indices) const
     {
-        static_assert(std::is_integral_v<IndexType>, "Index type must be integral!");
-
         if(indices.size() > strides().size())
         {
             throw std::invalid_argument("Number of indices (" + std::to_string(indices.size())
@@ -282,6 +411,18 @@ public:
         fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
     }
 
+    void fillWithSentinelValue() override
+    {
+        if constexpr(std::numeric_limits<T>::has_quiet_NaN)
+        {
+            fillWithValue(std::numeric_limits<T>::quiet_NaN());
+        }
+        else
+        {
+            fillWithValue(std::numeric_limits<T>::max());
+        }
+    }
+
     virtual MigratableMemoryBase<T>& memory() = 0;
     virtual const MigratableMemoryBase<T>& memory() const = 0;
 
@@ -291,8 +432,7 @@ public:
         return (*this)(indices...);
     }
 
-    template <typename IndexType>
-    T getHostValue(const std::vector<IndexType>& indices) const
+    T getHostValue(const std::vector<int64_t>& indices) const
     {
         return (*this)(indices);
     }
@@ -303,8 +443,7 @@ public:
         (*this)(indices...) = value;
     }
 
-    template <typename IndexType>
-    void setHostValue(T value, const std::vector<IndexType>& indices)
+    void setHostValue(T value, const std::vector<int64_t>& indices)
     {
         (*this)(indices) = value;
     }
@@ -312,7 +451,7 @@ public:
     template <typename... Args>
     T& operator()(Args... indices)
     {
-        int64_t index = getIndex(indices...);
+        const int64_t index = getIndex(indices...);
         auto* data = memory().hostData();
         return data[index];
     }
@@ -320,23 +459,21 @@ public:
     template <typename... Args>
     const T& operator()(Args... indices) const
     {
-        int64_t index = getIndex(indices...);
+        const int64_t index = getIndex(indices...);
         const auto* data = memory().hostData();
         return data[index];
     }
 
-    template <typename IndexType>
-    T& operator()(const std::vector<IndexType>& indices)
+    T& operator()(const std::vector<int64_t>& indices)
     {
-        int64_t index = getIndex(indices);
+        const int64_t index = getIndex(indices);
         auto* data = memory().hostData();
         return data[index];
     }
 
-    template <typename IndexType>
-    const T& operator()(const std::vector<IndexType>& indices) const
+    const T& operator()(const std::vector<int64_t>& indices) const
     {
-        int64_t index = getIndex(indices);
+        const int64_t index = getIndex(indices);
         const auto* data = memory().hostData();
         return data[index];
     }
@@ -394,7 +531,7 @@ protected:
             std::inner_product(dims.begin(),
                                dims.end(),
                                strides.begin(),
-                               1,
+                               size_t{1},
                                std::plus<>(),
                                [](size_t len, size_t stride) { return (len - 1) * stride; }));
     }
@@ -407,11 +544,12 @@ protected:
         }
 
         return static_cast<size_t>(
-            std::accumulate(dims.begin(), dims.end(), 1, std::multiplies<>()));
+            std::accumulate(dims.begin(), dims.end(), int64_t{1}, std::multiplies<>()));
     }
 };
 
 // NOLINTEND(portability-template-virtual-member-function)
+
 template <class T, class HostAlloc = HostAllocator<T>, class DeviceAlloc = DeviceAllocator<T>>
 class Tensor : public TensorBase<T>
 {
@@ -480,7 +618,7 @@ public:
 
     size_t fillWithData(const void* data, size_t maxBytesCopied) override
     {
-        size_t bytesCopied = std::min(maxBytesCopied, _memory.count() * sizeof(T));
+        const size_t bytesCopied = std::min(maxBytesCopied, _memory.count() * sizeof(T));
         _memory.markHostModified();
         std::memcpy(_memory.hostData(), data, bytesCopied);
         return bytesCopied;
@@ -489,16 +627,9 @@ public:
     void fillWithValue(T value) override
     {
         _memory.markHostModified();
-        if(isPacked())
+        for(auto valuePtr : (*this))
         {
-            auto data{_memory.hostData()};
-            std::fill(data, data + _elementCount, value);
-        }
-        else
-        {
-            iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
-                this->setHostValue(value, indices);
-            });
+            *static_cast<T*>(valuePtr) = value;
         }
     }
 
@@ -510,23 +641,11 @@ public:
                                                            static_cast<float>(max));
 
         _memory.markHostModified();
-
-        if(isPacked())
+        for(auto valuePtr : (*this))
         {
-            auto data{_memory.hostData()};
-            for(size_t i{0}; i < _elementCount; i++)
-            {
-                data[i] = static_cast<T>(distribution(generator));
-            }
-        }
-        else
-        {
-            iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
-                this->setHostValue(static_cast<T>(distribution(generator)), indices);
-            });
+            *static_cast<T*>(valuePtr) = static_cast<T>(distribution(generator));
         }
     }
-
     bool isPacked() const override
     {
         return _packed;
@@ -576,9 +695,9 @@ inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType d
     case data_objects::DataType::FLOAT:
         return std::make_unique<Tensor<float>>(dims, strides);
     case data_objects::DataType::HALF:
-        return std::make_unique<Tensor<half>>(dims, strides);
+        return std::make_unique<Tensor<types::half>>(dims, strides);
     case data_objects::DataType::BFLOAT16:
-        return std::make_unique<Tensor<hip_bfloat16>>(dims, strides);
+        return std::make_unique<Tensor<types::bfloat16>>(dims, strides);
     case data_objects::DataType::DOUBLE:
         return std::make_unique<Tensor<double>>(dims, strides);
     case data_objects::DataType::UINT8:
@@ -587,6 +706,10 @@ inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType d
         return std::make_unique<Tensor<int32_t>>(dims, strides);
     case data_objects::DataType::INT8:
         return std::make_unique<Tensor<int8_t>>(dims, strides);
+    case data_objects::DataType::FP8_E4M3:
+        return std::make_unique<Tensor<types::fp8_e4m3>>(dims, strides);
+    case data_objects::DataType::FP8_E5M2:
+        return std::make_unique<Tensor<types::fp8_e5m2>>(dims, strides);
     default:
         throw std::runtime_error("Unsupported data type for tensor");
     }

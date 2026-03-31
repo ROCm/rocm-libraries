@@ -16,6 +16,22 @@
   - any-glob-to-any-file: 'shared/origami/**/*'
   - any-glob-to-any-file: 'shared/rocroller/**/*'
 
+"project: hipblaslt-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hipblaslt-provider/**/*'
+
+"project: hip-kernel-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/**/*'
+
+"project: fusilli-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/fusilli-provider/**/*'
+
+"project: hipdnn-integration-tests":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/integration-tests/**/*'
+
 "project: hipcub":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipcub/**/*'
@@ -43,14 +59,23 @@
 "project: hipsparselt":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipsparselt/**/*'
+  - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
+
+"ci:hipsparselt-fast":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
 
 "project: miopen":
 - changed-files:
   - any-glob-to-any-file: 'projects/miopen/**/*'
 
+"project: miopen-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/miopen-provider/**/*'
+
 "project: none":
 - changed-files:
-  - all-globs-to-all-files: ['!projects/**/*', '!shared/**/*']
+  - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
 
 "project: rocblas":
 - changed-files:
@@ -88,6 +113,10 @@
 "shared: origami":
 - changed-files:
   - any-glob-to-any-file: 'shared/origami/**/*'
+
+"shared: primbench":
+- changed-files:
+  - any-glob-to-any-file: 'shared/primbench/**/*'
 
 "shared: rocroller":
 - changed-files:

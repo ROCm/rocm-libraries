@@ -129,10 +129,10 @@ private:
     struct Interface
     {
     public:
-        Interface(const Interface&) = delete;
-        Interface(Interface&&)      = delete;
+        Interface(const Interface&)            = delete;
+        Interface(Interface&&)                 = delete;
         Interface& operator=(const Interface&) = delete;
-        Interface& operator=(Interface&&) = delete;
+        Interface& operator=(Interface&&)      = delete;
 
         virtual ~Interface(){};
 

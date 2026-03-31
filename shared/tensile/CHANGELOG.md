@@ -1,6 +1,25 @@
 # Changelog for Tensile
 
-## (Unreleased) Tensile 4.44.0
+## Tensile 4.47.0 (Unreleased)
+
+## Tensile 4.46.0 (Unreleased)
+
+## Changed
+
+- Disable optimizations for `RunGEMMKernel_test`.
+
+## Resolved issues
+
+- Fixed how the toolchain handles an empty Windows ROCm directory.
+
+## Tensile 4.45.0 for ROCm 7.2.0
+
+### Removed
+
+- `op_sel` modifiers for `v_dot4` from Tensile codegen
+- Dependency on `rocm-agent-enumerator` during build
+
+## Tensile 4.44.0 for ROCm 7.0.0
 
 ### Added
 

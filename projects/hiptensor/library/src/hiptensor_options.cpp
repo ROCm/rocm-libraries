@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "hiptensor_options.hpp"
+#include "util.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -48,18 +49,11 @@ namespace hiptensor
         , mLogFilename("")
     {
         // Override HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR with environment variable if present
-        if(const char* stride_env = std::getenv("HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR"))
+        auto stride_env = getEnvironmentVariable("HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR");
+        if(stride_env.has_value())
         {
-            std::string upper = stride_env;
-            std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
-            if(upper.compare("ON") == 0)
-            {
-                mColMajorStrides = true;
-            }
-            else if(upper.compare("OFF") == 0)
-            {
-                mColMajorStrides = false;
-            }
+            mColMajorStrides
+                = checkEnvironmentVariableEnabled("HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR");
         }
     }
 
@@ -224,5 +218,5 @@ namespace hiptensor
     {
         return mColMajorStrides;
     }
-    
+
 } // namespace hiptensor

@@ -66,6 +66,7 @@ CMAKE_CXX_COMPILER = "/opt/rocm/llvm/bin/clang++"
 hip_DIR = "${hip_DIR}"
 hipdnn_frontend_DIR = "${hipdnn_frontend_DIR}"
 hipdnn_backend_DIR = "${hipdnn_backend_DIR}"
+hipdnn_data_sdk_DIR = "${hipdnn_data_sdk_DIR}"
 
 [tool.cibuildwheel]
 # Skip building for certain Python versions or platforms if needed

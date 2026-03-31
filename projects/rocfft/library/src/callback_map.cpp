@@ -19,33 +19,31 @@
 // THE SOFTWARE.
 
 #include "callback_map.h"
+#include "exec_info.h"
 #include "plan.h"
-#include "transform.h"
 
-std::map<int, device_callback_t> DeviceCallbackMap(const rocfft_execution_info_t*   info,
-                                                   const rocfft_plan_description_t& desc)
+std::map<int, device_callback_t> DeviceCallbackMap(const rocfft_execution_info_internal& exec_info,
+                                                   const rocfft_plan_description_t&      desc,
+                                                   int local_comm_rank)
 {
-    // tolerate user not providing an execution_info
-    rocfft_execution_info_t exec_info;
-    if(info)
-        exec_info = *info;
-
     int local_device = 0;
     if(hipGetDevice(&local_device) != hipSuccess)
         throw std::runtime_error("failed to get device");
 
     std::map<int, device_callback_t> callbacks;
 
-    auto set_field_callback = [&callbacks](const std::vector<rocfft_field_t>& fields,
-                                           void**                             src_fn,
-                                           void**                             src_data,
-                                           bool                               load) {
+    auto set_field_callback = [=, &callbacks](const std::vector<rocfft_field_t>& fields,
+                                              void**                             src_fn,
+                                              void**                             src_data,
+                                              bool                               load) {
         size_t src_idx = 0;
         for(const auto& f : fields)
         {
             for(const auto& b : f.bricks)
             {
                 int device_id = b.location.device;
+                if(b.location.comm_rank != local_comm_rank)
+                    continue;
 
                 if(load)
                 {
@@ -88,34 +86,39 @@ std::map<int, device_callback_t> DeviceCallbackMap(const rocfft_execution_info_t
         }
     };
 
+    auto load_cb_fns   = exec_info.get_load_cb_fns();
+    auto load_cb_data  = exec_info.get_load_cb_data();
+    auto store_cb_fns  = exec_info.get_store_cb_fns();
+    auto store_cb_data = exec_info.get_store_cb_data();
+
     if(desc.inFields.empty())
     {
         // we have at most one load callback
-        if(exec_info.load_cb_fns)
+        if(load_cb_fns)
         {
-            callbacks[local_device].load_fn = exec_info.load_cb_fns[0];
-            if(exec_info.load_cb_data)
-                callbacks[local_device].load_data = exec_info.load_cb_data[0];
+            callbacks[local_device].load_fn = load_cb_fns[0];
+            if(load_cb_data)
+                callbacks[local_device].load_data = load_cb_data[0];
         }
     }
     else
     {
-        set_field_callback(desc.inFields, exec_info.load_cb_fns, exec_info.load_cb_data, true);
+        set_field_callback(desc.inFields, load_cb_fns, load_cb_data, true);
     }
 
     if(desc.outFields.empty())
     {
         // we have at most one store callback
-        if(exec_info.store_cb_fns)
+        if(store_cb_fns)
         {
-            callbacks[local_device].store_fn = exec_info.store_cb_fns[0];
-            if(exec_info.store_cb_data)
-                callbacks[local_device].store_data = exec_info.store_cb_data[0];
+            callbacks[local_device].store_fn = store_cb_fns[0];
+            if(store_cb_data)
+                callbacks[local_device].store_data = store_cb_data[0];
         }
     }
     else
     {
-        set_field_callback(desc.outFields, exec_info.store_cb_fns, exec_info.store_cb_data, false);
+        set_field_callback(desc.outFields, store_cb_fns, store_cb_data, false);
     }
 
     return callbacks;

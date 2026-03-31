@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -46,9 +47,8 @@ void testing_csr2gebsr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
 
-    hipsparseStatus_t              status;
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseStatus_t      status;
+    hipsparseLocalHandle_t handle;
 
     hipsparseIndexBase_t csr_idx_base = HIPSPARSE_INDEX_BASE_ZERO;
     hipsparseIndexBase_t bsr_idx_base = HIPSPARSE_INDEX_BASE_ZERO;
@@ -433,12 +433,11 @@ void testing_csr2gebsr(Arguments argus)
     int                  col_block_dim = argus.col_block_dimA;
     std::string          filename      = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
-    std::unique_ptr<descr_struct>  unique_ptr_csr_descr(new descr_struct);
-    hipsparseMatDescr_t            csr_descr = unique_ptr_csr_descr->descr;
-    std::unique_ptr<descr_struct>  unique_ptr_bsr_descr(new descr_struct);
-    hipsparseMatDescr_t            bsr_descr = unique_ptr_bsr_descr->descr;
+    hipsparseLocalHandle_t        handle(argus);
+    std::unique_ptr<descr_struct> unique_ptr_csr_descr(new descr_struct);
+    hipsparseMatDescr_t           csr_descr = unique_ptr_csr_descr->descr;
+    std::unique_ptr<descr_struct> unique_ptr_bsr_descr(new descr_struct);
+    hipsparseMatDescr_t           bsr_descr = unique_ptr_bsr_descr->descr;
 
     hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
     hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);

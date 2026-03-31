@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 from therock_matrix import subtree_to_project_map, collect_projects_to_run
 import time
-from typing import Mapping, Optional, Iterable
+from typing import Mapping, Optional, Iterable, List
 import os
 from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
 from config_loader import load_repo_config
@@ -25,24 +25,42 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # build or test workflows so any related jobs can be skipped if all paths
 # modified by a commit/PR match a pattern in this list.
 SKIPPABLE_PATH_PATTERNS = [
-    "docs/*",
-    ".gitignore",
+    "*.clinerules",
+    "*.cursorrules",
+    "*.mdc",
     "*.md",
     "*.rst",
-    "projects/*/docs/*",
+    "*.rtf",
+    "*/.markdownlint-ci2.yaml",
+    "*/.readthedocs.yaml",
+    "*/.spellcheck.local.yaml",
+    "*/.wordlist.txt",
+    ".gitignore",
+    "dnn-providers/*/.gitignore",
+    "dnn-providers/*/docs/*",
+    "docs/*",
     "projects/*/.gitignore",
-    "projects/*/*.md",
-    "projects/*/*.rst",
-    "shared/*/docs/*",
+    "projects/*/docs/*",
+    # Tools are standalone scripts/utilities not part of the build or test pipeline.
+    # Changes here should not trigger CI builds.
+    "projects/hipdnn/tools/*",
     "shared/*/.gitignore",
-    "shared/*/*.md",
-    "shared/*/*.rst",
+    "shared/*/docs/*",
 ]
 
 
 def is_path_skippable(path: str) -> bool:
     """Determines if a given relative path to a file matches any skippable patterns."""
     return any(fnmatch.fnmatch(path, pattern) for pattern in SKIPPABLE_PATH_PATTERNS)
+
+
+def get_pr_labels(args) -> List[str]:
+    """Gets a list of labels applied to a pull request."""
+    data = json.loads(args.get("pr_labels", "{}"))
+    labels = []
+    for label in data.get("labels", []):
+        labels.append(label["name"])
+    return labels
 
 
 def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
@@ -135,18 +153,23 @@ def retrieve_projects(args):
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
 
-    # by default, we select full tests
-    test_type = "full"
+    # by default, we select standard tests
+    test_type = "standard"
 
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
     if args.get("is_push") or args.get("is_pull_request"):
         paths_set = set(modified_paths)
         contains_non_skippable_files = check_for_non_skippable_path(paths_set)
+        pr_labels = get_pr_labels(args)
 
         # If only skippable paths were modified, skip CI
         if not contains_non_skippable_files:
             logging.info("Only skippable paths were modified, skipping CI")
+            return [], test_type
+
+        if "skip-therockci" in pr_labels:
+            logging.info("`skip-therockci` label was added, skipping CI")
             return [], test_type
 
     subtrees = get_changed_path_projects(modified_paths)
@@ -170,6 +193,7 @@ def retrieve_projects(args):
     # for nightly runs, run everything with full tests
     if args.get("is_nightly"):
         subtrees = list(subtree_to_project_map.keys())
+        test_type = "comprehensive"
 
     project_to_run = collect_projects_to_run(subtrees)
 
@@ -193,6 +217,8 @@ if __name__ == "__main__":
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
     args["is_nightly"] = github_event_name == "schedule"
+
+    args["pr_labels"] = os.environ.get("PR_LABELS", '{"labels": []}')
 
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects

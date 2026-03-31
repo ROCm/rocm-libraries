@@ -44,6 +44,15 @@ struct BlockFmhaPipelineProblem
     using FmhaMask              = remove_cvref_t<FmhaMask_>;
     using Traits                = remove_cvref_t<Traits_>;
 
+    // TODO: Pass scale types and granularity from FmhaFwdTypeConfig
+    using QScaleDataType = ck_tile::e8m0_t;
+    using KScaleDataType = ck_tile::e8m0_t;
+    using VScaleDataType = ck_tile::e8m0_t;
+    using PScaleDataType = ck_tile::e8m0_t;
+
+    static constexpr ck_tile::index_t kQKScaleGranularity = 32;
+    static constexpr ck_tile::index_t kVScaleGranularity  = 32;
+
     static constexpr index_t kNumGemm0Warps = BlockFmhaShape::NumGemm0Warps;
     static constexpr index_t kNumGemm1Warps = BlockFmhaShape::NumGemm1Warps;
     static constexpr index_t kBlockSize     = BlockFmhaShape::NumWarps * get_warp_size();
@@ -107,16 +116,6 @@ struct BlockFmhaBatchPrefillPipelineProblem
     static_assert(kPageBlockSize > 0, "kPageBlockSize must be positive");
     static_assert((kPageBlockSize & (kPageBlockSize - 1)) == 0,
                   "kPageBlockSize must be power of two");
-    static constexpr index_t kLog2PageSize = []() constexpr {
-        index_t shift = 0;
-        index_t val   = kPageBlockSize_;
-        while(val > 1)
-        {
-            val >>= 1;
-            shift++;
-        }
-        return shift;
-    }();
 
     static constexpr index_t kVectorSize  = 16 / sizeof(KDataType_); // Dwordx4
     static constexpr auto kKVMemoryLayout = Traits_::kKVMemoryLayout;
@@ -126,9 +125,14 @@ struct BlockFmhaBatchPrefillPipelineProblem
 
     static_assert(BlockFmhaShape_::kQKHeaddim % kVectorSize == 0,
                   "kQKHeaddim must be divisible by kVectorSize");
+    static_assert(!(kPageBlockSize == 1 && kIsVectorizedLayout),
+                  "page_size=1 only supports linear KV cache layout");
     static_assert(!kIsVectorizedLayout || kPageBlockSize % kVectorSize == 0,
                   "kPageBlockSize must be divisible by kVectorSize for vectorized layout");
     static_assert(kIsGroupMode_, "Batch prefill requires group mode");
+
+    static_assert(BlockFmhaShape_::IsVLayoutRowMajor,
+                  "Batch prefill kernel requires RowMajor VLayout");
 };
 
 template <typename QDataType_,

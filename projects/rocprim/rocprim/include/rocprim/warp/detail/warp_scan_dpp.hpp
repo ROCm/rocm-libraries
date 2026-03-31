@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -120,12 +120,6 @@ public:
             }
 #if !ROCPRIM_TARGET_SPIRV
             static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
-#else
-            if constexpr(VirtualWaveSize > 64)
-            {
-                ROCPRIM_PRINT_ERROR_ONCE("VirtualWaveSize > 64 is not supported");
-                return;
-            }
 #endif
         }
     }

@@ -22,7 +22,7 @@
 #define HIPFFTW_HELPER_H
 
 #include "../shared/array_validator.h"
-#include "../shared/data_layout.h"
+#include "../shared/client_data_layout_helpers.h"
 #include "../shared/environment.h"
 #include "../shared/fft_params.h"
 #include <algorithm>
@@ -34,7 +34,7 @@
 #include <string>
 #include <type_traits>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 // psapi.h requires windows.h to be included first
 #include <psapi.h>
@@ -85,7 +85,7 @@ private:
 #else
         const std::string lib_basename = "cufftw";
 #endif
-#ifdef WIN32
+#ifdef _WIN32
         const std::string lib_fullame = lib_basename + ".dll";
         lib_handle                    = LoadLibraryA(lib_fullame.c_str());
 #else
@@ -96,7 +96,7 @@ private:
         if(!lib_handle)
         {
             load_error_info << "failed to open library " << lib_fullame;
-#ifdef WIN32
+#ifdef _WIN32
             load_error_info << ". System's error code = " << GetLastError();
 #else
             load_error_info << ". System's error message = " << dlerror();
@@ -129,7 +129,7 @@ public:
     {
         if(lib_handle)
         {
-#ifdef WIN32
+#ifdef _WIN32
             (void)FreeLibrary(lib_handle);
 #else
             (void)dlclose(lib_handle);
@@ -210,7 +210,7 @@ public:
             func_ptr = nullptr;
             return;
         }
-#ifdef WIN32
+#ifdef _WIN32
         func_ptr = reinterpret_cast<func_type*>(GetProcAddress(hipfftw_lib, func_symbol.c_str()));
 #else
         func_ptr = reinterpret_cast<func_type*>(dlsym(hipfftw_lib, func_symbol.c_str()));

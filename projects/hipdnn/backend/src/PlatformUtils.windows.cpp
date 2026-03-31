@@ -82,26 +82,27 @@ std::string getSystemInfo()
 {
     // Get Windows version using RtlGetVersion (more reliable than deprecated GetVersionEx)
     typedef LONG(WINAPI * RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
-    RTL_OSVERSIONINFOW versionInfo;
+    RTL_OSVERSIONINFOW versionInfo = {};
     versionInfo.dwOSVersionInfoSize = sizeof(versionInfo);
 
+    bool versionInfoValid = false;
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    if(ntdll)
+    if(ntdll != nullptr)
     {
-        auto RtlGetVersion
+        auto rtlGetVersion
             = reinterpret_cast<RtlGetVersionPtr>(GetProcAddress(ntdll, "RtlGetVersion"));
-        if(RtlGetVersion)
+        if(rtlGetVersion != nullptr)
         {
-            RtlGetVersion(&versionInfo);
+            versionInfoValid = (rtlGetVersion(&versionInfo) == 0);
         }
     }
 
     // Get computer name
-    char computerName[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD size = sizeof(computerName);
-    if(!GetComputerNameA(computerName, &size))
+    std::array<char, MAX_COMPUTERNAME_LENGTH + 1> computerName;
+    auto size = static_cast<DWORD>(computerName.size());
+    if(GetComputerNameA(computerName.data(), &size) == FALSE)
     {
-        strcpy_s(computerName, "Unknown");
+        strcpy_s(computerName.data(), computerName.size(), "Unknown");
     }
 
     // Get system architecture
@@ -124,13 +125,23 @@ std::string getSystemInfo()
         architecture = "Unknown";
     }
 
-    return fmt::format("System Information: {{System Name: Windows, Node Name: {}, Release: {}.{}, "
-                       "Version: {}, Machine: {}}}",
-                       computerName,
-                       versionInfo.dwMajorVersion,
-                       versionInfo.dwMinorVersion,
-                       versionInfo.dwBuildNumber,
-                       architecture);
+    if(versionInfoValid)
+    {
+        return fmt::format(
+            "System Information: {{System Name: Windows, Node Name: {}, Release: {}.{}, "
+            "Version: {}, Machine: {}}}",
+            computerName.data(),
+            versionInfo.dwMajorVersion,
+            versionInfo.dwMinorVersion,
+            versionInfo.dwBuildNumber,
+            architecture);
+    }
+
+    return fmt::format(
+        "System Information: {{System Name: Windows, Node Name: {}, Release: unknown, "
+        "Version: unknown, Machine: {}}}",
+        computerName.data(),
+        architecture);
 }
 
 }

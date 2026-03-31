@@ -26,13 +26,21 @@
 #ifndef GUARD_TARGET_PROPERTIES_HPP
 #define GUARD_TARGET_PROPERTIES_HPP
 
+#include <miopen/config.hpp>
 #include <string>
 #include <tuple>
+#include <stdexcept>
+#include <miopen/stringutils.hpp>
 
 #define WORKAROUND_ISSUE_1204 1 // ROCm may incorrectly report "sramecc-" for gfx900.
 #define WORKAROUND_ISSUE_3001 1
 
 namespace miopen {
+
+static inline bool IsTF32Supported(const std::string& device_name)
+{
+    return device_name == "gfx942" || StartsWith(device_name, "gfx95");
+}
 
 struct Handle;
 
@@ -174,7 +182,7 @@ public:
     static std::size_t GetMaxWaveScratchSize() { return MaxWaveScratchSize; }
     static std::size_t GetMaxLocalMemorySize() { return MaxLocalMemorySize; }
 
-    void Init(const Handle*);
+    MIOPEN_INTERNALS_EXPORT void Init(const Handle*);
 };
 
 } // namespace miopen

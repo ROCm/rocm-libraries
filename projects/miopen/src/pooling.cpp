@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017-2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/pooling.hpp>
 #include <miopen/check_numerics.hpp>
 #include <miopen/datatype.hpp>
@@ -36,11 +14,23 @@
 #include <miopen/subbuffers.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
+#include "miopen/pooling/problem_description.hpp"
 
 #include <cassert>
 #include <cmath>
 
 namespace miopen {
+
+namespace pooling {
+
+miopen::PerformanceDb GetDb(const miopen::ExecutionContext& context,
+                            const miopen::pooling::ProblemDescriptionTag&)
+{
+    return {
+        DbKinds::PerfDb, context.GetPerfDbPath("pooling"), context.GetUserPerfDbPath("pooling")};
+}
+
+} // namespace pooling
 
 template <class T, class U>
 T iciel_div(T x, U y)
@@ -270,9 +260,37 @@ std::size_t PoolingDescriptor::GetWorkSpaceSize(const TensorDescriptor& yDesc) c
             TensorDescriptor{yDesc.GetType(), yDesc.GetLengths(), transposed_strides};
 
         const auto y_transpose_size = transposed_y.GetElementSpace() * e_size;
-        // Todo: We do not have xDesc, so we infer that. But currently this is incorrect, x tensor
-        // is larger than y and should be calculated properly.
-        const auto x_transpose_size = y_transpose_size * 2;
+
+        // Compute x dimensions from y dimensions and pooling parameters
+        // x_spatial = (y_spatial - 1) * stride - 2 * pad + kernel_size
+        const auto& y_lens = yDesc.GetLengths();
+        auto x_lens        = y_lens; // N and C remain the same
+
+        const auto ndims        = yDesc.GetNumDims();
+        const auto spatial_dims = ndims - 2; // Exclude N and C
+
+        for(std::size_t i = 0; i < spatial_dims; ++i)
+        {
+            // y_lens[2+i] is the spatial dimension (H, W for 4D; D, H, W for 5D)
+            // lens[i], strides[i], pads[i] are in spatial order
+            const auto y_spatial = y_lens[2 + i];
+            const auto kernel    = lens[i];
+            const auto stride    = strides[i];
+            const auto pad       = pads[i];
+
+            // Reverse the output dimension formula:
+            // y = floor((x + 2*pad - kernel) / stride) + 1
+            // The maximum x that produces this y is:
+            // x_max = y * stride - 2*pad + kernel - 1
+            // Use this to ensure workspace is large enough for any valid input
+            x_lens[2 + i] = y_spatial * stride - 2UL * pad + kernel - 1UL;
+        }
+
+        auto x_transposed_strides = std::vector<std::size_t>{};
+        tensor_layout_to_strides(x_lens, labels, in_layout, x_transposed_strides);
+        const auto transposed_x = TensorDescriptor{yDesc.GetType(), x_lens, x_transposed_strides};
+
+        const auto x_transpose_size = transposed_x.GetElementSpace() * e_size;
         const auto subbuffer_align  = GetSubbufferAlignment();
         const auto align_after_mask = (subbuffer_align - main_ws) % subbuffer_align;
         const auto align_after_x    = (subbuffer_align - x_transpose_size) % subbuffer_align;

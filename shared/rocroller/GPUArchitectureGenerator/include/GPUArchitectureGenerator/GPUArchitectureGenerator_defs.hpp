@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -130,9 +107,12 @@ namespace GPUArchitectureGenerator
              {{"v_wmma_f32_16x16x16_fp8_fp8 v[0:7], v[32:33], v[34:35], v[0:7]"}, ""}},
 
             {rocRoller::GPUCapability::HasAccumOffset,
-             {{".amdhsa_kernel hello_world\n  .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr\n  "
-               ".amdhsa_next_free_sgpr .amdgcn.next_free_sgpr\n  .amdhsa_accum_offset "
-               "4\n.end_amdhsa_kernel"},
+             {{R"(
+                .amdhsa_kernel hello_world
+                .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr
+                .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
+                .amdhsa_accum_offset 4
+                .end_amdhsa_kernel)"},
               ""}},
 
             {rocRoller::GPUCapability::HasGlobalOffset,
@@ -221,6 +201,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }},
            {rocRoller::GPUCapability::HasAccCD,
             {
@@ -242,6 +224,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }},
            {rocRoller::GPUCapability::ArchAccUnifiedRegs,
             {
@@ -256,6 +240,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }},
            {rocRoller::GPUCapability::HasNaNoo,
             {
@@ -270,6 +256,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }},
            {rocRoller::GPUCapability::HasWave64,
             std::vector<rocRoller::GPUArchitectureTarget>(rocRoller::SupportedArchitectures.begin(),
@@ -281,6 +269,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }},
            {rocRoller::GPUCapability::HasE8M0Scale,
             {
@@ -289,6 +279,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }},
            {rocRoller::GPUCapability::HasXCC,
             {
@@ -297,6 +289,8 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
                                                  {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true, .xnack = true}},
             }}};
 
     inline std::vector<rocRoller::GPUArchitectureTarget> gfx908ISAs()
@@ -340,7 +334,7 @@ namespace GPUArchitectureGenerator
                      std::back_inserter(retval),
                      [](rocRoller::GPUArchitectureTarget const& x) -> bool {
                          return x.isCDNA1GPU() || x.isCDNA2GPU() || x.isCDNA3GPU()
-                                || x.isCDNA35GPU();
+                                || x.isCDNA4GPU();
                      });
         return retval;
     }
@@ -398,7 +392,7 @@ namespace GPUArchitectureGenerator
             rocRoller::SupportedArchitectures.begin(),
             rocRoller::SupportedArchitectures.end(),
             std::back_inserter(retval),
-            [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isCDNA35GPU(); });
+            [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isCDNA4GPU(); });
         return retval;
     }
 
@@ -418,7 +412,7 @@ namespace GPUArchitectureGenerator
 
             {rocRoller::GPUCapability::PackedWorkitemIDs,
              [](rocRoller::GPUArchitectureTarget x) -> bool {
-                 return x.isCDNA2GPU() || x.isCDNA3GPU() || x.isCDNA35GPU() || x.isRDNA4GPU();
+                 return x.isCDNA2GPU() || x.isCDNA3GPU() || x.isCDNA4GPU() || x.isRDNA4GPU();
              }},
             {rocRoller::GPUCapability::WorkgroupIdxViaTTMP,
              [](rocRoller::GPUArchitectureTarget x) -> bool { return x.isGFX12GPU(); }},

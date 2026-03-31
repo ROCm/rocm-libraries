@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,12 +30,14 @@
 #include <cstdlib>
 #include <string>
 
+#include <hiptensor/hiptensor.h>
+
 #include "hiptensor_ostream.hpp"
 #include "singleton.hpp"
 
 namespace hiptensor
 {
-    struct HiptensorOptions : public LazySingleton<HiptensorOptions>
+    struct HIPTENSOR_EXPORT HiptensorOptions : public LazySingleton<HiptensorOptions>
     {
         // For static initialization
         friend std::unique_ptr<HiptensorOptions> std::make_unique<HiptensorOptions>();
@@ -93,4 +95,3 @@ namespace hiptensor
     };
 
 } // namespace hiptensor
-

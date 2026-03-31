@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,11 @@
     #include "test_block_discontinuity.cpp.in"
 #endif
 
+constexpr auto crosslane
+    = rocprim::block_adjacent_difference_algorithm::adjacent_difference_crosslane;
+constexpr auto shared_mem
+    = rocprim::block_adjacent_difference_algorithm::adjacent_difference_shared_mem;
+
 test_suite_type_def(suite_name, name_suffix)
 
 typed_test_suite_def(RocprimBlockDiscontinuity, name_suffix, warp_params);
@@ -41,10 +46,71 @@ typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagHeads)
     using flag_op_type_4        = rocprim::not_equal_to<type>;
     constexpr size_t block_size = TestFixture::params::block_size;
 
-    static_for<0, 2, type, flag_type, flag_op_type_1, 0, block_size>::run();
-    static_for<2, 4, type, flag_type, flag_op_type_2, 0, block_size>::run();
-    static_for<4, 6, type, flag_type, flag_op_type_3, 0, block_size>::run();
-    static_for<6, n_items, type, flag_type, flag_op_type_4, 0, block_size>::run();
+    static_for<0,
+               2,
+               type,
+               flag_type,
+               flag_op_type_1,
+               TestBlockDiscontinuityMethod::HEADS,
+               block_size,
+               crosslane>::run();
+    static_for<2,
+               4,
+               type,
+               flag_type,
+               flag_op_type_2,
+               TestBlockDiscontinuityMethod::HEADS,
+               block_size,
+               crosslane>::run();
+    static_for<4,
+               6,
+               type,
+               flag_type,
+               flag_op_type_3,
+               TestBlockDiscontinuityMethod::HEADS,
+               block_size,
+               crosslane>::run();
+    static_for<6,
+               n_items,
+               type,
+               flag_type,
+               flag_op_type_4,
+               TestBlockDiscontinuityMethod::HEADS,
+               block_size,
+               crosslane>::run();
+
+    static_for<0,
+               2,
+               type,
+               flag_type,
+               flag_op_type_1,
+               TestBlockDiscontinuityMethod::HEADS,
+               block_size,
+               shared_mem>::run();
+    static_for<2,
+               4,
+               type,
+               flag_type,
+               flag_op_type_2,
+               TestBlockDiscontinuityMethod::HEADS,
+               block_size,
+               shared_mem>::run();
+    static_for<4,
+               6,
+               type,
+               flag_type,
+               flag_op_type_3,
+               TestBlockDiscontinuityMethod::HEADS,
+               block_size,
+               shared_mem>::run();
+    static_for<6,
+               n_items,
+               type,
+               flag_type,
+               flag_op_type_4,
+               TestBlockDiscontinuityMethod::HEADS,
+               block_size,
+               shared_mem>::run();
 }
 
 typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagTails)
@@ -57,10 +123,71 @@ typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagTails)
     using flag_op_type_4        = rocprim::not_equal_to<type>;
     constexpr size_t block_size = TestFixture::params::block_size;
 
-    static_for<0, 2, type, flag_type, flag_op_type_1, 1, block_size>::run();
-    static_for<2, 4, type, flag_type, flag_op_type_2, 1, block_size>::run();
-    static_for<4, 6, type, flag_type, flag_op_type_3, 1, block_size>::run();
-    static_for<6, n_items, type, flag_type, flag_op_type_4, 1, block_size>::run();
+    static_for<0,
+               2,
+               type,
+               flag_type,
+               flag_op_type_1,
+               TestBlockDiscontinuityMethod::TAILS,
+               block_size,
+               crosslane>::run();
+    static_for<2,
+               4,
+               type,
+               flag_type,
+               flag_op_type_2,
+               TestBlockDiscontinuityMethod::TAILS,
+               block_size,
+               crosslane>::run();
+    static_for<4,
+               6,
+               type,
+               flag_type,
+               flag_op_type_3,
+               TestBlockDiscontinuityMethod::TAILS,
+               block_size,
+               crosslane>::run();
+    static_for<6,
+               n_items,
+               type,
+               flag_type,
+               flag_op_type_4,
+               TestBlockDiscontinuityMethod::TAILS,
+               block_size,
+               crosslane>::run();
+
+    static_for<0,
+               2,
+               type,
+               flag_type,
+               flag_op_type_1,
+               TestBlockDiscontinuityMethod::TAILS,
+               block_size,
+               shared_mem>::run();
+    static_for<2,
+               4,
+               type,
+               flag_type,
+               flag_op_type_2,
+               TestBlockDiscontinuityMethod::TAILS,
+               block_size,
+               shared_mem>::run();
+    static_for<4,
+               6,
+               type,
+               flag_type,
+               flag_op_type_3,
+               TestBlockDiscontinuityMethod::TAILS,
+               block_size,
+               shared_mem>::run();
+    static_for<6,
+               n_items,
+               type,
+               flag_type,
+               flag_op_type_4,
+               TestBlockDiscontinuityMethod::TAILS,
+               block_size,
+               shared_mem>::run();
 }
 
 typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagHeadsAndTails)
@@ -73,8 +200,69 @@ typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagHeadsAndTails)
     using flag_op_type_4        = rocprim::not_equal_to<type>;
     constexpr size_t block_size = TestFixture::params::block_size;
 
-    static_for<0, 2, type, flag_type, flag_op_type_1, 2, block_size>::run();
-    static_for<2, 4, type, flag_type, flag_op_type_2, 2, block_size>::run();
-    static_for<4, 6, type, flag_type, flag_op_type_3, 2, block_size>::run();
-    static_for<6, n_items, type, flag_type, flag_op_type_4, 2, block_size>::run();
+    static_for<0,
+               2,
+               type,
+               flag_type,
+               flag_op_type_1,
+               TestBlockDiscontinuityMethod::HEADS_AND_TAILS,
+               block_size,
+               crosslane>::run();
+    static_for<2,
+               4,
+               type,
+               flag_type,
+               flag_op_type_2,
+               TestBlockDiscontinuityMethod::HEADS_AND_TAILS,
+               block_size,
+               crosslane>::run();
+    static_for<4,
+               6,
+               type,
+               flag_type,
+               flag_op_type_3,
+               TestBlockDiscontinuityMethod::HEADS_AND_TAILS,
+               block_size,
+               crosslane>::run();
+    static_for<6,
+               n_items,
+               type,
+               flag_type,
+               flag_op_type_4,
+               TestBlockDiscontinuityMethod::HEADS_AND_TAILS,
+               block_size,
+               crosslane>::run();
+
+    static_for<0,
+               2,
+               type,
+               flag_type,
+               flag_op_type_1,
+               TestBlockDiscontinuityMethod::HEADS_AND_TAILS,
+               block_size,
+               shared_mem>::run();
+    static_for<2,
+               4,
+               type,
+               flag_type,
+               flag_op_type_2,
+               TestBlockDiscontinuityMethod::HEADS_AND_TAILS,
+               block_size,
+               shared_mem>::run();
+    static_for<4,
+               6,
+               type,
+               flag_type,
+               flag_op_type_3,
+               TestBlockDiscontinuityMethod::HEADS_AND_TAILS,
+               block_size,
+               shared_mem>::run();
+    static_for<6,
+               n_items,
+               type,
+               flag_type,
+               flag_op_type_4,
+               TestBlockDiscontinuityMethod::HEADS_AND_TAILS,
+               block_size,
+               shared_mem>::run();
 }

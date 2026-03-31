@@ -7,6 +7,7 @@
 #include <numeric>
 #include <sstream>
 
+#include "ck/ck.hpp"
 #include "ck/utility/common_header.hpp"
 
 #include "ck/tensor_description/tensor_descriptor.hpp"
@@ -64,34 +65,41 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 {
 #if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
 #if defined(__gfx11__)
-    // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
-    using e_data_type = remove_cvref_t<remove_pointer_t<decltype(karg.p_e_grid)>>;
-    if constexpr(!(CGlobalMemoryDataOperation == InMemoryDataOperationEnum::AtomicAdd &&
-                   (std::is_same_v<e_data_type, ck::half_t> ||
-                    std::is_same_v<e_data_type, ck::bhalf_t>)))
+    if constexpr(CGlobalMemoryDataOperation != InMemoryDataOperationEnum::AtomicAdd)
     {
 #endif
         constexpr index_t LDS_size = GridwiseGemm::template GetSharedMemoryNumberOfByte<
             typename GridwiseGemm::EpilogueCShuffle>();
         __shared__ char p_shared[LDS_size];
 
-        auto epilogue_args = typename GridwiseGemm::EpilogueCShuffle{};
+        const auto block_2_ctile_map_ = typename GridwiseGemm::Block2CTileMap{karg.M, karg.N, 4};
+        auto epilogue_args            = typename GridwiseGemm::EpilogueCShuffle{};
 
-        GridwiseGemm::template Run<AGridDesc_AK0_M_K1,
+        GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BWD_WEIGHT,
+                                   AGridDesc_AK0_M_K1,
                                    BGridDesc_BK0_N_K1,
+                                   ck::Tuple<>, // Empty tuple
                                    CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                   decltype(block_2_ctile_map_),
                                    ComputePtrOffsetOfBatch,
+                                   ComputePtrOffsetOfBatch, // placeholder
                                    1,
                                    HasMainKBlockLoop,
                                    CGlobalMemoryDataOperation,
-                                   TailNum>(p_shared,
-                                            a_grid_desc_ak0_m_ak1,
-                                            b_grid_desc_bk0_n_bk1,
-                                            c_grid_desc_mblock_mperblock_nblock_nperblock,
-                                            compute_ptr_offset_of_batch,
-                                            num_k_per_block,
-                                            karg,
-                                            epilogue_args);
+                                   false,
+                                   TailNum,
+                                   decltype(epilogue_args)>(
+            p_shared,
+            a_grid_desc_ak0_m_ak1,
+            b_grid_desc_bk0_n_bk1,
+            ck::Tuple<>(), // placeholder
+            c_grid_desc_mblock_mperblock_nblock_nperblock,
+            block_2_ctile_map_,
+            compute_ptr_offset_of_batch,
+            ComputePtrOffsetOfBatch{}, // placeholder
+            num_k_per_block,
+            karg,
+            epilogue_args);
 
 #if defined(__gfx11__)
     }
@@ -419,6 +427,10 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
     {
         ActiveWorkgroupsPerCU()
         {
+            if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+            {
+                return;
+            }
             constexpr int dynamic_smem_size = 0;
             constexpr index_t minimum_occupancy =
                 BlkGemmPipeSched == BlockGemmPipelineScheduler::Intrawave ? 1 : 2;
@@ -511,7 +523,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             std::copy(begin(a_g_n_k_wos_lengths) + spatial_offset,
                       end(a_g_n_k_wos_lengths),
                       begin(output_spatial_lengths_));
-#if !DISABLE_SPLIT_K_AUTODEDUCE_FOR_ONE_STAGE_KERNELS
+
             if(split_k < 0)
             {
                 ck::index_t gemmM, gemmN, gemmK;
@@ -525,8 +537,11 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
 
                 // Ensure that k_batch_ does not exceed the maximum value
                 // for the GEMM pipeline.
-                const auto k_batch_max = math::integer_divide_ceil((gemmK - 1), KPerBlock);
+                const auto k_batch_max = math::integer_divide_ceil(gemmK, KPerBlock);
                 k_batch_               = std::min(k_batch_, k_batch_max);
+
+                // Cap k_batch_ to 128 to avoid accuracy issues
+                k_batch_ = std::min(k_batch_, 128);
 
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
@@ -537,7 +552,6 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                 }
             }
             else
-#endif
             {
                 k_batch_ = split_k;
             }
@@ -1040,12 +1054,6 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-#if DISABLE_SPLIT_K_AUTODEDUCE_FOR_ONE_STAGE_KERNELS
-        if(arg.k_batch_ < 0)
-        {
-            return false;
-        }
-#endif
         const index_t GemmM = arg.a_grid_desc_kbatch_k0_m_k1_.GetLength(I1);
         const index_t GemmN = arg.b_grid_desc_kbatch_k0_n_k1_.GetLength(I1);
         const index_t GemmK = arg.a_grid_desc_kbatch_k0_m_k1_.GetLength(I0) *
@@ -1089,18 +1097,14 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             return false;
         }
 
-        if constexpr(std::is_same_v<CDataType, ck::half_t> ||
-                     std::is_same_v<CDataType, ck::bhalf_t>)
+        if(gemm_arg.KBatch > 1 && ck::is_gfx11_supported())
         {
-            if(gemm_arg.KBatch > 1 && ck::is_gfx11_supported())
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
-                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
-                {
-                    std::cout << "Unsupported splitK on gfx11." << std::endl;
-                }
-                // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
-                return false;
+                std::cout << "Unsupported splitK on gfx11." << std::endl;
             }
+            // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
+            return false;
         }
 
         if constexpr(std::is_same_v<ComputeTypeA, f8_t> || std::is_same_v<ComputeTypeA, bf8_t> ||

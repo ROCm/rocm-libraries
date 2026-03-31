@@ -6,6 +6,7 @@
 #include "ck_tile/builder/testing/tensor_descriptor.hpp"
 #include "ck_tile/builder/factory/helpers/ck/conv_tensor_type.hpp"
 #include <cstdint>
+#include <cassert>
 #include <concepts>
 #include <array>
 
@@ -17,6 +18,102 @@
 /// should that be needed.
 
 namespace ck_tile::builder::test {
+
+/// @brief Utility structure for N-dimensional iteration using a flat index
+///
+/// This structure's main purpose is to "unmerge" a flattened index into a
+/// multi-dimensional index, which helps when iterating over multi-dimensional
+/// indices without having to write an arbitrary amount of nested for loops.
+/// A minimal amount of precomputation must be done to do this efficiently,
+/// which is handled in the constructor of this type.
+///
+/// @details Decoding a flat index into a multi-dimensional index is done by
+/// first computing a reverse scan of the shape. These values can then be
+/// used to decode the index in the usual way:
+///
+///     x = flat_idx / (size_y * size_z)
+///     y = flat_idx % (size_y * size_z) / size_z
+///     z = flat_idx % (size_y * size_z) % size_z
+///     etc
+///
+/// The decode order is such that the innermost dimension (right in
+/// the shape extent) changes the fastest.
+///
+/// @tparam RANK The rank (number of spatial dimensions) of the tensor to
+/// iterate.
+template <size_t RANK>
+struct NdIter
+{
+    /// @brief Prepare N-dimensional iteration over a particular shape.
+    ///
+    /// Precompute ashape into a form that can be used to easily decode a flat
+    /// index into a multi-dimensional index.
+    ///
+    /// @param shape The shape to iterate over.
+    explicit NdIter(const Extent<RANK>& shape)
+    {
+        // Precompute shape_scan = [..., shape[-2] * shape[-1], shape[-1], 1]
+
+        numel_ = 1;
+        for(int i = RANK; i > 0; --i)
+        {
+            shape_scan_[i - 1] = numel_;
+            numel_ *= shape[i - 1];
+        }
+    }
+
+    /// @brief Unflatten a flat index into a multi-dimensional index
+    ///
+    /// This applies the usual multi-dimensional indexing method over the
+    /// precomputed shape scan to get back a multi-dimensional index.
+    /// The decode order is such that the innermost dimension (right in
+    /// the shape extent) changes the fastest.
+    ///
+    /// @param flat_index The "flattened" (1-dimensional) index of the tensor
+    ///
+    /// @returns A multi-dimensional index into the tensor
+    ///
+    /// @pre `0 <= flat_index < size()` (in other words, the `flat_index` must
+    /// be in bounds of the tensor shape that this `NdIter` was made from).
+    __host__ __device__ Extent<RANK> operator()(size_t flat_index) const
+    {
+        Extent<RANK> index = {};
+        auto idx           = flat_index;
+        for(size_t i = 0; i < RANK; ++i)
+        {
+            const auto scanned_dim = shape_scan_[i];
+            index[i]               = idx / scanned_dim;
+            idx %= scanned_dim;
+        }
+
+        return index;
+    }
+
+    /// @brief Return the total elements to iterate over
+    ///
+    /// Get the total number of elements in the shape to iterate over. This value
+    /// can be used to construct a complete for loop to iterate over all indices
+    /// of a tensor, for example:
+    ///
+    ///    for(size_t i = 0; i < iter.numel(); ++i)
+    ///    {
+    ///        const auto index = iter(i);
+    ///        use(index);
+    ///    }
+    __host__ __device__ size_t numel() const { return numel_; }
+
+    private:
+    /// Reverse (right) scan of the shape to iterate over.
+    Extent<RANK> shape_scan_;
+
+    /// The total number of elements in the shape. This value turns out to be almost
+    /// always required when iterating over a shape, so just store it in this type
+    /// so that it is easily accessible.
+    size_t numel_;
+};
+
+template <size_t RANK>
+NdIter(Extent<RANK>) -> NdIter<RANK>;
 
 /// @brief Concept for constraining tensor iteration functors.
 ///
@@ -50,28 +147,19 @@ constexpr int DEVICE_FOREACH_BLOCK_SIZE = 256;
 /// @tparam F The type of the callback to invoke. This function must be
 /// compatible with execution as a __device__ function.
 ///
-/// @param numel The total number of elements in the tensor.
-/// @param shape_scan A right-exclusive scan of the shape of the tensor.
+/// @param iter An NdIter instance to help iterating over the tensor.
 /// @param f The callback to invoke for each index of the tensor. This
 /// functor must be eligible for running on the GPU.
 template <int BLOCK_SIZE, size_t RANK, typename F>
     requires ForeachFunctor<F, RANK>
 __global__ __launch_bounds__(BLOCK_SIZE) //
-    void foreach_kernel(const size_t numel, Extent<RANK> shape_scan, F f)
+    void foreach_kernel(NdIter<RANK> iter, F f)
 {
     const auto gid = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-    for(size_t flat_idx = gid; flat_idx < numel; flat_idx += gridDim.x * BLOCK_SIZE)
+    for(size_t flat_idx = gid; flat_idx < iter.numel(); flat_idx += gridDim.x * BLOCK_SIZE)
     {
         // Compute the current index.
-        Extent<RANK> index = {};
-
-        size_t idx = flat_idx;
-        for(size_t i = 0; i < RANK; ++i)
-        {
-            const auto scanned_dim = shape_scan[i];
-            index[i]               = idx / scanned_dim;
-            idx %= scanned_dim;
-        }
+        const auto index = iter(flat_idx);
 
         // Then invoke the callback with the index.
         f(index);
@@ -160,18 +248,12 @@ void tensor_foreach(const Extent<RANK>& shape, ForeachFunctor<RANK> auto f)
     // order in the kernel is from large-to-small. Right layout is the
     // easiest solution for that.
 
-    Extent<RANK> shape_scan;
-    size_t numel = 1;
-    for(int i = RANK; i > 0; --i)
-    {
-        shape_scan[i - 1] = numel;
-        numel *= shape[i - 1];
-    }
+    NdIter iter(shape);
 
     // Reset any errors from previous launches.
     (void)hipGetLastError();
 
-    kernel<<<occupancy * multiprocessors, block_size>>>(numel, shape_scan, f);
+    kernel<<<occupancy * multiprocessors, block_size>>>(iter, f);
     check_hip(hipGetLastError());
 }
 
@@ -179,7 +261,7 @@ void tensor_foreach(const Extent<RANK>& shape, ForeachFunctor<RANK> auto f)
 ///
 /// This concept checks that a functor has the correct signature for
 /// use with the `fill_tensor` function.
-template <typename F, builder::DataType DT, size_t RANK>
+template <typename F, DataType DT, size_t RANK>
 concept FillTensorFunctor = requires(const F& f, const Extent<RANK>& index) {
     { f(index) } -> std::convertible_to<detail::cpp_type_t<DT>>;
 };
@@ -199,7 +281,7 @@ concept FillTensorFunctor = requires(const F& f, const Extent<RANK>& index) {
 /// @param f A functor used to get the value at a particular coordinate.
 ///
 /// @see FillTensorFunctor
-template <builder::DataType DT, size_t RANK>
+template <DataType DT, size_t RANK>
 void fill_tensor(const TensorDescriptor<DT, RANK>& desc,
                  void* buffer,
                  FillTensorFunctor<DT, RANK> auto f)
@@ -218,7 +300,7 @@ void fill_tensor(const TensorDescriptor<DT, RANK>& desc,
 ///
 /// This concept checks that a functor has the correct signature for
 /// use with the `fill_tensor_buffer` function.
-template <typename F, builder::DataType DT>
+template <typename F, DataType DT>
 concept FillTensorBufferFunctor = requires(const F& f, size_t index) {
     { f(index) } -> std::convertible_to<detail::cpp_type_t<DT>>;
 };
@@ -239,7 +321,7 @@ concept FillTensorBufferFunctor = requires(const F& f, size_t index) {
 /// @param f A functor used to get the value at a particular index.
 ///
 /// @see FillTensorBufferFunctor
-template <builder::DataType DT, size_t RANK>
+template <DataType DT, size_t RANK>
 void fill_tensor_buffer(const TensorDescriptor<DT, RANK>& desc,
                         void* buffer,
                         FillTensorBufferFunctor<DT> auto f)
@@ -247,12 +329,135 @@ void fill_tensor_buffer(const TensorDescriptor<DT, RANK>& desc,
     fill_tensor(desc.get_space_descriptor(), buffer, [f](auto index) { return f(index[0]); });
 }
 
-template <builder::DataType DT, size_t RANK>
+/// @brief Utility for clearing tensor buffers to a particular value.
+///
+/// This function initializes all memory backing a particular tensor buffer to
+/// one specific value, zero by default. Note that this function ignores strides,
+/// and clears the entire buffer backing the tensor.
+///
+/// @tparam DT The tensor element datatype
+/// @tparam RANK The rank (number of spatial dimensions) of the tensor.
+///
+/// @param desc The descriptor of the tensor to initialize.
+/// @param buffer The memory of the tensor to initialize.
+/// @param value The value to initialize the tensor buffer with.
+template <DataType DT, size_t RANK>
 void clear_tensor_buffer(const TensorDescriptor<DT, RANK>& desc,
                          void* buffer,
                          detail::cpp_type_t<DT> value = detail::cpp_type_t<DT>{0})
 {
     fill_tensor_buffer(desc, buffer, [value]([[maybe_unused]] size_t i) { return value; });
 }
+
+/// @brief Utility for copying a tensor from one layout to another
+///
+/// This function copies tensor data from `src_buffer` to `dst_buffer`,
+/// changing the layout from `src_desc` to `dst_desc`. Note that the src and
+/// dst tensor lengths must be compatible, otherwise this function may write
+/// out of bounds.
+///
+/// @tparam DT The element datatype of both tensors.
+/// @tparam RANK The rank (number of spatial dimensions) of the tensors.
+///
+/// @param src_desc The descriptor of the source tensor to copy from.
+/// @param src_buffer The memory of the source tensor.
+/// @param dst_desc The descriptor of the destination tensor to copy to.
+/// @param dst_buffer The memory of the destination tensor.
+template <DataType DT, size_t RANK>
+void copy_tensor(const TensorDescriptor<DT, RANK>& src_desc,
+                 const void* src_buffer,
+                 const TensorDescriptor<DT, RANK>& dst_desc,
+                 void* dst_buffer)
+{
+    assert(src_desc.get_lengths() == dst_desc.get_lengths());
+    const auto src_strides = src_desc.get_strides();
+    const auto dst_strides = dst_desc.get_strides();
+    tensor_foreach(dst_desc.get_lengths(),
+                   [src_buffer, dst_buffer, src_strides, dst_strides](const auto& index) {
+                       using T            = detail::cpp_type_t<DT>;
+                       const auto* src    = static_cast<const T*>(src_buffer);
+                       auto* dst          = static_cast<T*>(dst_buffer);
+                       const auto src_off = calculate_offset(index, src_strides);
+                       const auto dst_off = calculate_offset(index, dst_strides);
+                       dst[dst_off]       = src[src_off];
+                   });
+}
+
+/// @brief Simple iterator implementation over tensors.
+///
+/// This type implements a simple "iterator" type for tensor types,
+/// basically exposing operator[] for flat indices. This type is useful
+/// to be able to provide a "pointer-like" object to API that does not
+/// expect higher dimensional tensor types, and expects linear pointers
+/// instead. Ideally, one just needs to replace the `T* ptr` with
+/// `Iterator it` to update those API to be compatible with this type.
+///
+/// @note This is not intended to be a full implementation of the C++
+/// iterator concept. For example, it does not really hold any state,
+/// because that is not really useful anyway.
+///
+/// @tparam DT The datatype of the tensor to iterate over. Note that this
+/// is only here for reference purposes, the actual data type of the backing
+/// memory is provided via the backing iterator type.
+/// @tparam RANK The rank (number of spatial dimensions) of the tensors.
+/// @tparam Iterator The backing iterator type. This can be a (non-void)
+/// pointer type.
+template <DataType DT, size_t RANK, typename Iterator>
+struct FlatTensorIterator
+{
+    /// @brief Construct a FlatTensorIterator.
+    ///
+    /// Construct a FlatTensorIterator from a tensor descriptor and a backing
+    /// iterator. The backing iterator can just be a non-void pointer type,
+    /// note that the result of FlatTensorIterator::operator[] is the same as
+    /// that of Iterator::operator[].
+    ///
+    /// @param desc The descriptor of the tensor to iterate.
+    /// @param inner The inner iterator, for example a (non-void) pointer.
+    FlatTensorIterator(const TensorDescriptor<DT, RANK>& desc, Iterator inner)
+        : iter_(desc.get_lengths()), strides_(desc.get_strides()), inner_(inner)
+    {
+    }
+
+    /// @brief Return the value at a particular flat index.
+    ///
+    /// This function returns the value of the tensor at flat coordinate
+    /// `flat_index`. This index is then unflattened into a multi-dimensional
+    /// index according to the way described in `NdIter`, and a tensor offset
+    /// is computed from that according to `calculate_offset`. The value at
+    /// that offset in the inner iterator is then the return value of this
+    /// function.
+    ///
+    /// @note NdIter iterates such that the inner dimension (right-most value
+    /// in the tensor shape) changes fastest.
+    ///
+    /// @note This function performs no bounds checking.
+    ///
+    /// @param flat_index The flat index into this tensor.
+    ///
+    /// @pre flat_index < numel()
+    ///
+    /// @see NdIter
+    __host__ __device__ auto& operator[](size_t flat_index) const
+    {
+        const auto index  = iter_(flat_index);
+        const auto offset = calculate_offset(index, strides_);
+        return inner_[offset];
+    }
+
+    /// @brief Return the total number of elements to iterate over.
+    ///
+    /// @see NdIter::numel()
+    __host__ __device__ size_t numel() const { return iter_.numel(); }
+
+    private:
+    NdIter<RANK> iter_;
+    Extent<RANK> strides_;
+    Iterator inner_;
+};
+
+template <DataType DT, size_t RANK, typename Iterator>
+FlatTensorIterator(const TensorDescriptor<DT, RANK>&,
+                   Iterator) -> FlatTensorIterator<DT, RANK, Iterator>;
 
 } // namespace ck_tile::builder::test

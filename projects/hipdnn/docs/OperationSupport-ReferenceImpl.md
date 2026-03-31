@@ -18,12 +18,14 @@ The following table lists all operations currently supported in the CPU Referenc
 
 | Operation | Datatypes | Layouts | Implementation | Notes |
 |-----------|-----------|---------|----------------|-------|
-| BatchNorm Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | BatchNorm Forward Inference | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
+| BatchNorm Forward Inference with Variance | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | BatchNorm Forward Training | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
+| BatchNorm Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Backward Data | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Backward Weights | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
+| Matmul | FP16, BFP16, FP32 | NCHW, NCDHW | CPU Reference |  |
 | Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference |  |
 | Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference |  |
 
@@ -34,6 +36,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Operation | Plan Builder | Signature Key | Description |
 |-----------|-------------|---------------|-------------|
 | BatchNorm Forward Inference | `BatchnormFwdInferencePlanBuilder` | `BatchnormFwdInferenceSignatureKey` | Inference-mode forward pass |
+| BatchNorm Forward Inference with Variance | `BatchnormFwdInferenceWithVariancePlanBuilder` | `BatchnormFwdInferenceWithVarianceSignatureKey` | Inference-mode with variance forward pass |
 | BatchNorm Forward Training | `BatchnormTrainPlanBuilder` | `BatchnormTrainSignatureKey` | Training-mode forward pass with statistics |
 | BatchNorm Backward | `BatchnormBwdPlanBuilder` | `BatchnormBwdSignatureKey` | Gradient computation |
 
@@ -44,6 +47,12 @@ The following table lists all operations currently supported in the CPU Referenc
 | Convolution Forward | `ConvolutionFwdPlanBuilder` | `ConvolutionFwdSignatureKey` | Forward convolution |
 | Convolution Backward Data | `ConvolutionBwdPlanBuilder` | `ConvolutionBwdSignatureKey` | Data gradient computation |
 | Convolution Backward Weights | `ConvolutionWrwPlanBuilder` | `ConvolutionWrwSignatureKey` | Weight gradient computation |
+
+### Matmul Operations
+
+| Operation | Plan Builder | Signature Key | Description |
+|-----------|-------------|---------------|-------------|
+| Matmul | `MatmulPlanBuilder` | `MatmulSignatureKey` | Generic matrix multiplication |
 
 ### Pointwise Operations
 
@@ -66,15 +75,21 @@ The following table lists all operations currently supported in the CPU Referenc
 - **NCDHW**: Batch, Channels, Depth, Height, Width (3D, channel-first)
 - **NDHWC**: Batch, Depth, Height, Width, Channels (3D, channel-last)
 
+> **Note:** The layout names (NCHW, NHWC, etc.) describe the **memory layout** controlled by
+> strides. Dimension ordering is operation-specific: convolution and batch normalization use
+> `(N, C, H, W)` / `(N, C, D, H, W)` ordering, matmul uses `(...batch, M, K)` ordering,
+> and pointwise operations are dimension-agnostic. See the
+> [Porting Guide](./PortingGuide.md#tensor-dimensions-and-layouts) for details.
+
 ### Implementation
 - **CPU Reference**: CPU-based reference implementation for validation
 
 ## Extension Guidelines
 
-For detailed information on adding new operations or datatypes to the CPU Reference Implementation, please refer to the [Extension Guidelines](./CpuGraphExecutorDesign.md#extension-guidelines) section in the CPU Graph Executor Design document.
+For detailed information on adding new operations or datatypes to the CPU Reference Implementation, please refer to the [Extension Guidelines](./rfcs/0001_CpuGraphExecutorDesign.md#extension-guidelines) section in the CPU Graph Executor Design document.
 
 ## Related Documentation
 
 - [hipDNN Operation Support](./OperationSupport.md) - Central hub for hipDNN operation support
-- [CPU Graph Executor Design](./CpuGraphExecutorDesign.md) - Detailed architecture documentation
+- [CPU Graph Executor Design](./rfcs/0001_CpuGraphExecutorDesign.md) - Detailed architecture documentation
 - [Testing Plan](./testing/TestPlan.md) - Testing strategy and procedures

@@ -35,6 +35,7 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse::csrmv_alg value_)
 {
     switch(value_)
     {
+    case rocsparse::csrmv_alg_default:
     case rocsparse::csrmv_alg_rowsplit:
     case rocsparse::csrmv_alg_adaptive:
     case rocsparse::csrmv_alg_lrb:
@@ -45,6 +46,29 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse::csrmv_alg value_)
     }
     return true;
 };
+
+rocsparse_status rocsparse::csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg& alg,
+                                                        rocsparse_operation   operation)
+{
+    if(alg != rocsparse::csrmv_alg_default)
+    {
+        // Algorithm is already specific, no dispatch needed
+        return rocsparse_status_success;
+    }
+
+    // Dispatch default algorithm to a specific algorithm based on operation:
+    // - transpose/conjugate_transpose: use rowsplit (adaptive doesn't support transpose)
+    // - none: use adaptive
+    if(operation != rocsparse_operation_none)
+    {
+        alg = rocsparse::csrmv_alg_rowsplit;
+    }
+    else
+    {
+        alg = rocsparse::csrmv_alg_adaptive;
+    }
+    return rocsparse_status_success;
+}
 
 template <typename I, typename J, typename A>
 rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          handle,
@@ -76,6 +100,9 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
         return rocsparse_status_success;
     }
 
+    // Dispatch default algorithm to specific algorithm based on operation
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_alg_default2csrmv_alg(alg, trans));
+
     switch(alg)
     {
     case rocsparse::csrmv_alg_adaptive:
@@ -102,6 +129,14 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_nnzsplit_template_dispatch(
             handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info));
         return rocsparse_status_success;
+    }
+
+    case rocsparse::csrmv_alg_default:
+    {
+        // LCOV_EXCL_START
+        // Should never reach here as csrmv_alg_default is dispatched above
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+        // LCOV_EXCL_STOP
     }
     }
 
@@ -192,6 +227,9 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
 
     const rocsparse_int ysize = (trans == rocsparse_operation_none) ? m : n;
 
+    // Dispatch default algorithm to specific algorithm based on operation
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_alg_default2csrmv_alg(alg, trans));
+
     // Another quick return.
     if(m == 0 || n == 0 || nnz == 0)
     {
@@ -237,7 +275,7 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
 
             if(temp_alloc)
             {
-                RETURN_IF_HIP_ERROR(hipFreeAsync(temp_storage_ptr, handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(temp_storage_ptr, handle->stream));
             }
         }
 
@@ -421,6 +459,14 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
                                                                               force_conj));
 
         return rocsparse_status_success;
+    }
+
+    case rocsparse::csrmv_alg_default:
+    {
+        // LCOV_EXCL_START
+        // Should never reach here as csrmv_alg_default is dispatched above
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+        // LCOV_EXCL_STOP
     }
     }
 }

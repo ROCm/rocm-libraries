@@ -121,7 +121,7 @@
       "inherits": ["base-test"],
       "filter": {
         "include": {
-          "name": "hipdnn_backend_tests|hipdnn_data_sdk_tests|hipdnn_frontend_tests|hipdnn_plugin_sdk_tests|miopen_legacy_plugin_tests|hipdnn_test_sdk_tests"
+          "name": "hipdnn_backend_tests|hipdnn_data_sdk_tests|hipdnn_frontend_tests|hipdnn_plugin_sdk_tests|miopen_plugin_tests|hipdnn_test_sdk_tests"
         }
       },
       "execution": {
@@ -135,7 +135,7 @@
       "inherits": ["base-test"],
       "filter": {
         "include": {
-          "name": "hipdnn_backend_tests|hipdnn_data_sdk_tests|hipdnn_frontend_tests|hipdnn_plugin_sdk_tests|miopen_legacy_plugin_tests|hipdnn_test_sdk_tests"
+          "name": "hipdnn_backend_tests|hipdnn_data_sdk_tests|hipdnn_frontend_tests|hipdnn_plugin_sdk_tests|miopen_plugin_tests|hipdnn_test_sdk_tests"
         }
       },
       "execution": {
@@ -149,7 +149,7 @@
       "inherits": ["base-test"],
       "filter": {
         "include": {
-          "name": "public_hipdnn_backend_tests|public_hipdnn_frontend_tests|miopen_plugin_integration_test"
+          "name": "hipdnn_public_backend_tests|hipdnn_public_frontend_tests|miopen_plugin_integration_test"
         }
       }
     },
@@ -160,7 +160,7 @@
       "inherits": ["base-test"],
       "filter": {
         "include": {
-          "name": "public_hipdnn_backend_tests|public_hipdnn_frontend_tests|miopen_plugin_integration_test"
+          "name": "hipdnn_public_backend_tests|hipdnn_public_frontend_tests|miopen_plugin_integration_test"
         }
       }
     }

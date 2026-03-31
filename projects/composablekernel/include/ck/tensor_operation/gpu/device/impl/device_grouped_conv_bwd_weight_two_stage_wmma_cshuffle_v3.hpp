@@ -7,6 +7,7 @@
 #include <numeric>
 #include <sstream>
 
+#include "ck/ck.hpp"
 #include "ck/utility/common_header.hpp"
 #include "ck/utility/env.hpp"
 #include "ck/tensor_description/tensor_descriptor.hpp"
@@ -29,6 +30,7 @@
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 #include "ck/host_utility/flush_cache.hpp"
+#include "ck/utility/tuple.hpp"
 
 #ifdef CK_EXPERIMENTAL_BUILDER
 #include "ck_tile/builder/reflect/description.hpp"
@@ -63,28 +65,46 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         const index_t num_k_per_block)
 {
 #if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
+#if defined(__gfx11__)
+    if constexpr(CGlobalMemoryDataOperation != InMemoryDataOperationEnum::AtomicAdd)
+    {
+#endif
+        constexpr index_t LDS_size = GridwiseGemm::template GetSharedMemoryNumberOfByte<
+            typename GridwiseGemm::EpilogueCShuffle>();
+        __shared__ char p_shared[LDS_size];
 
-    constexpr index_t LDS_size = GridwiseGemm::template GetSharedMemoryNumberOfByte<
-        typename GridwiseGemm::EpilogueCShuffle>();
-    __shared__ char p_shared[LDS_size];
+        const auto block_2_ctile_map_ = typename GridwiseGemm::Block2CTileMap{karg.M, karg.N, 4};
+        auto epilogue_args            = typename GridwiseGemm::EpilogueCShuffle{};
 
-    auto epilogue_args = typename GridwiseGemm::EpilogueCShuffle{};
+        GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BWD_WEIGHT,
+                                   AGridDesc_AK0_M_K1,
+                                   BGridDesc_BK0_N_K1,
+                                   ck::Tuple<>, // Empty tuple
+                                   CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                   decltype(block_2_ctile_map_),
+                                   ComputePtrOffsetOfBatch,
+                                   ComputePtrOffsetOfBatch, // placeholder
+                                   NumGroupsToMerge,
+                                   HasMainKBlockLoop,
+                                   CGlobalMemoryDataOperation,
+                                   false,
+                                   TailNum,
+                                   decltype(epilogue_args)>(
+            p_shared,
+            a_grid_desc_ak0_m_ak1,
+            b_grid_desc_bk0_n_bk1,
+            ck::Tuple<>(), // placeholder
+            c_grid_desc_mblock_mperblock_nblock_nperblock,
+            block_2_ctile_map_,
+            compute_ptr_offset_of_batch,
+            ComputePtrOffsetOfBatch{}, // placeholder
+            num_k_per_block,
+            karg,
+            epilogue_args);
 
-    GridwiseGemm::template Run<AGridDesc_AK0_M_K1,
-                               BGridDesc_BK0_N_K1,
-                               CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                               ComputePtrOffsetOfBatch,
-                               NumGroupsToMerge,
-                               HasMainKBlockLoop,
-                               CGlobalMemoryDataOperation,
-                               TailNum>(p_shared,
-                                        a_grid_desc_ak0_m_ak1,
-                                        b_grid_desc_bk0_n_bk1,
-                                        c_grid_desc_mblock_mperblock_nblock_nperblock,
-                                        compute_ptr_offset_of_batch,
-                                        num_k_per_block,
-                                        karg,
-                                        epilogue_args);
+#if defined(__gfx11__)
+    }
+#endif
 #else
     ignore = karg;
     ignore = a_grid_desc_ak0_m_ak1;
@@ -460,6 +480,10 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
     {
         ActiveWorkgroupsPerCU()
         {
+            if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+            {
+                return;
+            }
             constexpr int dynamic_smem_size = 0;
             constexpr index_t minimum_occupancy =
                 BlkGemmPipeSched == BlockGemmPipelineScheduler::Intrawave ? 1 : 2;
@@ -572,7 +596,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
 
                 // Ensure that k_batch_ does not exceed the maximum value
                 // for the GEMM pipeline.
-                const auto k_batch_max = math::integer_divide_ceil((gemmK - 1), KPerBlock);
+                const auto k_batch_max = math::integer_divide_ceil(gemmK, KPerBlock);
                 k_batch_               = std::min(k_batch_, k_batch_max);
 
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
@@ -1176,6 +1200,16 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
             {
                 std::cout << "Unsupported: Architecture must be gfx11/gfx12." << std::endl;
             }
+            return false;
+        }
+
+        if(arg.k_batch_ > 1 && ck::is_gfx11_supported())
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Unsupported splitK on gfx11." << std::endl;
+            }
+            // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
             return false;
         }
 

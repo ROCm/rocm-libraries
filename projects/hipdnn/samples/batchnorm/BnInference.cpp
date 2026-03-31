@@ -10,14 +10,13 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
-
-// Note: Sample temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
 
 template <typename InputType, typename IntermediateType>
 bool SampleRunner::operator()(const TensorLayout& layout)
@@ -39,10 +38,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto x = createTensor({n, c, h, w}, inputType, layout);
-    auto scale = createTensor({1, c, 1, 1}, intermediateType);
-    auto bias = createTensor({1, c, 1, 1}, intermediateType);
-    auto mean = createTensor({1, c, 1, 1}, intermediateType);
-    auto invVariance = createTensor({1, c, 1, 1}, intermediateType);
+    auto scale = createTensor({1, c, 1, 1}, intermediateType, layout);
+    auto bias = createTensor({1, c, 1, 1}, intermediateType, layout);
+    auto mean = createTensor({1, c, 1, 1}, intermediateType, layout);
+    auto invVariance = createTensor({1, c, 1, 1}, intermediateType, layout);
 
     auto bnAttributes = graph::BatchnormInferenceAttributes();
     bnAttributes.set_name("bn_inference_node");
@@ -92,7 +91,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> yRefTensor(y->get_dim(), layout);
 
         auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceInference<InputType>();
-        double epsilon = utilities::BATCHNORM_DEFAULT_EPSILON;
 
         hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdInference(
             xTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, yRefTensor);
@@ -100,10 +98,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         auto validator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool yValid = validator.allClose(yRefTensor, yTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
+        bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+            std::cout, "y", validator, yRefTensor, yTensor, tolerance, tolerance);
 
         validationPassed = yValid;
     }
@@ -123,15 +120,10 @@ int main(int argc, char* argv[])
 {
     auto config = parseCommandLineArgs(argc, argv);
 
-    initializeFrontendLogging();
+    auto [handle, handleError] = createHipdnnHandle();
+    HIPDNN_FE_CHECK(handleError);
 
-    auto backend = hipdnnBackend();
-    hipdnnHandle_t handle;
-    HIPDNN_CHECK(backend->create(&handle));
-
-    bool allPassed = run(SampleRunner{handle, config});
-
-    HIPDNN_CHECK(backend->destroy(handle));
+    bool allPassed = run(SampleRunner{*handle, config});
 
     if(allPassed)
     {

@@ -16,6 +16,28 @@ namespace ckt = ck_tile::builder::test;
 using ::testing::Each;
 using ::testing::Eq;
 
+TEST(TensorForeach, NdIter)
+{
+    {
+        ckt::NdIter iter(ckt::Extent{523, 345, 123, 601});
+
+        EXPECT_THAT(iter.numel(), Eq(13'338'296'505ULL));
+        EXPECT_THAT(iter(0), Eq(ckt::Extent{0, 0, 0, 0}));
+        EXPECT_THAT(iter(1), Eq(ckt::Extent{0, 0, 0, 1}));
+        EXPECT_THAT(iter(601), Eq(ckt::Extent{0, 0, 1, 0}));
+        EXPECT_THAT(iter(601 * 123), Eq(ckt::Extent{0, 1, 0, 0}));
+        EXPECT_THAT(iter(601 * 123 * 10), Eq(ckt::Extent{0, 10, 0, 0}));
+        EXPECT_THAT(iter(((34 * 345 + 63) * 123 + 70) * 601 + 5), Eq(ckt::Extent{34, 63, 70, 5}));
+    }
+
+    {
+        ckt::NdIter iter(ckt::Extent{});
+
+        EXPECT_THAT(iter.numel(), Eq(1));
+        EXPECT_THAT(iter(0), Eq(ckt::Extent{}));
+    }
+}
+
 TEST(TensorForeach, CalculateOffset)
 {
     EXPECT_THAT(ckt::calculate_offset(ckt::Extent{1, 2, 3}, ckt::Extent{100, 10, 1}), Eq(123));
@@ -87,8 +109,8 @@ TEST(TensorForeach, VisitsEveryIndex)
 
 TEST(TensorForeach, FillTensorBuffer)
 {
-    auto desc = ckt::make_descriptor<ckb::DataType::INT32>(ckt::Extent{31, 54, 13},
-                                                           ckt::PackedRightLayout{});
+    auto desc =
+        ckt::make_descriptor<ckb::DataType::I32>(ckt::Extent{31, 54, 13}, ckt::PackedRightLayout{});
 
     auto buffer = ckt::alloc_tensor_buffer(desc);
 
@@ -109,7 +131,7 @@ TEST(TensorForeach, FillTensor)
     // FillTensor with non-packed indices should not write out-of-bounds.
     const ckt::Extent shape = {4, 23, 35};
     const ckt::Extent pad   = {12, 53, 100};
-    auto desc = ckt::make_descriptor<ckb::DataType::INT32>(shape, ckt::PackedRightLayout{}(pad));
+    auto desc = ckt::make_descriptor<ckb::DataType::I32>(shape, ckt::PackedRightLayout{}(pad));
     const auto strides = desc.get_strides();
 
     auto size   = desc.get_element_space_size();
@@ -169,7 +191,7 @@ TEST(TensorForeach, ClearTensorZeros)
     const ckt::Extent pad   = {6, 6, 6, 6, 6, 6, 6, 6};
 
     const auto desc =
-        ckt::make_descriptor<ckb::DataType::INT32>(shape, ckt::PackedRightLayout{}(pad));
+        ckt::make_descriptor<ckb::DataType::I32>(shape, ckt::PackedRightLayout{}(pad));
 
     auto buffer = ckt::alloc_tensor_buffer(desc);
     ckt::clear_tensor_buffer(desc, buffer.get());
@@ -202,4 +224,100 @@ TEST(TensorForeach, ClearTensorZeros)
     ckt::check_hip(hipMemcpy(&actual, d_count.get(), sizeof(uint64_t), hipMemcpyDeviceToHost));
 
     EXPECT_THAT(actual, Eq(0));
+}
+
+TEST(TensorForeach, CopyTensor)
+{
+    constexpr auto dt       = ckb::DataType::I32;
+    const ckt::Extent shape = {10, 3, 45, 23, 6};
+    using Counter           = uint32_t;
+
+    const auto src_desc = ckt::make_descriptor<dt>(shape, ckt::PackedRightLayout{});
+    const auto dst_desc = ckt::make_descriptor<dt>(shape, ckt::PackedLeftLayout{});
+
+    auto src_buffer = ckt::alloc_tensor_buffer(src_desc);
+    auto dst_buffer = ckt::alloc_tensor_buffer(dst_desc);
+
+    const auto gen = [](const auto& index, const auto& lengths) {
+        // Simple incrementing counter
+        return static_cast<Counter>(ckt::calculate_offset(index, lengths));
+    };
+
+    ckt::fill_tensor(
+        src_desc, src_buffer.get(), [lengths = src_desc.get_lengths(), gen](const auto& index) {
+            return gen(index, lengths);
+        });
+    ckt::clear_tensor_buffer(dst_desc, dst_buffer.get());
+
+    // Perform the actual test
+
+    ckt::copy_tensor(src_desc, src_buffer.get(), dst_desc, dst_buffer.get());
+
+    // Check that the dst tensor has the same data
+
+    auto d_invalid = ckt::alloc_buffer(sizeof(Counter));
+    ckt::check_hip(hipMemset(d_invalid.get(), 0, sizeof(Counter)));
+
+    ckt::tensor_foreach(shape,
+                        [lengths = dst_desc.get_lengths(),
+                         gen,
+                         dst     = dst_buffer.get(),
+                         invalid = reinterpret_cast<Counter*>(d_invalid.get()),
+                         strides = dst_desc.get_strides()](const auto& index) {
+                            const auto offset   = ckt::calculate_offset(index, strides);
+                            const auto expected = gen(index, lengths);
+                            const auto actual   = reinterpret_cast<const Counter*>(dst)[offset];
+
+                            if(expected != actual)
+                                atomicAdd(invalid, 1);
+                        });
+
+    Counter invalid = 0;
+    ckt::check_hip(hipMemcpy(&invalid, d_invalid.get(), sizeof(Counter), hipMemcpyDeviceToHost));
+
+    EXPECT_THAT(invalid, Eq(0));
+}
+
+TEST(TensorForeach, FlatTensorIterator)
+{
+    using Counter = uint32_t;
+
+    constexpr auto dt                = ckb::DataType::I32;
+    const ckt::Extent shape          = {10, 9, 8, 7, 6, 5, 4, 3, 2, 1};
+    const ckt::Extent packed_strides = ckt::PackedRightLayout{}(shape);
+
+    const auto desc = ckt::make_descriptor<dt>(shape, ckt::PackedLeftLayout{});
+
+    auto buffer = ckt::alloc_tensor_buffer(desc);
+
+    // Fill the tensor with random values according to the *flat* index. The
+    // FlatTensorIterator iterates over flat values even if the strides are not
+    // packed, so indexing these elements according to the flat index in the
+    // iterator should yield again this value.
+    ckt::fill_tensor(desc, buffer.get(), [packed_strides](const auto& index) {
+        const auto flat_index = ckt::calculate_offset(index, packed_strides);
+        return static_cast<int32_t>(flat_index * 10001 % 1001);
+    });
+
+    auto iterator = ckt::FlatTensorIterator(desc, reinterpret_cast<const int32_t*>(buffer.get()));
+
+    auto d_invalid = ckt::alloc_buffer(sizeof(Counter));
+    ckt::check_hip(hipMemset(d_invalid.get(), 0, sizeof(Counter)));
+
+    ckt::tensor_foreach(shape,
+                        [iterator,
+                         packed_strides,
+                         strides = desc.get_strides(),
+                         data    = reinterpret_cast<const int32_t*>(buffer.get()),
+                         invalid = reinterpret_cast<Counter*>(d_invalid.get())](const auto& index) {
+                            const auto flat_index = ckt::calculate_offset(index, packed_strides);
+                            const auto offset     = ckt::calculate_offset(index, strides);
+                            if(iterator[flat_index] != data[offset])
+                                atomicAdd(invalid, 1);
+                        });
+
+    Counter invalid = 0;
+    ckt::check_hip(hipMemcpy(&invalid, d_invalid.get(), sizeof(Counter), hipMemcpyDeviceToHost));
+
+    EXPECT_THAT(invalid, Eq(0));
 }

@@ -39,7 +39,7 @@
 #include <sys/utsname.h>
 #endif
 
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
 #endif
 
@@ -76,15 +76,11 @@ public:
         const std::string amdgpuVer = GetAmdGpuVersion();
 
         // Format final output
-        std::cout << "Timestamp: " << timestamp << "; "
-                  << "Host Name: " << hostname << "; "
-                  << "Operating System: " << osInfo << "; "
-                  << "ROCm: " << hipVer << "; "
+        std::cout << "Timestamp: " << timestamp << "; " << "Host Name: " << hostname << "; "
+                  << "Operating System: " << osInfo << "; " << "ROCm: " << hipVer << "; "
                   << "MIOpen Driver: " << miopMajor << "." << miopMinor << "." << miopPatch << "; "
-                  << "CPU Vendor: " << cpuVendor << "; "
-                  << "CPU Model: " << cpuModel << "; "
-                  << "RAM Size: " << ramSize << "; "
-                  << "GPU Model: " << gpuInfo << "; "
+                  << "CPU Vendor: " << cpuVendor << "; " << "CPU Model: " << cpuModel << "; "
+                  << "RAM Size: " << ramSize << "; " << "GPU Model: " << gpuInfo << "; "
                   << "AMDGPU Driver: " << amdgpuVer << std::endl;
 #else
         miopMajor;
@@ -216,7 +212,7 @@ private:
     std::string GetHipVersion()
     {
         int runtime_version = 0;
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
         HIP_CHECK(hipRuntimeGetVersion(&runtime_version));
 #endif
         const int patch = runtime_version % 100000;
@@ -231,7 +227,7 @@ private:
     {
         std::string result;
         int deviceCount = 0;
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
         HIP_CHECK(hipGetDeviceCount(&deviceCount));
 #endif
         if(deviceCount < 1)
@@ -241,7 +237,7 @@ private:
         else
         {
             std::map<std::string, int> gpuList;
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
             for(int i = 0; i < deviceCount; i++)
             {
                 hipDeviceProp_t props;

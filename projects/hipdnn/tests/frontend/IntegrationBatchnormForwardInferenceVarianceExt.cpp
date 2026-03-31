@@ -120,6 +120,10 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+
+        ASSERT_EQ(hipInit(0), hipSuccess);
+        int deviceId = 0;
+        ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
     }
 
     void TearDown() override
@@ -132,10 +136,6 @@ protected:
 
     static hipdnnHandle_t setupEnvironmentWithPlugin(const std::string& pluginPath)
     {
-        EXPECT_EQ(hipInit(0), hipSuccess);
-        int deviceId = 0;
-        EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
-
         // Set up plugin path - load specific plugin by absolute path
         const std::array<const char*, 1> paths = {pluginPath.c_str()};
         EXPECT_EQ(hipdnnSetEnginePluginPaths_ext(
@@ -199,11 +199,24 @@ protected:
         }
         tensors.bias = std::make_shared<TensorAttributes>(std::move(biasAttr));
 
+        // Epsilon (pass-by-value)
+        auto epsilon = std::make_shared<TensorAttributes>();
+        epsilon->set_name("epsilon").set_value(1e-5f);
+        if(useManualUids)
+        {
+            epsilon->set_uid(uid++);
+        }
+
         BatchnormInferenceAttributesVarianceExt bnAttrs;
         bnAttrs.set_name("batchnorm_inference_variance_ext");
 
-        tensors.y = graph->batchnorm_inference_variance_ext(
-            tensors.x, tensors.mean, tensors.variance, tensors.scale, tensors.bias, bnAttrs);
+        tensors.y = graph->batchnorm_inference_variance_ext(tensors.x,
+                                                            tensors.mean,
+                                                            tensors.variance,
+                                                            tensors.scale,
+                                                            tensors.bias,
+                                                            epsilon,
+                                                            bnAttrs);
 
         if(useManualUids)
         {
@@ -284,7 +297,7 @@ protected:
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
 
         // Create tensor bundle
-        std::vector<int64_t> dims = {2, 3, 14, 14}; // n=2, c=3, h=14, w=14
+        const std::vector<int64_t> dims = {2, 3, 14, 14}; // n=2, c=3, h=14, w=14
         SimpleBatchnorm2DTensorBundle<float, float> tensorBundle(dims);
 
         // Create graph and tensors using the unified function

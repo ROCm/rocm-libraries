@@ -531,11 +531,11 @@ struct GroupedConvolutionBackwardDataKernel
 
     static constexpr index_t kBlockSize = GemmPipeline::BlockSize;
 
-    using InDataType  = remove_cvref_t<typename GemmPipeline::ADataType>;
+    using OutDataType = remove_cvref_t<typename GemmPipeline::ADataType>;
     using WeiDataType = remove_cvref_t<typename GemmPipeline::BDataType>;
     using DsDataType  = remove_cvref_t<typename EpiloguePipeline::DsDataType>;
 
-    using OutDataType = remove_cvref_t<typename EpiloguePipeline::ODataType>;
+    using InDataType = remove_cvref_t<typename EpiloguePipeline::ODataType>;
 
     using GroupedConvBwdDataKernelArgsSpecialized =
         GroupedConvBwdDataKernelArgs<GroupedConvTraitsType_, TilePartitioner>;
@@ -561,7 +561,7 @@ struct GroupedConvolutionBackwardDataKernel
         constexpr auto NumGroupsToMerge        = GroupedConvTraitsType_::NumGroupsToMerge;
         // clang-format off
         return concat('_', "grouped_convolution_backward_data", 
-            gemm_prec_str<InDataType, WeiDataType>(), 
+            gemm_prec_str<OutDataType, WeiDataType>(), 
             InLayout::name,
             WeiLayout::name,
             OutLayout::name,
@@ -632,7 +632,7 @@ struct GroupedConvolutionBackwardDataKernel
         const auto& a_pad_view = pad_tensor_view(
             a_tensor_view,
             make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::KPerBlock>{}),
-            sequence<true, true>{});
+            sequence<false, true>{});
 
         // Step 3: Create tile window
         auto a_block_window = make_tile_window(
@@ -644,7 +644,7 @@ struct GroupedConvolutionBackwardDataKernel
     }
 
     CK_TILE_DEVICE static auto
-    MakeBBlockWindow(const InDataType* b_ptr,
+    MakeBBlockWindow(const WeiDataType* b_ptr,
                      const GroupedConvBwdDataKernelArgsSpecialized& kargs,
                      const index_t group_id,
                      const index_t i_n,
@@ -658,7 +658,7 @@ struct GroupedConvolutionBackwardDataKernel
         const auto& b_pad_view = pad_tensor_view(
             b_tensor_view,
             make_tuple(number<TilePartitioner::KPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
-            sequence<true, true>{});
+            sequence<false, true>{});
 
         // Step 3: Create tile window
         auto b_block_window = make_tile_window(
@@ -681,14 +681,14 @@ struct GroupedConvolutionBackwardDataKernel
             [&](auto i) {
                 // Step 1: Create tensor view for D
                 const auto& d_tensor_view = make_tensor_view<address_space_enum::global>(
-                    static_cast<const OutDataType*>(ds_ptr[i]), kargs.c_grid_descs_m_n[group_id]);
+                    static_cast<const InDataType*>(ds_ptr[i]), kargs.c_grid_descs_m_n[group_id]);
 
                 // Step 2: Create padded view
                 const auto& d_pad_view =
                     pad_tensor_view(d_tensor_view,
                                     make_tuple(number<TilePartitioner::MPerBlock>{},
                                                number<TilePartitioner::NPerBlock>{}),
-                                    sequence<true, true>{});
+                                    sequence<false, true>{});
 
                 // Step 3: Create tile window
                 return make_tile_window(d_pad_view,
@@ -703,7 +703,7 @@ struct GroupedConvolutionBackwardDataKernel
 
     template <memory_operation_enum DstInMemOp = memory_operation_enum::set>
     CK_TILE_DEVICE static auto
-    MakeCBlockWindow(WeiDataType* c_ptr,
+    MakeCBlockWindow(InDataType* c_ptr,
                      const GroupedConvBwdDataKernelArgsSpecialized& kargs,
                      const index_t group_id,
                      const index_t i_m,
@@ -713,11 +713,20 @@ struct GroupedConvolutionBackwardDataKernel
         const auto& c_tensor_view = make_tensor_view<address_space_enum::global, DstInMemOp>(
             c_ptr, kargs.c_grid_descs_m_n[group_id]);
 
+        // For bf16_t and atomic_add global_atomic_add is used instead of buffer_atomic_add
+        // Add padding for not contiguous dim due to the lack of OOB check
+        // Not needed from gfx950.
+#if defined(__gfx950__)
+        constexpr bool pad_not_contiguous_dim = false;
+#else
+        constexpr bool pad_not_contiguous_dim =
+            std::is_same_v<InDataType, bf16_t> && DstInMemOp == memory_operation_enum::atomic_add;
+#endif
         // Step 2: Create padded view
         const auto& c_pad_view = pad_tensor_view(
             c_tensor_view,
             make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
-            sequence<true, true>{});
+            sequence<pad_not_contiguous_dim, true>{});
 
         // Step 3: Create tile window
         auto c_block_window = make_tile_window(
@@ -731,8 +740,15 @@ struct GroupedConvolutionBackwardDataKernel
     CK_TILE_HOST static bool
     IsSupportedArgument(const GroupedConvBwdDataKernelArgsSpecialized& kargs)
     {
+        if constexpr(GemmPipeline_::Async)
+        {
+            if(get_device_name() != "gfx950")
+            {
+                return false;
+            }
+        }
         if constexpr(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                     is_any_of<OutDataType, fp16_t, bf16_t>::value)
+                     is_any_of<InDataType, fp16_t, bf16_t>::value)
         {
             if(kargs.k_batch != 1)
             {
@@ -855,133 +871,6 @@ struct GroupedConvolutionBackwardDataKernel
         return true;
     }
 
-    template <memory_operation_enum DstInMemOp = memory_operation_enum::set>
-    CK_TILE_DEVICE static auto
-    MakeGemmTensorViews(const OutDataType* a_ptr,
-                        const InDataType* b_ptr,
-                        const std::array<const void*, NumDTensor>& ds_ptr,
-                        WeiDataType* c_ptr,
-                        const GroupedConvBwdDataKernelArgsSpecialized& kargs,
-                        const index_t group_id)
-    {
-        static_assert(!GemmPipeline::BlockGemmShape::PermuteA, "Not implemented!");
-        static_assert(!GemmPipeline::BlockGemmShape::PermuteB, "Not implemented!");
-        const auto& a_tensor_view = [&]() {
-            return make_tensor_view<address_space_enum::global>(
-                a_ptr,
-                kargs.a_grid_descs_m_k[group_id]); // A: out
-        }();
-
-        const auto& b_tensor_view = [&]() {
-            return make_tensor_view<address_space_enum::global>(
-                b_ptr,
-                kargs.b_grid_descs_n_k[group_id]); // B: weight
-        }();
-
-        const auto& c_tensor_view = [&]() {
-            return make_tensor_view<address_space_enum::global, DstInMemOp>(
-                c_ptr, kargs.c_grid_descs_m_n[group_id]);
-        }();
-
-        const auto& ds_tensor_view = generate_tuple(
-            [&](auto i) {
-                static_assert(std::is_same_v<std::tuple_element_t<i, DsLayout>, OutLayout>,
-                              "Not supported!");
-                static_assert(std::is_same_v<GemmCLayout, tensor_layout::gemm::RowMajor>,
-                              "Not supported!");
-                static_assert(std::is_same_v<std::tuple_element_t<i, DsDataType>, OutDataType>,
-                              "Not supported!");
-
-                return make_tensor_view<address_space_enum::global>(
-                    static_cast<OutDataType*>(ds_ptr[i]), kargs.c_grid_descs_m_n[group_id]);
-            },
-            number<NumDTensor>{});
-
-        return make_tuple(a_tensor_view, b_tensor_view, ds_tensor_view, c_tensor_view);
-    }
-
-    template <typename TensorView>
-    CK_TILE_DEVICE static auto MakeGemmPadViews(const TensorView& views)
-    {
-        const auto& a_pad_view = [&]() {
-            const auto& a_tensor_view = views.at(I0);
-            return pad_tensor_view(a_tensor_view,
-                                   make_tuple(number<TilePartitioner::MPerBlock>{},
-                                              number<TilePartitioner::KPerBlock>{}),
-                                   sequence<true, true>{});
-        }();
-
-        const auto& b_pad_view = [&]() {
-            const auto& b_tensor_view = views.at(I1);
-            return pad_tensor_view(b_tensor_view,
-                                   make_tuple(number<TilePartitioner::KPerBlock>{},
-                                              number<TilePartitioner::NPerBlock>{}),
-                                   sequence<true, true>{});
-        }();
-
-        const auto& ds_tensor_view = views.at(I2);
-        const auto& ds_pad_view    = generate_tuple(
-            [&](auto i) {
-                return pad_tensor_view(ds_tensor_view[i],
-                                       make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                  number<TilePartitioner::NPerBlock>{}),
-                                       sequence<true, true>{});
-            },
-            number<NumDTensor>{});
-
-        const auto& c_pad_view = [&]() {
-            const auto& c_tensor_view = views.at(I3);
-            return pad_tensor_view(c_tensor_view,
-                                   make_tuple(number<TilePartitioner::MPerBlock>{},
-                                              number<TilePartitioner::NPerBlock>{}),
-                                   sequence<true, true>{});
-        }();
-
-        return make_tuple(a_pad_view, b_pad_view, ds_pad_view, c_pad_view);
-    }
-
-    template <typename PadView>
-    CK_TILE_DEVICE static auto MakeGemmTileWindows(const PadView& views,
-                                                   const index_t i_m,
-                                                   const index_t i_n,
-                                                   const index_t i_k)
-    {
-        const auto& a_pad_view  = views.at(I0);
-        const auto& b_pad_view  = views.at(I1);
-        const auto& ds_pad_view = views.at(I2);
-        const auto& c_pad_view  = views.at(I3);
-
-        const auto& a_block_window = [&]() {
-            return make_tile_window(a_pad_view,
-                                    make_tuple(number<TilePartitioner::MPerBlock>{},
-                                               number<TilePartitioner::KPerBlock>{}),
-                                    {i_m, i_k});
-        }();
-
-        const auto& b_block_window = [&]() {
-            return make_tile_window(b_pad_view,
-                                    make_tuple(number<TilePartitioner::KPerBlock>{},
-                                               number<TilePartitioner::NPerBlock>{}),
-                                    {i_k, i_n});
-        }();
-
-        const auto ds_block_window = generate_tuple(
-            [&](auto i) {
-                return make_tile_window(ds_pad_view[i],
-                                        make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                   number<TilePartitioner::NPerBlock>{}),
-                                        {i_m, i_n});
-            },
-            number<NumDTensor>{});
-
-        auto c_block_window = make_tile_window(
-            c_pad_view,
-            make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
-            {i_m, i_n});
-
-        return make_tuple(a_block_window, b_block_window, ds_block_window, c_block_window);
-    }
-
     /**
      * @brief Runs single GEMM problem cooperatively by whole workgroup.
      *
@@ -995,9 +884,9 @@ struct GroupedConvolutionBackwardDataKernel
      *
      */
     CK_TILE_DEVICE static void RunGemm(const OutDataType* a_ptr,
-                                       const InDataType* b_ptr,
+                                       const WeiDataType* b_ptr,
                                        const std::array<const void*, NumDTensor>& ds_ptr,
-                                       WeiDataType* c_ptr,
+                                       InDataType* c_ptr,
                                        void* smem_ptr_0,
                                        const GroupedConvBwdDataKernelArgsSpecialized& kargs,
                                        const index_t splitted_k,
@@ -1036,84 +925,16 @@ struct GroupedConvolutionBackwardDataKernel
         }
         else
         {
-            auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
-                c_ptr, kargs, group_id, block_idx_m, block_idx_n);
+            if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
+                           is_any_of<InDataType, fp16_t, bf16_t>::value))
+            {
+                auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
+                    c_ptr, kargs, group_id, block_idx_m, block_idx_n);
 
-            EpiloguePipeline{}
-                .template operator()<decltype(c_block_window), decltype(c_block_tile)>(
-                    c_block_window, c_block_tile, d_block_window, smem_ptr_0);
-        }
-    }
-
-    /**
-     * @brief Runs single GEMM problem cooperatively by whole workgroup.
-     *
-     * @note RunGemm2LDS in with two shared memory buffers using the ping pong buffer mechanism.
-     *
-     * @param a_ptr input A pointer
-     * @param b_ptr input B pointer
-     * @param c_ptr output C pointer
-     * @param smem_ptr_0 The starting pointer of 1st shared memory block.
-     * @param smem_ptr_1 The starting pointer of 2nd shared memory block.
-     * @param kargs Grouped Convolution Backward Data kernel arguments
-     * @param block_idx_m The GEMM's output M dimension tile index processed by this workgroup.
-     * @param block_idx_n The GEMM's output N dimension tile index processed by this workgroup.
-     *
-     */
-    CK_TILE_DEVICE static void RunGemm2LDS(const OutDataType* a_ptr,
-                                           const InDataType* b_ptr,
-                                           const std::array<const void*, NumDTensor>& ds_ptr,
-                                           WeiDataType* c_ptr,
-                                           void* __restrict__ smem_ptr_0,
-                                           void* __restrict__ smem_ptr_1,
-                                           const GroupedConvBwdDataKernelArgsSpecialized& kargs,
-                                           const index_t splitted_k,
-                                           const index_t block_idx_m,
-                                           const index_t block_idx_n,
-                                           const index_t block_idx_k,
-                                           const index_t group_id)
-    {
-        // Create block windows using specialized methods
-        const auto& a_block_window =
-            MakeABlockWindow(a_ptr, kargs, group_id, block_idx_m, block_idx_k);
-        const auto& b_block_window =
-            MakeBBlockWindow(b_ptr, kargs, group_id, block_idx_n, block_idx_k);
-        const auto& d_block_window =
-            MakeDBlockWindows(ds_ptr, kargs, group_id, block_idx_m, block_idx_n);
-
-        const index_t num_loop  = amd_wave_read_first_lane(TilePartitioner::GetLoopNum(splitted_k));
-        const bool has_hot_loop = GemmPipeline::BlockHasHotloop(num_loop);
-        const TailNumber tail_num = GemmPipeline::GetBlockLoopTailNum(num_loop);
-
-        // Run GEMM cooperatively by whole workgroup.
-        const auto& c_block_tile = GemmPipeline{}.template operator()(a_block_window,
-                                                                      b_block_window,
-                                                                      num_loop,
-                                                                      has_hot_loop,
-                                                                      tail_num,
-                                                                      smem_ptr_0,
-                                                                      smem_ptr_1);
-
-        const index_t k_batch = amd_wave_read_first_lane(kargs.k_batch);
-
-        // Run Epilogue Pipeline with k_batch dispatch
-        if(k_batch == 1)
-        {
-            auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
-                c_ptr, kargs, group_id, block_idx_m, block_idx_n);
-
-            EpiloguePipeline{}
-                .template operator()<decltype(c_block_window), decltype(c_block_tile)>(
-                    c_block_window, c_block_tile, d_block_window, smem_ptr_0);
-        }
-        else
-        {
-            auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
-                c_ptr, kargs, group_id, block_idx_m, block_idx_n);
-
-            EpiloguePipeline{}
-                .template operator()<decltype(c_block_window), decltype(c_block_tile)>(
-                    c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+                EpiloguePipeline{}
+                    .template operator()<decltype(c_block_window), decltype(c_block_tile)>(
+                        c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+            }
         }
     }
 
@@ -1195,45 +1016,37 @@ struct GroupedConvolutionBackwardDataKernel
             static_cast<InDataType*>(kargs.in_ptr) + group_offset_c + input_batch_offset;
 
         // allocate LDS
-        __shared__ char smem_ptr_0[GetSmemSize()];
-
-        if constexpr(GemmPipeline::DoubleSmemBuffer == true)
+        __shared__ char smem_ptr[GetSmemSize()];
+        // Disable Async for other archs than gfx950
+        if constexpr(GemmPipeline_::Async)
         {
-            __shared__ char smem_ptr_1[GemmPipeline::GetSmemSize()];
-            if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                           is_any_of<OutDataType, fp16_t, bf16_t>::value))
-            {
-                RunGemm2LDS(a_ptr,
-                            b_ptr,
-                            kargs.ds_ptr,
-                            c_ptr,
-                            smem_ptr_0,
-                            smem_ptr_1,
-                            kargs,
-                            splitted_k,
-                            i_m,
-                            i_n,
-                            i_k,
-                            group_id);
-            }
+#if defined(__gfx950__)
+            RunGemm(a_ptr,
+                    b_ptr,
+                    kargs.ds_ptr,
+                    c_ptr,
+                    smem_ptr,
+                    kargs,
+                    splitted_k,
+                    i_m,
+                    i_n,
+                    i_k,
+                    group_id);
+#endif
         }
         else
         {
-            if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                           is_any_of<OutDataType, fp16_t, bf16_t>::value))
-            {
-                RunGemm(a_ptr,
-                        b_ptr,
-                        kargs.ds_ptr,
-                        c_ptr,
-                        smem_ptr_0,
-                        kargs,
-                        splitted_k,
-                        i_m,
-                        i_n,
-                        i_k,
-                        group_id);
-            }
+            RunGemm(a_ptr,
+                    b_ptr,
+                    kargs.ds_ptr,
+                    c_ptr,
+                    smem_ptr,
+                    kargs,
+                    splitted_k,
+                    i_m,
+                    i_n,
+                    i_k,
+                    group_id);
         }
     }
 };

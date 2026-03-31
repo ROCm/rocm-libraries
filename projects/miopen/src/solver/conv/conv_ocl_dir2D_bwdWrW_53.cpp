@@ -416,7 +416,8 @@ ConvSolution ConvOclBwdWrW53::GetSolution(const ExecutionContext& ctx,
                           GRP_SZ) != miopenStatusSuccess ||
        out_n_vert_reads <= 0)
     {
-        return {miopenStatusNotInitialized};
+        result = ConvSolution{miopenStatusNotInitialized};
+        return result;
     }
 
     int out_n_vert_read_loops = static_cast<int>(std::ceil(
@@ -440,12 +441,14 @@ ConvSolution ConvOclBwdWrW53::GetSolution(const ExecutionContext& ctx,
     if(out_n_horizon_read_loops > 2 && problem.GetPadW() != 0)
     {
         MIOPEN_LOG_I2("Padding where split is more than 2 ways is not supported.");
-        return {miopenStatusNotInitialized};
+        result = ConvSolution{miopenStatusNotInitialized};
+        return result;
     }
     if(out_n_horizon_read_loops > 1 && problem.GetGroupCount() > 1)
     {
         MIOPEN_LOG_I2("For large images, group support is missing.");
-        return {miopenStatusNotInitialized};
+        result = ConvSolution{miopenStatusNotInitialized};
+        return result;
     }
 
     int out_horizon_last_chunk_valid_read_units = std::ceil(

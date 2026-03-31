@@ -31,8 +31,13 @@ class TestGroupedConvndFwd : public ::testing::Test
     {
         EXPECT_FALSE(conv_params.empty());
         bool pass = true;
-        for(auto& param : conv_params)
+        for(size_t i = 0; i < conv_params.size(); i++)
         {
+            if((param_mask & (1 << i)) == 0)
+            {
+                continue;
+            }
+            auto& param = conv_params[i];
             pass = pass && ck::profiler::profile_grouped_conv_fwd_bias_clamp_impl<NDimSpatial,
                                                                                   InLayout,
                                                                                   WeiLayout,
@@ -44,7 +49,7 @@ class TestGroupedConvndFwd : public ::testing::Test
                                                                                   DataType,
                                                                                   IndexType,
                                                                                   true /*BiasGK*/>(
-                               true,  // do_verification
+                               2,     // do_verification
                                1,     // init_method: integer value
                                false, // do_log
                                false, // time_kernel

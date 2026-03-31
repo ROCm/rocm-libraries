@@ -25,9 +25,9 @@ The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/
 
   .. grid-item-card:: How to
 
+    * :doc:`Build rocThrust for different backends <./how-to/rocThrust-build-for-backends>`
     * :doc:`Add rocThrust to a CMake project <./how-to/use-rocThrust-in-a-project>`
     * :doc:`Run tests on multiple GPUs <./how-to/run-rocThrust-tests-on-multiple-gpus>`
-    * :doc:`Build rocThrust applications on different backends <./how-to/rocThrust-build-backends>`
     * :doc:`Use HIPSTDPAR <./how-to/rocThrust-hipstdpar>`
 
   .. grid-item-card:: Reference

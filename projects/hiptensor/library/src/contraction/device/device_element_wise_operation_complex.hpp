@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,9 +26,10 @@
 
 #pragma once
 
-#include <binary_element_wise_operation.hpp>
+#include <ck/tensor_operation/gpu/element/binary_element_wise_operation.hpp>
 #include <hip/hip_complex.h>
-#include <hiptensor_element_wise_operation.hpp>
+
+#include "hiptensor_element_wise_operation.hpp"
 
 namespace ck
 {
@@ -108,4 +109,3 @@ namespace ck
         } // namespace element_wise
     } // namespace tensor_operation
 } // namespace ck
-
