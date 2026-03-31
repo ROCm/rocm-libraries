@@ -801,24 +801,31 @@ bwd_result fmha_bwd_run(mode_enum mode,
             ck_tile::HostTensor<AccDataType> p_sink_host_ref(
                 sink_grad ? std::array<ck_tile::index_t, 2>{nhead, real_seqlen_q}
                           : std::array<ck_tile::index_t, 2>{0, 0});
+            if(sink_grad)
             {
                 for(int i_h = 0; i_h < nhead; ++i_h)
                 {
-                    AccDataType exp_sink = ck_tile::exp(sink_host(wb, i_h));
+                    AccDataType sink_val = sink_host(wb, i_h);
                     for(int i_q = 0; i_q < real_seqlen_q; ++i_q)
                     {
-                        AccDataType exp_lse_old = ck_tile::exp(lse_host_ref(i_h, i_q));
-                        AccDataType exp_lse_new = exp_lse_old + exp_sink;
-                        AccDataType lse_new     = ck_tile::log(exp_lse_new);
+                        // Use numerically stable log-domain arithmetic to avoid exp(lse)
+                        // overflow when lse is large (e.g. lse > 88 overflows float32).
+                        //   lse_new = lse_old + log(1 + exp(sink - lse_old))
+                        //   p_scale = 1 / (1 + exp(sink - lse_old))   [= exp(lse_old - lse_new)]
+                        //   p_sink  = exp(sink - lse_new)
+                        AccDataType lse_old = lse_host_ref(i_h, i_q);
+                        AccDataType diff    = sink_val - lse_old; // sink - lse_old
+                        AccDataType lse_new =
+                            lse_old + ck_tile::log(AccDataType(1) + ck_tile::exp(diff));
+                        AccDataType p_scale =
+                            AccDataType(1) / (AccDataType(1) + ck_tile::exp(diff));
 
                         lse_host_ref(i_h, i_q) = lse_new;
 
-                        AccDataType p_scale = exp_lse_old / exp_lse_new;
                         for(int i_k = 0; i_k < real_seqlen_k; ++i_k)
                             p_hp_host_ref(i_h, i_q, i_k) *= p_scale;
 
-                        if(sink_grad)
-                            p_sink_host_ref(i_h, i_q) = exp_sink / exp_lse_new;
+                        p_sink_host_ref(i_h, i_q) = ck_tile::exp(sink_val - lse_new);
                     }
                 }
             }
