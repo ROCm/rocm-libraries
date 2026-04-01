@@ -121,8 +121,10 @@ protected:
     friend Solver GetSolver(const std::string&);
 };
 
-extern template class MIOPEN_INTERNALS_EXPORT SolverMixin<miopen::ExecutionContext, miopen::conv::ProblemDescription>;
-extern template class MIOPEN_INTERNALS_EXPORT SolverMixin<miopen::ExecutionContext, miopen::batchnorm::ProblemDescription>;
+extern template class MIOPEN_INTERNALS_EXPORT
+    SolverMixin<miopen::ExecutionContext, miopen::conv::ProblemDescription>;
+extern template class MIOPEN_INTERNALS_EXPORT
+    SolverMixin<miopen::ExecutionContext, miopen::batchnorm::ProblemDescription>;
 
 // Convolution solver
 class ConvSolver final
@@ -164,12 +166,14 @@ protected:
 
 // Convolution
 MIOPEN_INTERNALS_EXPORT const std::vector<ConvSolver>& GetAllConvSolvers();
-MIOPEN_INTERNALS_EXPORT std::vector<ConvSolver> GetConvSolvers(const std::vector<std::string>& names);
+MIOPEN_INTERNALS_EXPORT std::vector<ConvSolver>
+GetConvSolvers(const std::vector<std::string>& names);
 MIOPEN_INTERNALS_EXPORT ConvSolver GetConvSolver(const std::string& name);
 
 // Batch normalization
 MIOPEN_INTERNALS_EXPORT const std::vector<BatchNormSolver>& GetAllBatchNormSolvers();
-MIOPEN_INTERNALS_EXPORT std::vector<BatchNormSolver> GetBatchNormSolvers(const std::vector<std::string>& names);
+MIOPEN_INTERNALS_EXPORT std::vector<BatchNormSolver>
+GetBatchNormSolvers(const std::vector<std::string>& names);
 MIOPEN_INTERNALS_EXPORT BatchNormSolver GetBatchNormSolver(const std::string& name);
 
 // Examples:
