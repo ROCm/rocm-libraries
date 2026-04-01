@@ -34,13 +34,14 @@ For more detailed information, please refer to the [hipTensor installation guide
 
 ### Project options
 
-| Option                              | Description                                             | Default Value                                           |
-|-------------------------------------|---------------------------------------------------------|---------------------------------------------------------|
-| GPU_TARGETS                         | Build code for specific GPU target(s)                   | gfx908;gfx90a;gfx942;gfx950;gfx11-generic;gfx12-generic |
-| HIPTENSOR_BUILD_TESTS               | Build the tests                                         | ON                                                      |
-| HIPTENSOR_BUILD_SAMPLES             | Build the samples                                       | ON                                                      |
-| HIPTENSOR_BUILD_COMPRESSED_DBG      | Enable compressed debug symbols                         | ON                                                      |
-| HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR | Set the hipTensor default data layout to column major   | ON                                                      |
+| Option                              | Description                                                              | Default Value                                           |
+|-------------------------------------|--------------------------------------------------------------------------|---------------------------------------------------------|
+| GPU_TARGETS                         | Build code for specific GPU target(s)                                    | gfx908;gfx90a;gfx942;gfx950;gfx11-generic;gfx12-generic |
+| HIPTENSOR_BUILD_TESTS               | Build the tests                                                          | ON                                                      |
+| HIPTENSOR_BUILD_SAMPLES             | Build the samples                                                        | ON                                                      |
+| HIPTENSOR_BUILD_COMPRESSED_DBG      | Enable compressed debug symbols                                          | ON                                                      |
+| HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR | Set the hipTensor default data layout to column major                    | ON                                                      |
+| HIPTENSOR_INLINE_UNARY_OPS          | Inline all unary ops for best runtime performance (slower compilation)   | OFF                                                     |
 
 ### Example configurations
 
