@@ -22,10 +22,27 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/core/BasicBlock.hpp"
-#include "stinkytofu/core/Function.hpp"
-#include "stinkytofu/core/IRBase.hpp"
-#include "stinkytofu/core/IRBuilder.hpp"
-#include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/core/Types.hpp"
-#include "stinkytofu/serialization/asm/IRConverter.hpp"
+#include "stinkytofu/core/PassInstrumentation.hpp"
+
+#include <memory>
+
+namespace stinkytofu
+{
+    class PassManagerDebugConfig;
+
+    /// Print IR before/after passes using PassManagerDebugConfig settings.
+    class DebugPrintInstrumentation : public PassInstrumentation
+    {
+    public:
+        explicit DebugPrintInstrumentation(std::unique_ptr<PassManagerDebugConfig> cfg);
+        ~DebugPrintInstrumentation() override;
+
+        void runBegin(Function& F, PassContext& ctx) override;
+        void beforePass(const std::string& passName, Function& F, PassContext& ctx) override;
+        void afterPass(const std::string& passName, Function& F, PassContext& ctx) override;
+
+    private:
+        std::unique_ptr<PassManagerDebugConfig> dbgCfg;
+    };
+
+} // namespace stinkytofu

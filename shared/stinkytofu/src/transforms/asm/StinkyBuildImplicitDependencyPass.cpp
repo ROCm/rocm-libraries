@@ -24,140 +24,93 @@
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include <cassert>
 #include <iostream>
-#include <unordered_map>
-#include <vector>
 
 #define DEBUG_TYPE "StinkyBuildImplicitDependencyPass"
+
+// Implicit LDS dependency pass
+// ============================
+// Attaches RegType::LDS pseudo-registers to instructions based on their MemTokenData
+// token IDs.  The instruction type determines src vs dest placement:
+//
+//   tensor_load / ds_write  →  LDS token to dest  (LDS producer)
+//   ds_read                 →  LDS token to src   (LDS consumer)
+//   barrier / signal / wait →  LDS token to both  (synchronization point)
+//
+// The def-use chain builder then sees:
+//   producer(def LDS[t]) → barrier(use+def LDS[t]) → consumer(use LDS[t])
+// which forces the scheduler to respect: producers → barrier → consumers.
 
 namespace
 {
     using namespace stinkytofu;
 
-    // A linkable op between two barriers is wired twice; keep src/dest operand lists from
-    // appending the same pseudo register again (list hygiene, not SSA "defines").
-    // For PSEUDO registers, also match by index since PSEUDO[0] != PSEUDO[1].
-    static const StinkyRegister& uniquePseudoDest(StinkyInstruction& inst,
-                                                  RegType                 kind,
-                                                  const StinkyRegister&   proto)
+    static void addUniqueLdsDest(StinkyInstruction& inst, int tokenId)
     {
         for(const StinkyRegister& d : inst.getDestRegs())
-        {
-            if(d.reg.type == kind)
-            {
-                if(kind == RegType::PSEUDO)
-                {
-                    if(d.reg.idx == proto.reg.idx)
-                        return d;
-                }
-                else
-                    return d;
-            }
-        }
-        inst.addDestReg(proto);
-        return inst.getDestReg(inst.getNumDestRegs() - 1);
+            if(d.reg.type == RegType::LDS && d.reg.idx == static_cast<uint32_t>(tokenId))
+                return;
+        inst.addDestReg(StinkyRegister(RegType::LDS, tokenId, 1));
     }
 
-    static void uniqueSrc(StinkyInstruction& inst, const StinkyRegister& r)
+    static void addUniqueLdsSrc(StinkyInstruction& inst, int tokenId)
     {
         for(const StinkyRegister& s : inst.getSrcRegs())
-            if(s.reg.type == r.reg.type && s.reg.idx == r.reg.idx)
+            if(s.reg.type == RegType::LDS && s.reg.idx == static_cast<uint32_t>(tokenId))
                 return;
-        inst.addSrcReg(r);
+        inst.addSrcReg(StinkyRegister(RegType::LDS, tokenId, 1));
     }
 
-    static void linkViaMemToken(StinkyInstruction& neighbor, StinkyInstruction& barrier,
-                                bool beforeBarrier)
+    // Barrier: LDS tokens to both src and dest.
+    // Returns false if this is a non-all-wave split barrier that should be skipped.
+    static bool processBarrier(StinkyInstruction& inst, const MemTokenData& mt,
+                               [[maybe_unused]] const std::string& bbLabel)
     {
-        const MemTokenData* neighborMt = neighbor.getModifier<MemTokenData>();
-        const MemTokenData* barrierMt  = barrier.getModifier<MemTokenData>();
-        if(!neighborMt || !barrierMt)
-            return;
-
-        for(int tokenId : neighborMt->tokens)
+        if((isBarrierSignal(inst) || isBarrierWait(inst)) && !isSplitBarrierAllWave(inst))
         {
-            // Only connect when the same token ID exists in both
-            if(std::find(barrierMt->tokens.begin(), barrierMt->tokens.end(), tokenId)
-               == barrierMt->tokens.end())
-                continue;
-
-            StinkyRegister pseudo(RegType::PSEUDO, tokenId, 1);
-            if(beforeBarrier)
-            {
-                uniquePseudoDest(neighbor, RegType::PSEUDO, pseudo);
-                uniqueSrc(barrier, pseudo);
-            }
-            else
-            {
-                uniquePseudoDest(barrier, RegType::PSEUDO, pseudo);
-                uniqueSrc(neighbor, pseudo);
-            }
-            PASS_DEBUG(std::cerr << "[BuildImplicitDep]   link via mem_token " << tokenId
-                                 << " <-> barrier" << (beforeBarrier ? " (before)" : " (after)")
-                                 << "\n");
+            PASS_DEBUG(std::cerr << "[BuildImplicitDep] non-all-wave split barrier BB label=\""
+                                 << bbLabel << "\" — skipping (workgroup-sync mode)\n");
+            return false;
         }
+
+        PASS_DEBUG(std::cerr << "[BuildImplicitDep] barrier BB label=\"" << bbLabel
+                             << "\" tokens=[";
+                   for(int t : mt.tokens) std::cerr << t << " ";
+                   std::cerr << "]\n");
+
+        for(int tokenId : mt.tokens)
+        {
+            addUniqueLdsDest(inst, tokenId);
+            addUniqueLdsSrc(inst, tokenId);
+        }
+        return true;
     }
 
-    static void linkNeighborToBarrier(StinkyInstruction& neighbor, StinkyInstruction& barrier,
-                                      bool beforeBarrier)
+    // LDS writers (tensor_load, ds_write): LDS tokens to dest.
+    static void processLdsWriter(StinkyInstruction& inst, const MemTokenData& mt,
+                                 [[maybe_unused]] const std::string& bbLabel)
     {
-        if(neighbor.getModifier<MemTokenData>())
-        {
-            linkViaMemToken(neighbor, barrier, beforeBarrier);
-            return;
-        }
+        PASS_DEBUG(std::cerr << "[BuildImplicitDep] LDS writer ("
+                             << (isTensorLoad(inst) ? "tensor_load" : "ds_write")
+                             << ") tokens=[";
+                   for(int t : mt.tokens) std::cerr << t << " ";
+                   std::cerr << "] -> dest\n");
 
-        if(isMUBUFLoad(neighbor))
-        {
-            const MUBUFModifiers* mubuf = neighbor.getModifier<MUBUFModifiers>();
-            if(!mubuf || !mubuf->glc)
-                return;
-            uniquePseudoDest(neighbor, RegType::MUBUF_LOAD, StinkyRegister::getMUBUFLoadRegister());
-            barrier.addSrcReg(StinkyRegister::getMUBUFLoadRegister());
-            uniqueSrc(neighbor, barrier.getDestReg(0));
-            PASS_DEBUG(std::cerr << "[BuildImplicitDep]   link GLC MUBUF load <-> barrier\n");
-            return;
-        }
-        if(isTensorLoad(neighbor))
-        {
-            const StinkyRegister& p = uniquePseudoDest(
-                neighbor, RegType::TENSOR_LOAD, StinkyRegister::getTensorLoadRegister());
-            barrier.addSrcReg(p);
-            uniqueSrc(neighbor, barrier.getDestReg(0));
-            PASS_DEBUG(std::cerr << "[BuildImplicitDep]   link tensor_load_to_lds <-> barrier "
-                                    "(tensor pseudo + barrier reg)\n");
-            return;
-        }
-        if(isDSRead(neighbor))
-        {
-            uniquePseudoDest(neighbor, RegType::DS_READ, StinkyRegister::getDSReadRegister());
-            barrier.addSrcReg(StinkyRegister::getDSReadRegister());
-            uniqueSrc(neighbor, barrier.getDestReg(0));
-            PASS_DEBUG(std::cerr << "[BuildImplicitDep]   link ds_read <-> barrier\n");
-            return;
-        }
-        if(isDSWrite(neighbor))
-        {
-            const StinkyRegister& p = uniquePseudoDest(
-                neighbor, RegType::DS_WRITE, StinkyRegister::getDSWriteRegister());
-            barrier.addSrcReg(p);
-            uniqueSrc(neighbor, barrier.getDestReg(0));
-            PASS_DEBUG(std::cerr << "[BuildImplicitDep]   link ds_write <-> barrier\n");
-        }
+        for(int tokenId : mt.tokens)
+            addUniqueLdsDest(inst, tokenId);
     }
 
-    static bool isLinkableImplicitNeighbor(const StinkyInstruction& inst)
+    // LDS readers (ds_read): LDS tokens to src.
+    static void processLdsReader(StinkyInstruction& inst, const MemTokenData& mt,
+                                 [[maybe_unused]] const std::string& bbLabel)
     {
-        if(inst.getModifier<MemTokenData>())
-            return true;
-        if(isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst))
-            return true;
-        if(isMUBUFLoad(inst))
-        {
-            const MUBUFModifiers* mubuf = inst.getModifier<MUBUFModifiers>();
-            return mubuf && mubuf->glc;
-        }
-        return false;
+        PASS_DEBUG(std::cerr << "[BuildImplicitDep] LDS reader (ds_read) tokens=[";
+                   for(int t : mt.tokens) std::cerr << t << " ";
+                   std::cerr << "] -> src\n");
+
+        for(int tokenId : mt.tokens)
+            addUniqueLdsSrc(inst, tokenId);
     }
 
     void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx)
@@ -169,138 +122,31 @@ namespace
             return;
         }
 
-        std::unordered_map<int, StinkyInstruction*> lastBarrierByToken;
-        // Track unpaired s_barrier_signal instructions awaiting their s_barrier_wait.
-        std::unordered_map<int, StinkyInstruction*> pendingSignalByToken;
-        std::vector<StinkyInstruction*> pending;
-
-        // Helper lambda: process a barrier instruction that acts as the entry point
-        // (drains pending ops) and optionally the exit point (updates lastBarrierByToken).
-        // For s_barrier (gfx9): single inst is both entry and exit.
-        // For split barriers (gfx1250): signal is entry, wait is exit.
-        auto processBarrierEntry = [&](StinkyInstruction* inst, const MemTokenData* mt) {
-            for(int tokenId : mt->tokens)
-                uniquePseudoDest(
-                    *inst, RegType::PSEUDO, StinkyRegister(RegType::PSEUDO, tokenId, 1));
-
-            auto newEnd = std::remove_if(
-                pending.begin(), pending.end(), [&](StinkyInstruction* op) {
-                    const MemTokenData* opMt = op->getModifier<MemTokenData>();
-                    assert(opMt
-                           && "mixed mem-token and non-mem-token ops in same BB");
-                    for(int t : opMt->tokens)
-                    {
-                        if(std::find(mt->tokens.begin(), mt->tokens.end(), t)
-                           != mt->tokens.end())
-                        {
-                            linkNeighborToBarrier(*op, *inst, true);
-                            return true;
-                        }
-                    }
-                    return false;
-                });
-            pending.erase(newEnd, pending.end());
-        };
-
-        auto processBarrierExit = [&](StinkyInstruction* inst, const MemTokenData* mt) {
-            for(int tokenId : mt->tokens)
-                uniquePseudoDest(
-                    *inst, RegType::PSEUDO, StinkyRegister(RegType::PSEUDO, tokenId, 1));
-            for(int t : mt->tokens)
-                lastBarrierByToken[t] = inst;
-        };
-
         for(auto it = bb.begin(); it != bb.end(); ++it)
         {
             auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
             if(!inst)
                 continue;
 
+            const MemTokenData* mt = inst->getModifier<MemTokenData>();
+            if(!mt)
+            {
+                assert(!isTensorLoad(*inst) && !isDSRead(*inst) && !isDSWrite(*inst)
+                       && "tensor_load/ds_read/ds_write must have MemTokenData");
+                continue;
+            }
+            assert(!mt->tokens.empty() && "MemTokenData with empty tokens");
+
             if(isBarrier(*inst))
-            {
-                const MemTokenData* mt = inst->getModifier<MemTokenData>();
-                if(!mt)
-                {
-                    PASS_DEBUG(std::cerr << "[BuildImplicitDep] non-mem-token barrier BB label=\""
-                                         << bb.getLabel() << "\" — skipping (side-effect)\n");
-                    assert(pending.empty()
-                           && "mixed mem-token and non-mem-token ops in same BB");
-                    continue;
-                }
-
-                // Split barriers with a non-(-1) operand are workgroup-sync mode:
-                // only one wave signals, pattern is "if wave==0: signal; all wg wait;"
-                // which splits signal/wait across different BBs. Skip these — we'll
-                // never find a matching pair in the same BB.
-                if((isBarrierSignal(*inst) || isBarrierWait(*inst))
-                   && !isSplitBarrierAllWave(*inst))
-                {
-                    PASS_DEBUG(
-                        std::cerr
-                        << "[BuildImplicitDep] non-all-wave split barrier BB label=\""
-                        << bb.getLabel()
-                        << "\" — skipping (workgroup-sync mode, signal/wait in different BBs)\n");
-                    continue;
-                }
-
-                if(isBarrierSignal(*inst))
-                {
-                    // s_barrier_signal: entry point only — drain pending ops, but don't
-                    // update lastBarrierByToken (the paired s_barrier_wait will do that).
-                    PASS_DEBUG(std::cerr << "[BuildImplicitDep] barrier_signal BB label=\""
-                                         << bb.getLabel() << "\" tokens=[";
-                               for(int t : mt->tokens) std::cerr << t << " ";
-                               std::cerr << "]\n");
-                    processBarrierEntry(inst, mt);
-                    for(int t : mt->tokens)
-                        pendingSignalByToken[t] = inst;
-                }
-                else if(isBarrierWait(*inst))
-                {
-                    // s_barrier_wait: exit point — link from the paired signal (if any)
-                    // and become the lastBarrier for subsequent ops.
-                    PASS_DEBUG(std::cerr << "[BuildImplicitDep] barrier_wait BB label=\""
-                                         << bb.getLabel() << "\" tokens=[";
-                               for(int t : mt->tokens) std::cerr << t << " ";
-                               std::cerr << "]\n");
-                    // Connect signal → wait via pseudo registers
-                    for(int t : mt->tokens)
-                    {
-                        auto sit = pendingSignalByToken.find(t);
-                        if(sit != pendingSignalByToken.end())
-                        {
-                            StinkyRegister pseudo(RegType::PSEUDO, t, 1);
-                            uniquePseudoDest(*sit->second, RegType::PSEUDO, pseudo);
-                            uniqueSrc(*inst, pseudo);
-                            pendingSignalByToken.erase(sit);
-                        }
-                    }
-                    processBarrierExit(inst, mt);
-                }
-                else
-                {
-                    // s_barrier (gfx9): single barrier is both entry and exit.
-                    PASS_DEBUG(std::cerr << "[BuildImplicitDep] movable barrier BB label=\""
-                                         << bb.getLabel() << "\" tokens=[";
-                               for(int t : mt->tokens) std::cerr << t << " ";
-                               std::cerr << "]\n");
-                    processBarrierEntry(inst, mt);
-                    processBarrierExit(inst, mt);
-                }
-            }
-            else if(isLinkableImplicitNeighbor(*inst))
-            {
-                const MemTokenData* opMt = inst->getModifier<MemTokenData>();
-                if(!opMt)
-                    continue;
-                pending.push_back(inst);
-                for(int t : opMt->tokens)
-                {
-                    auto bit = lastBarrierByToken.find(t);
-                    if(bit != lastBarrierByToken.end())
-                        linkNeighborToBarrier(*inst, *bit->second, false);
-                }
-            }
+                processBarrier(*inst, *mt, bb.getLabel());
+            else if(isTensorLoad(*inst) || isDSWrite(*inst))
+                processLdsWriter(*inst, *mt, bb.getLabel());
+            else if(isDSRead(*inst))
+                processLdsReader(*inst, *mt, bb.getLabel());
+            else
+                assert(false
+                       && "instruction has MemTokenData but is not a barrier, "
+                          "tensor_load, ds_write, or ds_read");
         }
     }
 

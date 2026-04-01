@@ -61,3 +61,12 @@ MACRO(IF_MXWMMA)
 
 // Arithmetic properties
 MACRO(IF_Commutative)
+
+// Implicit special-register access.
+// These flags record implicit reads/writes to SCC, VCC, or EXEC that are NOT
+// encoded as explicit operands.
+MACRO(IF_ImplicitReadVCC)
+MACRO(IF_ImplicitReadEXEC)
+MACRO(IF_ImplicitWriteEXEC)
+MACRO(IF_ImplicitReadSCC)
+MACRO(IF_ImplicitWriteSCC)

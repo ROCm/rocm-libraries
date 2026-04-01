@@ -325,40 +325,21 @@ namespace stinkytofu
 
         void dump() const;
 
-        // Scalar condition code (SCC): the architectural SALU status register. Instructions may
-        // use SCC implicitly without listing it in the textual operands; lowering represents
-        // those implicit reads/writes as explicit src/dst SCC operands so def-use and scheduling
-        // see the dependency. When emitting GPU assembly text, SCC is not printed—it is IR-only
-        // for dependency modeling (see isImplicitRegister).
         static StinkyRegister getSCCRegister()
         {
             return StinkyRegister(RegType::SCC, 0, 1);
         }
 
-        // Pseudo register: BARRIER, DS_WRITE, TENSOR_LOAD, etc.
-        static StinkyRegister getBarrierRegister()
+        static StinkyRegister getVCCRegister(uint32_t wavefrontSize)
         {
-            return StinkyRegister(RegType::BARRIER, 0, 1);
+            return wavefrontSize == 32 ? StinkyRegister(RegType::VCC_LO, 0, 1)
+                                       : StinkyRegister(RegType::VCC, 0, 1);
         }
 
-        static StinkyRegister getMUBUFLoadRegister()
+        static StinkyRegister getEXECRegister(uint32_t wavefrontSize)
         {
-            return StinkyRegister(RegType::MUBUF_LOAD, 0, 1);
-        }
-
-        static StinkyRegister getDSReadRegister()
-        {
-            return StinkyRegister(RegType::DS_READ, 0, 1);
-        }
-
-        static StinkyRegister getDSWriteRegister()
-        {
-            return StinkyRegister(RegType::DS_WRITE, 0, 1);
-        }
-
-        static StinkyRegister getTensorLoadRegister()
-        {
-            return StinkyRegister(RegType::TENSOR_LOAD, 0, 1);
+            return wavefrontSize == 32 ? StinkyRegister(RegType::EXEC_LO, 0, 1)
+                                       : StinkyRegister(RegType::EXEC, 0, 1);
         }
 
         /// Create a virtual VGPR register for template-based code generation.
@@ -454,17 +435,6 @@ namespace stinkytofu
             return false;
 
         return reg.reg.type >= RegType::PSEUDO_START;
-    }
-
-    /// Check if register is an implicit register (SCC, VCC, EXEC, etc.).
-    /// Implicit registers are set implicitly by instructions and should not be
-    /// printed in assembly output.
-    inline bool isImplicitRegister(const StinkyRegister& reg)
-    {
-        if(reg.dataType != StinkyRegister::Type::Register)
-            return false;
-
-        return reg.reg.type == RegType::SCC;
     }
 
 } // namespace stinkytofu

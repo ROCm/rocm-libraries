@@ -200,7 +200,7 @@ DEF_FORMAT(VOPC,
 // Vector compare-and-write-exec: v_cmpx_*
 DEF_FORMAT(VCMPX,
     .parent = VOPC,
-    .flags = {VCmpX},
+    .flags = {VCmpX, ImplicitWriteEXEC},
     .fields = {
         {D0, vdst, exec, 64},
         {S0, src0, src, 32},
@@ -348,7 +348,7 @@ DEF_FORMAT(SOPC,
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 2,  // src0 + src1 (result to SCC)
-    .flags = {SALU},
+    .flags = {SALU, ImplicitWriteSCC},
     .fields = {
         {S0, ssrc0, ssrc, 32},
         {S1, ssrc1, ssrc, 32},

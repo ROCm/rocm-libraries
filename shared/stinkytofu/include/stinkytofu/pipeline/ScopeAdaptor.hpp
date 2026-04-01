@@ -25,10 +25,15 @@
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
+#include "stinkytofu/support/DebugPrintInstrumentation.hpp"
+#include "stinkytofu/support/PassOrderSnapshotJson.hpp"
 
 #include <cassert>
+#include <fstream>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace stinkytofu
@@ -37,12 +42,47 @@ namespace stinkytofu
     // Debug output utility
     // -----------------------------------------------------------------------
 
+    /// Shared cache of open output streams keyed by filename.
+    ///
+    /// The first request for a given filename opens it in truncate mode;
+    /// every subsequent request returns the same (already-open) stream so
+    /// multiple PassManagers targeting the same file append naturally.
+    /// Streams are closed when the last shared_ptr is released.
+    class DebugOutputStreams
+    {
+        std::unordered_map<std::string, std::shared_ptr<std::ostream>> streams;
+
+    public:
+        std::shared_ptr<std::ostream> getOrCreate(const std::string& filename)
+        {
+            auto [it, inserted] = streams.emplace(filename, nullptr);
+            if(inserted)
+                it->second = std::make_shared<std::ofstream>(filename, std::ofstream::out);
+            return it->second;
+        }
+    };
+
+    /// Create shared DebugOutputStreams for a pipeline build.
+    /// Returns nullptr when no file-based debug output is needed.
+    inline std::shared_ptr<DebugOutputStreams>
+        createDebugOutputStreams(const StinkyAsmModule::ModuleOptions& opts)
+    {
+        bool needsFileOutput = (opts.DebugLevel >= 2) || !opts.PrintBeforePass.empty()
+                               || !opts.PrintAfterPass.empty();
+        if(!needsFileOutput)
+            return nullptr;
+        return std::make_shared<DebugOutputStreams>();
+    }
+
     /// Configure debug output (DebugLevel, PrintBeforePass, PrintAfterPass)
     /// on a PassManager using the given label as the file prefix.
+    /// File streams are obtained from \p debugStreams (shared across PMs)
+    /// so that the first PM truncates and subsequent PMs append.
     /// DebugPass is global and does not need per-PM setup.
-    inline void configureDebugOutput(PassManager&                          pm,
-                                     const StinkyAsmModule::ModuleOptions& opts,
-                                     const std::string&                    label)
+    inline void configureDebugOutput(PassManager&                                pm,
+                                     const StinkyAsmModule::ModuleOptions&       opts,
+                                     const std::string&                          label,
+                                     const std::shared_ptr<DebugOutputStreams>&  debugStreams)
     {
         auto forEachName = [](const std::string& csv, auto cb) {
             std::istringstream stream(csv);
@@ -72,29 +112,86 @@ namespace stinkytofu
         {
             debugConfig->setDumpInitialIR(true);
             debugConfig->setPrintAfterAll(true);
-            debugConfig->setDumpToFileInBefore(label + "-before_passes.txt");
-            debugConfig->setDumpToFileInAfter(label + "-after_passes.txt");
+            if(debugStreams)
+            {
+                debugConfig->setDumpStreamBefore(
+                    debugStreams->getOrCreate(label + "-before_passes.txt"));
+                debugConfig->setDumpStreamAfter(
+                    debugStreams->getOrCreate(label + "-after_passes.txt"));
+            }
         }
         if(!opts.PrintBeforePass.empty())
         {
-            debugConfig->setDumpToFileInBefore(label + "-before_passes.txt");
+            if(debugStreams)
+                debugConfig->setDumpStreamBefore(
+                    debugStreams->getOrCreate(label + "-before_passes.txt"));
             forEachName(opts.PrintBeforePass,
                         [&](const std::string& n) { debugConfig->addOnlyPrintBefore(n); });
         }
         if(!opts.PrintAfterPass.empty())
         {
-            debugConfig->setDumpToFileInAfter(label + "-after_passes.txt");
+            if(debugStreams)
+                debugConfig->setDumpStreamAfter(
+                    debugStreams->getOrCreate(label + "-after_passes.txt"));
             forEachName(opts.PrintAfterPass,
                         [&](const std::string& n) { debugConfig->addOnlyPrintAfter(n); });
         }
 
-        pm.setDebugConfig(std::move(debugConfig));
+        pm.addInstrumentation(std::make_shared<DebugPrintInstrumentation>(std::move(debugConfig)));
 
         if(!opts.DebugPass.empty())
         {
             forEachName(opts.DebugPass,
                         [](const std::string& n) { PassManagerDebugConfig::addDebugOnly(n); });
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Pass-order snapshot utility
+    // -----------------------------------------------------------------------
+
+    /// Create a shared DAGScheduleJsonCollector and populate
+    /// passFeatureCfg.passOrderSnapshot from ModuleOptions.
+    ///
+    /// Returns nullptr when PassOrderSnapshotJson is empty (feature disabled).
+    ///
+    /// DebugPass (comma-separated pass names) serves as the allow-list for
+    /// instruction-order snapshots.  When DebugPass is empty and jsonPath is
+    /// set, only StinkyDAGSchedulerPass is recorded by default.
+    inline std::shared_ptr<DAGScheduleJsonCollector>
+        createPassOrderSnapshotCollector(PassFeatureConfig&                    passFeatureCfg,
+                                         const StinkyAsmModule::ModuleOptions& opts,
+                                         const std::string&                    moduleName)
+    {
+        if(opts.PassOrderSnapshotJson.empty())
+            return nullptr;
+
+        passFeatureCfg.passOrderSnapshot.jsonPath = opts.PassOrderSnapshotJson;
+
+        if(!opts.DebugPass.empty())
+        {
+            std::istringstream stream(opts.DebugPass);
+            std::string        name;
+            while(std::getline(stream, name, ','))
+            {
+                auto s = name.find_first_not_of(" ");
+                auto e = name.find_last_not_of(" ");
+                if(s != std::string::npos)
+                    passFeatureCfg.passOrderSnapshot.dumpAfterPasses.push_back(
+                        name.substr(s, e - s + 1));
+            }
+        }
+
+        return std::make_shared<DAGScheduleJsonCollector>(opts.PassOrderSnapshotJson, moduleName);
+    }
+
+    /// Add PassOrderSnapshotInstrumentation to \p pm when \p collector is non-null.
+    inline void
+        configurePassOrderSnapshot(PassManager&                                     pm,
+                                   const std::shared_ptr<DAGScheduleJsonCollector>& collector)
+    {
+        if(collector)
+            pm.addInstrumentation(std::make_shared<PassOrderSnapshotInstrumentation>(collector));
     }
 
     // -----------------------------------------------------------------------
@@ -204,7 +301,7 @@ namespace stinkytofu
         {
             // Propagate config from outer PassContext to inner PM
             innerPM.setGemmTileConfig(outerCtx.getGemmTileConfig());
-            innerPM.setPassFeatureConfig(outerCtx.getPassFeatureConfig());
+            // innerPM.setPassFeatureConfig(outerCtx.getPassFeatureConfig());
 
             if(groupNames.empty())
             {
@@ -437,32 +534,30 @@ namespace stinkytofu
     // -----------------------------------------------------------------------
 
     /// Create a ScopeAdaptor that runs an inner PM on a single named region.
-    /// Configures debug output on the inner PM using the group name as file prefix.
+    /// Debug output must be configured on \p pm before calling this function
+    /// (see configureDebugOutput / createDebugOutputStreams).
     inline std::unique_ptr<Pass> createKernelToRegionPassAdaptor(StinkyAsmModule&   module,
                                                                  const std::string& groupName,
                                                                  PassManager        pm)
     {
-        configureDebugOutput(pm, module.getModuleOptions(), groupName);
         return std::make_unique<ScopeAdaptor>(
             module, std::vector<std::string>{groupName}, std::move(pm));
     }
 
     /// Create a ScopeAdaptor that runs an inner PM on multiple named regions
     /// (their union is extracted, PM runs once, results spliced back).
-    /// Configures debug output on the inner PM using joined group names as file prefix.
+    /// Debug output must be configured on \p pm before calling this function.
     inline std::unique_ptr<Pass> createKernelToRegionsPassAdaptor(
         StinkyAsmModule& module, std::vector<std::string> groupNames, PassManager pm)
     {
-        configureDebugOutput(pm, module.getModuleOptions(), makeDebugLabel(groupNames));
         return std::make_unique<ScopeAdaptor>(module, std::move(groupNames), std::move(pm));
     }
 
     /// Create a ScopeAdaptor that runs an inner PM on the whole kernel
     /// (extracts everything to temp, runs, splices back to restore flat BB).
-    /// Configures debug output on the inner PM with the "wholeKernel" label.
+    /// Debug output must be configured on \p pm before calling this function.
     inline std::unique_ptr<Pass> createKernelPassAdaptor(StinkyAsmModule& module, PassManager pm)
     {
-        configureDebugOutput(pm, module.getModuleOptions(), "wholeKernel");
         return std::make_unique<ScopeAdaptor>(module, std::vector<std::string>{}, std::move(pm));
     }
 

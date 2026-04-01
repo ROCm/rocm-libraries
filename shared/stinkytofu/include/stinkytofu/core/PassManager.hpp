@@ -32,6 +32,7 @@
 
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/core/PassInstrumentation.hpp"
 #include "stinkytofu/core/Types.hpp"
 
 namespace stinkytofu
@@ -190,25 +191,20 @@ namespace stinkytofu
     // Users can also configure a global debug-only list of passes to print.
     class PassManagerDebugConfig final
     {
-        friend class PassManager;
-
         unsigned printAfterAll : 1;
         unsigned printBeforeAll : 1;
         unsigned dumpInitialIR : 1;
         unsigned printPassNames : 1;
 
-        std::string dumpFileNameBefore;
-        std::string dumpFileNameAfter;
-
-        std::unique_ptr<std::ostream> dumpStreamBefore;
-        std::unique_ptr<std::ostream> dumpStreamAfter;
+        std::shared_ptr<std::ostream> dumpStreamBefore;
+        std::shared_ptr<std::ostream> dumpStreamAfter;
 
         std::unordered_set<std::string> onlyPrintBefore;
         std::unordered_set<std::string> onlyPrintAfter;
 
     public:
         PassManagerDebugConfig();
-        ~PassManagerDebugConfig();
+        ~PassManagerDebugConfig() = default;
 
         void setPrintAfterAll(bool v = true);
         void setPrintBeforeAll(bool v = true);
@@ -216,8 +212,13 @@ namespace stinkytofu
         void setPrintPassNames(bool v = true);
         void addOnlyPrintBefore(const std::string& passName);
         void addOnlyPrintAfter(const std::string& passName);
-        void setDumpToFileInBefore(const std::string& filename);
-        void setDumpToFileInAfter(const std::string& filename);
+        void setDumpStreamBefore(std::shared_ptr<std::ostream> stream);
+        void setDumpStreamAfter(std::shared_ptr<std::ostream> stream);
+
+        bool shouldDumpInitialIR() const
+        {
+            return dumpInitialIR;
+        }
 
         bool shouldPrintBefore(const std::string& passName) const;
         bool shouldPrintAfter(const std::string& passName) const;
@@ -225,16 +226,12 @@ namespace stinkytofu
         std::ostream& getOutputStreamInBefore() const;
         std::ostream& getOutputStreamInAfter() const;
 
-        void prepareDumpOutputStream();
-
     public:
         // Note: The debug only functions will use internal global static
         // variables, that's why they are static.
         static void addDebugOnly(const std::string& passName);
         static void clearDebugOnly();
     };
-
-    class DAGScheduleJsonCollector;
 
     // PassManager manages a list of passes to run on a module.
     //
@@ -258,6 +255,12 @@ namespace stinkytofu
             passes.push_back(std::move(pass));
         }
 
+        /// Register a PassInstrumentation callback to observe pass execution
+        void addInstrumentation(std::shared_ptr<PassInstrumentation> inst)
+        {
+            instrumentations.push_back(std::move(inst));
+        }
+
         PassManager()  = default;
         ~PassManager() = default;
 
@@ -265,8 +268,6 @@ namespace stinkytofu
         PassManager& operator=(PassManager&&) noexcept = default;
 
     public:
-        void setDebugConfig(std::unique_ptr<PassManagerDebugConfig> cfg);
-
         // Set GEMM tile configuration (wavefront size automatically determined from architecture)
         void setGemmTileConfig(const GemmTileConfig& config);
 
@@ -282,15 +283,6 @@ namespace stinkytofu
 
         // Set pass feature configuration
         void setPassFeatureConfig(const PassFeatureConfig& config);
-
-        /// Use an external JSON collector shared across multiple PassManager::run() calls
-        /// (e.g. Backend running loopWithPrefetch + noLoadLoopBody). The caller owns the
-        /// collector and must keep it alive until all runs are done. When set, PassManager
-        /// will not create its own collector internally.
-        void setExternalOrderJsonCollector(DAGScheduleJsonCollector* collector)
-        {
-            externalOrderJsonCollector_ = collector;
-        }
 
         void setBasicBlockFilter(BasicBlockFilter filter)
         {
@@ -317,8 +309,6 @@ namespace stinkytofu
         // The passes will be run in the order they are added.
         std::vector<std::unique_ptr<Pass>> passes;
 
-        std::unique_ptr<PassManagerDebugConfig> dbgCfg;
-
-        DAGScheduleJsonCollector* externalOrderJsonCollector_ = nullptr;
+        std::vector<std::shared_ptr<PassInstrumentation>> instrumentations;
     };
 }

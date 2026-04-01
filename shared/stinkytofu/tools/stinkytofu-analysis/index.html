@@ -382,7 +382,9 @@
     .order-section {
       flex: 1;
       min-height: 0;
-      overflow: auto;
+      min-width: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
       border-top: 1px solid var(--border);
       background: var(--panel);
     }
@@ -407,25 +409,33 @@
 
     .order-pair {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      /* minmax(0,1fr) so wide instruction lines don’t force tracks to min-content and shove the second column off-screen */
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 0;
       padding: 0.25rem 1rem 1rem;
+      max-width: 100%;
+    }
+
+    .order-pair > div {
+      min-width: 0;
     }
 
     @media (max-width: 960px) {
       .order-pair {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
       }
     }
 
     .order-col {
+      min-width: 0;
       padding: 0.5rem;
       border: 1px solid var(--border);
       border-radius: 8px;
       margin: 0.25rem;
       max-height: min(52vh, 560px);
-      overflow: auto;
-      font-size: 0.72rem;
+      overflow-x: auto;
+      overflow-y: auto;
+      font-size: 0.7rem;
       font-family: ui-monospace, "Cascadia Code", monospace;
       line-height: 1.45;
       scroll-behavior: smooth;
@@ -436,13 +446,17 @@
 
     .order-row {
       display: flex;
-      flex-wrap: wrap;
-      gap: 0.25rem 0.5rem;
+      flex-wrap: nowrap;
+      align-items: baseline;
+      gap: 0.35rem 0.5rem;
       padding: 0.35rem 0.4rem;
       border-radius: 4px;
-      align-items: baseline;
       cursor: pointer;
       border: 1px solid transparent;
+      white-space: nowrap;
+      width: max-content;
+      min-width: 100%;
+      box-sizing: border-box;
     }
 
     .order-row:hover {
@@ -461,17 +475,27 @@
     .order-row .idx {
       color: var(--muted);
       min-width: 1.25rem;
+      flex-shrink: 0;
     }
 
     .order-row .lbl {
-      flex: 1;
-      min-width: 8rem;
+      display: flex;
+      flex-wrap: nowrap;
+      align-items: baseline;
+      gap: 0.25rem 0.4rem;
+      white-space: nowrap;
+      flex: 0 1 auto;
+    }
+
+    .order-row .order-core {
+      white-space: nowrap;
     }
 
     .order-row .order-id {
       font-size: 0.68rem;
       color: var(--edge-added);
       margin-right: 0.25rem;
+      flex-shrink: 0;
     }
 
     .instr-detail {
@@ -503,6 +527,20 @@
 
     .instr-detail .kv strong {
       color: var(--text);
+    }
+
+    .instr-detail .attr-block {
+      margin: 0.35rem 0 0;
+      padding: 0.5rem 0.65rem;
+      background: #0c0e0c;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.72rem;
+      max-height: min(40vh, 22rem);
+      overflow: auto;
     }
 
     .deps-tab {
@@ -782,6 +820,12 @@
     .main-wrap .instr-detail .kv strong,
     .main-wrap .instr-detail h4 {
       color: var(--main-text);
+    }
+
+    .main-wrap .instr-detail .attr-block {
+      background: #fff;
+      border-color: var(--main-border);
+      color: var(--main-muted);
     }
 
     .main-wrap .deps-toolbar {
@@ -1102,6 +1146,38 @@
       return escapeHtml(t);
     }
 
+    /**
+     * Split IR text into the visible instruction line vs trailing { issueCycles, mod.*, ... } block.
+     * List rows show only the summary; the brace block appears in the detail panel when selected.
+     */
+    function splitLabelForDisplay(full) {
+      var s = String(full || "");
+      var idx = s.indexOf(" {");
+      if (idx < 0) return { summary: s, attrs: null };
+      return { summary: s.slice(0, idx).replace(/\s+$/, ""), attrs: s.slice(idx).replace(/^\s+/, "") };
+    }
+
+    /**
+     * One-line list text: shorter than IR summary but keeps tag + mnemonic + operands.
+     * Full line stays in detail panel and in row.title on hover.
+     */
+    function compactOrderLineSummary(summary) {
+      var s = String(summary || "").replace(/\s+/g, " ").trim();
+      if (!s) return s;
+      s = s.replace(/\s*=\s*"st\.([^"]+)"\s*\(/g, " $1(");
+      s = s.replace(/\s*=\s*"([^"]+)"\s*\(/g, " $1(");
+      s = s.replace(/,\s+/g, ",");
+      return s.trim();
+    }
+
+    /** Leading IR attachment e.g. [label_LoopBeginL] — omitted from order list; shown in detail panel. */
+    function extractBlockLabel(summary) {
+      var s = String(summary || "").trim();
+      var m = s.match(/^(\[[^\]]+\])\s*(.*)$/);
+      if (m) return { blockLabel: m[1], rest: m[2].trim() };
+      return { blockLabel: null, rest: s };
+    }
+
     function buildPredSuccMaps(edges) {
       var preds = new Map(), succs = new Map();
       edges.forEach(function(e) {
@@ -1166,15 +1242,26 @@
 
       var rankB = ob.findIndex(function(x) { return String(x) === id; });
       var rankA = oa.findIndex(function(x) { return String(x) === id; });
-      var label = nodesById.get(id) || "\u2014";
+      var fullLabel = nodesById.get(id) || "\u2014";
+      var split = splitLabelForDisplay(fullLabel);
+      var bl = extractBlockLabel(split.summary);
+      var blockLabelHtml = bl.blockLabel
+        ? '<div class="kv"><strong>Block label</strong> ' + escapeHtml(bl.blockLabel) + '</div>'
+        : "";
+      var instrBody = bl.rest || "\u2014";
+      var attrsHtml = split.attrs
+        ? '<div class="kv" style="margin-top:0.45rem"><strong>Attributes</strong></div><div class="attr-block">' + escapeHtml(split.attrs) + '</div>'
+        : "";
 
       var btnCls = function(phase) { return "deps-toggle-btn" + (detailDepPhase === phase ? " active" : ""); };
 
       detailEl.innerHTML =
         '<h4>Selected instruction</h4>' +
         '<div class="kv"><strong>id</strong> ' + escapeHtml(id) + '</div>' +
-        '<div class="kv"><strong>label</strong> ' + escapeHtml(label) + '</div>' +
         '<div class="kv"><strong>line</strong> ' + (rankB < 0 ? '\u2014' : rankB) + ' \u2192 ' + (rankA < 0 ? '\u2014' : rankA) + '</div>' +
+        blockLabelHtml +
+        '<div class="kv"><strong>instruction</strong> ' + escapeHtml(instrBody) + '</div>' +
+        attrsHtml +
         '<div style="margin:0.65rem 0 0.35rem;display:flex;align-items:center;gap:0.75rem">' +
           '<strong style="color:var(--main-text);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em">Dependencies</strong>' +
           '<div class="deps-toggle" role="group" style="margin:0">' +
@@ -1239,10 +1326,16 @@
         row.tabIndex = 0;
         var newPos = posA.get(sid);
         if (newPos !== undefined && newPos !== i) row.classList.add("moved");
-        row.innerHTML = '<span class="idx">' + i + '</span><span class="lbl"><span class="order-id">' + escapeHtml(sid) + '</span> ' + escapeHtml(nodesById.get(sid) || "") + '</span>';
+        var fullL = nodesById.get(sid) || "";
+        var disp = splitLabelForDisplay(fullL);
+        var bl = extractBlockLabel(disp.summary);
+        var listLine = compactOrderLineSummary(bl.rest);
+        if (!listLine) listLine = "\u2014";
+        row.innerHTML = '<span class="idx">' + i + '</span><span class="lbl"><span class="order-id">' + escapeHtml(sid) + '</span><span class="order-core">' + escapeHtml(listLine) + '</span></span>';
+        row.title = disp.summary;
         row.addEventListener("click", function() { focusInstructionPair(sid, "before"); });
         row.addEventListener("keydown", function(ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); focusInstructionPair(sid, "before"); } });
-        row.dataset.searchHaystack = (sid + "\n" + (nodesById.get(sid) || "")).toLowerCase();
+        row.dataset.searchHaystack = (sid + "\n" + fullL).toLowerCase();
         elB.appendChild(row);
         orderRowMapBefore.set(sid, row);
       }
@@ -1255,10 +1348,16 @@
         row.tabIndex = 0;
         var oldPos = posB.get(sid);
         if (oldPos !== undefined && oldPos !== i) row.classList.add("moved");
-        row.innerHTML = '<span class="idx">' + i + '</span><span class="lbl"><span class="order-id">' + escapeHtml(sid) + '</span> ' + escapeHtml(nodesById.get(sid) || "") + '</span>';
+        var fullL = nodesById.get(sid) || "";
+        var disp = splitLabelForDisplay(fullL);
+        var bl = extractBlockLabel(disp.summary);
+        var listLine = compactOrderLineSummary(bl.rest);
+        if (!listLine) listLine = "\u2014";
+        row.innerHTML = '<span class="idx">' + i + '</span><span class="lbl"><span class="order-id">' + escapeHtml(sid) + '</span><span class="order-core">' + escapeHtml(listLine) + '</span></span>';
+        row.title = disp.summary;
         row.addEventListener("click", function() { focusInstructionPair(sid, "after"); });
         row.addEventListener("keydown", function(ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); focusInstructionPair(sid, "after"); } });
-        row.dataset.searchHaystack = (sid + "\n" + (nodesById.get(sid) || "")).toLowerCase();
+        row.dataset.searchHaystack = (sid + "\n" + fullL).toLowerCase();
         elA.appendChild(row);
         orderRowMapAfter.set(sid, row);
       }

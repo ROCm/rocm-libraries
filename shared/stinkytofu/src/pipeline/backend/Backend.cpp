@@ -24,7 +24,7 @@
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/pipeline/ScopeAdaptor.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 
 namespace stinkytofu
 {
@@ -67,14 +67,6 @@ namespace stinkytofu
         gemmTileConfig.NumGRM   = opts.NumGRM;
         gemmTileConfig.NumWaves = opts.WaveGroup0 * opts.WaveGroup1;
         pm.setGemmTileConfig(gemmTileConfig);
-
-        PassFeatureConfig passFeatureConfig;
-        passFeatureConfig.barrierConfig.unrollMovableBarrier = true;
-        passFeatureConfig.loopConfig.unrollGemm              = true;
-        passFeatureConfig.dagFeatures.distributeGlobalRead   = true;
-        pm.setPassFeatureConfig(passFeatureConfig);
-
-        configureDebugOutput(pm, opts, "kernel-OuterPM");
     }
 
 } // namespace stinkytofu

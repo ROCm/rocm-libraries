@@ -23,6 +23,8 @@
 #pragma once
 
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/pipeline/ScopeAdaptor.hpp"
+#include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/ir/DumpStinkyFunctionPass.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
@@ -60,16 +62,17 @@ const std::vector<PassInfo> availablePasses
         []() { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }}};
 
 /**
- * Get default PassManagerDebugConfig configuration.
+ * Create default DebugPrintInstrumentation for stinkytofu-opt.
  */
-std::unique_ptr<stinkytofu::PassManagerDebugConfig> getPassManagerDebugConfig()
+std::shared_ptr<stinkytofu::PassInstrumentation> createDebugPrintInstrumentation()
 {
+    auto streams     = std::make_shared<stinkytofu::DebugOutputStreams>();
     auto debugConfig = std::make_unique<stinkytofu::PassManagerDebugConfig>();
     debugConfig->setPrintBeforeAll(true);
     debugConfig->setPrintAfterAll(true);
-    debugConfig->setDumpToFileInBefore("before.txt");
-    debugConfig->setDumpToFileInAfter("after.txt");
-    return debugConfig;
+    debugConfig->setDumpStreamBefore(streams->getOrCreate("before.txt"));
+    debugConfig->setDumpStreamAfter(streams->getOrCreate("after.txt"));
+    return std::make_shared<stinkytofu::DebugPrintInstrumentation>(std::move(debugConfig));
 }
 
 /**

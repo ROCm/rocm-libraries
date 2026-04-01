@@ -72,9 +72,9 @@ namespace stinkytofu
         // different opcode.
         std::vector<std::unique_ptr<Modifier>> modifiers;
 
-        // TODO: CMP instructions imply modify SCC register, but it's not tracked in
-        //       the frontend (e.g. SCmpKEQU32 struct), a workaround is to track it
-        //       here.
+        // Implicit special registers (SCC, VCC, EXEC) are added via HW flags
+        // (IF_ImplicitReadSCC, IF_ImplicitWriteSCC, etc.) during lowering; see
+        // addRegistersToInstruction() in ToStinkyTofuUtils.cpp.
         std::vector<StinkyRegister> destRegs;
         std::vector<StinkyRegister> srcRegs;
 

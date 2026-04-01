@@ -76,7 +76,7 @@ NB_MODULE(_stinkytofu, m)
         .value("EXEC_LO", RegType::EXEC_LO, "Execution Mask (low)")
         .value("EXEC_HI", RegType::EXEC_HI, "Execution Mask (high)")
         .value("SCC", RegType::SCC, "Scalar Condition Code")
-        .value("PSEUDO", RegType::PSEUDO, "Pseudo register for dependency tracking")
+        .value("LDS", RegType::LDS, "LDS dependency tracking pseudo-register")
         .value("UNKNOWN", RegType::UNKNOWN, "Unknown Register Type");
 
     // ========================================================================

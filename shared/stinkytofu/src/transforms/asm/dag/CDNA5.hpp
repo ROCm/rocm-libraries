@@ -33,8 +33,6 @@
 #include <algorithm>
 #include <cassert>
 #include <map>
-#include <string>
-#include <unordered_set>
 
 #include "ReadyQueue.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -53,12 +51,17 @@ namespace
     // with that op's latencyCycles (WAW). Remaining counts seed wmmaRegisterLatencyCounters so the
     // first WMMA in a region sees preloop / in-BB loads the register DAG may not edge to that WMMA
     // (double-buffer: WMMA on X0 while in-loop ds fills X1). Caller: onInitRegion.
+    //
+    // crossBBResiduals: DS latency residuals from predecessor BBs (merged in onInit).
+    // They decay through the prefix alongside within-BB DS loads so cross-BB ds_loads
+    // properly gate WMMA issue.
     static void seedWmmaDsLatencyFromPrefix(IRList::iterator                blockBegin,
                                             IRList::iterator                regionStart,
-                                            std::map<int, int>&             wmmaRegisterLatencyCounters)
+                                            std::map<int, int>&             wmmaRegisterLatencyCounters,
+                                            const std::map<int, int>&       crossBBResiduals)
     {
         wmmaRegisterLatencyCounters.clear();
-        std::map<int, int> pending;
+        std::map<int, int> pending(crossBBResiduals);
 
         for(IRList::iterator it = blockBegin; it != regionStart; ++it)
         {
@@ -93,218 +96,102 @@ namespace
         }
     }
 
-    // Scheduling rule (5) helper: walk backward in **linear IR / source order** from branchIt
-    // (exclusive), skipping LABEL ops; true if the first such instruction is WMMA/SWMMA.
-    //
-    // This is not read from the dependency DAG. The DAG is built from def-use (edges flow
-    // producer -> consumer; the scheduler drains "ready" nodes when in-degree hits 0). "Last"
-    // here does **not** mean "last WMMA to execute in the iteration" or "bottom of the DAG" —
-    // it means the **textual** opcode immediately before the branch in the IR list. That static
-    // shape is cheap to detect and still marks loops whose **control flow** jumps from "branch
-    // right after a WMMA" back to the head, which is when head WMMA can schedule back-to-back
-    // with tail WMMA without a def-use arc between them. Caller: analyzeLoopTailWmmaAndHeadLabels.
-    static bool lastNonLabelBeforeIsWmma(IRList::iterator bbBegin, IRList::iterator branchIt)
+    // Scheduling rule (5) helper: walk backward from the end of a BB, skipping LABEL and
+    // branch ops; true if the first real instruction found is WMMA/SWMMA.
+    // Used to detect “tail WMMA” in the latch BB of a loop (cross-BB aware).
+    static bool latchBBTailIsWmma(BasicBlock& latchBB)
     {
-        if(branchIt == bbBegin)
+        if(latchBB.empty())
             return false;
-        for(auto it = std::prev(branchIt);;)
+        // Walk from tail toward head. Do not use std::prev(end()) on IRList::iterator:
+        // end() is nullptr and IntrusiveListIterator::operator-- does not step to tail_.
+        for(auto it = latchBB.rbegin(); it != latchBB.rend(); ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
-            if(isLabel(inst))
-            {
-                if(it == bbBegin)
-                    return false;
-                it = std::prev(it);
+            if(isLabel(inst) || isBranch(inst))
                 continue;
-            }
             return isWMMA(inst) || isSWMMA(inst);
-        }
-    }
-
-    // Scheduling rule (5) helper: true if any LABEL in [blockBegin, regionStart) matches a recorded
-    // loop-head name (backward-edge target with tail WMMA). Preloop prefixes fail → no deferral
-    // before the loop label. Caller: onInitRegion (sets deferHeadBalanceThisRegion_).
-    static bool prefixContainsAnyLoopHead(IRList::iterator                    blockBegin,
-                                          IRList::iterator                    regionStart,
-                                          const std::unordered_set<std::string>& headLabels)
-    {
-        if(headLabels.empty())
-            return false;
-        for(auto it = blockBegin; it != regionStart; ++it)
-        {
-            StinkyInstruction& inst = getStinkyInst(it);
-            if(!isLabel(inst))
-                continue;
-            auto* ld = inst.getModifier<LabelData>();
-            if(ld && headLabels.count(ld->label) != 0)
-                return true;
         }
         return false;
     }
 
-    // Scheduling rule (5): scan one BB — for each backward edge, if lastNonLabelBeforeIsWmma,
-    // record branch target in *outHeadLabels and set *outAnyTailWmma. Caller: onInit →
-    // deferFirstHeadWmmaActive_ / loopHeadLabelsForBalance_. No hardcoded label strings.
-    static void analyzeLoopTailWmmaAndHeadLabels(IRList::iterator          bbBegin,
-                                                 IRList::iterator          bbEnd,
-                                                 bool*                     outAnyTailWmma,
-                                                 std::unordered_set<std::string>* outHeadLabels)
+    // Rule (5) — loop tail WMMA / head WMMA deferral (cross-BB aware via LoopDetection).
+    //
+    // Uses the Loop* from setLoopContext() to detect whether the loop’s latch BB ends with
+    // WMMA before its back-edge branch. If so, the header BB’s first WMMA should be deferred
+    // to avoid back-to-back WMMA across iterations.
+    //
+    // When the loop is split across multiple BBs (e.g. unrolled loops), the latch BB
+    // (containing the back-edge branch) may be different from the header BB.
+    //
+    // Steps (unchanged from the old pipeline, but loop detection is now cross-BB):
+    //   Step 1 — onInit: check latchBB tail for WMMA via latchBBTailIsWmma().
+    //   Step 2 — onInitRegion: deferHeadBalanceThisRegion_ if this BB is the loop header.
+    //   Step 3 — pickOne Phase A: block WMMA while non-WMMA queues have work.
+    //   Step 4 — pickOneFromWMMA: clear deferral after first head WMMA is issued.
+
+    // Collect non-pseudo VGPR destination register indices from an instruction.
+    static std::unordered_set<uint32_t> collectDestVGPRs(const StinkyInstruction& inst)
     {
-        // Diagrams / IR-vs-DAG notes below. Steps 1–4 and **Presumptions** (tail position vs
-        // head WMMA earliness): see the block comment immediately after this function.
-        //
-        // One basic block, linear order (bbBegin -> bbEnd):
-        //
-        //   bbBegin
-        //      |
-        //      v
-        //   L_loop:                    <--- branch target (recorded in *outHeadLabels)
-        //      |
-        //      ... body (may include more WMMA) ...
-        //      |
-        //      v
-        //   [WMMA]  <--- last real insn before branch (lastNonLabelBeforeIsWmma)
-        //      |
-        //      v
-        //   branch  --->  L_loop       <--- backward edge: target is *earlier* in block
-        //      |              |
-        //   bbEnd          (distHead < distBr)
-        //
-        // If that pattern matches, set *outAnyTailWmma and insert "L_loop" into *outHeadLabels.
-        // Forward branches (target below branch) and branches whose tail is not WMMA are ignored.
-        //
-        // IR order vs DAG (people often draw the DAG "top -> down" for dependencies; that is
-        // **not** the same axis as scrolling the basic block top -> bottom):
-        //
-        //   Linear IR list (bbBegin ----> bbEnd)     Def-use DAG (producer above consumer)
-        //   ------------------------------------     -------------------------------
-        //   L_loop:                                  WMMA_h at head may only depend on
-        //      |                                     e.g. ds_load / VALU from *before* WMMA_t
-        //      v                                     in the same iteration — not on WMMA_t.
-        //   ... body ...
-        //      |
-        //      v
-        //   WMMA_t  <--- "last" = **previous opcode in the IR list** before the branch
-        //      |         (walk backward, skip labels). Not "last in DAG topo order" and not
-        //      v         "last WMMA to fire" in a simulated schedule — purely static layout.
-        //   branch  ---> L_loop
-        //
-        //   Backward-edge test uses **indices in the IR list** (distHead < distBr), not DAG
-        //   depth. Classification runs on this static shape; pickOne then applies deferral
-        //   when scheduling the region after the head label.
-        //
-        // Why this avoids two WMMAs "stuck together" across the back-edge (ASCII):
-        //
-        //   iteration N (bottom of loop)              iteration N+1 (after branch)
-        //   --------------------------                ---------------------------
-        //          ... body ...
-        //               |
-        //               v
-        //          +-----------+
-        //          |  WMMA_t   |  last real insn before branch (tail)
-        //          +-----------+
-        //               |
-        //               +------ branch to L_loop ----->  (jump to earlier label)
-        //               v
-        //          +-----------+
-        //          |  WMMA_h   |  first WMMA at loop head — operands often ready from *before*
-        //          +-----------+  WMMA_t; register DAG typically has NO edge WMMA_t --> WMMA_h
-        //
-        //   Greedy Phase A (no rule 5):     ... [ WMMA_t ][ WMMA_h ]   <- consecutive issue
-        //
-        //   Rule (5) after head label:      ... [ WMMA_t ][ VALU/DS/tensor/... ][ WMMA_h ]
-        //                                        pickOne blocks WMMA while other* queues work
-        //
-        *outAnyTailWmma = false;
-        outHeadLabels->clear();
-
-        std::map<std::string, IRList::iterator> labelToFollowingInst;
-        for(auto it = bbBegin; it != bbEnd; ++it)
+        std::unordered_set<uint32_t> vgprs;
+        for(const StinkyRegister& dst : inst.getDestRegs())
         {
-            StinkyInstruction& inst = getStinkyInst(it);
-            if(!isLabel(inst))
+            if(!dst.isRegister() || isPseudoReg(dst))
                 continue;
-            auto* ld = inst.getModifier<LabelData>();
-            if(!ld)
-                continue;
-            labelToFollowingInst[ld->label] = std::next(it);
+            for(uint32_t off = 0; off < dst.reg.num; ++off)
+                vgprs.insert(dst.reg.idx + off);
         }
-
-        for(auto it = bbBegin; it != bbEnd; ++it)
-        {
-            StinkyInstruction& inst = getStinkyInst(it);
-            if(!isBranch(inst))
-                continue;
-            if(inst.getSrcRegs().empty()
-               || inst.getSrcRegs()[0].dataType != StinkyRegister::Type::LiteralString)
-                continue;
-            const std::string tgt = getBranchTarget(inst);
-            auto              fit = labelToFollowingInst.find(tgt);
-            if(fit == labelToFollowingInst.end())
-                continue;
-            const long distHead = std::distance(bbBegin, fit->second);
-            const long distBr   = std::distance(bbBegin, it);
-            if(distHead >= distBr)
-                continue; // not a backward edge within this block
-            if(!lastNonLabelBeforeIsWmma(bbBegin, it))
-                continue;
-
-            *outAnyTailWmma = true;
-            outHeadLabels->insert(tgt);
-        }
+        return vgprs;
     }
 
-    // Rule (5) — loop tail WMMA / head WMMA: numbered pipeline
-    //
-    // Step 1 — Identify the pattern in the basic block (onInit → analyzeLoopTailWmmaAndHeadLabels).
-    //   • Build a map: each LABEL’s name → iterator to the first instruction *after* that label.
-    //   • Walk every branch. If the target label resolves to an instruction *earlier* in the same
-    //     BB (distHead < distBr), it is a same-BB backward edge.
-    //   • For each backward edge, call lastNonLabelBeforeIsWmma: the first real (non-LABEL)
-    //     instruction immediately before the branch in **linear IR order** must be WMMA/SWMMA.
-    //   • For every match, insert the branch target name into *outHeadLabels and set *outAnyTailWmma.
-    //     onInit copies that into loopHeadLabelsForBalance_ and deferFirstHeadWmmaActive_.
-    //   • If loopConfig.unrollGemm is false, onInit/onInitRegion return early — none of the
-    //     following steps run.
-    //
-    // Step 2 — Decide which scheduling regions are affected (onInitRegion).
-    //   • deferHeadBalanceThisRegion_ = deferFirstHeadWmmaActive_ &&
-    //     prefixContainsAnyLoopHead(blockBegin, regionStart, loopHeadLabelsForBalance_).
-    //   • So only regions whose linear prefix (from BB start up to regionStart) already contains
-    //     a recorded loop-head label participate. Preloop code before the label is excluded.
-    //
-    // Step 3 — While picking ready nodes (pickOne, Phase A).
-    //   • blockWmmaForLoopHeadBalance = deferHeadBalanceThisRegion_ && deferFirstHeadWmmaActive_
-    //     && otherQueuesHaveWork (global / local / other still non-empty).
-    //   • When true, WMMA is not taken even if the DAG says it is ready: non-WMMA work is
-    //     scheduled first, so tail WMMA (end of iteration N) and head WMMA (iteration N+1)
-    //     are not issued back-to-back. (ASCII inside analyzeLoopTailWmmaAndHeadLabels shows why.)
-    //
-    // Step 4 — Stop deferring for the rest of the BB after one head WMMA (pickOneFromWMMA).
-    //   • If deferHeadBalanceThisRegion_ was set when this WMMA is issued, clear
-    //     deferFirstHeadWmmaActive_. One balanced head WMMA is enough; later WMMAs in the BB
-    //     are not forced through the same deferral.
-    //
-    // Presumptions — tail WMMA *position* vs how *early* head WMMA can issue:
-    //
-    //   • Head WMMA readiness is decided by the **def-use DAG** (operands from the previous
-    //     iteration’s loads/VALU, etc.), not by “how far down the body” the tail WMMA sits.
-    //     So the first head WMMA can become ready **very early** in dynamic order even if the
-    //     tail WMMA is **late** in static IR — there is no edge tail→head WMMA, so nothing in
-    //     the DAG forces head WMMA to wait for tail WMMA to finish.
-    //
-    //   • This heuristic does **not** measure distance (instruction count or cycles) from the
-    //     loop head to the tail WMMA, and does **not** scale deferral from that distance. Step 1
-    //     only checks a **boolean shape**: the real insn **immediately before** the backward
-    //     branch is WMMA. If VALU or other ops appear after the last WMMA but before the branch,
-    //     the pattern is **not** detected (false negative for that loop shape).
-    //
-    //   • How we **do** cope without a positional model: Step 3 is deliberately coarse — while
-    //     deferral is active and global/local/other still have **any** ready node, Phase A skips
-    //     WMMA. The **amount** of separation before the first head WMMA is therefore “whatever
-    //     non-WMMA work the DAG currently exposes as ready,” not a computed gap from tail WMMA’s
-    //     line number. If little non-WMMA work is ready, otherQueuesHaveWork becomes false and
-    //     head WMMA may still issue soon; rules (2)(3)(4) continue to gate WMMA independently.
+    // True if any non-pseudo src VGPR of inst overlaps the given VGPR index set.
+    static bool srcVGPRsOverlap(const StinkyInstruction& inst,
+                                const std::unordered_set<uint32_t>& vgprs)
+    {
+        for(const StinkyRegister& src : inst.getSrcRegs())
+        {
+            if(!src.isRegister() || isPseudoReg(src))
+                continue;
+            for(uint32_t off = 0; off < src.reg.num; ++off)
+            {
+                if(vgprs.count(src.reg.idx + off))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    struct BarrierTokenEntry
+    {
+        StinkyInstruction*           barrier;
+        std::unordered_set<uint32_t> tokens;
+    };
+
+    // Collect all movable barriers in [regionStart, regionEnd) with their PSEUDO token sets.
+    // useSrc: true → collect from getSrcRegs(), false → collect from getDestRegs().
+    static std::vector<BarrierTokenEntry> collectBarrierTokens(IRList::iterator regionStart,
+                                                               IRList::iterator regionEnd,
+                                                               bool            useSrc)
+    {
+        std::vector<BarrierTokenEntry> barriers;
+        for(IRList::iterator it = regionStart; it != regionEnd; ++it)
+        {
+            StinkyInstruction& inst = getStinkyInst(it);
+            if(!isBarrier(inst) || inst.getDestRegs().empty())
+                continue;
+            BarrierTokenEntry entry;
+            entry.barrier = &inst;
+            const auto& regs = useSrc ? inst.getSrcRegs() : inst.getDestRegs();
+            for(const StinkyRegister& r : regs)
+            {
+                if(isPseudoReg(r))
+                    entry.tokens.insert(r.reg.idx);
+            }
+            if(!entry.tokens.empty())
+                barriers.push_back(std::move(entry));
+        }
+        return barriers;
+    }
 
     // -------------------------------------------------------------------------
     // CDNA5ReadyQueue — WMMA scheduling policy (Gfx1250)
@@ -312,7 +199,7 @@ namespace
     //
     // Scheduling menu (every pick still respects the DAG: in-degree 0 only):
     //
-    //  (1) Program order vs WMMA — prefer WMMA in Phase A, but not before pickable
+    //  (1) Program order vs WMMA — prefer WMMA in Phase B, but not before pickable
     //      global/tensor/local/other with a smaller DAG id (preload / X0 vs X1 double-buffer).
     //  (2) DS / VGPR latency — block WMMA until modeled ds_load latency for WMMA src VGPRs
     //      has decayed; seed from the BB prefix before each region.
@@ -321,36 +208,33 @@ namespace
     //  (4) Density + cross-region gap — avgIssueInterval from region WMMA/DS/issue totals;
     //      wmmaPipelineGapCycles survives region splits so WMMAs do not pack only because
     //      micro-regions reset per-node spacing.
-    //  (5) Loop tail vs head — defer first WMMA after the loop-head label until non-WMMA queues
-    //      drain once. Steps 1–4 + **Presumptions** (tail position vs head WMMA earliness; what is
-    //      not modeled) are in the block comment after analyzeLoopTailWmmaAndHeadLabels; diagrams
-    //      are inside that function. Skipped when loopConfig.unrollGemm is false.
+    //  (5) Loop tail vs head — defer first WMMA in the loop header BB until non-WMMA queues
+    //      drain once. Uses cross-BB Loop detection (LoopDetection.hpp) via setLoopContext().
+    //      Skipped when loopConfig.unrollGemm is false.
     //
-    // Where rules are implemented (grep these function names in this file, then read the block
-    // comment above each body for state variables and callees):
+    // Where rules are implemented:
     //
     //   pickOne                 — main orchestration: (1)(2)(3)(4)(5); (5) Step 3 blockWmmaForLoopHeadBalance
     //   pickOneFromWMMA         — (3)(4) inter-Wmma delay + wmmaPipelineGapCycles; (5) Step 4 clear deferral
     //   updateWMMAStatus        — (2)(3)(4) time step for counters after any picked insn
-    //   isWMMALatencyFree       — (2) gate before WMMA
+    //   findMostReadyWMMA       — (2) gate before WMMA
     //   findSmallestPickableNonWmma — (1) min-id non-WMMA vs WMMA program order
     //   push                    — (1) bucket routing into ready queues
-    //   onInit                  — (4) gap reset + WMMA latency snap; (5) Step 1 stores loop-head set
+    //   onInit                  — (4) gap reset + WMMA latency snap; (5) Step 1 latchBBTailIsWmma
     //   onInitRegion            — (2) prefix DS seed; (4) WMMAIssueConfig budget; (5) Step 2 defer flag
     //   seedWmmaDsLatencyFromPrefix — (2) prefix-only DS latency → wmmaRegisterLatencyCounters
-    //   analyzeLoopTailWmmaAndHeadLabels — (5) Step 1 pattern scan (uses lastNonLabelBeforeIsWmma)
-    //   prefixContainsAnyLoopHead — (5) Step 2 helper (region prefix vs recorded head labels)
+    //   latchBBTailIsWmma       — (5) check if latch BB ends with WMMA before back-edge branch
     //
     // Temporarily named CDNA5 for MI450-class hardware; rename when marketing settles.
     //
     class CDNA5ReadyQueue : public ReadyQueue
     {
         // --- Priority buckets (DAG ids compare smaller = earlier in source within region) ---
-        DAGidPriorityQueue wmmaQueue;
-        DAGidPriorityQueue globalReadQueue; // tensor_load_to_lds when distributeGlobalRead
-        DAGidPriorityQueue localReadQueue; // reserved; same priority scheme as CDNA3
-        DAGidPriorityQueue barrierQueue;
-        DAGidPriorityQueue otherQueue; // scalars, ds_load, waits in region, etc.
+        ReadySetByDAGid wmmaQueue;
+        ReadySetByDAGid globalReadQueue; // tensor_load_to_lds when distributeGlobalRead
+        ReadySetByDAGid localReadQueue; // reserved; same priority scheme as CDNA3
+        ReadySetByDAGid barrierQueue;
+        ReadySetByDAGid otherQueue; // scalars, ds_load, waits in region, etc.
 
         // Throttle tensor issues vs other work (mirrors CDNA3 globalReadPerMFMA idea).
         int globalReadCounter = 0;
@@ -377,19 +261,49 @@ namespace
         // so we do not string WMMAs when scalar/tensor work is still ready.
         bool lastPickedWasWMMA = false;
 
-        // --- Loop head balancing (computed once per BB in onInit) ---
-        bool deferFirstHeadWmmaActive_ = false; // true after analyze if any tail-WMMA back-edge
-        std::unordered_set<std::string> loopHeadLabelsForBalance_; // branch targets to match
-        bool deferHeadBalanceThisRegion_ = false; // per onInitRegion: prefix saw a head label
+        // ABBA zigzag: track affinity group transitions to flip DAG id sort direction.
+        unsigned lastPickedDsReadAffinity_ = UINT_MAX;
+        bool     dsReadSortAscending_      = true;
+
+        // This region contains WMMA.
+        bool hasWMMAInRegion_ = false;
+
+        // --- Loop head balancing (computed once per BB in onInit via Loop from setLoopContext) ---
+        bool deferFirstHeadWmmaActive_  = false; // true if latch BB tail is WMMA
+        bool deferHeadBalanceThisRegion_ = false; // true if this BB is the loop header
+
+        // Per-barrier forced-issue threshold: maps StinkyInstruction* → N.
+        // When wmmaIssuedCountThisRegion_ >= N for a barrier in barrierQueue, that barrier
+        // is immediately issued at the top of pickOne() before any other phase.
+        // Counter resets to 0 each time a forced barrier fires.
+        std::unordered_map<StinkyInstruction*, int> barrierWmmaThresholds_;
+
+        int wmmaIssuedCountThisRegion_ = 0;
+
+        BasicBlock* currentBB_ = nullptr;
+
+        // Cross-BB DS residuals merged from predecessors in onInit. Kept separate
+        // from wmmaRegisterLatencyCounters to avoid double-decay when
+        // seedWmmaDsLatencyFromPrefix re-simulates the within-BB prefix.
+        std::map<int, int> crossBBDsResiduals_;
 
         void     updateWMMAStatus(DAGNode* node);
-        bool     isWMMALatencyFree(DAGNode* node);
-        DAGNode* pickOneFromWMMA();
+        int      getMaxDsLatency(DAGNode* node);
+        std::pair<DAGNode*, int> findMostReadyWMMA();
+        DAGNode* pickOneFromWMMA(DAGNode* pick = nullptr);
         bool     findSmallestPickableNonWmma(DAGNode** outNode, int* kindOut) const;
+        DAGNode* extractForcedBarrier();
+        void computeBarrierAfterThresholds(IRList::iterator regionStart, IRList::iterator regionEnd);
+        std::unordered_map<StinkyInstruction*, int>
+             computeBarrierBeforeThresholds(IRList::iterator regionStart, IRList::iterator regionEnd);
         /// True if any non-barrier bucket still has work this pick could take (min-id policy +
         /// tensor throttle). Barriers must not run while this holds — avoids corner cases where
         /// WMMA heuristics defer compute but the barrier queue would still drain.
         bool nonBarrierNodesStillReady() const;
+
+        // Restore cross-BB state from loop body predecessors only.
+        // TODO: extend to all BBs once scheduling heuristics are verified safe.
+        void restoreCrossBBStateFromLoop();
 
     public:
         explicit CDNA5ReadyQueue(const PassContext& passCtx)
@@ -406,6 +320,8 @@ namespace
         void onInitRegion(IRList::iterator regionStart,
                           IRList::iterator regionEnd,
                           IRList::iterator blockBegin) override;
+
+        void onFinishBB() override;
     };
 
     // Scheduling rules (2)(3)(4): after any picked instruction, advance modeled time — decay
@@ -443,38 +359,61 @@ namespace
         }
     }
 
-    // Scheduling rule (2): gate WMMA on wmmaRegisterLatencyCounters — any WMMA src VGPR with
-    // outstanding modeled ds_load latency blocks issue. Operand walk: getSrcRegs per node->inst.
-    bool CDNA5ReadyQueue::isWMMALatencyFree(DAGNode* node)
+    // Scheduling rule (2): compute the maximum outstanding DS latency for a WMMA's src VGPRs.
+    // Returns 0 if all src data is ready (latency-free), >0 if hardware would stall.
+    int CDNA5ReadyQueue::getMaxDsLatency(DAGNode* node)
     {
-        // WMMA src operands (A/B/acc bundles) share getSrcRegs in our IR; any VGPR still in the
-        // DS latency map with >0 blocks issue so WMMA does not start while loads are in flight.
-        for(const StinkyRegister& dstReg : node->inst->getSrcRegs())
+        int maxLat = 0;
+        for(const StinkyRegister& srcReg : node->inst->getSrcRegs())
         {
-            if(!dstReg.isRegister())
+            if(!srcReg.isRegister())
                 continue;
-
-            for(unsigned off = 0; off < dstReg.reg.num; ++off)
+            for(unsigned off = 0; off < srcReg.reg.num; ++off)
             {
-                auto it = wmmaRegisterLatencyCounters.find(dstReg.reg.idx + off);
-                if(it != wmmaRegisterLatencyCounters.end() && it->second > 0)
-                {
-                    return false;
-                }
+                auto it = wmmaRegisterLatencyCounters.find(srcReg.reg.idx + off);
+                if(it != wmmaRegisterLatencyCounters.end() && it->second > maxLat)
+                    maxLat = it->second;
             }
         }
-        return true;
+        return maxLat;
+    }
+
+    // Find the WMMA in wmmaQueue with the smallest max DS latency (most ready).
+    // Returns the node and its latency. Ties broken by DAG id (program order).
+    std::pair<DAGNode*, int> CDNA5ReadyQueue::findMostReadyWMMA()
+    {
+        DAGNode* best       = nullptr;
+        int      bestLatency = INT_MAX;
+        for(DAGNode* n : wmmaQueue)
+        {
+            int lat = getMaxDsLatency(n);
+            if(lat < bestLatency || (lat == bestLatency && (!best || n->id < best->id)))
+            {
+                best        = n;
+                bestLatency = lat;
+            }
+        }
+        return {best, bestLatency};
     }
 
     // Scheduling rules (3)(4): compute delay from wmmaIssueConfig (rest, avgIssueInterval,
     // latencyCycles); raise wmmaNodeCounters on sibling WMMAs; set wmmaPipelineGapCycles.
     // Rule (5): if deferHeadBalanceThisRegion_, first pick clears deferFirstHeadWmmaActive_.
-    // Then updateWMMAStatus; resets globalReadCounter. Callers: pickOne Phase A / Phase D.
-    DAGNode* CDNA5ReadyQueue::pickOneFromWMMA()
+    // Then updateWMMAStatus; resets globalReadCounter. Callers: pickOne Phase B / Phase D.
+    DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick)
     {
         assert(!wmmaQueue.empty() && "The WMMA queue must not be empty");
-        DAGNode* node = wmmaQueue.top();
-        wmmaQueue.pop();
+        DAGNode* node;
+        if(pick)
+        {
+            node = pick;
+            wmmaQueue.erase(pick);
+        }
+        else
+        {
+            node = wmmaQueue.top();
+            wmmaQueue.pop();
+        }
 
         // Push out sibling WMMAs: delay is derived from avgIssueInterval and remaining non-WMMA
         // slack (rest) in the region snapshot, similar in spirit to CDNA3 MFMA spacing.
@@ -507,6 +446,7 @@ namespace
         // One balanced head WMMA is enough to drop loop-head deferral for the rest of the BB.
         if(deferHeadBalanceThisRegion_)
             deferFirstHeadWmmaActive_ = false;
+        wmmaIssuedCountThisRegion_++;
         updateWMMAStatus(node);
         globalReadCounter = 0;
         return node;
@@ -565,20 +505,214 @@ namespace
         return !wmmaQueue.empty();
     }
 
+    // Drain barrierQueue to find the lowest-id barrier whose WMMA threshold is met,
+    // remove it, and push the rest back. Returns nullptr if no barrier qualifies.
+    DAGNode* CDNA5ReadyQueue::extractForcedBarrier()
+    {
+        if(barrierQueue.empty() || barrierWmmaThresholds_.empty())
+            return nullptr;
+
+        DAGNode* forced = nullptr;
+        for(DAGNode* node : barrierQueue)
+        {
+            auto thIt = barrierWmmaThresholds_.find(node->inst);
+            if(thIt != barrierWmmaThresholds_.end()
+               && wmmaIssuedCountThisRegion_ >= thIt->second)
+            {
+                forced = node;
+                break;
+            }
+        }
+        if(forced)
+            barrierQueue.erase(forced);
+        return forced;
+    }
+
+    // Compute forceBarrierAfterNthWmma_ for this region from register dependencies.
+    //
+    //  Step 1a — collect all movable barriers with their PSEUDO src token sets.
+    //  Step 1b — for each barrier, find the latest ds_read whose dest PSEUDO token matches.
+    //  Step 2 & 3 — find the last WMMA in [regionStart, that ds_read] whose src VGPRs
+    //               overlap the ds_read's dest VGPRs; record its 1-based index (wmmaIdx).
+    //  Step 4 — threshold N = wmmaIdx + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1.
+    void CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
+                                                        IRList::iterator regionEnd)
+    {
+        // Step 1a: collect all movable barriers with their PSEUDO src token sets.
+        auto barriers = collectBarrierTokens(regionStart, regionEnd, /*useSrc=*/true);
+
+        for(const BarrierTokenEntry& be : barriers)
+        {
+            // Step 1b: scan [regionStart, barrier) — find the latest ds_read whose
+            //          dest PSEUDO token matches a src token of this barrier.
+            StinkyInstruction* targetDSLoad        = nullptr;
+            IRList::iterator   targetDSLoadIt      = regionEnd;
+            uint32_t           targetDSLoadLatency = 0;
+            for(IRList::iterator it = regionStart; it != regionEnd; ++it)
+            {
+                StinkyInstruction& inst = getStinkyInst(it);
+                if(&inst == be.barrier)
+                    break;
+                if(!isDSRead(inst))
+                    continue;
+                for(const StinkyRegister& dst : inst.getDestRegs())
+                {
+                    if(isPseudoReg(dst) && be.tokens.count(dst.reg.idx))
+                    {
+                        targetDSLoad        = &inst;
+                        targetDSLoadIt      = it; // keep updating → ends up as latest
+                        targetDSLoadLatency = inst.latencyCycles;
+                        break;
+                    }
+                }
+            }
+            if(!targetDSLoad)
+                continue;
+
+            // Step 2 & 3: collect VGPR dest regs of the latest ds_read, then scan
+            //             [regionStart, targetDSLoad] (inclusive) for WMMAs — keep
+            //             updating lastOverlap so the last matching WMMA is recorded.
+            auto             loadDestVGPRs = collectDestVGPRs(*targetDSLoad);
+            int              wmmaIdx       = 0;
+            int              lastOverlap   = -1;
+            IRList::iterator wmmaEnd       = std::next(targetDSLoadIt);
+            for(IRList::iterator it = regionStart; it != wmmaEnd; ++it)
+            {
+                StinkyInstruction& inst = getStinkyInst(it);
+                if(!isWMMA(inst) && !isSWMMA(inst))
+                    continue;
+                wmmaIdx++;
+                if(srcVGPRsOverlap(inst, loadDestVGPRs))
+                    lastOverlap = wmmaIdx;
+            }
+
+            // Step 4: threshold N = wmmaIdx + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1.
+            if(lastOverlap != -1)
+                barrierWmmaThresholds_[be.barrier] = lastOverlap + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1;
+        }
+    }
+
+    // Compute forceBarrierBeforeNthWmma_ for this region from register dependencies.
+    //
+    //  Step 1  — for each barrier, find ds_reads whose src PSEUDO token matches.
+    //  Step 2  — for each such ds_read, find the first WMMA whose src overlaps the
+    //            ds_read's dest VGPRs; take the maximum such 1-based WMMA index across
+    //            all matching ds_reads (MaximumWMMAIdx).
+    //  Step 3  — residualCycles = max(0, targetDSLoadLatency
+    //                                    - MaximumWMMAIdx * wmmaIssueConfig.latency)
+    //  Step 4  — forceBarrierBeforeNthWmma = (residualCycles / wmmaIssueConfig.latency) + 1
+    //            i.e. the barrier is suppressed from firing until WMMA count reaches this value,
+    //            ensuring it fires before the computed WMMA slot.
+    std::unordered_map<StinkyInstruction*, int>
+    CDNA5ReadyQueue::computeBarrierBeforeThresholds(IRList::iterator regionStart,
+                                                    IRList::iterator regionEnd)
+    {
+        std::unordered_map<StinkyInstruction*, int> result;
+
+        auto barriers = collectBarrierTokens(regionStart, regionEnd, /*useSrc=*/false);
+
+        for(const BarrierTokenEntry& be : barriers)
+        {
+            // Step 1: scan (barrier, regionEnd] — collect all ds_reads whose src
+            //         PSEUDO token matches a dest token of this barrier.
+            struct DSReadMatch
+            {
+                uint32_t                     latency;
+                std::unordered_set<uint32_t> destVGPRs;
+            };
+            std::vector<DSReadMatch> matchingDSReads;
+            bool                    isAfterBarrier = false;
+            for(IRList::iterator it = regionStart; it != regionEnd; ++it)
+            {
+                StinkyInstruction& inst = getStinkyInst(it);
+                if(&inst == be.barrier)
+                    isAfterBarrier = true;
+                if(!isDSRead(inst) || !isAfterBarrier)
+                    continue;
+                for(const StinkyRegister& src : inst.getSrcRegs())
+                {
+                    if(isPseudoReg(src) && be.tokens.count(src.reg.idx))
+                    {
+                        matchingDSReads.push_back({static_cast<uint32_t>(inst.latencyCycles), collectDestVGPRs(inst)});
+                        break;
+                    }
+                }
+            }
+            if(matchingDSReads.empty())
+                continue;
+
+            // Step 2: for each matching ds_read, find the first WMMA in [regionStart, regionEnd)
+            //         whose src VGPRs overlap the ds_read's dest VGPRs; take the maximum
+            //         1-based WMMA index across all ds_reads (MaximumWMMAIdx).
+            int maximumWMMAIdx      = -1;
+            int targetDSLoadLatency = 0;
+            for(const DSReadMatch& dse : matchingDSReads)
+            {
+                int wmmaIdx = 0;
+                for(IRList::iterator it = regionStart; it != regionEnd; ++it)
+                {
+                    StinkyInstruction& inst = getStinkyInst(it);
+                    if(!isWMMA(inst) && !isSWMMA(inst))
+                        continue;
+                    wmmaIdx++;
+                    if(srcVGPRsOverlap(inst, dse.destVGPRs))
+                    {
+                        if(wmmaIdx > maximumWMMAIdx)
+                        {
+                            maximumWMMAIdx      = wmmaIdx;
+                            targetDSLoadLatency = (int)dse.latency;
+                        }
+                        break; // want the first, not the last
+                    }
+                }
+            }
+            if(maximumWMMAIdx == -1)
+                continue;
+
+            // Step 3: residualCycles = max(0, targetDSLoadLatency
+            //                               - MaximumWMMAIdx * wmmaIssueConfig.latency)
+            int residualCycles = std::max(
+                0, targetDSLoadLatency - maximumWMMAIdx * (int)wmmaIssueConfig.latency);
+
+            // Step 4: beforeN = (residualCycles / wmmaIssueConfig.latency) + 1
+            int beforeN         = (residualCycles / (int)wmmaIssueConfig.latency) + 1;
+            int maxFinalWmmaIdx = targetDSLoadLatency / (int)wmmaIssueConfig.latency;
+            int beforeThreshold = wmmaIssueConfig.issuedCount - (beforeN + maxFinalWmmaIdx);
+            result[be.barrier]  = beforeThreshold;
+        }
+
+        return result;
+    }
+
     // Main scheduling orchestration — rules (1)–(5):
-    //   Phase A: WMMA if wmmaNodeCounters, wmmaPipelineGapCycles, isWMMALatencyFree, programOrderOk
+    //   Phase A: forced barrier — when wmmaIssuedCountThisRegion_ reaches a per-barrier threshold
+    //            (barrierWmmaThresholds_), immediately issue the barrier before any other phase.
+    //   Phase B: WMMA if wmmaNodeCounters, wmmaPipelineGapCycles, findMostReadyWMMA, programOrderOk
     //            (vs findSmallestPickableNonWmma), lastPickedWasWMMA / otherQueuesHaveWork, and
     //            !blockWmmaForLoopHeadBalance (rule 5).
-    //   Phase B: pop non-WMMA; on ds_load, extend wmmaRegisterLatencyCounters (rule 2).
-    //   Phase C: forced WMMA (pickOneFromWMMA) when Phase A skipped it but wmmaQueue still ready.
-    //   Phase D: barriers only after no global/local/other non-WMMA and no schedulable WMMA remains.
+    //   Phase C: pop non-WMMA; on ds_load, extend wmmaRegisterLatencyCounters (rule 2).
+    //   Phase D: forced WMMA (pickOneFromWMMA) when Phase B skipped it but wmmaQueue still ready.
+    //   Phase E: barriers only after no global/local/other non-WMMA and no schedulable WMMA remains.
     DAGNode* CDNA5ReadyQueue::pickOne()
     {
-        // Phase A — try WMMA first if all WMMA-specific gates pass.
-        // Phase B — smallest-id non-WMMA among global/local/other.
-        // Phase C — WMMA via pickOneFromWMMA if queue non-empty (Phase A may have deferred it).
-        // Phase D — barriers when nothing else above can run this step.
+        // Phase A — forced barrier when per-barrier WMMA threshold is met.
+        // Phase B — try WMMA first if all WMMA-specific gates pass.
+        // Phase C — smallest-id non-WMMA among global/local/other.
+        // Phase D — WMMA via pickOneFromWMMA if queue non-empty (Phase B may have deferred it).
+        // Phase E — barriers when nothing else above can run this step.
 
+        // Phase A — forced barrier: issue the lowest-id barrier whose WMMA threshold is met.
+        if(DAGNode* forced = extractForcedBarrier())
+        {
+            PASS_DEBUG(std::cerr << "[CDNA5 pickOne] forced barrier: wmmaIssued=" << wmmaIssuedCountThisRegion_
+                      << " threshold=" << barrierWmmaThresholds_.at(forced->inst)
+                      << " barrierId=" << forced->id << std::flush << "\n");
+            updateWMMAStatus(forced);
+            lastPickedWasWMMA          = false;
+            return forced;
+        }
+
+        // Phase B — try WMMA first if all WMMA-specific gates pass.
         bool otherQueuesHaveWork
             = !globalReadQueue.empty() || !localReadQueue.empty() || !otherQueue.empty();
 
@@ -588,22 +722,25 @@ namespace
 
         if(!wmmaQueue.empty())
         {
-            DAGNode* top = wmmaQueue.top();
-            int      c   = wmmaNodeCounters.count(top) ? wmmaNodeCounters.at(top) : 0;
+            // Pick the WMMA with the smallest outstanding DS latency (most ready).
+            auto [bestWMMA, bestLatency] = findMostReadyWMMA();
+            int  c = wmmaNodeCounters.count(bestWMMA) ? wmmaNodeCounters.at(bestWMMA) : 0;
             bool programOrderOk
-                = smallestPickable == nullptr || top->id < smallestPickable->id;
+                = hasWMMAInRegion_
+                  || (smallestPickable == nullptr || bestWMMA->id < smallestPickable->id);
             // Rule (5): avoid WMMA at loop tail then WMMA as first work after the head label.
             const bool blockWmmaForLoopHeadBalance
                 = deferHeadBalanceThisRegion_ && deferFirstHeadWmmaActive_ && otherQueuesHaveWork;
-            if(c <= 0 && wmmaPipelineGapCycles <= 0 && isWMMALatencyFree(top) && programOrderOk
+            if(c <= 0 && wmmaPipelineGapCycles <= 0 && programOrderOk
                && (!lastPickedWasWMMA || !otherQueuesHaveWork) && !blockWmmaForLoopHeadBalance)
             {
-                DAGNode* node     = pickOneFromWMMA();
+                DAGNode* node     = pickOneFromWMMA(bestWMMA);
                 lastPickedWasWMMA = true;
                 return node;
             }
         }
 
+        // Phase C — smallest-id non-WMMA among global/local/other.
         if(smallestPickable != nullptr)
         {
             DAGNode* node = nullptr;
@@ -615,35 +752,80 @@ namespace
             }
             else if(pickKind == 1)
             {
-                node = localReadQueue.top();
-                localReadQueue.pop();
+                // Pick ds_read based on configured reorder strategy.
+                using DsReadOrder = PassFeatureConfig::DsReadOrder;
+                const auto order
+                    = getPassContext().getPassFeatureConfig().dagFeatures.dsReadOrder;
+
+                DAGNode* best = nullptr;
+                if(order == DsReadOrder::ProgramOrder)
+                {
+                    // AABB: just take the smallest DAG id (top of set).
+                    best = localReadQueue.top();
+                }
+                else
+                {
+                    // ABAB/ABBA: pick from the smallest wmmaAffinity group.
+                    // Find the smallest wmmaAffinity in the queue.
+                    unsigned smallestAffinity = UINT_MAX;
+                    for(DAGNode* n : localReadQueue)
+                        smallestAffinity = std::min(smallestAffinity, n->wmmaAffinity);
+
+                    // ABBA: flip sort direction when transitioning to a new group.
+                    if(order == DsReadOrder::AscendingCache
+                       && lastPickedDsReadAffinity_ != UINT_MAX
+                       && smallestAffinity != lastPickedDsReadAffinity_)
+                    {
+                        dsReadSortAscending_ = !dsReadSortAscending_;
+                    }
+
+                    bool ascending = (order == DsReadOrder::Ascending) || dsReadSortAscending_;
+
+                    for(DAGNode* n : localReadQueue)
+                    {
+                        if(n->wmmaAffinity != smallestAffinity)
+                            continue;
+                        if(!best
+                           || (ascending ? (n->id < best->id) : (n->id > best->id)))
+                        {
+                            best = n;
+                        }
+                    }
+                }
+
+                lastPickedDsReadAffinity_ = best->wmmaAffinity;
+                node = best;
+                localReadQueue.erase(best);
+                for(const StinkyRegister& dstReg : node->inst->getDestRegs())
+                {
+                    if(!dstReg.isRegister() || isPseudoReg(dstReg))
+                        continue;
+                    for(unsigned off = 0; off < dstReg.reg.num; ++off)
+                        wmmaRegisterLatencyCounters[dstReg.reg.idx + off]
+                            = node->inst->latencyCycles;
+                }
             }
             else
             {
                 assert(pickKind == 2);
                 node = otherQueue.top();
                 otherQueue.pop();
-                if(isDSRead(*node->inst))
-                {
-                    for(const StinkyRegister& dstReg : node->inst->getDestRegs())
-                    {
-                        if(!dstReg.isRegister())
-                            continue;
-                        for(unsigned off = 0; off < dstReg.reg.num; ++off)
-                            wmmaRegisterLatencyCounters[dstReg.reg.idx + off]
-                                = node->inst->latencyCycles;
-                    }
-                }
             }
             updateWMMAStatus(node);
             lastPickedWasWMMA = false;
+            // Rule (5): one non-WMMA issued after loop head is sufficient — lift the deferral so
+            // WMMA can compete again on the very next pick instead of waiting for all non-WMMAs.
+            if(deferHeadBalanceThisRegion_)
+                deferFirstHeadWmmaActive_ = false;
             return node;
         }
 
-        // Forced WMMA (same as block comment Phase C): must drain before barriers.
+        // Phase D — forced WMMA: pick the most-ready WMMA before barriers.
         if(!wmmaQueue.empty())
         {
-            DAGNode* node     = pickOneFromWMMA();
+            auto [bestWMMA, bestLatency] = findMostReadyWMMA();
+            (void)bestLatency;
+            DAGNode* node     = pickOneFromWMMA(bestWMMA);
             lastPickedWasWMMA = true;
             return node;
         }
@@ -651,14 +833,14 @@ namespace
         assert(!nonBarrierNodesStillReady()
                && "CDNA5 pickOne: barrier only after pickable global/local/other and WMMA are gone");
 
-        // Phase D — movable barriers only when nothing else in the ready set can be issued this step.
+        // Phase E — movable barriers only when nothing else in the ready set can be issued this step.
         if(!barrierQueue.empty())
         {
             DAGNode* barrier = barrierQueue.top();
             barrierQueue.pop();
             updateWMMAStatus(barrier);
             lastPickedWasWMMA = false;
-            PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] Phase D barrierQueue dagId=" << barrier->id
+            PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] Phase E barrierQueue dagId=" << barrier->id
                                  << " (non-barrier buckets empty for this pick)\n";
                        barrier->inst->dump(std::cerr);
                        std::cerr << "\n");
@@ -689,6 +871,12 @@ namespace
             return;
         }
 
+        if(isDSRead(*node->inst))
+        {
+            localReadQueue.push(node);
+            return;
+        }
+
         if(isBarrier(*node->inst))
         {
             barrierQueue.push(node);
@@ -705,25 +893,32 @@ namespace
                && barrierQueue.empty() && localReadQueue.empty();
     }
 
-    // Once per BB (StinkyDAGSchedulerPass passes bb bounds). Rule (4): reset wmmaPipelineGapCycles;
-    // set wmmaIssueConfig.latency from first WMMA/SWMMA in block. Rule (5): analyzeLoopTailWmmaAndHeadLabels
-    // → deferFirstHeadWmmaActive_, loopHeadLabelsForBalance_. Skipped when loopConfig.unrollGemm is false.
+    // Once per BB. Rule (4): reset/restore wmmaPipelineGapCycles; compute loop-wide
+    // avgIssueInterval. Rule (5): cross-BB loop tail WMMA detection via setLoopContext().
+    // Sets wmmaIssueConfig.latency from first WMMA/SWMMA in block.
+    //
+    // Per-BB init. Restores cross-BB state from predecessors via bbEndStates_.
     void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regionEnd)
     {
-        // Full basic block [regionStart, regionEnd) — StinkyDAGSchedulerPass passes bb bounds.
-        deferFirstHeadWmmaActive_ = false;
-        loopHeadLabelsForBalance_.clear();
+        deferFirstHeadWmmaActive_  = false;
         deferHeadBalanceThisRegion_ = false;
+
+        currentBB_ = (regionStart != regionEnd)
+                         ? getStinkyInst(regionStart).getParent()
+                         : nullptr;
 
         if(getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false)
             return;
 
-        wmmaPipelineGapCycles = 0;
+        wmmaPipelineGapCycles = 4; //FIXME: should use jump latency instead.
 
-        analyzeLoopTailWmmaAndHeadLabels(
-            regionStart, regionEnd, &deferFirstHeadWmmaActive_, &loopHeadLabelsForBalance_);
-        // deferFirstHeadWmmaActive_ true => defer first post-head WMMA until non-WMMA wave
-        // drains, but only in regions whose prefix contains a recorded head (see onInitRegion).
+        // Rule (5): cross-BB loop tail WMMA detection via LoopDetection.
+        const Loop* loop = getLoop();
+        if(loop && loop->headerBB && loop->latchBB)
+        {
+            if(latchBBTailIsWmma(*loop->latchBB))
+                deferFirstHeadWmmaActive_ = true;
+        }
 
         wmmaIssueConfig.latency = 0;
         for(IRList::iterator it = regionStart; it != regionEnd; ++it)
@@ -736,32 +931,76 @@ namespace
             }
         }
 
+        restoreCrossBBStateFromLoop();
+
     }
 
-    // Per scheduling region. Rule (2): seedWmmaDsLatencyFromPrefix(blockBegin, regionStart, …).
-    // Rule (4): scan region into wmmaIssueConfig (totalIssuedCycles, WMMA counts, totalDSLatency,
-    // avgIssueInterval). Rule (5): deferHeadBalanceThisRegion_ via prefixContainsAnyLoopHead.
-    // Resets lastPickedWasWMMA. Skipped when loopConfig.unrollGemm is false.
+    // Restore cross-BB state from all predecessors via ScheduleAnalysisCache.
+    // Only triggered for loop body BBs, but reads from all predecessors
+    // (including pre-loop) — findMostReadyWMMA handles residual latencies gracefully.
+    void CDNA5ReadyQueue::restoreCrossBBStateFromLoop()
+    {
+        crossBBDsResiduals_.clear();
+        const Loop* loop = getLoop();
+        if(!currentBB_ || !loop || !loop->contains(currentBB_) || !getAnalysisCache())
+            return;
+
+        for(BasicBlock* pred : currentBB_->getPredecessors())
+        {
+            const BBScheduleState* state = getAnalysisCache()->lookup(pred);
+            if(!state)
+                continue;
+            wmmaPipelineGapCycles
+                = std::max(wmmaPipelineGapCycles, state->gapCycles);
+            for(const auto& [regIdx, rem] : state->dsResiduals)
+            {
+                if(rem > 0)
+                    crossBBDsResiduals_[regIdx]
+                        = std::max(crossBBDsResiduals_[regIdx], rem);
+            }
+        }
+    }
+
+    // Save end-of-BB state to ScheduleAnalysisCache for all BBs.
+    void CDNA5ReadyQueue::onFinishBB()
+    {
+        if(currentBB_ && getAnalysisCache())
+            getAnalysisCache()->store(currentBB_,
+                                      {wmmaPipelineGapCycles, wmmaRegisterLatencyCounters});
+    }
+
+    // Per scheduling region. avgIssueInterval uses region-local totals only (no loop-wide aggregation).
+    // Rule (2): seedWmmaDsLatencyFromPrefix. Rule (4): wmmaIssueConfig. Rule (5): head balance.
     void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart,
                                        IRList::iterator regionEnd,
                                        IRList::iterator blockBegin)
     {
         // Per scheduling region (between non-movable side effects). blockBegin is the BB start
         // so prefix seeding and loop-head detection see preloop / prior regions in file order.
-        lastPickedWasWMMA = false;
+        lastPickedWasWMMA          = false;
+        lastPickedDsReadAffinity_  = UINT_MAX;
+        dsReadSortAscending_       = true;
+        wmmaIssuedCountThisRegion_ = 0;
         if(getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false)
             return;
 
+        // Rule (5): only defer in the header BB of the loop (where back-edge lands),
+        // and only for regions after the first one (matching the old prefix-based check
+        // where the first region's empty prefix meant no deferral).
+        const Loop* loop = getLoop();
         deferHeadBalanceThisRegion_
-            = deferFirstHeadWmmaActive_
-              && prefixContainsAnyLoopHead(blockBegin, regionStart, loopHeadLabelsForBalance_);
+            = deferFirstHeadWmmaActive_ && loop
+              && loop->headerBB == getStinkyInst(blockBegin).getParent()
+              && regionStart != blockBegin;
 
-        seedWmmaDsLatencyFromPrefix(blockBegin, regionStart, wmmaRegisterLatencyCounters);
+        seedWmmaDsLatencyFromPrefix(
+            blockBegin, regionStart, wmmaRegisterLatencyCounters, crossBBDsResiduals_);
 
         wmmaIssueConfig.totalIssuedCycles     = 0;
         wmmaIssueConfig.totalWmmaIssuedCycles = 0;
         wmmaIssueConfig.issuedCount           = 0;
         int totalDSLatency                    = 0;
+        hasWMMAInRegion_                      = false;
         for(IRList::iterator it = regionStart; it != regionEnd; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
@@ -796,9 +1035,12 @@ namespace
         if(wmmaIssueConfig.issuedCount <= 0)
             totalAvgLatency = wmmaIssueConfig.latency;
         else
+        {
             totalAvgLatency = (int)std::ceil(
                 (float)std::max(wmmaIssueConfig.totalIssuedCycles, totalDSLatency)
                 / wmmaIssueConfig.issuedCount);
+            hasWMMAInRegion_ = true;
+        }
         if(totalAvgLatency > wmmaIssueConfig.latency)
         {
             wmmaIssueConfig.avgIssueInterval = totalAvgLatency;
@@ -806,6 +1048,23 @@ namespace
         else
         {
             wmmaIssueConfig.avgIssueInterval = wmmaIssueConfig.latency;
+        }
+
+
+        barrierWmmaThresholds_.clear();
+        if(hasWMMAInRegion_)
+        {
+            computeBarrierAfterThresholds(regionStart, regionEnd);
+
+            auto beforeThresholds = computeBarrierBeforeThresholds(regionStart, regionEnd);
+            for(auto& [barrier, beforeVal] : beforeThresholds)
+            {
+                auto it = barrierWmmaThresholds_.find(barrier);
+                if(it != barrierWmmaThresholds_.end())
+                    it->second = (it->second + beforeVal) / 2;
+                else
+                    barrierWmmaThresholds_[barrier] = beforeVal;
+            }
         }
     }
 }

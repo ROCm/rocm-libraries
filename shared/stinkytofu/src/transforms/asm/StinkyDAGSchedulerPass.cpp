@@ -21,9 +21,11 @@
  *
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
+#include "stinkytofu/support/LoopDetection.hpp"
 
 // Before dag/CDNA*.hpp so PASS_DEBUG inside those headers uses this pass name.
 #define DEBUG_TYPE "StinkyDAGSchedulerPass"
@@ -47,11 +49,13 @@ namespace
     // Build a DAG within a region and perform a stable topological schedule.
     // Adds RAW/WAR/WAW deps for physical regs and also respects explicitPreds
     // (only when both endpoints are inside the region).
-    static void scheduleRegionWithMovableSideEffects(IRList::iterator                 regionStart,
-                                                     IRList::iterator                 regionEnd,
-                                                     IRList::iterator                 blockBegin,
-                                                     std::vector<StinkyInstruction*>& scheduled,
-                                                     ReadyQueue&                      readyQueue)
+    static void scheduleRegionWithMovableSideEffects(
+        IRList::iterator                                       regionStart,
+        IRList::iterator                                       regionEnd,
+        IRList::iterator                                       blockBegin,
+        std::vector<StinkyInstruction*>&                        scheduled,
+        ReadyQueue&                                             readyQueue,
+        const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex)
     {
         if(regionStart == regionEnd)
         {
@@ -161,6 +165,38 @@ namespace
             }
         }
 
+        // Annotate ds_read nodes with WMMA affinity using cross-BB def-use chains.
+        // Walks through PHI nodes transitively to find the first real WMMA consumer.
+        for(unsigned i = 0; i < regionSize; ++i)
+        {
+            if(isDSRead(*dagNodes[i].inst))
+            {
+                // BFS through users, skipping PHI nodes, to find WMMA consumers.
+                std::vector<StinkyInstruction*> worklist(
+                    dagNodes[i].inst->getUsers().begin(),
+                    dagNodes[i].inst->getUsers().end());
+                std::unordered_set<StinkyInstruction*> visited;
+                while(!worklist.empty())
+                {
+                    StinkyInstruction* user = worklist.back();
+                    worklist.pop_back();
+                    if(!visited.insert(user).second)
+                        continue;
+                    if(user->getUnifiedOpcode() == GFX::PHI)
+                    {
+                        // Walk through PHI to its real users.
+                        for(StinkyInstruction* phiUser : user->getUsers())
+                            worklist.push_back(phiUser);
+                        continue;
+                    }
+                    auto it = wmmaIndex.find(user);
+                    if(it != wmmaIndex.end())
+                        dagNodes[i].wmmaAffinity
+                            = std::min(dagNodes[i].wmmaAffinity, it->second);
+                }
+            }
+        }
+
         PASS_DEBUG(dumpDAGGraph(dagGraph, dagNodes));
 
         readyQueue.onInitRegion(regionStart, regionEnd, blockBegin);
@@ -235,7 +271,9 @@ namespace
     //
     // In the end, the instructions will be reordered in the block
     // to reflect the scheduling order.
-    static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue)
+    static void scheduleInDAG(BasicBlock&                                             bb,
+                              ReadyQueue&                                             readyQueue,
+                              const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex)
     {
         PASS_DEBUG(std::cerr << "*** Scheduling Instructions in DAG: ***\n");
 
@@ -258,7 +296,8 @@ namespace
             // Only break regions on non-movable side effects
             if(hasSideEffect(inst) && !isMovableSideEffect(inst))
             {
-                scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue);
+                scheduleRegionWithMovableSideEffects(
+                    regionStart, it, beginIt, scheduled, readyQueue, wmmaIndex);
 
                 scheduled.push_back(&inst);
 
@@ -271,7 +310,8 @@ namespace
             }
         }
         // Flush the last region if it has not been flushed yet.
-        scheduleRegionWithMovableSideEffects(regionStart, endIt, beginIt, scheduled, readyQueue);
+        scheduleRegionWithMovableSideEffects(
+            regionStart, endIt, beginIt, scheduled, readyQueue, wmmaIndex);
 
         assert(scheduled.size() == bb.size()
                && "Scheduled instructions size must match original instructions size");
@@ -283,6 +323,8 @@ namespace
             bb.removeIR(inst);
             bb.appendIR(inst);
         }
+
+        readyQueue.onFinishBB();
     }
 
     std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx)
@@ -319,18 +361,84 @@ namespace
             return &StinkyDAGSchedulerPass::ID;
         }
 
-        void runOnBasicBlock(BasicBlock& bb, PassContext& passCtx)
-        {
-            std::unique_ptr<ReadyQueue> readyQueue = chooseReadyQueue(passCtx);
-            scheduleInDAG(bb, *readyQueue);
-        }
-
         void run(Function& func, PassContext& passCtx) override
         {
-            // Traverse BasicBlocks in control flow order (reverse post-order)
+            // Build def-use chains so we can look up cross-BB WMMA consumers
+            // of ds_reads for wmmaAffinity annotation.
+            buildUseDefChain(func, true);
+
+            // Pre-assign a function-wide index to each WMMA/SWMMA so wmmaAffinity
+            // values are comparable across scheduling regions.
+            std::unordered_map<StinkyInstruction*, unsigned> wmmaIndex;
+            {
+                unsigned idx = 0;
+                traverseCFGInRPO(func, [&](BasicBlock* bb) {
+                    for(auto it = bb->begin(); it != bb->end(); ++it)
+                    {
+                        StinkyInstruction& inst = getStinkyInst(it);
+                        if(isWMMA(inst) || isSWMMA(inst))
+                            wmmaIndex[&inst] = idx++;
+                    }
+                });
+            }
+
+            auto loops = detectLoops(func);
+
+            PASS_DEBUG(
+                for(const Loop& loop : loops) {
+                    std::cerr << "[LoopDetection] Loop: header="
+                              << (loop.headerBB ? loop.headerBB->getLabel() : "?")
+                              << " latch="
+                              << (loop.latchBB ? loop.latchBB->getLabel() : "?") << "\n";
+                    for(BasicBlock* bb : loop.bodyBBs)
+                    {
+                        std::cerr << "  body: " << bb->getLabel() << " ->";
+                        for(BasicBlock* succ : bb->getSuccessors())
+                            std::cerr << " " << succ->getLabel();
+                        std::cerr << "\n";
+                    }
+                }
+            );
+
+            // Cross-BB scheduling state shared across all BBs.
+            // Written by all BBs in onFinishBB, read only by loop body BBs in onInit.
+            ScheduleAnalysisCache analysisCache;
+
+            // Per-loop ReadyQueue: shared across loop body BBs for loop-specific
+            // scheduling state (wmmaNodeCounters, evenly-split config).
+            std::map<const Loop*, std::unique_ptr<ReadyQueue>> loopQueues;
+
+            // Map only loop body BBs to their loop — shared queue for loop iterations.
+            std::unordered_map<BasicBlock*, const Loop*> bbToLoop;
+            for(const Loop& loop : loops)
+            {
+                for(BasicBlock* bb : loop.bodyBBs)
+                    bbToLoop[bb] = &loop;
+            }
+
             traverseCFGInRPO(func, [&](BasicBlock* bb) {
-                if(passCtx.shouldProcessBasicBlock(*bb))
-                    runOnBasicBlock(*bb, passCtx);
+                if(!passCtx.shouldProcessBasicBlock(*bb))
+                    return;
+
+                auto it = bbToLoop.find(bb);
+                if(it != bbToLoop.end())
+                {
+                    const Loop* loop = it->second;
+                    auto&       rq   = loopQueues[loop];
+                    if(!rq)
+                    {
+                        rq = chooseReadyQueue(passCtx);
+                        rq->setLoopContext(loop);
+                    }
+                    rq->setAnalysisCache(&analysisCache);
+                    scheduleInDAG(*bb, *rq, wmmaIndex);
+                }
+                else
+                {
+                    auto rq = chooseReadyQueue(passCtx);
+                    rq->setAnalysisCache(&analysisCache);
+                    scheduleInDAG(*bb, *rq, wmmaIndex);
+                }
             });
         }
     };

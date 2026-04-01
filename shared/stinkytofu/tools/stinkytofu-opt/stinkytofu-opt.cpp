@@ -24,6 +24,8 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
+#include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
+#include "stinkytofu/support/PassOrderSnapshotJson.hpp"
 
 #include <cctype>
 #include <cstring>
@@ -286,7 +288,6 @@ int main(int argc, char** argv)
 
     std::string filename = argv[irFileIdx];
 
-    auto                          debugConfig       = getPassManagerDebugConfig();
     stinkytofu::PassFeatureConfig passFeatureConfig = getPassFeatureConfig();
     passFeatureConfig.passOrderSnapshot.jsonPath = extractPassOrderSnapshotJsonPath(argc, argv);
     passFeatureConfig.passOrderSnapshot.dumpAfterPasses
@@ -294,7 +295,14 @@ int main(int argc, char** argv)
 
     stinkytofu::PassManager passManager;
 
-    passManager.setDebugConfig(std::move(debugConfig));
+    passManager.addInstrumentation(createDebugPrintInstrumentation());
+    if(!passFeatureConfig.passOrderSnapshot.jsonPath.empty())
+    {
+        auto collector = std::make_shared<stinkytofu::DAGScheduleJsonCollector>(
+            passFeatureConfig.passOrderSnapshot.jsonPath, "kernel");
+        passManager.addInstrumentation(
+            std::make_shared<stinkytofu::PassOrderSnapshotInstrumentation>(std::move(collector)));
+    }
     passManager.setPassFeatureConfig(passFeatureConfig);
     setKernelConfig(passManager, arch);
 

@@ -72,9 +72,18 @@ namespace stinkytofu
         };
 
         /// DAG scheduler switches.
+        /// DS read reorder strategy for WMMA operand scheduling.
+        enum class DsReadOrder
+        {
+            ProgramOrder,   ///< No reorder (AABB)
+            Ascending,      ///< Pair by WMMA affinity: A0 B0 A1 B1
+            AscendingCache, ///< Zigzag for cache reuse: A0 B0 B1 A1
+        };
+
         struct DagFeatures
         {
-            bool distributeGlobalRead = false; ///< Enable global read distribution optimization
+            bool        distributeGlobalRead = false;              ///< Enable global read distribution
+            DsReadOrder dsReadOrder          = DsReadOrder::Ascending; ///< DS read reorder strategy
         };
 
         /// Generic before/after instruction-order snapshot written by PassManager.

@@ -323,6 +323,7 @@ namespace stinkytofu
 
         // Optimization config fields
         std::array<int, 2> threadTile             = {0, 0};
+        std::array<int, 2> subGroup               = {0, 0};
         std::array<int, 2> waveGroup              = {0, 0};
         int                vectorWidthA           = 0;
         int                vectorWidthB           = 0;
@@ -345,6 +346,7 @@ namespace stinkytofu
 
         void setGprs(int totalVgprs, int totalAgprs, int totalSgprs);
         void setOptimizationConfig(const std::array<int, 2>& tt,
+                                   const std::array<int, 2>& sg,
                                    const std::array<int, 2>& wg,
                                    int                       vwA,
                                    int                       vwB,
@@ -422,6 +424,7 @@ namespace stinkytofu
 
         void setGprs(int totalVgprs, int totalAgprs, int totalSgprs);
         void setOptimizationConfig(const std::array<int, 2>& tt,
+                                   const std::array<int, 2>& sg,
                                    const std::array<int, 2>& wg,
                                    int                       vwA,
                                    int                       vwB,

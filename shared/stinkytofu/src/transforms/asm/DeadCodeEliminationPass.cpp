@@ -130,14 +130,10 @@ namespace
                     continue;
 
                 // Never remove instructions that write to dummy registers (dependency tracking only)
-                // These include: SCC (condition codes), BARRIER/PSEUDO (dependency / pseudo), DS_WRITE, TENSOR_LOAD
                 bool hasDummyDest = false;
                 for(const StinkyRegister& destReg : inst->getDestRegs())
                 {
-                    if(destReg.reg.type == RegType::SCC || destReg.reg.type == RegType::BARRIER
-                       || destReg.reg.type == RegType::PSEUDO
-                       || destReg.reg.type == RegType::DS_WRITE
-                       || destReg.reg.type == RegType::TENSOR_LOAD)
+                    if(destReg.reg.type == RegType::SCC || isPseudoReg(destReg))
                     {
                         hasDummyDest = true;
                         break;
