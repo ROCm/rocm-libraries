@@ -59,8 +59,10 @@ set(__clang_cxx_compile_options
     -Wno-nested-anon-types
     -Wno-option-ignored
     -Wno-padded
+    -Wno-return-std-move-in-c++11
     -Wno-shorten-64-to-32
     -Wno-sign-conversion
+    -Wno-unknown-warning-option
     -Wno-unused-command-line-argument
     -Wno-weak-vtables
     -Wno-covered-switch-default
@@ -94,6 +96,7 @@ set(__clang_cxx_compile_options
     -Wno-incompatible-pointer-types
     -Wno-documentation
     -Wno-deprecated-builtins
+    -Wno-enum-constexpr-conversion
     -Wno-unused-parameter
     -Wmissing-noreturn)
 
