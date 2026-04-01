@@ -695,10 +695,16 @@ namespace ck
                         << MPerBlock << ", "
                         << NPerBlock << ", "
                         << KPerBlock << ", "
+                        << MPerXDL   << ", "
+                        << NPerXDL   << ", "
                         << AK1 << ", "
                         << BK1 << ", "
                         << ABlockTransferSrcVectorDim << ", "
-                        << BBlockTransferSrcVectorDim
+                        << BBlockTransferSrcVectorDim << ", "
+                        << ABlockTransferSrcScalarPerVector << ", "
+                        << BBlockTransferSrcScalarPerVector << ", "
+                        << ABlockLdsExtraM << ", "
+                        << BBlockLdsExtraN
                         << ">";
                     // clang-format on
 

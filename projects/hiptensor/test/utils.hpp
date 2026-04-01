@@ -65,11 +65,11 @@ inline double getEpsilon(hiptensorComputeDescriptor_t id)
 
     if(id == HIPTENSOR_COMPUTE_DESC_16F)
     {
-        return toDouble(std::numeric_limits<_Float16>::epsilon());
+        return std::pow(2, -10); // F16 machine epsilon (std::numeric_limits<_Float16> isn't valid on Windows MSVC)
     }
     else if(id == HIPTENSOR_COMPUTE_DESC_16BF)
     {
-        return toDouble(std::numeric_limits<hip_bfloat16>::epsilon());
+        return std::pow(2, -7); // BF16 machine epsilon (std::numeric_limits<hip_bfloat16> isn't valid on Windows MSVC)
     }
     else if(id == HIPTENSOR_COMPUTE_DESC_32F)
     {
