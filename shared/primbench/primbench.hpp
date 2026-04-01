@@ -20,6 +20,16 @@
 
 #pragma once
 
+#ifdef _WIN32
+    // Disables the min() and max() macros from windows.h
+    #define NOMINMAX
+
+    #include <io.h>
+    #include <windows.h>
+#else
+    #include <unistd.h>
+#endif
+
 #ifdef __HIP__
     #include <hip/hip_runtime.h>
 #elif defined(__CUDACC__)
@@ -42,15 +52,16 @@
     #endif
 #endif
 
-#include <unistd.h>
-
 #include <array>
+#include <cassert>
+#include <chrono>
 #include <fstream>
 #include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <random>
 #include <regex>
 #include <thread>
@@ -201,17 +212,48 @@ struct type_name
     static inline const char* name = "";
 };
 
+#ifdef _WIN32
+/// Required to print horizontal_bar (u8"─").
+inline const auto init_console_utf8 = []
+{
+    SetConsoleOutputCP(CP_UTF8);
+    return 0;
+}();
+#endif
+
+/// Returns whether the environment variable is set.
+inline bool get_env(std::string_view key)
+{
+#ifdef _WIN32
+    char*  value = nullptr;
+    size_t len   = 0;
+
+    if(_dupenv_s(&value, &len, key.data()) != 0 || value == nullptr)
+        return false;
+
+    free(value);
+    return true;
+#else
+    return std::getenv(key.data());
+#endif
+}
+
 /// Caches whether ANSI color output is enabled.
 /// The standard is described at https://bixense.com/clicolors/
 inline bool use_color()
 {
     static const bool result = []
     {
-        if(std::getenv("NO_COLOR"))
+        if(get_env("NO_COLOR"))
             return false;
-        if(std::getenv("CLICOLOR_FORCE"))
+        if(get_env("CLICOLOR_FORCE"))
             return true;
-        return isatty(fileno(stdout)) == 1;
+
+#ifdef _WIN32
+        return bool(_isatty(_fileno(stdout)));
+#else
+        return bool(isatty(fileno(stdout)));
+#endif
     }();
     return result;
 }
@@ -958,14 +1000,7 @@ private:
            << "\"";
 #endif
 
-        char host_name[HOST_NAME_MAX + 1]; // +1 for null terminator.
-        if(gethostname(host_name, sizeof(host_name)) != 0)
-        {
-            std::cerr << "Error: Failed to get host name\n";
-            exit(EXIT_FAILURE);
-        }
-        host_name[sizeof(host_name) - 1] = '\0'; // Ensure null termination.
-        ss << ",\"host_name\":\"" << host_name << "\"";
+        ss << ",\"host_name\":\"" << get_host_name() << "\"";
 
         ss << ",\"date\":\"" << date() << "\"";
 
@@ -1053,8 +1088,31 @@ private:
     }
 #endif
 
+    static std::string get_host_name()
+    {
+#ifdef _WIN32
+        char  buffer[MAX_COMPUTERNAME_LENGTH + 1] = {0};
+        DWORD size                                = sizeof(buffer);
+        if(!GetComputerNameA(buffer, &size))
+        {
+            std::cerr << "Error: GetComputerNameA failed with Win32 Error Code: " << GetLastError()
+                      << "\n";
+            exit(EXIT_FAILURE);
+        }
+#else
+        char buffer[HOST_NAME_MAX + 1] = {0};
+        // POSIX allows truncation without a null terminator.
+        if(gethostname(buffer, HOST_NAME_MAX) != 0)
+        {
+            std::cerr << "Error: gethostname failed: " << std::strerror(errno) << "\n";
+            exit(EXIT_FAILURE);
+        }
+#endif
+        return std::string(buffer);
+    }
+
     /// Returns the local date and time as an RFC3339 string: `yyyy-mm-ddTHH:MM:SS±HH:MM`.
-    std::string date() const
+    static std::string date()
     {
         using namespace std::chrono;
 
@@ -1590,17 +1648,11 @@ inline std::string format_eta(double remaining_secs)
 
     std::ostringstream oss;
     if(h > 0)
-    {
         oss << h << "h " << m << "m " << s << "s";
-    }
     else if(m > 0)
-    {
         oss << std::setw(3) << "" << m << "m " << s << "s";
-    }
     else
-    {
         oss << std::setw(7) << "" << s << "s";
-    }
 
     return oss.str();
 }
@@ -2668,9 +2720,7 @@ private:
     {
         // We can only estimate once at least one specialization has finished.
         if(m_specialization_index == 0)
-        {
             return 0.0;
-        }
 
         auto now   = std::chrono::steady_clock::now();
         auto start = m_logger.get_program_start_time();
