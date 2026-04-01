@@ -6,31 +6,15 @@
 #include <hip/hip_runtime.h>
 #include <gtest/gtest.h>
 
-#include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/arch/mma/mfma/mfma.hpp"
-#include "ck_tile/core/arch/mma/mma_op_family.hpp"
-#include "ck_tile/core/arch/mma/mma_traits.hpp"
-#include "ck_tile/core/arch/mma/scale/scale.hpp"
-#include "ck_tile/core/arch/mma/sparse/sparse.hpp"
-#include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_calculator.hpp"
-#include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_register_mapper.hpp"
-#include "ck_tile/core/arch/mma/wmma/wmma.hpp"
-#include "ck_tile/core/numeric/bfloat16.hpp"
-#include "ck_tile/core/numeric/float8.hpp"
-#include "ck_tile/core/numeric/half.hpp"
-#include "ck_tile/core/numeric/int8.hpp"
-#include "ck_tile/core/numeric/integer.hpp"
-// #include "ck_tile/core/numeric/pk_fp4.hpp"
-#include "ck_tile/core/numeric/type_convert.hpp"
-#include "ck_tile/core/numeric/vector_type.hpp"
-#include "ck_tile/host/device_memory.hpp"
 #include "ck_tile/host/hip_check_error.hpp"
-#include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/host/stream_config.hpp"
+#include "ck_tile/host/device_memory.hpp"
+#include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/core/arch/arch.hpp"
 
-#include <cmath>
-#include <cstdint>
+#include <cstdio>
 #include <vector>
+#include <cmath>
 
 namespace {
 
@@ -38,6 +22,8 @@ using namespace ck_tile;
 using namespace ck_tile::core::arch;
 using namespace mma;
 
+using I4        = pk_int4_t;
+using I32       = int32_t;
 using F16       = fp16_t;
 using BF16      = bf16_t;
 using F32       = fp32_t;
@@ -151,10 +137,6 @@ struct MmaLayoutTestKernel
             BVecType b_frag{};
             CVecType c_frag{};
             uint32_t sparse_idx{};
-            // The actual scale is computed as pow(2, scale - 127), so:
-            // 125 -> 2^-2 and 129 -> 2^2.
-            int scale_A = 125;
-            int scale_B = 129;
             static_assert(MmaOp::kCompressionRatio <= 2); // Allow only 4:2 compression (or no).
 
             // get (m, k, n), where "1" should be placed for this block
@@ -180,7 +162,7 @@ struct MmaLayoutTestKernel
 
                 if(a_coords[0] == m && a_coords[1] == k_target)
                 {
-                    a_frag[v] = 1;
+                    a_frag[v] = packed_one<typename MmaOp::ADataType>(k_rem);
 
                     // Calc an appropriate sparse idx value for a single 1 in position k. We use a
                     // baseline index of 0x88888888. This sends each compressed index i to
@@ -201,17 +183,13 @@ struct MmaLayoutTestKernel
 
                 if(b_coords[0] == n && b_coords[1] == k_target)
                 {
-                    b_frag[v] = 1;
+                    b_frag[v] = packed_one<typename MmaOp::ADataType>(k_rem);
                 }
             }
 
             if constexpr(MmaOpTraits<MmaOp>::IsSparse)
             {
                 c_frag = MmaOp::exec(a_frag, b_frag, c_frag, sparse_idx);
-            }
-            else if constexpr(MmaOpTraits<MmaOp>::IsScale)
-            {
-                c_frag = MmaOp::exec(a_frag, b_frag, c_frag, scale_A, scale_B);
             }
             else
             {
@@ -305,14 +283,14 @@ void run_mma_layout_test()
 // Lists of intrinsics to test.
 // clang-format off
 using Gfx9Intrinsics = ::testing::Types<
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_16x16x16f16
-    amdgcn_mma<F16, F16, F32, 64u, 32u, 4u,   DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_32x32x4f16
-    amdgcn_mma<F16, F16, F32, 32u, 64u, 4u,   DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_32x32x4f16
-    amdgcn_mma<F16, F16, F32, 64u, 4u,  4u,   DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_4x4x4f16
-    amdgcn_mma<F16, F16, F32, 4u,  64u, 4u,   DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>  // mfma_f32_4x4x4f16
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_16x16x16f16
+    amdgcn_mma<F16, F16, F32, 64u, 32u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_32x32x4f16
+    amdgcn_mma<F16, F16, F32, 32u, 64u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_32x32x4f16
+    amdgcn_mma<F16, F16, F32, 64u, 4u,  4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_4x4x4f16
+    amdgcn_mma<F16, F16, F32, 4u,  64u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>  // mfma_f32_4x4x4f16
     >;
 using Gfx942Intrinsics = ::testing::Types<
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 32u,  DefaultSparseMfmaCtrlFlags,          Target942, MmaOpFamily::SPARSE> // smfmac_f32_16x16x32_f16
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 32u, DefaultSparseMfmaCtrlFlags,          Target942, MmaOpFamily::SPARSE> // smfmac_f32_16x16x32_f16
 >;
 using Gfx950Intrinsics = ::testing::Types<
     amdgcn_mma<F16, F16, F32, 16u, 16u, 32u,  DefaultMfmaCtrlFlags,                Target950, MmaOpFamily::DENSE>, // mfma_f32_16x16x32_f16
@@ -324,9 +302,10 @@ using Gfx950Intrinsics = ::testing::Types<
     // amdgcn_mma<F4,  F4,  F32, 32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,           Target950, MmaOpFamily::SCALE>  // mfma_scale_f32_32x32x64_f8f6f4
 >;
 using Gfx11Intrinsics = ::testing::Types<
-    amdgcn_mma<F16,  F16,  F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,              Target11,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32,
-    amdgcn_mma<BF16, BF16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,              Target11,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_bf16_w32,
-    amdgcn_mma<I8,   I8,   I32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,              Target11,  MmaOpFamily::DENSE>  // wmma_i32_16x16x16_iu8_w32
+    amdgcn_mma<F16,  F16,  F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,              Target11,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32
+    amdgcn_mma<BF16, BF16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,              Target11,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_bf16_w32
+    amdgcn_mma<I8,   I8,   I32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,              Target11,  MmaOpFamily::DENSE>, // wmma_i32_16x16x16_iu8_w32
+    amdgcn_mma<I4,   I4,   I32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,              Target11,  MmaOpFamily::DENSE>  // wmma_i32_16x16x16_iu4_w32
 >;
 using Gfx12Intrinsics = ::testing::Types<
     amdgcn_mma<F16,  F16,  F32,  16u, 16u, 16u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32_gfx12,
@@ -338,6 +317,8 @@ using Gfx12Intrinsics = ::testing::Types<
     amdgcn_mma<FP8,  BF8,  F32,  16u, 16u, 16u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_fp8_bf8_w32_gfx12,
     amdgcn_mma<BF8,  FP8,  F32,  16u, 16u, 16u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_bf8_fp8_w32_gfx12,
     amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 16u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_bf8_bf8_w32_gfx12
+    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 16u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::DENSE>, // wmma_i32_16x16x16_iu4_w32_gfx12
+    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 32u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::DENSE>, // wmma_i32_16x16x32_iu4_w32_gfx12
     amdgcn_mma<F16,  F16,  F32,  16u, 16u, 32u, DefaultSparseMfmaCtrlFlags,       Target12,  MmaOpFamily::SPARSE> // swmmac_f32_16x16x32_f16_w32
 >;
 // clang-format on
