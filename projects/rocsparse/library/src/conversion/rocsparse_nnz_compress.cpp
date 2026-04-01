@@ -59,6 +59,8 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
                                                   rocsparse_int*            nnz_C, //6
                                                   T                         tol) //7
 {
+    std::cout << "nnz_compress_template" << std::endl;
+
     ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
@@ -115,6 +117,9 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
     RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
 
     nnz_A -= nnz_A_0;
+
+    std::cout << "nnz_A: " << nnz_A << " nnz_A_0: " << nnz_A_0 << std::endl;
+
     if(nnz_A < 0)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_size);
@@ -130,6 +135,8 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
 
     // Mean number of elements per row in the input CSR matrix
     rocsparse_int mean_nnz_per_row = nnz_A / m;
+
+    std::cout << "mean_nnz_per_row: " << mean_nnz_per_row << std::endl;
 
     // A wavefront is divided into segments of size 2, 4, 8, 16, or 32 threads (or 64 in the case of 64
     // thread wavefronts) depending on the mean number of elements per CSR matrix row. Each row in the
@@ -254,6 +261,8 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
         dnnz_C = nnz_C;
     }
 
+    std::cout << "Before find_sum_buffer_size" << std::endl;
+
     // Perform inclusive scan on csr row pointer array
     size_t temp_storage_size_bytes;
     RETURN_IF_ROCSPARSE_ERROR(
@@ -274,6 +283,8 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
         temp_alloc = true;
     }
 
+    std::cout << "Before find_sum" << std::endl;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::find_sum(
         handle, nnz_per_row, dnnz_C, m, temp_storage_size_bytes, temp_storage_ptr));
 
@@ -284,6 +295,8 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
         RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
         RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(dnnz_C, handle->stream));
     }
+
+    std::cout << "End of nnz_compress_template" << std::endl;
 
     if(temp_alloc)
     {

@@ -125,6 +125,10 @@ Expand rocSPARSE YAML test data file into binary Arguments records
     parser.add_argument('-m', '--matrices-dir',
                         dest='matrices-dir',
                         default='./')
+    parser.add_argument('--ilp64',
+                        action='store_true',
+                        default=False,
+                        help='Use 64-bit rocsparse_int (c_int64 instead of c_int)')
     return parser.parse_args()
 
 
@@ -206,6 +210,8 @@ def get_datatypes(doc):
                 dt[name] = dt[decl]
             else:
                 sys.exit("Unrecognized data type "+name+": "+repr(decl))
+    if args.get('ilp64'):
+        dt['rocsparse_int'] = ctypes.c_int64
     return dt
 
 

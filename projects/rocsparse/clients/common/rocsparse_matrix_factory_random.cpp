@@ -240,29 +240,36 @@ void rocsparse_matrix_factory_random<T, I, J>::init_coo(std::vector<I>&        c
 };
 
 template struct rocsparse_matrix_factory_random<int8_t, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_random<int8_t, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_random<int8_t, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_random<int8_t, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_random<_Float16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_random<_Float16, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_random<_Float16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_random<_Float16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_random<rocsparse_bfloat16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_random<rocsparse_bfloat16, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_random<rocsparse_bfloat16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_random<rocsparse_bfloat16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_random<float, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_random<float, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_random<float, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_random<float, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_random<double, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_random<double, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_random<double, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_random<double, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_random<rocsparse_float_complex, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_random<rocsparse_float_complex, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_random<rocsparse_float_complex, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_random<rocsparse_float_complex, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_random<rocsparse_double_complex, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_random<rocsparse_double_complex, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_random<rocsparse_double_complex, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_random<rocsparse_double_complex, int64_t, int64_t>;

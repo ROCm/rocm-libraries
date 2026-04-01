@@ -722,6 +722,8 @@ struct traits_init_bsr<
         rocsparse_int            N         = nb_ * block_dim;
         host_csr_matrix<T, I, J> hA_uncompressed;
 
+        std::cout << "M: " << M << " N: " << N << " block_dim: " << block_dim << std::endl;
+
         // Always generate sorted CSR matrix as convert routine requires CSR matrix to be sorted
         hA_uncompressed.define(M, N, 0, base_);
         factory.init_csr(hA_uncompressed.ptr,
@@ -1046,29 +1048,36 @@ void rocsparse_matrix_factory<T, I, J>::init_hyb(
 // INSTANTIATE.
 //
 template struct rocsparse_matrix_factory<int8_t, int32_t, int32_t>;
+template struct rocsparse_matrix_factory<int8_t, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<int8_t, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<int8_t, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory<_Float16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory<_Float16, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<_Float16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<_Float16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory<rocsparse_bfloat16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory<rocsparse_bfloat16, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<rocsparse_bfloat16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<rocsparse_bfloat16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory<float, int32_t, int32_t>;
+template struct rocsparse_matrix_factory<float, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<float, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<float, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory<double, int32_t, int32_t>;
+template struct rocsparse_matrix_factory<double, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<double, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<double, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory<rocsparse_float_complex, int32_t, int32_t>;
+template struct rocsparse_matrix_factory<rocsparse_float_complex, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<rocsparse_float_complex, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<rocsparse_float_complex, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory<rocsparse_double_complex, int32_t, int32_t>;
+template struct rocsparse_matrix_factory<rocsparse_double_complex, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<rocsparse_double_complex, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<rocsparse_double_complex, int64_t, int64_t>;

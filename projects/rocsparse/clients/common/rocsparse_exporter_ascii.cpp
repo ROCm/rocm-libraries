@@ -262,6 +262,7 @@ INSTANTIATE_TIJ(float, int64_t, int32_t);
 INSTANTIATE_TIJ(float, int64_t, int64_t);
 
 INSTANTIATE_TIJ(double, int32_t, int32_t);
+INSTANTIATE_TIJ(double, int32_t, int64_t);
 INSTANTIATE_TIJ(double, int64_t, int32_t);
 INSTANTIATE_TIJ(double, int64_t, int64_t);
 

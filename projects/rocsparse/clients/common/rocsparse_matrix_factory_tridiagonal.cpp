@@ -203,29 +203,36 @@ void rocsparse_matrix_factory_tridiagonal<T, I, J>::init_gebsr(std::vector<I>&  
 }
 
 template struct rocsparse_matrix_factory_tridiagonal<int8_t, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<int8_t, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_tridiagonal<int8_t, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<int8_t, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_tridiagonal<_Float16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<_Float16, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_tridiagonal<_Float16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<_Float16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_tridiagonal<rocsparse_bfloat16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<rocsparse_bfloat16, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_tridiagonal<rocsparse_bfloat16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<rocsparse_bfloat16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_tridiagonal<float, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<float, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_tridiagonal<float, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<float, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_tridiagonal<double, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<double, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_tridiagonal<double, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<double, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_tridiagonal<rocsparse_float_complex, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<rocsparse_float_complex, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_tridiagonal<rocsparse_float_complex, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<rocsparse_float_complex, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_tridiagonal<rocsparse_double_complex, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<rocsparse_double_complex, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_tridiagonal<rocsparse_double_complex, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<rocsparse_double_complex, int64_t, int64_t>;

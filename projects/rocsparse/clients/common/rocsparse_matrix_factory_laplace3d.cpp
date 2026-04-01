@@ -225,29 +225,36 @@ void rocsparse_matrix_factory_laplace3d<T, I, J>::init_gebsr(std::vector<I>&    
 }
 
 template struct rocsparse_matrix_factory_laplace3d<int8_t, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_laplace3d<int8_t, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_laplace3d<int8_t, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_laplace3d<int8_t, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_laplace3d<_Float16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_laplace3d<_Float16, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_laplace3d<_Float16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_laplace3d<_Float16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_laplace3d<rocsparse_bfloat16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_laplace3d<rocsparse_bfloat16, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_laplace3d<rocsparse_bfloat16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_laplace3d<rocsparse_bfloat16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_laplace3d<float, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_laplace3d<float, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_laplace3d<float, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_laplace3d<float, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_laplace3d<double, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_laplace3d<double, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_laplace3d<double, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_laplace3d<double, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_laplace3d<rocsparse_float_complex, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_laplace3d<rocsparse_float_complex, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_laplace3d<rocsparse_float_complex, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_laplace3d<rocsparse_float_complex, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_laplace3d<rocsparse_double_complex, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_laplace3d<rocsparse_double_complex, int32_t, int64_t>;
 template struct rocsparse_matrix_factory_laplace3d<rocsparse_double_complex, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_laplace3d<rocsparse_double_complex, int64_t, int64_t>;

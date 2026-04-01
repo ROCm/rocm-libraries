@@ -10080,6 +10080,7 @@ INSTANTIATE_DENSE2COO(int64_t, rocsparse_float_complex);
 INSTANTIATE_DENSE2COO(int64_t, rocsparse_double_complex);
 
 INSTANTIATE_IJ(int32_t, int32_t);
+INSTANTIATE_IJ(int32_t, int64_t);
 INSTANTIATE_IJ(int64_t, int32_t);
 INSTANTIATE_IJ(int64_t, int64_t);
 
@@ -10093,16 +10094,16 @@ INSTANTIATE_IT(int64_t, rocsparse_float_complex);
 INSTANTIATE_IT(int64_t, rocsparse_double_complex);
 
 INSTANTIATE_IJT(int32_t, int32_t, float);
-INSTANTIATE_IJT(int32_t, int32_t, double);
-INSTANTIATE_IJT(int32_t, int32_t, rocsparse_float_complex);
-INSTANTIATE_IJT(int32_t, int32_t, rocsparse_double_complex);
 INSTANTIATE_IJT(int64_t, int32_t, float);
-INSTANTIATE_IJT(int64_t, int32_t, double);
-INSTANTIATE_IJT(int64_t, int32_t, rocsparse_float_complex);
-INSTANTIATE_IJT(int64_t, int32_t, rocsparse_double_complex);
 INSTANTIATE_IJT(int64_t, int64_t, float);
+INSTANTIATE_IJT(int32_t, int32_t, double);
+INSTANTIATE_IJT(int64_t, int32_t, double);
 INSTANTIATE_IJT(int64_t, int64_t, double);
+INSTANTIATE_IJT(int32_t, int32_t, rocsparse_float_complex);
+INSTANTIATE_IJT(int64_t, int32_t, rocsparse_float_complex);
 INSTANTIATE_IJT(int64_t, int64_t, rocsparse_float_complex);
+INSTANTIATE_IJT(int32_t, int32_t, rocsparse_double_complex);
+INSTANTIATE_IJT(int64_t, int32_t, rocsparse_double_complex);
 INSTANTIATE_IJT(int64_t, int64_t, rocsparse_double_complex);
 
 INSTANTIATE_IJT_2(int32_t, int32_t, int8_t);

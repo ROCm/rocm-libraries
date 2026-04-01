@@ -129,6 +129,10 @@ struct rocsparse_matrix_utils
         T                            tol   = static_cast<T>(0);
         rocsparse_int                nnz_c = 0;
         device_vector<rocsparse_int> dnnz_per_row(that.m);
+
+        std::cout << "that.m: " << that.m << " that.n: " << that.n << " that.nnz: " << that.nnz
+                  << std::endl;
+
         CHECK_ROCSPARSE_THROW_ERROR(
             rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
         CHECK_ROCSPARSE_THROW_ERROR(rocsparse_nnz_compress<T>(
@@ -703,12 +707,9 @@ struct rocsparse_matrix_utils
     template <typename T,
               typename I,
               typename J,
-              template <typename...>
-              class VEC1,
-              template <typename...>
-              class VEC2,
-              template <typename...>
-              class VEC3>
+              template <typename...> class VEC1,
+              template <typename...> class VEC2,
+              template <typename...> class VEC3>
     static void host_csrtri(const I*             ptr,
                             const J*             ind,
                             const T*             val,
@@ -813,12 +814,9 @@ struct rocsparse_matrix_utils
 
     template <typename T,
               typename I,
-              template <typename...>
-              class VEC1,
-              template <typename...>
-              class VEC2,
-              template <typename...>
-              class VEC3>
+              template <typename...> class VEC1,
+              template <typename...> class VEC2,
+              template <typename...> class VEC3>
     static void host_cootri(const I*             row_ind,
                             const I*             col_ind,
                             const T*             val,
