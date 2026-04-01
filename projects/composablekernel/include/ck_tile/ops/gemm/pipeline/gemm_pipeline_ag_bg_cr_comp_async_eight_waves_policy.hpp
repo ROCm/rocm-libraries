@@ -108,12 +108,13 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     static_assert(sizeof(ADataType) == sizeof(BDataType), "Wrong!");
     static constexpr index_t ElementSize = sizeof(ADataType);
     static constexpr index_t K2          = Problem::VectorLoadSize / ElementSize * PackedSize;
-    static constexpr index_t PacksPerLdsRow =
+    static constexpr index_t kDramLoadPackElems =
         std::is_same_v<ADataType, pk_fp6x16_t>
-            ? kDramLoadPackBytes / K2
-            : (kDramLoadPackBytes / sizeof(ADataType) * PackedSize) / K2;
-    static constexpr index_t K1 = PacksPerLdsRow;
-    static constexpr index_t K0 = KPerBlock / (K1 * K2);
+            ? kDramLoadPackBytes
+            : kDramLoadPackBytes / sizeof(ADataType) * PackedSize;
+    static constexpr index_t PacksPerLdsRow = std::min(kDramLoadPackElems, KPerBlock) / K2;
+    static constexpr index_t K1             = PacksPerLdsRow;
+    static constexpr index_t K0             = KPerBlock / (K1 * K2);
     static_assert(K0 * K1 * K2 == KPerBlock, "Wrong!");
 
     static constexpr index_t SwizzleFactor = WarpTileK / static_cast<index_t>(WGAccess) / K2;
@@ -353,15 +354,17 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeA()
     {
+        constexpr index_t sizeofType =
+            std::is_same_v<ADataType, pk_fp6x16_t> ? 16 : sizeof(ADataType);
         constexpr index_t desc_size = MakeALdsBlockDescriptor().get_element_space_size();
-        return integer_least_multiple(
-            lds_padded_sizeof<typename Problem::ADataType>() * desc_size / PackedSize, 16);
+        return integer_least_multiple(sizeofType * desc_size / PackedSize, 16);
     }
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeB()
     {
+        constexpr index_t sizeofType =
+            std::is_same_v<BDataType, pk_fp6x16_t> ? 16 : sizeof(BDataType);
         constexpr index_t desc_size = MakeBLdsBlockDescriptor().get_element_space_size();
-        return integer_least_multiple(
-            lds_padded_sizeof<typename Problem::BDataType>() * desc_size / PackedSize, 16);
+        return integer_least_multiple(sizeofType * desc_size / PackedSize, 16);
     }
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSize()
