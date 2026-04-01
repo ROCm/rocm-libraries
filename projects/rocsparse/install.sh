@@ -496,7 +496,7 @@ if [[ -n "${rocblas_path+x}" ]]; then
 fi
 
 # Default cmake executable is called cmake
-cmake_executable=cmake
+cmake_executable=/src/cmake-4.3.1-linux-x86_64/bin/cmake
 
 case "${ID}" in
   centos|rhel|almalinux|rocky|ol)
@@ -523,7 +523,7 @@ if [[ "${install_dependencies}" == true ]]; then
     mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
     ${cmake_executable} ../../deps
     make -j$(nproc)
-    elevate_if_not_root make install
+    elevate_if_not_root make install_deps
   popd
 fi
 
