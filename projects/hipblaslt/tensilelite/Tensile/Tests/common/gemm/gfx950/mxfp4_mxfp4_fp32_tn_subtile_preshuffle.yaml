@@ -1,0 +1,430 @@
+# Pre-shuffled B (SwizzleTensorB) tests for the subtile path.
+#
+# Run with:
+#   cd {your build directory with Tensile.sh}
+#   source {your tensilelite venv bin activate}
+#   ./Tensile.sh <path-to-this-file> output_dir \
+#       --prebuilt-client=tensilelite/client/tensilelite-client
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  DataInitTypeA: 3     # Random
+  DataInitTypeB: 3     # Random
+  DataInitTypeC: 0     # Zero
+  DataInitTypeAlpha: 1 # One
+  DataInitTypeBeta: 1  # One
+  DataInitTypeMXSA: 3  # Random
+  DataInitTypeMXSB: 3  # Random
+  MXScaleFormat: 1
+
+BenchmarkProblems:
+  ########################################
+  # Pre-shuffled B: all WG 2x2 MIWT configs (26 configs)
+  # Covers square (2x2..8x8) and rectangular MIWT tiles.
+  ########################################
+  -
+    - OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      SwizzleTensorB: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 6, 6, 2, 2]
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 6, 2, 2]
+          - [16, 16, 128, 1, 1, 6, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 8, 2, 2]
+          - [16, 16, 128, 1, 1, 8, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 6, 2, 2]
+          - [16, 16, 128, 1, 1, 6, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 8, 2, 2]
+          - [16, 16, 128, 1, 1, 8, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 6, 8, 2, 2]
+          - [16, 16, 128, 1, 1, 8, 6, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 10, 2, 2]
+          - [16, 16, 128, 1, 1, 10, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 12, 2, 2]
+          - [16, 16, 128, 1, 1, 12, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 16, 2, 2]
+          - [16, 16, 128, 1, 1, 16, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 10, 2, 2]
+          - [16, 16, 128, 1, 1, 10, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 12, 2, 2]
+          - [16, 16, 128, 1, 1, 12, 4, 2, 2]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 256]
+          - Exact: [512, 512, 1, 768]
+          - Exact: [512, 1024, 1, 768]
+          - Exact: [512, 512, 1, 1792]
+
+  ########################################
+  # Pre-shuffled B: all WG 4x1 MIWT configs (15 configs)
+  ########################################
+  -
+    - OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      SwizzleTensorB: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 4, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 6, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 8, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 12, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 16, 4, 1]
+          - [16, 16, 128, 1, 1, 4, 2, 4, 1]
+          - [16, 16, 128, 1, 1, 4, 4, 4, 1]
+          - [16, 16, 128, 1, 1, 4, 6, 4, 1]
+          - [16, 16, 128, 1, 1, 4, 8, 4, 1]
+          - [16, 16, 128, 1, 1, 4, 12, 4, 1]
+          - [16, 16, 128, 1, 1, 4, 16, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 20, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 24, 4, 1]
+          - [16, 16, 128, 1, 1, 4, 10, 4, 1]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 384, 1, 256]
+          - Exact: [512, 384, 1, 768]
+
+  ########################################
+  # Pre-shuffled B: all WG 1x4 MIWT configs (15 configs)
+  ########################################
+  -
+    - OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      SwizzleTensorB: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 1, 4]
+          - [16, 16, 128, 1, 1, 4, 2, 1, 4]
+          - [16, 16, 128, 1, 1, 6, 2, 1, 4]
+          - [16, 16, 128, 1, 1, 8, 2, 1, 4]
+          - [16, 16, 128, 1, 1, 12, 2, 1, 4]
+          - [16, 16, 128, 1, 1, 16, 2, 1, 4]
+          - [16, 16, 128, 1, 1, 2, 4, 1, 4]
+          - [16, 16, 128, 1, 1, 4, 4, 1, 4]
+          - [16, 16, 128, 1, 1, 6, 4, 1, 4]
+          - [16, 16, 128, 1, 1, 8, 4, 1, 4]
+          - [16, 16, 128, 1, 1, 12, 4, 1, 4]
+          - [16, 16, 128, 1, 1, 16, 4, 1, 4]
+          - [16, 16, 128, 1, 1, 20, 2, 1, 4]
+          - [16, 16, 128, 1, 1, 24, 2, 1, 4]
+          - [16, 16, 128, 1, 1, 10, 4, 1, 4]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [384, 256, 1, 256]
+          - Exact: [384, 512, 1, 768]
+
+  ########################################
+  # Pre-shuffled B: StreamK, WG 2x2
+  ########################################
+  -
+    - OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      SwizzleTensorB: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [96, 160, 1, 256]
+          - Exact: [160, 96, 1, 512]
+          - Exact: [224, 224, 1, 768]
+
+  ########################################
+  # Pre-shuffled A only, WG 2x2
+  ########################################
+  -
+    - OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      SwizzleTensorA: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 256]
+          - Exact: [96, 160, 1, 768]
+
+  ########################################
+  # Pre-shuffled A and B, WG 2x2
+  ########################################
+  -
+    - OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      SwizzleTensorA: True
+      SwizzleTensorB: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 256]
+          - Exact: [96, 160, 1, 768]
+          - Exact: [64, 64, 1, 768]
+
+  ########################################
+  # Non-regression: NO pre-shuffle, WG 2x2 / 4x1 / 1x4
+  ########################################
+  -
+    - OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 2, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 1, 4]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [128, 128, 1, 768]
+
+  ########################################
+  # PGR=2: pre-shuffled B with scheduler path
+  # Subset of MIWT configs with double-buffered LDS.
+  ########################################
+  -
+    - OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      SwizzleTensorB: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 2, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 1, 4]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [128, 128, 1, 768]
+
+  ########################################
+  # PGR=2: pre-shuffled A+B with scheduler path
+  ########################################
+  -
+    - OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      SwizzleTensorA: True
+      SwizzleTensorB: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 2, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 1, 4]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [128, 128, 1, 768]

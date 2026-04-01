@@ -147,6 +147,12 @@ class TileInfo:
   loadWidthGR: int = 16  # Always assume widest load width for global reads
   loadWidthLR: int = 0  # load width in bytes for local reads
   isSwizzled: bool = False
+  # True when this tensor has been pre-shuffled on the host (SwizzleTensor{A,B}).
+  # The pre-shuffling is currently assused to be as follows (for FP4 elements):
+  #    X.reshape(N//16, 16, K//32, 32).transpose(0, 2, 1, 3).
+  # For FP4 this grouping is naturally BC-free, and so GR and LR swizzling are
+  # not needed in code generate.
+  isPreShuffled: bool = False
 
   # MMA Shape is w.r.t to data element (not size in bytes)
   #
@@ -194,10 +200,10 @@ class TileInfo:
     self.subtileShape = [1, 2]
 
     self.tc = tc
-    self.isSwizzled = isMXSAB
-
     isA = tc in ['A', 'MXSA']
     _tc = 'A' if isA else 'B'
+    self.isSwizzled = isMXSAB
+    self.isPreShuffled = isAB and kernel["ProblemType"].get("SwizzleTensor%s" % _tc, False)
 
     if isAB or isMXSAB:
 
@@ -533,6 +539,29 @@ def _computeLROffset(module, kernel, tileInfo, colOffset, rowOffset):
     module.add(VLShiftLeftB32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(tileInfo.sharedVgprLROffset[vgprId]), comment="%s: colOffset*loadWidth"%tc))
     module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=vgpr(rowOffset), comment="%s: row + col"%tc))
 
+def _computeLROffsetLinear(module, kernel, writer, tileInfo):
+  """Compute linear LR offsets for a pre-shuffled tensor (laneId * 16 per MFMA tile)."""
+  tc = tileInfo.tc
+  wavesize = kernel["WavefrontSize"]
+  laneIdVgpr = writer.vgprPool.checkOut(1)
+  module.addComment0("Pre-shuffled %s: linear LR offset = laneId * 16" % tc)
+  module.add(VAndB32(dst=vgpr(laneIdVgpr), src0=vgpr("Serial"), src1=wavesize-1, comment="laneId within wave"))
+  module.add(VLShiftLeftB32(dst=vgpr(laneIdVgpr), shiftHex=hex(4), src=vgpr(laneIdVgpr), comment="laneId * 16"))
+  # Populate the ds_read address VGPRs. sharedVgprLROffset[i] holds the LDS
+  # byte offset that each lane will use to read data for the i-th MFMA tile.
+  # Tiles are are `mmaTileBytes` bytes (defined below) apart.
+  #
+  # Example with 2 MFMA tiles per subtile, and mmaTileBytes = 1024:
+  #   lane 0:  sharedVgprLROffset[0] = 0,    sharedVgprLROffset[1] = 1024
+  #   lane 1:  sharedVgprLROffset[0] = 16,   sharedVgprLROffset[1] = 1040
+  #   lane 63: sharedVgprLROffset[0] = 1008, sharedVgprLROffset[1] = 2032
+  mmaTileBytes = tileInfo.mmaTileSize
+  for vgprId in range(len(tileInfo.sharedVgprLROffset)):
+    module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=hex(vgprId * mmaTileBytes),
+                       src1=vgpr(laneIdVgpr),
+                       comment="ds_read addr for MFMA tile %u" % vgprId))
+  writer.vgprPool.checkIn(laneIdVgpr)
+
 def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
   """Apply wave-based partition offset to LR offsets.
 
@@ -621,7 +650,7 @@ def lraTileAssignment(writer, kernel):
   module.add(VLShiftRightB32(dst=vgpr(lane16Group), shiftHex=hex(mi_m.bit_length()-1), src=vgpr(lane16Group), comment="lane16Group"))
   module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="laneId % 16"))
 
-  swizzling = True
+  swizzling = not tileInfoA.isPreShuffled or not tileInfoB.isPreShuffled
   if swizzling:
     # Get lds row id
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
@@ -642,8 +671,11 @@ def lraTileAssignment(writer, kernel):
   module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(subIterKBytes.bit_length()-1), src=vgpr(lane16), comment="offsetRow = subIterKBytes*lane16"))
 
   # Calculate LR offset for A and B
-  _computeLROffset(module, kernel, tileInfoA, colOffset, rowOffset)
-  _computeLROffset(module, kernel, tileInfoB, colOffset, rowOffset)
+  for tInfo in [tileInfoA, tileInfoB]:
+    if tInfo.isPreShuffled:
+      _computeLROffsetLinear(module, kernel, writer, tInfo)
+    else:
+      _computeLROffset(module, kernel, tInfo, colOffset, rowOffset)
 
   writer.vgprPool.checkIn(tmpVgpr)
 
@@ -732,9 +764,6 @@ def graInitPointer(writer, kernel):
   return module
 
 
-##################################################
-# Compute GR offset for a single matrix (A or B)
-#
 def _grComputeOffset(module, writer, tileInfo, colId, rowId, output):
   tc = tileInfo.tc
   bpeBits = int(8*tileInfo.bpe)
@@ -744,12 +773,20 @@ def _grComputeOffset(module, writer, tileInfo, colId, rowId, output):
   loadWidth = tileInfo.loadWidthGR
 
   module.add(VLShiftLeftB32(dst=vgpr(colBytes), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
-  MT0 = tileInfo.globalMMATileGrid[0] * tileInfo.mmaTileShape[0]
-  subtileSize = tileInfo.subtileShape[0]*tileInfo.mmaTileShape[0]
-  strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
-  module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(rowId), comment="%s: rowId * stride"%tc))
-  module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpeBits.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: rowId*stride*bpe"%tc))
-  module.add(VLShiftRightB32(dst=vgpr(tmpVgpr), shiftHex=hex(3), src=vgpr(tmpVgpr), comment="to bytes"))
+  # The caller partitions lanes into rows: colId = laneId % blockSize,
+  # rowId = laneId / blockSize, where blockSize = depthUBytes / loadWidth.
+  depthUBytes = tileInfo.depthUBytes
+  assert depthUBytes % loadWidth == 0
+  if tileInfo.isPreShuffled:
+    # Pre-shuffled: depthUBytes is a compile-time constant (power of 2).
+    module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(depthUBytes.bit_length()-1),
+                              src=vgpr(rowId), comment="%s: rowId * %u (depthUBytes)" % (tc, depthUBytes)))
+  else:
+    # Non-pre-shuffled: depthUBytes = Stride{A0I,B1J} * bpe (runtime).
+    strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
+    module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(rowId), comment="%s: rowId * stride"%tc))
+    module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpeBits.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: rowId*stride*bpe"%tc))
+    module.add(VLShiftRightB32(dst=vgpr(tmpVgpr), shiftHex=hex(3), src=vgpr(tmpVgpr), comment="to bytes"))
   module.add(VAddU32(dst=vgpr(output), src0=vgpr(colBytes), src1=vgpr(tmpVgpr), comment="%s: GR row_offset"%tc))
   writer.vgprPool.checkIn(tmpVgpr)
 
@@ -824,10 +861,11 @@ def _grComputeAllOffsets(module, writer, tileInfo, colId, rowId, rowOffset):
     offset = math.ceil(subtileSize * tileInfo.loadRatioGR)
     module.add(VAddU32(dst=vgpr(rowOffset), src0=offset, src1=vgpr(rowOffset), comment="%s: advance row for GR offset %u"%(tileInfo.tc, i)))
 
-    # Apply Rotation on entire wave. Only applies to 4x case as a subtile is loaded by a single wave in 2 steps. (waveId rotation not applied)
+    # Apply column rotation for the second GR load within a subtile.
+    # Only needed at loadRatioGR == 0.5 (1x4 wave config) and not pre-shuffled.
     rotatedcolId = writer.vgprPool.checkOut(1)
     loadWidth = tileInfo.loadWidthGR
-    if tileInfo.loadRatioGR == 0.5:
+    if tileInfo.loadRatioGR == 0.5 and not tileInfo.isPreShuffled:
       blockSize = tileInfo.subIterKBytes // loadWidth
       module.add(VAddU32(dst=vgpr(rotatedcolId), src0=4, src1=vgpr(colId), comment="%s: advance row for GR offset %u"%(tileInfo.tc, i)))
       module.add(VAndB32(dst=vgpr(rotatedcolId), src0=vgpr(rotatedcolId), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
@@ -857,21 +895,27 @@ def _grSwizzleColIds(module, writer, tileInfoA, tileInfoB, blockSize, numRowsPer
   tmp = tmpVgpr + 1
   waveRotation = tmpVgpr + 2
 
-  module.addComment0("Swizzling")
+  allTiles = [(tileInfoA, colIdA), (tileInfoB, colIdB)]
+  swizzledTiles = [(t, c) for t, c in allTiles if not t.isPreShuffled]
+  module.addComment0("Swizzling colId%s" % ",".join(t.tc for t, _ in swizzledTiles))
+
   module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
   module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(ldsRowId), comment="lds row id"))
   module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(ldsRowId), src1=hex(1), comment="lds row id % 2"))
   module.add(VCmpXEqU32(dst=VCC(), src0=0, src1=vgpr(tmp), comment="lds row id % 2 == 0 ?"))
-  module.add(VMovB32(dst=vgpr(colIdA), src=vgpr(colIdA), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap colId pairs for swizzling"))
+  if swizzledTiles:
+    firstColId = swizzledTiles[0][1]
+    module.add(VMovB32(dst=vgpr(firstColId), src=vgpr(firstColId), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap colId pairs for swizzling"))
   module.add(SMovB64(dst=EXEC(), src=-1))
-  module.add(VMovB32(dst=vgpr(colIdB), src=vgpr(colIdA), comment=""))
+  for _, cId in swizzledTiles[1:]:
+    module.add(VMovB32(dst=vgpr(cId), src=vgpr(firstColId), comment="copy swizzled colId"))
+
   module.addComment0("Rotation within a single wave")
-  # wave rotation
   module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(ldsRowId), comment=""))
   module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="(ldsRowId //2) * 2"))
   module.add(VSubU32(dst=vgpr(tmp), src0=hex(blockSize), src1=vgpr(tmp), comment="rotation offset : blockSize - (ldsRowId//2)*2"))
 
-  for tInfo, cId in [(tileInfoA, colIdA), (tileInfoB, colIdB)]:
+  for tInfo, cId in swizzledTiles:
     if tInfo.loadRatioGR != 0.5:
       module.addComment0("Rotation per wave")
       module.add(VAndB32(dst=vgpr(waveRotation), src0=vgpr(waveId), src1=hex(1), comment=""))
@@ -881,8 +925,8 @@ def _grSwizzleColIds(module, writer, tileInfoA, tileInfoB, blockSize, numRowsPer
     else:
       module.add(VAddU32(dst=vgpr(cId), src0=vgpr(tmp), src1=vgpr(cId), comment=""))
 
-  module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr(colIdA), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
-  module.add(VAndB32(dst=vgpr(colIdB), src0=vgpr(colIdB), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
+  for _, cId in swizzledTiles:
+    module.add(VAndB32(dst=vgpr(cId), src0=vgpr(cId), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
 
   writer.vgprPool.checkIn(tmpVgpr)
 
@@ -920,14 +964,18 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   # Compute waveId and laneId
   module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
   module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize-1, comment=""))
-  # Common code for both A & B
-  # Calculate col and row id within a wave for 128b loads
-  module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr("Serial"), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
+  # Calculate col and row id within a wave for 128b loads.
+  # Both colIds start as Serial & (blockSize-1). Pre-shuffled tiles keep this
+  # value; non-pre-shuffled tiles get swizzled by _grSwizzleColIds below.
+  module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr("Serial"), src1=(blockSize-1), comment="colIdA base"))
+  module.add(VAndB32(dst=vgpr(colIdB), src0=vgpr("Serial"), src1=(blockSize-1), comment="colIdB base"))
   module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
 
-  # Apply swizzling and rotation to colId for A and B
-  _grSwizzleColIds(module, writer, tileInfoA, tileInfoB, blockSize, numRowsPerLDSBanks,
-                   laneId, colIdA, colIdB, waveId)
+  # Swizzle the non-pre-shuffled tiles for LDS bank conflict avoidance.
+  # Pre-shuffled tiles keep the linear base value set above.
+  if not tileInfoA.isPreShuffled or not tileInfoB.isPreShuffled:
+    _grSwizzleColIds(module, writer, tileInfoA, tileInfoB, blockSize, numRowsPerLDSBanks,
+                     laneId, colIdA, colIdB, waveId)
 
   # Compute rowOffsetA and rowOffsetB row offset based on wave partitioning (e.g. 2x2, 4x1/1x4)
   _grComputeRowPartition(module, kernel, writer, tileInfoA, waveId, rowOffsetA)
@@ -939,9 +987,9 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
 
   writer.vgprPool.checkIn(tmpVgpr)
 
-  # Compute subtile offsets for A and B
-  _grComputeSubtileOffsets(writer, module, tileInfoA)
-  _grComputeSubtileOffsets(writer, module, tileInfoB)
+  # Compute subtile offsets along the free dimension.
+  for tInfo in [tileInfoA, tileInfoB]:
+    _grComputeSubtileOffsets(writer, module, tInfo)
 
   return module
 
@@ -1254,14 +1302,18 @@ def globalReadScalePtrUpdates(tc, writer, kernel):
 ##################################################
 # Subroutine to generate GR load code
 #
-def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
+def emitSingleBufferLoad(tileInfo, writer, kernel, sId0, sId1):
   """Emit buffer_load instructions for a single subtile (sId0, sId1).
 
-  When loadRatioGR > 1, multiple local subtiles share the same global read.
-  Only the first subtile in each group emits the load; others return empty.
+  Each call emits numGRPerSubtile loads (1 or 2 depending on loadRatioGR).
+
+  HBM address = SRD_base + soffset + vaddr + offset12
+  LDS address = m0 + vaddr + offset12
+  (soffset is HBM-only in DTL mode)
 
   Args:
       tileInfo: TileInfo for the tensor component
+      writer:   KernelWriter (needed for pre-shuffle soffset correction SGPRs)
       sId0:     Subtile row index
       sId1:     Subtile column index (K-dimension)
   """
@@ -1285,31 +1337,52 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
 
   regList = tileInfo.localSubtilesRegister[subtileInfo.regListId]
 
+  # K-dimension byte offset within DepthU (for subtiles beyond sId1=0)
   offsetK = sId1 * int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe)
 
   subtileOffset = math.ceil(tileInfo.loadRatioGR*tileInfo.subtileSize)
   WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
-  # Emit number of buffer loads equal to number of loads needed to load a subtile
+
   for i in range(tileInfo.numGRPerSubtile):
+    # Set m0 = LDS write base for this load
     m0Offset = i * subtileOffset + (sId0 + sId1 * tileInfo.globalSubtileGrid[0]) * tileInfo.subtileSize
     module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=(m0Offset - offsetK)))
     mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
 
-    # Check if the subtile specific registers is SGPR or VGPR
-    # For SGPR we can keep the same shared vgpr offset and use the soffset field for the subtile specific SGPR
-    # For VGPR we need to update the apply the subtile-specific constant offset to the VGPR
-    #   the shared VGPR offset is not used for that specific tile, soffset is also set to zero.
+    # Determine soffset and vaddr based on register type:
+    #   SGPR path: soffset = inter-group offset, vaddr = shared intra-group offset
+    #   VGPR path: soffset = 0, vaddr = combined offset (inter + intra baked in)
     useSgpr = subtileInfo.useSgpr
     soffset = sgpr(regList.regValues[0]) if len(regList) > 0 and useSgpr else 0
     voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.regValues[i]
+
+    # Pre-shuffled: data is tiled into 16x16 byte blocks. The HBM stride
+    # between rows is uniform within a tile but has a gap at tile boundaries
+    # (every 16 rows) proportional to (K - DepthU). Waves whose rows span
+    # a boundary need the soffset correction from _computePreShuffleSoffsetCorr.
+    # Add before the load, restore after (soffset SGPR must be clean for
+    # the next subtile).
+    matrixStates = writer.states.a if tc == 'A' else writer.states.b
+    if tileInfo.isPreShuffled:
+      correctionSgpr = matrixStates.preShuffleSoffsetCorrection
+      if soffset == 0:
+        soffset = sgpr(correctionSgpr)
+      else:
+        module.add(SAddU32(dst=soffset, src0=soffset, src1=sgpr(correctionSgpr),
+                           comment="Pre-shuffled %s: soffset += wave partition correction" % tc))
+
     module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(grBaseId , i)))
+
+    if tileInfo.isPreShuffled and soffset != sgpr(correctionSgpr):
+      module.add(SSubU32(dst=soffset, src0=soffset, src1=sgpr(correctionSgpr),
+                         comment="Pre-shuffled %s: restore soffset" % tc))
 
   return module
 
 
 def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  return emitSingleBufferLoad(tileInfo, kernel, subtileId[0], subtileId[1])
+  return emitSingleBufferLoad(tileInfo, writer, kernel, subtileId[0], subtileId[1])
 
 ##################################################
 # Subroutine to generate GR load code
@@ -1389,6 +1462,61 @@ def localReadDoSubtile(tc, writer, kernel):
 ##################################################
 # Subroutine to generate DTL M0 LDS buffer swap
 #
+def _computePreShuffleSoffsetCorr(module, writer, kernel, tile, rowOffset):
+  """Compute per-wave HBM soffset correction for a pre-shuffled tensor.
+
+  The pre-shuffled layout tiles data into 16x16 byte blocks. In HBM, going
+  from B[k, n] to B[k, n+1] costs 16 bytes within a tile (n%16 < 15), but
+  K*8 - 240 bytes at a tile boundary (n%16 == 15). The vaddr offsets assume
+  a uniform stride (depthUBytes per wave-row), which is correct within a
+  tile but too small at boundaries. This function computes the cumulative
+  gap for waves whose rows cross one or more tile boundaries:
+
+    correction = alignedRow * (K - DepthU) * bpe
+
+  rowOffset is the wave's starting row from _grComputeRowPartition (based
+  on waveId and the wave group config). alignedRow = rowOffset & ~15 zeros
+  out intra-tile rows so only boundary crossings contribute.
+
+  Example for WG 2x2, MIWT 2x2, FP4 (bpe=0.5), MT_N=64:
+    Waves are grouped into partitions of 32 rows (= partitionOffset).
+    Each wave loads 8 rows per buffer_load, and each partition has 2
+    subtile groups of 16 rows. Rows not covered by rowOffset are reached
+    via the subtile group soffset (from _grComputeSubtileOffsets).
+
+    wave 0: rowOffset=0,  loads rows 0-7  (+ rows 16-23 via subtile group 1)
+    wave 1: rowOffset=8,  loads rows 8-15 (+ rows 24-31 via subtile group 1)
+    wave 2: rowOffset=32, loads rows 32-39 (+ rows 48-55 via subtile group 1)
+    wave 3: rowOffset=40, loads rows 40-47 (+ rows 56-63 via subtile group 1)
+
+    Corrections (only rowOffset matters, not subtile group):
+      wave 0: alignedRow=0,  correction=0
+      wave 1: alignedRow=0,  correction=0
+      wave 2: alignedRow=32, correction=32*(K-256)*0.5
+      wave 3: alignedRow=32, correction=32*(K-256)*0.5
+    When K=DepthU, all corrections are zero.
+
+  Stored as an SGPR for use in emitSubtileBufferLoad's soffset field
+  (HBM-only, does not affect LDS).
+  """
+  tc = tile.tc
+  bpe = tile.bpe
+  nTileRows = tile.mmaTileShape[0]
+  correctionSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
+  correctionVgpr = writer.vgprPool.checkOut(1)
+  module.addComment0("Pre-shuffled %s: soffset correction = alignedRow*(SizeL-DepthU)*bpe" % tc)
+  module.add(VAndB32(dst=vgpr(correctionVgpr), src0=hex(~(nTileRows - 1) & 0xFFFFFFFF),
+                     src1=vgpr(rowOffset),
+                     comment="alignedRow = rowOffset & ~%d (tile align)" % (nTileRows - 1)))
+  module.add(SSubU32(dst=sgpr(correctionSgpr), src0=sgpr("SizeL"), src1=hex(kernel["_DepthU%s" % tc]),
+                     comment="SizeL - DepthU"))
+  module.add(VMulLOU32(dst=vgpr(correctionVgpr), src0=sgpr(correctionSgpr), src1=vgpr(correctionVgpr),
+                       comment="alignedRow * (SizeL - DepthU)"))
+  if bpe == 0.5:
+    module.add(VLShiftRightB32(dst=vgpr(correctionVgpr), shiftHex=hex(1), src=vgpr(correctionVgpr),
+                               comment="* bpe (0.5 = >> 1)"))
+  return correctionSgpr, correctionVgpr
+
 def globalReadDTLInitCommonSgpr(writer, kernel):
   module = Module()
 
@@ -1409,6 +1537,12 @@ def globalReadDTLInitCommonSgpr(writer, kernel):
 
   subIterKBytes = atile.subIterKBytes
 
+  # Compute soffset corrections BEFORE rowOffsets get scaled by subIterKBytes.
+  correctionData = {}  # tc -> (correctionSgpr, correctionVgpr)
+  for tile, rowOffset in [(atile, rowOffsetA), (btile, rowOffsetB)]:
+    if tile.isPreShuffled:
+      correctionData[tile.tc] = _computePreShuffleSoffsetCorr(module, writer, kernel, tile, rowOffset)
+
   module.add(VLShiftLeftB32(dst=vgpr(rowOffsetA), shiftHex=hex((subIterKBytes).bit_length()-1), src=vgpr(rowOffsetA), comment="Apply wave-specific offset for A"))
   module.add(VLShiftLeftB32(dst=vgpr(rowOffsetB), shiftHex=hex((subIterKBytes).bit_length()-1), src=vgpr(rowOffsetB), comment="Apply wave-specific offset for B"))
 
@@ -1422,9 +1556,17 @@ def globalReadDTLInitCommonSgpr(writer, kernel):
   module.add(SAddU32(dst=sgpr("SwapB"), src0=sgpr("LocalWriteBaseAddrB"), src1=writer.ldsTotalSize, comment=""))
   module.add(SXorB32(dst=sgpr("SwapB"), src0=sgpr("LocalWriteBaseAddrB"), src1=sgpr("SwapB"), comment=""))
 
+  # Move corrections from VGPR to SGPR and store on writer.states
+  for tc, (correctionSgpr, correctionVgpr) in correctionData.items():
+    module.add(SNop(waitState=0))
+    module.add(VReadfirstlaneB32(dst=sgpr(correctionSgpr), src=vgpr(correctionVgpr),
+                                 comment="Pre-shuffled %s: per-wave soffset correction" % tc))
+    writer.vgprPool.checkIn(correctionVgpr)
+    matrixStates = writer.states.a if tc == 'A' else writer.states.b
+    matrixStates.preShuffleSoffsetCorrection = correctionSgpr
+
   writer.vgprPool.checkIn(vgprWaveId)
   writer.vgprPool.checkIn(tmpVgpr)
-
 
   return module
 
@@ -1522,13 +1664,18 @@ def localReadLDSBufferSwap(tc, writer, kernel):
 
   return module
 
-##################################################
-# Subroutine to update ptrs
-#
 def globalReadPtrUpdates(tc, writer, kernel):
   module = Module()
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
   inc = int(tileInfo.localSubtileGrid[1] * tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe)
+
+  # Pre-shuffled layout is [N/16, K/32, 16, 32] FP4, so each K-tile
+  # (32 FP4 = 16 bytes) is interleaved with 16 N-rows, making each tile
+  # 256 bytes. The SRD advance per DepthU must be 16x larger than the
+  # non-pre-shuffled case to skip over the interleaved N-rows.
+  if tileInfo.isPreShuffled:
+    inc *= tileInfo.mmaTileShape[0]  # 16 rows per pre-shuffle tile
+
   module.add(SAddU32(dst=sgpr("Srd%s"%tc), src0=sgpr("Srd%s"%tc), src1=inc))
   module.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0))
 
@@ -1898,5 +2045,11 @@ def mainLoop(writer, kernel):
     module.addComment0("MAINLOOP")
     module.add(mainLoopImplPGR0(writer, kernel))
     module.addComment("")
+
+  # Free pre-shuffle correction SGPRs after the K-loop (both PGR paths)
+  for matrixStates in [writer.states.a, writer.states.b]:
+    if hasattr(matrixStates, 'preShuffleSoffsetCorrection'):
+      writer.sgprPool.checkIn(matrixStates.preShuffleSoffsetCorrection)
+      del matrixStates.preShuffleSoffsetCorrection
 
   return module

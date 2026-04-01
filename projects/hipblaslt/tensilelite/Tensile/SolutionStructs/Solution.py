@@ -2596,27 +2596,31 @@ class Solution(collections.abc.Mapping):
             state["AssertFree1ElementMultiple"] = max(state["AssertFree1ElementMultiple"], state["GlobalReadVectorWidthB"])
 
       #for tensor swizzling, we calculate pack-k to achieve buffer_load_dwordx4
-      for tc in ("A", "B",):
-        if state["ProblemType"][f"SwizzleTensor{tc}"]:
-          if not state["EnableMatrixInstruction"]:
-            reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
-          # Print rejection reason instead of force set
-          # 16 means bytes of buffer_load_dwordx4
-          SwizzlePackK = calSwizzlePackK(state, tc)
-          if state[f"GlobalReadVectorWidth{tc}"] != state[f"MIInputPerThread{tc}"] * SwizzlePackK:
-            GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
-            MIInPerThread = state[f"MIInputPerThread{tc}"]
-            reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != MIInputPerThread{tc} ({MIInPerThread}) * {SwizzlePackK}")
+      # Subtile path does not use GRVW for swizzle, so skip these checks.
+      if not state["UseSubtileImpl"]:
+        for tc in ("A", "B",):
+          if state["ProblemType"][f"SwizzleTensor{tc}"]:
+            if not state["EnableMatrixInstruction"]:
+              reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
+            # Print rejection reason instead of force set
+            # 16 means bytes of buffer_load_dwordx4
+            SwizzlePackK = calSwizzlePackK(state, tc)
+            if state[f"GlobalReadVectorWidth{tc}"] != state[f"MIInputPerThread{tc}"] * SwizzlePackK:
+              GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
+              MIInPerThread = state[f"MIInputPerThread{tc}"]
+              reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != MIInputPerThread{tc} ({MIInPerThread}) * {SwizzlePackK}")
 
       if state["ProblemType"]["SwizzleTensorA"]:
-        if not state["DirectToVgprA"]:
-          reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
+        if not state["UseSubtileImpl"]:
+          if not state["DirectToVgprA"]:
+            reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
         if not state["ProblemType"]["TransposeA"]:
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
 
       if state["ProblemType"]["SwizzleTensorB"]:
-        if not state["DirectToVgprB"]:
-          reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
+        if not state["UseSubtileImpl"]:
+          if not state["DirectToVgprB"]:
+            reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
         if state["ProblemType"]["TransposeB"]:
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN or NN only")
 
