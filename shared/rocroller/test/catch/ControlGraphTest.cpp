@@ -294,10 +294,10 @@ TEST_CASE("ControlGraph BeforeAfter", "[control-graph]")
         checkAllPolicies(rocRoller::IgnoreCache);
     }
 
-    SECTION("bodyParents and controlStack")
+    SECTION("containingAncestors and controlStack")
     {
         {
-            auto parents = KernelGraph::bodyParents(forInit, control).to<std::vector>();
+            auto parents = KernelGraph::containingAncestors(forInit, control).to<std::vector>();
             std::vector<int> parentNodes;
             for(auto const& [node, edge] : parents)
                 parentNodes.push_back(node);
@@ -310,7 +310,7 @@ TEST_CASE("ControlGraph BeforeAfter", "[control-graph]")
         }
 
         {
-            auto parents = KernelGraph::bodyParents(storeD, control).to<std::vector>();
+            auto parents = KernelGraph::containingAncestors(storeD, control).to<std::vector>();
             std::vector<int> parentNodes;
             for(auto const& [node, edge] : parents)
                 parentNodes.push_back(node);
@@ -323,7 +323,7 @@ TEST_CASE("ControlGraph BeforeAfter", "[control-graph]")
         }
 
         {
-            auto parents = KernelGraph::bodyParents(storeE, control).to<std::vector>();
+            auto parents = KernelGraph::containingAncestors(storeE, control).to<std::vector>();
             std::vector<int> parentNodes;
             for(auto const& [node, edge] : parents)
                 parentNodes.push_back(node);
@@ -491,7 +491,7 @@ TEST_CASE("ControlGraph Conditional", "[control-graph]")
         )."));
 }
 
-TEST_CASE("ControlGraph bodyParents distinguishes Body vs Else edges", "[control-graph]")
+TEST_CASE("ControlGraph containingAncestors distinguishes Body vs Else edges", "[control-graph]")
 {
     ControlGraph control = ControlGraph();
 
@@ -505,8 +505,8 @@ TEST_CASE("ControlGraph bodyParents distinguishes Body vs Else edges", "[control
     control.addElement(Else(), {condOp}, {elseAssign});
 
     // Both assigns have condOp as their immediate body parent.
-    auto thenParent = KernelGraph::bodyParents(thenAssign, control).take(1).only();
-    auto elseParent = KernelGraph::bodyParents(elseAssign, control).take(1).only();
+    auto thenParent = KernelGraph::containingAncestors(thenAssign, control).take(1).only();
+    auto elseParent = KernelGraph::containingAncestors(elseAssign, control).take(1).only();
 
     REQUIRE(thenParent.has_value());
     REQUIRE(elseParent.has_value());
