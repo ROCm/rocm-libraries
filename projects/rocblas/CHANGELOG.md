@@ -3,6 +3,11 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
+## rocBLAS 5.4.0
+
+### Optimized
+* Improved the performance of Level 3 geam for pure transpose scale use cases.
+
 ## rocBLAS 5.3.0
 
 ### Added
