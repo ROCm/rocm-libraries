@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include <string>
 
 #ifndef CHECK_HIP_ALLOC
 #define CHECK_HIP_ALLOC(status)               \
@@ -45,6 +46,21 @@
 
 namespace hiptensor
 {
+    // Find the first solution in candidates whose kernel name matches the given string.
+    // Used by ActorCriticSelection to perform a cross-platform-stable lookup.
+    static ContractionSolution*
+        findByKernelName(std::unordered_map<size_t, ContractionSolution*> const& candidates,
+                         std::string const&                                      kernelName)
+    {
+        for(auto const& [uid, solution] : candidates)
+        {
+            if(solution->kernelName() == kernelName)
+                return solution;
+        }
+
+        return nullptr;
+    }
+
     hiptensorStatus_t bruteForceModel(ContractionSolution**              winner,
                                       std::vector<ContractionSolution*>& candidates,
                                       hiptensorDataType_t                typeA,
@@ -255,8 +271,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -264,32 +280,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 16046312426561516674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 5651259715737336589ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 5651259715737336589ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 16046312426561516674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 17447143014665713887ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 16046312426561516674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -297,44 +319,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 9021620837589482599ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 1, 2, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 6053663486226699267ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 6053663486226699267ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 6053663486226699267ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 10097482900535040320ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 32, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 6053663486226699267ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -367,8 +389,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -376,32 +398,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 16046312426561516674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 16046312426561516674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 5651259715737336589ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 16046312426561516674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 17447143014665713887ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 16046312426561516674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -409,44 +437,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 6053663486226699267ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 6053663486226699267ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 6053663486226699267ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 6053663486226699267ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 10097482900535040320ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 32, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 6053663486226699267ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -479,8 +507,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -488,32 +516,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
             }
             else
@@ -521,44 +555,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 2317674114976786230ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 2317674114976786230ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 2317674114976786230ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 11152060091307708334ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 2, 2, 2, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -591,8 +625,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -600,32 +634,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 872672380373754190ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 872672380373754190ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 16476891743625221381ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 16476891743625221381ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 16476891743625221381ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 16476891743625221381ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -636,50 +676,51 @@ namespace hiptensor
                 // rank2 dim1 case
                 if(rank == 2 && dim1)
                 {
-                    unique_id = 58303249112943560ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m1n1k1
                 else if(rank == 1)
                 // if (rank == 1 || (rank == 1 && (a_ms_ks_lengths[3] == 1 || b_ns_ks_lengths[3] == 1)))
                 {
-                    unique_id = 58303249112943560ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 2303552229010777601ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 2, 2, 2, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 58303249112943560ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 58303249112943560ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 58303249112943560ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 2303552229010777601ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 2, 2, 2, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -712,8 +753,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -721,32 +762,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 8024078432480148721ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 12894894255582471185ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 12894894255582471185ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 12894894255582471185ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 12894894255582471185ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 12894894255582471185ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -754,44 +801,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 9333825291905548205ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 32, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 17760782256758115565ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 9333825291905548205ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 32, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 13058678487168027ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 9333825291905548205ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 32, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 9333825291905548205ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 32, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -824,8 +871,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -833,32 +880,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 8024078432480148721ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 12894894255582471185ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 12894894255582471185ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 12894894255582471185ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 12894894255582471185ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 12894894255582471185ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -866,44 +919,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 9333825291905548205ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 32, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 17760782256758115565ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 9333825291905548205ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 32, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 13058678487168027ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 9333825291905548205ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 32, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 9333825291905548205ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 32, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -936,8 +989,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -945,32 +998,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
             }
             else
@@ -978,44 +1037,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 9967477699864925937ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 14071475272156866885ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 14071475272156866885ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 8307633941691601884ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 1, 2, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -1048,8 +1107,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -1057,32 +1116,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 9344798352708026060ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 9344798352708026060ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 9344798352708026060ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 9344798352708026060ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 9344798352708026060ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 9344798352708026060ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -1093,49 +1158,50 @@ namespace hiptensor
                 // rank2 dim1 case
                 if(rank == 2 && dim1)
                 {
-                    unique_id = 16299024124514902126ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m1n1k1
                 else if(rank == 1)
                 {
-                    unique_id = 378062791888302715ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 76527422265261696ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 2, 2, 2, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 378062791888302715ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 378062791888302715ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 378062791888302715ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 378062791888302715ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -1163,8 +1229,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -1172,32 +1238,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 13825918879176996502ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 13825918879176996502ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 17141562253969597117ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 17141562253969597117ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 17141562253969597117ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 17141562253969597117ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -1205,44 +1277,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 17141562253969597117ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 17141562253969597117ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 17141562253969597117ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 17141562253969597117ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 17141562253969597117ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 6384780398804323250ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 2, 2, 2, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -1270,8 +1342,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -1279,32 +1351,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 11208787066124811014ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 11208787066124811014ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 14522095938220523368ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 14522095938220523368ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 14522095938220523368ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 14522095938220523368ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -1315,49 +1393,50 @@ namespace hiptensor
                 // rank2 dim1 case
                 if(rank == 2 && dim1)
                 {
-                    unique_id = 8251132190088736039ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m1n1k1
                 else if(rank == 1)
                 {
-                    unique_id = 2897979232477761524ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 2897979232477761524ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 2897979232477761524ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 2897979232477761524ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 2897979232477761524ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 2897979232477761524ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -1385,8 +1464,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -1394,32 +1473,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 13613206280884761703ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 13613206280884761703ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 13613206280884761703ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 4373449368168185126ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 4373449368168185126ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 4373449368168185126ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -1427,44 +1512,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 4373449368168185126ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 4373449368168185126ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 2008216990064456310ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 4373449368168185126ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 13613206280884761703ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 15116758930810193332ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 2, 2, 2, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -1497,8 +1582,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -1506,32 +1591,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 15864809842584901464ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 8067958629699904967ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 15864809842584901464ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 6775599605174985174ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 6775599605174985174ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 5326563676026437938ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
             }
             else
@@ -1542,49 +1633,50 @@ namespace hiptensor
                 // rank2 dim1 case
                 if(rank == 2 && dim1)
                 {
-                    unique_id = 8067958629699904967ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m1n1k1
                 else if(rank == 1)
                 {
-                    unique_id = 8116863550692548667ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 8116863550692548667ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 8116863550692548667ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 8116863550692548667ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 8116863550692548667ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 8116863550692548667ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -1612,8 +1704,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -1621,32 +1713,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 5794367356792942822ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 5794367356792942822ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 5794367356792942822ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 5794367356792942822ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 5794367356792942822ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 5794367356792942822ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
             }
             else
@@ -1654,44 +1752,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 5794367356792942822ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 17939389824758640014ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 10640128726648594287ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 5794367356792942822ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 5794367356792942822ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 13933081369664111675ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 2, 2, 2, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -1719,8 +1817,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -1728,32 +1826,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 14915761978535949477ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 2224053047801499357ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 3431382583157381293ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 5422513160360085353ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 3431382583157381293ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 3431382583157381293ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -1764,49 +1868,50 @@ namespace hiptensor
                 // rank2 dim1 case
                 if(rank == 2 && dim1)
                 {
-                    unique_id = 14915761978535949477ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m1n1k1
                 else if(rank == 1)
                 {
-                    unique_id = 14915761978535949477ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 14915761978535949477ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 14915761978535949477ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 14915761978535949477ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 14915761978535949477ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 14915761978535949477ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -1834,8 +1939,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -1843,32 +1948,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 16870758234615651290ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 14901158961446820896ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 2, 2, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 16870758234615651290ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 8188562791036959263ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 16870758234615651290ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 16870758234615651290ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
             }
             else
@@ -1876,44 +1987,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 18207091374964962208ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 16948282955506101335ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 16870758234615651290ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 15355329505248522280ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 14642257549075851915ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 14642257549075851915ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -1941,8 +2052,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -1950,32 +2061,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 12057130050439892271ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 13038089902448627981ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 2, 2, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 12057130050439892271ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 11269655469469274301ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 11269655469469274301ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 12057130050439892271ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
             }
             else
@@ -1986,49 +2103,50 @@ namespace hiptensor
                 // rank2 dim1 case
                 if(rank == 2 && dim1)
                 {
-                    unique_id = 11269655469469274301ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m1n1k1
                 else if(rank == 1)
                 {
-                    unique_id = 2143493311543532856ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 2143493311543532856ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 2143493311543532856ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 2143493311543532856ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 2143493311543532856ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 2143493311543532856ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -2056,8 +2174,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -2065,32 +2183,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 3879892272436099392ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 3879892272436099392ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 3879892272436099392ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 3879892272436099392ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 3879892272436099392ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 6406117030749216765ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -2098,44 +2222,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 3879892272436099392ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 8021137963958390646ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 3248584345341330494ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 3879892272436099392ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 3879892272436099392ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 7950787545240972863ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -2163,8 +2287,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -2172,32 +2296,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 4041813994497895944ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 4041813994497895944ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 4041813994497895944ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 4041813994497895944ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 4041813994497895944ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 7591632339673577634ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -2208,49 +2338,50 @@ namespace hiptensor
                 // rank2 dim1 case
                 if(rank == 2 && dim1)
                 {
-                    unique_id = 2054609181761357786ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
                 // m1n1k1
                 else if(rank == 1)
                 {
-                    unique_id = 14145390177844245465ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 14145390177844245465ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 14145390177844245465ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 14145390177844245465ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 14145390177844245465ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 14145390177844245465ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -2283,8 +2414,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -2292,32 +2423,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 1688099565795560288ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 1688099565795560288ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 1688099565795560288ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 1688099565795560288ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 1688099565795560288ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 1688099565795560288ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
             }
             else
@@ -2325,44 +2462,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 1688099565795560288ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 4348837698146370003ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 1688099565795560288ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 1688099565795560288ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 1688099565795560288ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 4363356859752806590ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 2, 2, 2, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -2395,8 +2532,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -2404,32 +2541,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 15330878641001915472ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 15330878641001915472ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 15330878641001915472ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 15330878641001915472ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 15330878641001915472ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 15330878641001915472ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
             }
             else
@@ -2440,49 +2583,50 @@ namespace hiptensor
                 // rank2 dim1 case
                 if(rank == 2 && dim1)
                 {
-                    unique_id = 15330878641001915472ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m1n1k1
                 else if(rank == 1)
                 {
-                    unique_id = 11537900932066889768ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 8338926107119209426ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 128, 128, 32, "
+                                "16, 32, 32, 4, 4, 2, 2, 2, 2, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 11537900932066889768ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 11537900932066889768ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 11537900932066889768ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 11537900932066889768ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 64, 64, 32, 16, "
+                                "32, 32, 4, 4, 2, 2, 1, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -2515,8 +2659,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -2524,32 +2668,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 12959721676360111684ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 12959721676360111684ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 12959721676360111684ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 12959721676360111684ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 12959721676360111684ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 12959721676360111684ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
             }
             else
@@ -2557,44 +2707,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 10254320286859648634ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 15705829219230515535ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 12959721676360111684ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 10254320286859648634ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 10254320286859648634ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 10254320286859648634ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -2627,8 +2777,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -2636,32 +2786,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 1322366267556764247ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 1322366267556764247ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 1322366267556764247ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 1322366267556764247ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 1322366267556764247ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 1322366267556764247ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
             }
             else
@@ -2672,49 +2828,50 @@ namespace hiptensor
                 // rank2 dim1 case
                 if(rank == 2 && dim1)
                 {
-                    unique_id = 14051358583041094215ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
                 // m1n1k1
                 else if(rank == 1)
                 {
-                    unique_id = 8503926755447648324ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 8503926755447648324ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 8503926755447648324ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 8503926755447648324ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 8503926755447648324ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 8503926755447648324ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -3388,8 +3545,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -3397,32 +3554,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 14408154905494010489ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 14408154905494010489ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 14408154905494010489ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 14408154905494010489ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 14408154905494010489ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 14408154905494010489ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -3430,44 +3593,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 6974095321173130927ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 16253689926652332996ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 16253689926652332996ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 6974095321173130927ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 16253689926652332996ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 16253689926652332996ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -3500,8 +3663,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -3509,32 +3672,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 14408154905494010489ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 14408154905494010489ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 14408154905494010489ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 14408154905494010489ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 14408154905494010489ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 14408154905494010489ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -3542,44 +3711,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 6974095321173130927ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 16253689926652332996ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 16253689926652332996ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 6974095321173130927ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 16253689926652332996ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 16253689926652332996ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -3613,8 +3782,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -3622,32 +3791,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 7538467540961049787ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 7538467540961049787ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 7538467540961049787ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 7538467540961049787ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 7538467540961049787ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 7538467540961049787ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -3655,44 +3830,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 5838574146849536063ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 9929579717278416296ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 9929579717278416296ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 9929579717278416296ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 9929579717278416296ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 15431985258997757854ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -3725,8 +3900,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -3734,32 +3909,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 3415378554316130654ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 3415378554316130654ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 3415378554316130654ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 3415378554316130654ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 3415378554316130654ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 3415378554316130654ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
             }
             else
@@ -3767,44 +3948,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 17177484621493380088ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 17177484621493380088ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 17177484621493380088ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 8974719589220802400ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 8974719589220802400ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 17177484621493380088ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -3837,8 +4018,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -3846,32 +4027,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 12765469494343230674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 3753568868518805000ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 12765469494343230674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 12765469494343230674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 3753568868518805000ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 12765469494343230674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -3879,44 +4066,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 16194744748728374153ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 14950476381367017410ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 14950476381367017410ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 14950476381367017410ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 14950476381367017410ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 14950476381367017410ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -3949,8 +4136,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -3958,32 +4145,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 12765469494343230674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 12765469494343230674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 12765469494343230674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 12765469494343230674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 3753568868518805000ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 12765469494343230674ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -3991,44 +4184,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 16194744748728374153ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 14950476381367017410ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 14950476381367017410ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 16194744748728374153ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 14950476381367017410ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 14950476381367017410ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -4061,8 +4254,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -4070,32 +4263,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 10572640329933031377ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 15510068347583301452ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 10572640329933031377ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 15510068347583301452ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 10572640329933031377ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 10572640329933031377ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
             }
             else
@@ -4103,44 +4302,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 6276769470110182113ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 5827523263153508957ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 5827523263153508957ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 5827523263153508957ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 5827523263153508957ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 6276769470110182113ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -4173,8 +4372,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -4182,32 +4381,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 12481385650722299445ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 4574287328754767068ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 12481385650722299445ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 12481385650722299445ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 12481385650722299445ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 4574287328754767068ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -4215,44 +4420,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 2817642069473326068ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 1139053823940322184ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 2817642069473326068ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 1139053823940322184ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 1139053823940322184ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 2817642069473326068ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -4285,8 +4490,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -4294,32 +4499,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 10482334011498030239ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 8472864432528069731ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 8472864432528069731ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 8472864432528069731ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 8472864432528069731ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 8472864432528069731ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -4327,44 +4538,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 4617465351495394743ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 1663480608868680521ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 1663480608868680521ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 1663480608868680521ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 1663480608868680521ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 1663480608868680521ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -4397,8 +4608,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -4406,32 +4617,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 14762504979677123854ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 14762504979677123854ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 14762504979677123854ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 14762504979677123854ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 14762504979677123854ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 14762504979677123854ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -4439,44 +4656,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 1158968124405133622ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 6681600076438905506ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 1685602420862754469ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 6681600076438905506ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 6681600076438905506ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 6681600076438905506ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -4509,8 +4726,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -4518,32 +4735,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 4677594781166299396ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 4677594781166299396ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 4677594781166299396ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 4677594781166299396ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 4677594781166299396ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 4677594781166299396ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -4551,44 +4774,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 5675370401297283233ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 9469902973241888595ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 9469902973241888595ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 9469902973241888595ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 9469902973241888595ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 9469902973241888595ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -4621,8 +4844,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -4630,32 +4853,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 5704881916563684892ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 2062110410148341538ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 2062110410148341538ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 2062110410148341538ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 2062110410148341538ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 2062110410148341538ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 2, 1, 1, 1, 1>";
                 }
             }
             else
@@ -4663,44 +4892,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 1580714540240191281ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 1580714540240191281ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 1580714540240191281ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 1580714540240191281ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 1580714540240191281ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 1580714540240191281ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -4728,8 +4957,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -4737,32 +4966,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 12160779730984340837ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 12160779730984340837ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 12160779730984340837ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 12160779730984340837ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 12160779730984340837ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 12160779730984340837ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -4770,44 +5005,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 6103881444342374783ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 3492198639380540417ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 6103881444342374783ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 3492198639380540417ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 3492198639380540417ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 6103881444342374783ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -4840,8 +5075,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -4849,32 +5084,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 5447850794718128443ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 7828346908127446539ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 5447850794718128443ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 7828346908127446539ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 1, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 5447850794718128443ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 5447850794718128443ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 1, 1, 1, 1, 1>";
                 }
             }
             else
@@ -4882,44 +5123,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 15770210374284736011ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 15770210374284736011ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 15770210374284736011ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 6463641982677566422ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 6463641982677566422ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 15770210374284736011ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 32, 32, 4, 4, 2, 2, 4, 4, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -4952,8 +5193,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -4961,32 +5202,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 2158644421080291960ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 2158644421080291960ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 2158644421080291960ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 1106420844725934876ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 16, 16, 2, 2, 2, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 2158644421080291960ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 2158644421080291960ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
             }
             else
@@ -4994,44 +5241,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 770569218298543735ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 5213105944240361468ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 16, 16, 2, 2, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 5213105944240361468ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 16, 16, 2, 2, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 5213105944240361468ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 16, 16, 2, 2, 1, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 5213105944240361468ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 16, 16, 2, 2, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 5213105944240361468ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 16, 16, 2, 2, 1, 2, 1, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -5064,8 +5311,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -5073,32 +5320,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 15689293195218612641ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 15689293195218612641ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 15689293195218612641ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 15689293195218612641ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 15689293195218612641ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 15689293195218612641ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
             }
             else
@@ -5106,44 +5359,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 12362723444598556025ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 64, 128, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 2980379434373265690ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 2980379434373265690ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 2980379434373265690ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 2980379434373265690ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 2980379434373265690ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 128, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -5176,8 +5429,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -5185,32 +5438,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 1818797200832435030ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 6509874686188425969ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 6509874686188425969ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 6509874686188425969ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 6509874686188425969ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 6509874686188425969ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
             }
             else
@@ -5218,44 +5477,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 10063938818899116719ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 1, 1, 1, 1, 1>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 16235788987998995137ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 16235788987998995137ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 10063938818899116719ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 1, 1, 1, 1, 1>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 16235788987998995137ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 16235788987998995137ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 2, 2, 1, 1, 1, 1>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
@@ -5288,8 +5547,8 @@ namespace hiptensor
                          std::vector<int32_t> const&                             e_ms_ns_modes,
                          const uint64_t                                          workspaceSize)
         {
-            auto   rank      = getRank(a_ms_ks_strides);
-            size_t unique_id = 0;
+            auto        rank = getRank(a_ms_ks_strides);
+            std::string unique_id;
 
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
@@ -5297,32 +5556,38 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 12567580538174379913ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 15173184787179566326ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 15173184787179566326ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 15173184787179566326ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 15173184787179566326ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 15173184787179566326ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 1, 1, 1, 1, 1, 1, 0, 0>";
                 }
             }
             else
@@ -5330,44 +5595,44 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 12567580538174379913ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 14694634098178137439ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 1, 2, 1, 1, 1, 1>";
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 14694634098178137439ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 1, 2, 1, 1, 1, 1>";
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 12567580538174379913ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 14694634098178137439ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 2, 1, 2, 1, 1, 1, 1>";
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 12567580538174379913ull;
+                    unique_id = "DeviceContractionMultipleD_Xdl_CShuffle<6, 6, 6, 256, 128, 64, "
+                                "16, 16, 16, 2, 1, 2, 1, 1, 1, 1, 0>";
                 }
             }
 
-            if(auto candidate = candidates.find(unique_id); candidate != candidates.end())
-            {
-                *winner = candidate->second;
-                return HIPTENSOR_STATUS_SUCCESS;
-            }
-            else
-            {
-                return HIPTENSOR_STATUS_EXECUTION_FAILED;
-            }
+            *winner = findByKernelName(candidates, unique_id);
+            return (*winner != nullptr) ? HIPTENSOR_STATUS_SUCCESS
+                                        : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
     };
 
