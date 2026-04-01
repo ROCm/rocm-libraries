@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,146 +39,136 @@ ROCSPARSE_KERNEL(1) void init_kernel(){};
  * if an exception is thrown during initialization.
  ******************************************************************************/
 _rocsparse_handle::_rocsparse_handle()
-try
 {
-    ROCSPARSE_ROUTINE_TRACE;
+    try
+    {
+        ROCSPARSE_ROUTINE_TRACE;
 
-    // Default device is active device
-    THROW_IF_HIP_ERROR(hipGetDevice(&device));
-    THROW_IF_HIP_ERROR(hipGetDeviceProperties(&properties, device));
+        // Default device is active device
+        THROW_IF_HIP_ERROR(hipGetDevice(&device));
+        THROW_IF_HIP_ERROR(hipGetDeviceProperties(&properties, device));
 
-    // Device wavefront size
-    wavefront_size = properties.warpSize;
+        // Device wavefront size
+        wavefront_size = properties.warpSize;
 
-    // Shared memory per block opt-in
-    shared_mem_per_block_optin = properties.sharedMemPerBlockOptin;
+        // Shared memory per block opt-in
+        shared_mem_per_block_optin = properties.sharedMemPerBlockOptin;
 
 #if HIP_VERSION >= 307
-    // ASIC revision
-    asic_rev = properties.asicRevision;
+        // ASIC revision
+        asic_rev = properties.asicRevision;
 #else
-    asic_rev = 0;
+        asic_rev = 0;
 #endif
 
-    // Layer mode
-    char* str_layer_mode;
-    if((str_layer_mode = getenv("ROCSPARSE_LAYER")) == NULL)
-    {
-        layer_mode = rocsparse_layer_mode_none;
-    }
-    else
-    {
-        layer_mode = (rocsparse_layer_mode)(atoi(str_layer_mode));
-    }
-
-    // Obtain size for coomv device buffer
-    rocsparse_int nthreads = properties.maxThreadsPerBlock;
-    rocsparse_int nprocs   = 2 * properties.multiProcessorCount;
-    rocsparse_int nblocks  = (nprocs * nthreads - 1) / 256 + 1;
-
-    size_t coomv_size = (((sizeof(rocsparse_int) + 16) * nblocks - 1) / 256 + 1) * 256;
-
-    // Allocate device buffer
-    buffer_size = (coomv_size > 1024 * 1024) ? coomv_size : 1024 * 1024;
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
-
-    // Device alpha and beta
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&alpha, sizeof(double) * 2));
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&beta, sizeof(double) * 2));
-
-    // Device one
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&sone, sizeof(float) * 2));
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&done, sizeof(double) * 2));
-
-    // Execute empty kernel for initialization
-
-    THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL");
-    hipLaunchKernelGGL(init_kernel, dim3(1), dim3(1), 0, stream);
-    THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel scheduling failed'");
-
-    // Execute memset for initialization
-    THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float) * 2, stream));
-    THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double) * 2, stream));
-
-    const float  s_value = 1.0f;
-    const double d_value = 1.0;
-    THROW_IF_HIP_ERROR(
-        hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
-    THROW_IF_HIP_ERROR(
-        hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
-
-    // Wait for device transfer to finish
-    THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
-
-    // With -fsanitize=address the kernels use dynamic stack (.amdhsa_uses_dynamic_stack 1)
-    // and require a larger per-thread stack size to run correctly.
-    {
-        const char* hsa_xnack     = getenv("HSA_XNACK");
-        const bool  is_xnack_plus = rocsparse::handle_get_xnack_mode(this) == "xnack+"
-                                   || (hsa_xnack && strcmp(hsa_xnack, "1") == 0);
-        if(is_xnack_plus)
+        // Layer mode
+        char* str_layer_mode;
+        if((str_layer_mode = getenv("ROCSPARSE_LAYER")) == NULL)
         {
-            size_t current_stack_size = 0;
-            THROW_IF_HIP_ERROR(hipDeviceGetLimit(&current_stack_size, hipLimitStackSize));
-            const size_t required_stack_size = 64 * 1024;
-            if(current_stack_size < required_stack_size)
+            layer_mode = rocsparse_layer_mode_none;
+        }
+        else
+        {
+            layer_mode = (rocsparse_layer_mode)(atoi(str_layer_mode));
+        }
+
+        // Obtain size for coomv device buffer
+        rocsparse_int nthreads = properties.maxThreadsPerBlock;
+        rocsparse_int nprocs   = 2 * properties.multiProcessorCount;
+        rocsparse_int nblocks  = (nprocs * nthreads - 1) / 256 + 1;
+
+        size_t coomv_size = (((sizeof(rocsparse_int) + 16) * nblocks - 1) / 256 + 1) * 256;
+
+        // Allocate device buffer
+        buffer_size = (coomv_size > 1024 * 1024) ? coomv_size : 1024 * 1024;
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+
+        // Device alpha and beta
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&alpha, sizeof(double) * 2));
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&beta, sizeof(double) * 2));
+
+        // Device one
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&sone, sizeof(float) * 2));
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&done, sizeof(double) * 2));
+
+        // Execute empty kernel for initialization
+
+        THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL");
+        hipLaunchKernelGGL(init_kernel, dim3(1), dim3(1), 0, stream);
+        THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel scheduling failed'");
+
+        // Execute memset for initialization
+        THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float) * 2, stream));
+        THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double) * 2, stream));
+
+        const float  s_value = 1.0f;
+        const double d_value = 1.0;
+        THROW_IF_HIP_ERROR(
+            hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
+        THROW_IF_HIP_ERROR(
+            hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
+
+        // Wait for device transfer to finish
+        THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+
+        {
+            const char* hsa_xnack     = getenv("HSA_XNACK");
+            const bool  is_xnack_plus = rocsparse::handle_get_xnack_mode(this) == "xnack+"
+                                       || (hsa_xnack && strcmp(hsa_xnack, "1") == 0);
+            if(is_xnack_plus)
             {
-                THROW_IF_HIP_ERROR(hipDeviceSetLimit(hipLimitStackSize, required_stack_size));
+                THROW_IF_HIP_ERROR(hipDeviceSetLimit(hipLimitStackSize, 64 * 1024));
             }
         }
-    }
 
-    // create blas handle
-    rocsparse::blas_impl blas_impl;
+        // create blas handle
+        rocsparse::blas_impl blas_impl;
 
 #ifdef ROCSPARSE_WITH_ROCBLAS
 
-    blas_impl = rocsparse::blas_impl_rocblas;
+        blas_impl = rocsparse::blas_impl_rocblas;
 
 #else
 
-    //
-    // Other implementation available? Otherwise, set it to none.
-    //
-    blas_impl = rocsparse::blas_impl_none;
+        //
+        // Other implementation available? Otherwise, set it to none.
+        //
+        blas_impl = rocsparse::blas_impl_none;
 #endif
 
-    THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_create_handle(&this->blas_handle, blas_impl));
-    THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_set_stream(this->blas_handle, this->stream));
-    THROW_IF_ROCSPARSE_ERROR(
-        rocsparse::blas_set_pointer_mode(this->blas_handle, this->pointer_mode));
+        THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_create_handle(&this->blas_handle, blas_impl));
+        THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_set_stream(this->blas_handle, this->stream));
+        THROW_IF_ROCSPARSE_ERROR(
+            rocsparse::blas_set_pointer_mode(this->blas_handle, this->pointer_mode));
 
-    // Open log file
-    if(layer_mode & rocsparse_layer_mode_log_trace)
-    {
-        rocsparse::open_log_stream(&log_trace_os, &log_trace_ofs, "ROCSPARSE_LOG_TRACE_PATH");
-    }
+        // Open log file
+        if(layer_mode & rocsparse_layer_mode_log_trace)
+        {
+            rocsparse::open_log_stream(&log_trace_os, &log_trace_ofs, "ROCSPARSE_LOG_TRACE_PATH");
+        }
 
-    // Open log_bench file
-    if(layer_mode & rocsparse_layer_mode_log_bench)
-    {
-        rocsparse::open_log_stream(&log_bench_os, &log_bench_ofs, "ROCSPARSE_LOG_BENCH_PATH");
-    }
+        // Open log_bench file
+        if(layer_mode & rocsparse_layer_mode_log_bench)
+        {
+            rocsparse::open_log_stream(&log_bench_os, &log_bench_ofs, "ROCSPARSE_LOG_BENCH_PATH");
+        }
 
-    // Open log_debug file
-    if(layer_mode & rocsparse_layer_mode_log_debug)
-    {
-        rocsparse::open_log_stream(&log_debug_os, &log_debug_ofs, "ROCSPARSE_LOG_DEBUG_PATH");
+        // Open log_debug file
+        if(layer_mode & rocsparse_layer_mode_log_debug)
+        {
+            rocsparse::open_log_stream(&log_debug_os, &log_debug_ofs, "ROCSPARSE_LOG_DEBUG_PATH");
+        }
     }
-}
-catch(...)
-{
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(this->buffer));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(this->alpha));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(this->beta));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(this->sone));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(this->done));
-    rocsparse_status status = rocsparse::blas_destroy_handle(this->blas_handle);
-    if(status != rocsparse_status_success)
+    catch(...)
     {
-        ROCSPARSE_ERROR_MESSAGE(status, "handle error");
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(buffer));
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(alpha));
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(done));
+        PRINT_IF_ROCSPARSE_ERROR(rocsparse::blas_destroy_handle(blas_handle), "handle error");
+        throw;
     }
-    throw;
 }
 
 /*******************************************************************************
@@ -202,11 +192,7 @@ _rocsparse_handle::~_rocsparse_handle()
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
 
     // destroy blas handle
-    rocsparse_status status = rocsparse::blas_destroy_handle(this->blas_handle);
-    if(status != rocsparse_status_success)
-    {
-        ROCSPARSE_ERROR_MESSAGE(status, "handle error");
-    }
+    PRINT_IF_ROCSPARSE_ERROR(rocsparse::blas_destroy_handle(this->blas_handle), "handle error");
 
     // Close log files
     if(log_trace_ofs.is_open())

@@ -23,6 +23,7 @@ TEST(TestTypes, ToSdkTypeDataTypes)
     EXPECT_EQ(toSdkType(DataType::INT4), hipdnn_data_sdk::data_objects::DataType::INT4);
     EXPECT_EQ(toSdkType(DataType::FP6_E2M3), hipdnn_data_sdk::data_objects::DataType::FP6_E2M3);
     EXPECT_EQ(toSdkType(DataType::FP6_E3M2), hipdnn_data_sdk::data_objects::DataType::FP6_E3M2);
+    EXPECT_EQ(toSdkType(DataType::INT64), hipdnn_data_sdk::data_objects::DataType::INT64);
     EXPECT_EQ(toSdkType(DataType::NOT_SET), hipdnn_data_sdk::data_objects::DataType::UNSET);
 }
 
@@ -44,6 +45,7 @@ TEST(TestTypes, FromSdkTypeDataTypes)
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT4), DataType::INT4);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP6_E2M3), DataType::FP6_E2M3);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP6_E3M2), DataType::FP6_E3M2);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT64), DataType::INT64);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::UNSET), DataType::NOT_SET);
 }
 
@@ -89,6 +91,7 @@ TEST(TestTypes, GetDataTypeEnumFromType)
     EXPECT_EQ(getDataTypeEnumFromType<int8_t>(), DataType::INT8);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e4m3>(), DataType::FP8_E4M3);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e5m2>(), DataType::FP8_E5M2);
+    EXPECT_EQ(getDataTypeEnumFromType<int64_t>(), DataType::INT64);
 
     EXPECT_EQ(getDataTypeEnumFromType<float*>(), DataType::NOT_SET);
     EXPECT_EQ(getDataTypeEnumFromType<char>(), DataType::NOT_SET);
@@ -112,6 +115,7 @@ TEST(TestTypes, DataTypeToString)
     EXPECT_STREQ(to_string(DataType::INT4), "int4");
     EXPECT_STREQ(to_string(DataType::FP6_E2M3), "fp6_e2m3");
     EXPECT_STREQ(to_string(DataType::FP6_E3M2), "fp6_e3m2");
+    EXPECT_STREQ(to_string(DataType::INT64), "int64");
     EXPECT_STREQ(to_string(DataType::NOT_SET), "unknown");
 }
 
@@ -175,6 +179,10 @@ TEST(TestTypes, DataTypeStreamOperator)
 
     oss << DataType::FP6_E3M2;
     EXPECT_EQ(oss.str(), "fp6_e3m2");
+    oss.str("");
+
+    oss << DataType::INT64;
+    EXPECT_EQ(oss.str(), "int64");
     oss.str("");
 
     oss << DataType::NOT_SET;
@@ -286,6 +294,7 @@ TEST(TestTypes, ToHipdnnDataType)
     EXPECT_EQ(toHipdnnDataType(DataType::INT4), HIPDNN_DATA_INT4);
     EXPECT_EQ(toHipdnnDataType(DataType::FP6_E2M3), HIPDNN_DATA_FP6_E2M3);
     EXPECT_EQ(toHipdnnDataType(DataType::FP6_E3M2), HIPDNN_DATA_FP6_E3M2);
+    EXPECT_EQ(toHipdnnDataType(DataType::INT64), HIPDNN_DATA_INT64);
     EXPECT_EQ(toHipdnnDataType(DataType::NOT_SET), std::nullopt);
 }
 
@@ -314,6 +323,7 @@ TEST(TestTypes, FromHipdnnDataTypeAllValidTypes)
     check(HIPDNN_DATA_INT4, DataType::INT4);
     check(HIPDNN_DATA_FP6_E2M3, DataType::FP6_E2M3);
     check(HIPDNN_DATA_FP6_E3M2, DataType::FP6_E3M2);
+    check(HIPDNN_DATA_INT64, DataType::INT64);
 }
 
 TEST(TestTypes, FromHipdnnDataTypeUnknownReturnsError)
@@ -345,7 +355,8 @@ TEST(TestTypes, FromHipdnnDataTypeRoundTrip)
                    DataType::FP4_E2M1,
                    DataType::INT4,
                    DataType::FP6_E2M3,
-                   DataType::FP6_E3M2})
+                   DataType::FP6_E3M2,
+                   DataType::INT64})
     {
         auto hipdnnOpt = toHipdnnDataType(dt);
         ASSERT_TRUE(hipdnnOpt.has_value()) << "toHipdnnDataType failed for " << to_string(dt);
@@ -577,6 +588,93 @@ TEST(TestTypes, FromHipdnnNormFwdPhaseRoundTrip)
             << "fromHipdnnNormFwdPhase failed for phase " << static_cast<int>(phase);
         EXPECT_EQ(roundTripped, phase)
             << "Round-trip mismatch for phase " << static_cast<int>(phase);
+    }
+}
+
+TEST(TestTypes, FromHipdnnDiagonalAlignmentValidValues)
+{
+    using namespace hipdnn_frontend;
+
+    auto [topLeft, topLeftErr]
+        = fromHipdnnDiagonalAlignment(HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT);
+    EXPECT_TRUE(topLeftErr.is_good());
+    EXPECT_EQ(topLeft, DiagonalAlignment::TOP_LEFT);
+
+    auto [bottomRight, bottomRightErr]
+        = fromHipdnnDiagonalAlignment(HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT);
+    EXPECT_TRUE(bottomRightErr.is_good());
+    EXPECT_EQ(bottomRight, DiagonalAlignment::BOTTOM_RIGHT);
+}
+
+TEST(TestTypes, FromHipdnnDiagonalAlignmentUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownVal = static_cast<hipdnnDiagonalAlignment_t>(9999);
+    auto [alignment, err] = fromHipdnnDiagonalAlignment(unknownVal);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(alignment, DiagonalAlignment::TOP_LEFT);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnDiagonalAlignmentRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
+    {
+        auto backend = toBackendDiagonalAlignment(alignment);
+        auto [roundTripped, err] = fromHipdnnDiagonalAlignment(backend);
+        EXPECT_TRUE(err.is_good());
+        EXPECT_EQ(roundTripped, alignment);
+    }
+}
+
+TEST(TestTypes, FromHipdnnAttentionImplementationValidValues)
+{
+    using namespace hipdnn_frontend;
+
+    auto [autoVal, autoErr]
+        = fromHipdnnAttentionImplementation(HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT);
+    EXPECT_TRUE(autoErr.is_good());
+    EXPECT_EQ(autoVal, AttentionImplementation::AUTO);
+
+    auto [composite, compositeErr]
+        = fromHipdnnAttentionImplementation(HIPDNN_ATTENTION_IMPLEMENTATION_COMPOSITE_EXT);
+    EXPECT_TRUE(compositeErr.is_good());
+    EXPECT_EQ(composite, AttentionImplementation::COMPOSITE);
+
+    auto [unified, unifiedErr]
+        = fromHipdnnAttentionImplementation(HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT);
+    EXPECT_TRUE(unifiedErr.is_good());
+    EXPECT_EQ(unified, AttentionImplementation::UNIFIED);
+}
+
+TEST(TestTypes, FromHipdnnAttentionImplementationUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownVal = static_cast<hipdnnAttentionImplementation_t>(9999);
+    auto [impl, err] = fromHipdnnAttentionImplementation(unknownVal);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(impl, AttentionImplementation::AUTO);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnAttentionImplementationRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto impl : {AttentionImplementation::AUTO,
+                     AttentionImplementation::COMPOSITE,
+                     AttentionImplementation::UNIFIED})
+    {
+        auto backend = toBackendAttentionImplementation(impl);
+        auto [roundTripped, err] = fromHipdnnAttentionImplementation(backend);
+        EXPECT_TRUE(err.is_good());
+        EXPECT_EQ(roundTripped, impl);
     }
 }
 
