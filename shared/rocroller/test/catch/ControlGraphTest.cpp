@@ -492,7 +492,7 @@ TEST_CASE("ControlGraph containingAncestors distinguishes Body vs Else edges", "
     control.addElement(Body(), {condOp}, {thenAssign});
     control.addElement(Else(), {condOp}, {elseAssign});
 
-    // Both assigns have condOp as their immediate body parent.
+    // Both assigns have condOp as their immediate containing parent.
     auto thenParent = KernelGraph::containingAncestors(thenAssign, control).take(1).only();
     auto elseParent = KernelGraph::containingAncestors(elseAssign, control).take(1).only();
 

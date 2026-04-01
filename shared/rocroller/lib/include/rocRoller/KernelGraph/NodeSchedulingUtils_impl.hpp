@@ -16,7 +16,7 @@ namespace rocRoller::KernelGraph::NodeScheduling
         for(auto node : theNodes)
         {
             auto parentPair = containingAncestors(node, graph).take(1).only();
-            AssertFatal(parentPair.has_value(), "Node has no body parent", ShowValue(node));
+            AssertFatal(parentPair.has_value(), "Node has no containing ancestor", ShowValue(node));
 
             rv[parentPair->first].push_back(node);
         }
