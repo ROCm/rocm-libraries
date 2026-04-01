@@ -127,6 +127,22 @@ public:
         return ss.str();
     }
 
+    size_t get_max_total_mem_on_devices() const
+    {
+        size_t ret = 0;
+        for(const auto& account : mem_account_on_device)
+            ret = std::max(ret, account.total_bytes);
+        return ret;
+    }
+
+    size_t get_limit_bytes_on_device(int dev_id) const
+    {
+        if(dev_id < 0 || static_cast<size_t>(dev_id) >= num_devices())
+            throw std::invalid_argument("Invalid device ID given to device memory accountant "
+                                        "(querying limit bytes on device).");
+        return mem_account_on_device[dev_id].limit_bytes;
+    }
+
 private:
     struct mem_account_t
     {
