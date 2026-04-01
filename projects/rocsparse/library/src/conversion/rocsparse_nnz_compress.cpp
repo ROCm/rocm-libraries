@@ -115,7 +115,6 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
     RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
 
     nnz_A -= nnz_A_0;
-
     if(nnz_A < 0)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_size);

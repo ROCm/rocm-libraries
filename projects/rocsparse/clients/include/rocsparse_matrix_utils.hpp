@@ -129,7 +129,6 @@ struct rocsparse_matrix_utils
         T                            tol   = static_cast<T>(0);
         rocsparse_int                nnz_c = 0;
         device_vector<rocsparse_int> dnnz_per_row(that.m);
-
         CHECK_ROCSPARSE_THROW_ERROR(
             rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
         CHECK_ROCSPARSE_THROW_ERROR(rocsparse_nnz_compress<T>(
