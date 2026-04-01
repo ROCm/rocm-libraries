@@ -29,6 +29,7 @@ struct GemmConfigBase
     static constexpr bool PreshuffleB               = false;
     static constexpr bool DoubleSmemBuffer          = false;
     static constexpr bool TiledMMAPermuteN          = false;
+    static constexpr bool FuseAQuant                = false;
 
     // Default GEMM tile sizes for tests
     static constexpr ck_tile::index_t M_Tile = 16;
@@ -195,6 +196,16 @@ struct GemmConfigEightWaves : public GemmConfigBase
 struct GemmConfigEightWaves_PreshuffleB : public GemmConfigEightWaves
 {
     static constexpr bool PreshuffleB = true;
+};
+
+struct GemmConfigFuseAQuant : public GemmConfigBase
+{
+    static constexpr bool FuseAQuant = true;
+};
+
+struct GemmConfigFuseAQuantTransposeC : public GemmConfigTransposeC
+{
+    static constexpr bool FuseAQuant = true;
 };
 
 template <typename Tuple>

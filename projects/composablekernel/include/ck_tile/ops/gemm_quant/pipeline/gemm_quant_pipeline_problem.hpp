@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/core/numeric/float8.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 
@@ -26,36 +27,49 @@ template <typename ADataType_,
           bool HasHotLoop_                 = true,
           TailNumber TailNum_              = TailNumber::Full,
           CastPolicy BCastPolicy_          = CastPolicy::AfterLDSRead>
-struct GemmQuantPipelineProblemBase
-    : public GemmPipelineProblemBase<
-          ADataType_,
-          BDataType_,
-          CDataType_,
-          BlockGemmShape_,
-          Traits_,
-          mixed_prec_compute_type_from_input_t<
-              ADataType_,
-              BDataType_,
-              mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>,
-          mixed_prec_compute_type_from_input_t<
-              BDataType_,
-              ADataType_,
-              mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>>
+    struct GemmQuantPipelineProblemBase : public GemmPipelineProblemBase < ADataType_,
+    BDataType_, CDataType_, BlockGemmShape_, Traits_,
+    std::conditional_t<Traits_::FuseAQuant,
+                       mixed_prec_compute_type_from_input_t<
+                           ADataType_,
+                           BDataType_,
+                           mixed_prec_compute_type_t<ComputeDataType_, fp8_t, BDataType_>>,
+                       mixed_prec_compute_type_from_input_t<
+                           ADataType_,
+                           BDataType_,
+                           mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>>,
+    std::conditional_t<Traits_::FuseAQuant,
+                       mixed_prec_compute_type_from_input_t<
+                           BDataType_,
+                           ADataType_,
+                           mixed_prec_compute_type_t<ComputeDataType_, fp8_t, BDataType_>>,
+                       mixed_prec_compute_type_from_input_t<
+                           BDataType_,
+                           ADataType_,
+                           mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>>
 {
-    using Base = GemmPipelineProblemBase<
-        ADataType_,
-        BDataType_,
-        CDataType_,
-        BlockGemmShape_,
-        Traits_,
-        mixed_prec_compute_type_from_input_t<
-            ADataType_,
-            BDataType_,
-            mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>,
-        mixed_prec_compute_type_from_input_t<
-            BDataType_,
-            ADataType_,
-            mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>>;
+    using Base = GemmPipelineProblemBase < ADataType_, BDataType_, CDataType_, BlockGemmShape_,
+          Traits_,
+          std::conditional_t<
+              Traits_::FuseAQuant,
+              mixed_prec_compute_type_from_input_t<
+                  ADataType_,
+                  BDataType_,
+                  mixed_prec_compute_type_t<ComputeDataType_, fp8_t, BDataType_>>,
+              mixed_prec_compute_type_from_input_t<
+                  ADataType_,
+                  BDataType_,
+                  mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>>,
+          std::conditional_t<
+              Traits_::FuseAQuant,
+              mixed_prec_compute_type_from_input_t<
+                  BDataType_,
+                  ADataType_,
+                  mixed_prec_compute_type_t<ComputeDataType_, fp8_t, BDataType_>>,
+              mixed_prec_compute_type_from_input_t<
+                  BDataType_,
+                  ADataType_,
+                  mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>>;
 
     using Traits = typename Base::Traits;
 
@@ -143,9 +157,7 @@ struct GemmQuantPipelineProblemBase
     }();
 
     CK_TILE_HOST_DEVICE static constexpr auto GetAlignmentBQ()
-    {
-        return VectorLoadSize / sizeof(BQDataType);
-    }
+    { return VectorLoadSize / sizeof(BQDataType); }
 
     static constexpr index_t VectorSizeBQ = []() { return kPadK ? 1 : GetAlignmentBQ(); }();
 };
