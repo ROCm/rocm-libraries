@@ -302,4 +302,33 @@ struct amdgcn_mma<pk_int4_t, pk_int4_t, int32_t, 16u, 16u, 16u, CtrlFlags, Compi
     }
 };
 
+/**
+ * @struct amdgcn_mma
+ * @brief Specialization of amdgcn_wmma for pk_int4_t, pk_int4_t, int32_t MMA operation on GFX12
+ * architecture.
+ * @tparam CtrlFlags Control flags for the WMMA operation
+ * @tparam CompilerTarget Current compiler target
+ */
+// TODO: c++20 template <CtrlFlagsGfx12I CtrlFlags, amdgcn_target CompilerTarget>
+// TODO: c++20 requires
+template <typename CtrlFlags, typename CompilerTarget>
+// clang-format off
+//               | A B C DataTypes             | MNK + WaveSize    |AParams  |BPar |CPar |
+struct amdgcn_mma<pk_int4_t, pk_int4_t, int32_t, 16u, 16u, 32u, CtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx12_t<CompilerTarget>>
+: amdgcn_mma_base<pk_int4_t, pk_int4_t, int32_t, 16u, 16u, 32u, 32u, 16, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
+// clang-format on
+{
+    CK_TILE_DEVICE static auto
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec) -> CVecType
+    {
+        return {__builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
+            true, // A signedness
+            bit_cast<int32x2_t>(aVec),
+            true, // B signedness
+            bit_cast<int32x2_t>(bVec),
+            cVec,
+            false)}; // TODO: use CtrlFlags for clamp val.
+    }
+};
+
 } // namespace ck_tile::core::arch::mma
