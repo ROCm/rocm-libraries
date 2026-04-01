@@ -26,6 +26,7 @@
 
 #include <hipfft/hipfft.h>
 #include <hipfft/hipfftXt.h>
+#include "../../shared/CLI11.hpp"
 
 #include "sample_utils.hpp"
 
@@ -35,7 +36,7 @@ DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
 
-int main()
+int main(int argc, char* argv[])
 {
     std::cout << "Multi-gpu hipFFT in-place 3D double-precision real-to-complex transform\n";
 
@@ -46,14 +47,31 @@ int main()
     // Note that when using cuFFTXt with two or more GPUs, its latest version requires
     // a minimum size per dimension greater or equal than 32 and less equal than 4096
     // for single precision, and 2048 for double precision.
-    const int Nx              = 512;
-    const int Ny              = 512;
-    const int Nz              = 512;
-    const int direction       = HIPFFT_FORWARD; // forward=-1, backward=1
+    int Nx{};
+    int Ny{};
+    int Nz{};
+    int ngpus{};
+    const int direction        = HIPFFT_FORWARD; // forward=-1, backward=1
     hipfftType transform_type  = HIPFFT_D2Z;     // double to std::complex<double>
     hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE;
-    const size_t     ngpus           = 8;
+    
+    // Declare the supported options.
+    CLI::App app{"hipfft_multigpu_3d_d2z sample code"}; // FIXME: actual name
+    app.add_option("--x", Nx, "Nx")->default_val(32);
+    app.add_option("--y", Ny, "Ny")->default_val(32);
+    app.add_option("--z", Nz, "Nz")->default_val(32);
+    app.add_option("--ngpus", ngpus, "Number of GPUs")->default_val(2);
+    try
+    {
+        app.parse(argc, argv);
+    }
+    catch(const CLI::ParseError& e)
+    {
+        return app.exit(e);
+    }
 
+    std::cout << "Size "<< Nx << " x " << Ny << " x " << Nz << " FFT using " << ngpus << " GPUs.\n";
+    
     const int Nzp = Nz / 2 + 1;
     
     // We only want to print a subset of the data:
@@ -130,7 +148,7 @@ int main()
         const size_t vsize
             = inoutdesc->descriptor->size[idx] / sizeof(decltype(rinput)::value_type);
         std::cout << "\tbuffer " << idx << ": " << inoutdesc->descriptor->size[idx] << " bytes, "
-                  << vsize << " values\n";
+                  << vsize << " real values\n";
     }
     std::cout << "\n";
 
