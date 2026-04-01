@@ -8,11 +8,14 @@
 #include <variant>
 #include <vector>
 
+#include <optional>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Operations/Operations.hpp>
 
 namespace rocRoller
 {
@@ -209,9 +212,19 @@ namespace rocRoller
              */
             void operator()(Operations::T_Load_Tiled const& tload)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Load_Tiled");
+                Log::debug("KernelGraph::TranslateVisitor::T_Load_Tiled");
 
-                auto tensor = m_command->getOperation<Operations::Tensor>(tload.getSrcTag());
+                auto srcTag = tload.getSrcTag();
+
+                std::optional<Operations::SubTileTranspose> subTile;
+                if(std::holds_alternative<Operations::SubTileTranspose>(
+                       *m_command->findTag(srcTag)))
+                {
+                    subTile = m_command->getOperation<Operations::SubTileTranspose>(srcTag);
+                    srcTag  = subTile->input();
+                }
+
+                auto tensor = m_command->getOperation<Operations::Tensor>(srcTag);
 
                 auto const sizes          = tensor.sizes();
                 auto const literalSizes   = tensor.literalSizes();
@@ -249,8 +262,27 @@ namespace rocRoller
                     dims.push_back(dim);
                 }
 
-                auto tiled
-                    = m_graph.coordinates.addElement(MacroTile(tload.getTag(), sizes.size()));
+                if(subTile)
+                {
+                    auto tileSizes = subTile->tileDimensions();
+                    auto tileStrides
+                        = std::vector<uint32_t>{1, static_cast<uint32_t>(tileSizes[0])};
+                    if(subTile->isTranspose())
+                    {
+                        tileStrides = {static_cast<uint32_t>(tileSizes[1]), 1};
+                    }
+
+                    dims.push_back(m_graph.coordinates.addElement(
+                        SubDimension(dims.size(),
+                                     Expression::literal(tileSizes[0]),
+                                     Expression::literal(tileStrides[0]))));
+                    dims.push_back(m_graph.coordinates.addElement(
+                        SubDimension(dims.size(),
+                                     Expression::literal(tileSizes[1]),
+                                     Expression::literal(tileStrides[1]))));
+                }
+
+                auto tiled = m_graph.coordinates.addElement(MacroTile(tload.getTag(), dims.size()));
 
                 m_graph.coordinates.addElement(Split(), std::vector<int>{user}, dims);
                 m_graph.coordinates.addElement(ConstructMacroTile(), dims, std::vector<int>{tiled});

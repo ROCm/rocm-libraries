@@ -970,21 +970,15 @@ namespace TensileLite
         hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
 
         // Default WGM
-        int32_t  defaultWGM         = 0;
-        uint32_t defaultWGMXCC      = 0;
+        int32_t  defaultWGM         = 1;
+        uint32_t defaultWGMXCC      = 1;
         uint32_t defaultWGMXCCCHUNK = 0;
-
-        // If any of the problem sizes are less than 1, return 0 for all values
-        auto sizes = problem.problemSizes();
-        if(sizes[0] < 1 || sizes[1] < 1 || sizes[2] < 1 || sizes[3] < 1)
-        {
-            return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK);
-        }
 
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
            && sizeMapping.workGroupMappingXCC == -1)
         {
+            auto sizes = problem.problemSizes();
             // Try to find cached WGM and WGMXCC and WGMXCCCHUNK
             auto cachedWGMParams = wgmParamsCache.find(problem);
 
@@ -1087,18 +1081,11 @@ namespace TensileLite
         size_t defaultStaggerU            = 0;
         size_t defaultStaggerUStrideShift = 0;
 
-        // If any of the problem sizes are less than 1, return 0 for all values
-        auto sizes = problem.problemSizes();
-        if(sizes[0] < 1 || sizes[1] < 1 || sizes[2] < 1 || sizes[3] < 1)
-        {
-            return std::make_tuple(
-                defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
-        }
-
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
            && sizeMapping.workGroupMappingXCC == -1)
         {
+            auto sizes = problem.problemSizes();
             // Try to find cached StaggerUMapping, StaggerU and StaggerUStrideShift
             auto cachedStaggerUParams = staggerUParamsCache.find(problem);
 
@@ -1219,7 +1206,13 @@ namespace TensileLite
         {
             uint32_t synchronizerUsage
                 = sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B;
-            gsuVal = synchronizerUsage > 409600 ? 1 : gsuVal;
+
+            if (problem.groupedGemm() && (problem.groupedGemmCount() > 1))
+            {
+                gsuVal = synchronizerUsage > (409600 * 16 / problem.groupedGemmCount()) ? 1 : gsuVal;
+            }
+            else
+                gsuVal = synchronizerUsage > (409600 * 16) ? 1 : gsuVal;
         }
 
         // Avoid selecting a gsu value that would make launch grid over the limit
@@ -1430,10 +1423,7 @@ namespace TensileLite
             rv.numWorkGroups.z = 1;
         }
 
-        //short-term workaround
-        int             deviceId;
-        hipDeviceProp_t deviceProperties;
-
+        // Use arch from existing hardware to avoid repeated hipGetDeviceProperties (SWDEV-579719)
         auto removePrefix = [](const std::string& s) {
             size_t pos = s.find("gfx");
             if(pos != std::string::npos)
@@ -1442,10 +1432,7 @@ namespace TensileLite
             }
             return s;
         };
-
-        static_cast<void>(hipGetDevice(&deviceId));
-        static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-        auto gpu_arch_no_prefix = removePrefix(deviceProperties.gcnArchName);
+        auto gpu_arch_no_prefix = removePrefix(hardware.archName());
         if(internalArgsSupport.version >= 1)
         {
             rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);

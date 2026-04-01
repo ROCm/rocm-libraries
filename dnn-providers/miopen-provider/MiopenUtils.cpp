@@ -67,6 +67,48 @@ MiopenTensor createTensor(
     return {tensorAttr};
 }
 
+MiopenTensor createBatchnormTensor(
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    int64_t uid)
+{
+    const auto& tensorAttr = findTensorAttributes(tensorMap, uid);
+
+    if(tensorAttr.dims() == nullptr || tensorAttr.strides() == nullptr)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Tensor dims or strides are null for UID: "
+                                                           + std::to_string(uid));
+    }
+
+    if(tensorAttr.dims()->size() != 3)
+    {
+        return {tensorAttr};
+    }
+
+    if(tensorAttr.dims()->size() != tensorAttr.strides()->size())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Tensor dims and strides size mismatch for UID: " + std::to_string(uid));
+    }
+
+    std::vector<int64_t> dims(tensorAttr.dims()->begin(), tensorAttr.dims()->end());
+    std::vector<int64_t> strides(tensorAttr.strides()->begin(), tensorAttr.strides()->end());
+
+    // MIOpen requires at least 4D tensors for batchnorm.
+    // Pad 3D to 4D by appending W=1 dimension.
+    // Stride for W: 1 for channels-first (NCL→NCHW), C for channels-last (NLC→NHWC).
+    dims.push_back(1);
+
+    constexpr size_t C_IDX = 1;
+    constexpr size_t L_IDX = 2;
+    bool isChannelsLast = strides[C_IDX] < strides[L_IDX];
+    strides.push_back(isChannelsLast ? dims[C_IDX] : 1);
+
+    return {uid, tensorAttr.data_type(), dims, strides};
+}
+
 size_t getSpatialDimCount(const hipdnn_data_sdk::data_objects::TensorAttributes& attr)
 {
     if(attr.dims()->size() < 3)
@@ -90,33 +132,33 @@ ActivationParams mapPointwiseModeToMiopenActivation(
     case PM::RELU_FWD:
     case PM::RELU_BWD:
     {
-        if(attrs.relu_lower_clip() && attrs.relu_upper_clip())
+        auto lowerClip = attrs.relu_lower_clip();
+        auto upperClip = attrs.relu_upper_clip();
+        auto lowerClipSlope = attrs.relu_lower_clip_slope();
+
+        if(lowerClip && upperClip)
         {
             // CLAMP
             // act(x) = max(\alpha, min(\beta, x))
             return ActivationParams{miopenActivationCLAMP,
-                                    static_cast<double>(*attrs.relu_lower_clip()),
-                                    static_cast<double>(*attrs.relu_upper_clip()),
+                                    static_cast<double>(*lowerClip),
+                                    static_cast<double>(*upperClip),
                                     0.0};
         }
-        if(attrs.relu_upper_clip())
+        if(upperClip)
         {
             // Clipped ReLU
             // act(x) = max(0, min(\alpha, x))
-            return ActivationParams{miopenActivationCLIPPEDRELU,
-                                    static_cast<double>(*attrs.relu_upper_clip()),
-                                    0.0,
-                                    0.0};
+            return ActivationParams{
+                miopenActivationCLIPPEDRELU, static_cast<double>(*upperClip), 0.0, 0.0};
         }
-        if(attrs.relu_lower_clip_slope())
+        if(lowerClipSlope)
         {
             // Leaky ReLU
-            return ActivationParams{miopenActivationLEAKYRELU,
-                                    static_cast<double>(*attrs.relu_lower_clip_slope()),
-                                    0.0,
-                                    0.0};
+            return ActivationParams{
+                miopenActivationLEAKYRELU, static_cast<double>(*lowerClipSlope), 0.0, 0.0};
         }
-        if(attrs.relu_lower_clip().has_value() && attrs.relu_lower_clip().value() != 0.f)
+        if(lowerClip && *lowerClip != 0.f)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,

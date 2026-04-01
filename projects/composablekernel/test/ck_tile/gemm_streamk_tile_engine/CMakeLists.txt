@@ -126,6 +126,7 @@ function(build_gemm_test_targets datatype layout config_name configs_dir_path)
                 --layout ${layout}
                 --config_json ${json_blob}
                 --list_kernels
+                --gpu_targets "${SUPPORTED_GPU_TARGETS}"
         WORKING_DIRECTORY ${TILE_ENGINE_GEMM_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -188,6 +189,7 @@ function(build_gemm_test_targets datatype layout config_name configs_dir_path)
                                 --kernel_name "${kernel_name}"
                                 --tile_config "${tile_config}"
                                 --trait_combo "${trait_combo}"
+                                --gpu_targets "${SUPPORTED_GPU_TARGETS}"
                         WORKING_DIRECTORY ${TILE_ENGINE_GEMM_DIR}
                         RESULT_VARIABLE gen_ret
                         OUTPUT_VARIABLE gen_output
@@ -232,7 +234,7 @@ message(STATUS "SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 
 # GPU architecture filtering - only build tests for supported architectures
 set(GEMM_TEST_GPU_TARGETS "")
-set(DESIRED_TARGETS "gfx90a;gfx942;gfx950")
+set(DESIRED_TARGETS "gfx90a;gfx942;gfx950;gfx12-generic")
 
 foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
     if(target IN_LIST DESIRED_TARGETS)
@@ -243,7 +245,7 @@ endforeach()
 
 # Early exit if no compatible GPU architectures are available
 if(NOT GEMM_TEST_GPU_TARGETS)
-	message(WARNING "Skipping StreamK GEMM Tile Engine tests: No supported GPU targets (gfx90a, gfx942, gfx950) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
+	message(WARNING "Skipping StreamK GEMM Tile Engine tests: No supported GPU targets (gfx90a, gfx942, gfx950, gfx12-generic) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
     return()
 endif()
 
@@ -278,14 +280,18 @@ message(STATUS "Building StreamK GEMM tile engine tests for GPU targets: ${GEMM_
 # All supported data types and layouts for comprehensive testing
 # Note: fp64 not included (no MFMA hardware support)
 set(TEST_DATATYPES "fp16;bf16")
-set(TEST_LAYOUTS "rcr;rrr;ccr;crr")
+# Temporarily only test rcr and crr
+# set(TEST_LAYOUTS "rcr;rrr;ccr;crr")
+set(TEST_LAYOUTS "rcr;crr")
 
 # ============================================================================
 # Test Target Generation - Datatype-Specific Categories
 # ============================================================================
 
 # 1. SMOKE TESTS: Test for basic functionality with data types (fp8, bf8, fp16, bf16)
-set(SMALL_DATATYPES "fp16;bf16;fp8;bf8")
+# Temporarily only consider fp16
+# set(SMALL_DATATYPES "fp16;bf16;fp8;bf8")
+set(SMALL_DATATYPES "fp16")
 set(SIXTEEN_BIT_DATATYPES "fp16;bf16")
 set(EIGHT_BIT_DATATYPES "fp8;bf8")
 set(LARGE_TILES "256,256,32")

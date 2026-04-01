@@ -116,16 +116,48 @@ ninja coverage
 ```
 
 ### Address Sanitizer Build
+
+#### Linux
 ```bash
 cmake -GNinja -DBUILD_ADDRESS_SANITIZER=ON ..
 ninja check
 # Note: Some HIP-related tests may be skipped due to AddressSanitizer incompatibility
 ```
 
-### Building Specific Components
+#### Windows (Clang)
+
+Before configuring, ensure the following are on your `PATH` (in addition to the
+[standard Windows setup](#8-setup-environment-variables)):
+
+- **TheRock `bin`** (for `hipconfig`): `C:\dist\therock\bin`
+- **Windows SDK `bin`** (for `rc.exe`, the Windows Resource Compiler — required by CMake when
+  targeting Clang on Windows, including sub-builds such as `flatc`):
+  `C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64`
+  (adjust the SDK version number to match your installed Windows Kit)
+
+Also set `HIP_PLATFORM=amd` if not already in your environment.
+
 ```bash
-# Build without plugins
-cmake -GNinja -DHIPDNN_BUILD_PLUGINS=OFF ..
+# Example using bash (Git Bash / MSYS2):
+export PATH="/c/dist/therock/bin:/c/Program Files (x86)/Windows Kits/10/bin/10.0.22621.0/x64:$PATH"
+export HIP_PLATFORM=amd
+
+cmake -GNinja -DBUILD_ADDRESS_SANITIZER=ON -DGPU_TARGETS=<target> \
+    -DENABLE_CLANG_TIDY=OFF -DENABLE_CLANG_FORMAT=OFF ..
+ninja
+```
+
+The Clang ASAN runtime DLL (`clang_rt.asan_dynamic-x86_64.dll`) must be on your `PATH` when
+running test executables. With a TheRock installation, add its `lib/windows` directory to `PATH`:
+```bash
+# TheRock installs the ASAN DLL here (adjust the clang version number as needed):
+export PATH="C:/dist/therock/lib/llvm/lib/clang/22/lib/windows:$PATH"
+ninja check
+```
+
+To find the exact resource directory path for your installation:
+```
+C:\dist\therock\lib\llvm\bin\clang++.exe -print-resource-dir
 ```
 
 ### Disabling JSON Support
@@ -161,6 +193,12 @@ cmake -GNinja -DCMAKE_INSTALL_PREFIX=/custom/install/path ..
 # Both custom
 cmake -GNinja -DROCM_CMAKE_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/another/path ..
 ```
+
+### rocm-libraries Superbuild
+
+The superbuild allows you to build hipdnn + dnn-providers in the same build making it easier to do cross project changes.
+
+See [Superbuild](./Superbuild.md) documentation for usage.
 
 ### Clang Tools
 

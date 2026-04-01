@@ -8,11 +8,13 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
+#include <hipdnn_frontend/detail/MatmulPacker.hpp>
+#include <hipdnn_frontend/detail/MatmulUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class MatmulNode : public BaseNode<MatmulNode>
+class MatmulNode : public BaseNode<MatmulNode, NodeType::MATMUL>
 {
 
 public:
@@ -22,6 +24,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(matmulAttributes))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        MatmulAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackMatmulOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 
     Error pre_validate_node() const override
@@ -119,6 +131,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createMatmulOperation(attributes, tensorDescs, operations);
     }
 
 private:

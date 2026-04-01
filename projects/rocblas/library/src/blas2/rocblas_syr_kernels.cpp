@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "device_macros.hpp"
 #include "rocblas_syr.hpp"
 
@@ -181,7 +182,7 @@ rocblas_status rocblas_internal_syr_launcher(rocblas_handle handle,
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
-    static constexpr int SYR_DIM_X = 1024;
+    static constexpr int SYR_DIM_X = rocblas::conditional_v<rocblas_enable_asan, 256, 1024>;
 
     size_t nitems = (size_t)n * (n + 1) / 2;
 

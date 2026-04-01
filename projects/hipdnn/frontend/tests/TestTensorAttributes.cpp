@@ -12,7 +12,7 @@ using namespace hipdnn_frontend::graph;
 
 TEST(TestTensorAttributes, DefaultConstructor)
 {
-    TensorAttributes tensor;
+    const TensorAttributes tensor;
     EXPECT_EQ(tensor.get_uid(), 0);
     EXPECT_EQ(tensor.get_name(), "");
     EXPECT_EQ(tensor.get_data_type(), DataType::NOT_SET);
@@ -129,7 +129,7 @@ TEST(TestTensorAttributes, PackAttributes)
 
 TEST(TestTensorAttributes, ValidateSucceedsOnValueTensor)
 {
-    TensorAttributes tensor(1.f);
+    const TensorAttributes tensor(1.f);
     EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
 }
 
@@ -177,7 +177,8 @@ TEST(TestTensorAttributes, ValidateFailsOnEmptyDims)
 
 TEST(TestTensorAttributes, ValidateFailsOnNonPositiveDimension)
 {
-    std::vector<std::vector<int64_t>> testDims = {{0, 1}, {1, 0, 1}, {-1, 1, 1}, {1, 1, 1, -1}};
+    const std::vector<std::vector<int64_t>> testDims
+        = {{0, 1}, {1, 0, 1}, {-1, 1, 1}, {1, 1, 1, -1}};
 
     for(const auto& dim : testDims)
     {
@@ -198,7 +199,7 @@ TEST(TestTensorAttributes, ValidateDataType)
     tensor.set_dim({4, 5, 6});
     tensor.set_stride({0, 1, 2});
 
-    std::vector<std::pair<DataType, ErrorCode>> expectedResults
+    const std::vector<std::pair<DataType, ErrorCode>> expectedResults
         = {{DataType::NOT_SET, ErrorCode::ATTRIBUTE_NOT_SET},
            {DataType::FLOAT, ErrorCode::OK},
            {DataType::HALF, ErrorCode::OK},
@@ -208,7 +209,13 @@ TEST(TestTensorAttributes, ValidateDataType)
            {DataType::INT32, ErrorCode::OK},
            {DataType::INT8, ErrorCode::OK},
            {DataType::FP8_E4M3, ErrorCode::OK},
-           {DataType::FP8_E5M2, ErrorCode::OK}};
+           {DataType::FP8_E5M2, ErrorCode::OK},
+           {DataType::FP8_E8M0, ErrorCode::OK},
+           {DataType::FP4_E2M1, ErrorCode::OK},
+           {DataType::INT4, ErrorCode::OK},
+           {DataType::FP6_E2M3, ErrorCode::OK},
+           {DataType::FP6_E3M2, ErrorCode::OK},
+           {DataType::INT64, ErrorCode::OK}};
 
     for(auto [dataType, errorCode] : expectedResults)
     {

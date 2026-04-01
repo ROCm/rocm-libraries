@@ -29,6 +29,13 @@ namespace hipdnn_frontend::graph
  * operation: C = A @ B. Supports batched operations when tensors have
  * leading batch dimensions.
  *
+ * **Tensor Shapes:**
+ * - **A** (left input): `(...batch, M, K)` — leading batch dims, rows, columns
+ * - **B** (right input): `(...batch, K, N)` — K must match A's last dim
+ * - **C** (output): `(...batch, M, N)` — batch dims are broadcast
+ *
+ * Batch dimensions support broadcasting (dims must be equal or divisible).
+ *
  * @code{.cpp}
  * // Matrix multiplication: C = A @ B
  * auto c = graph.matmul(a, b, MatmulAttributes());
@@ -39,6 +46,8 @@ namespace hipdnn_frontend::graph
 class MatmulAttributes : public Attributes<MatmulAttributes>
 {
 public:
+    MatmulAttributes() = default;
+
     /// Input tensor identifiers
     enum class InputNames
     {
@@ -127,5 +136,5 @@ public:
     }
 };
 
-typedef MatmulAttributes Matmul_attributes; ///< @brief cuDNN compatibility alias
+typedef MatmulAttributes Matmul_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

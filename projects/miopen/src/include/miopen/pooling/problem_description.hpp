@@ -183,16 +183,12 @@ private:
     }
     std::string GetDirectionStr() const
     {
-        std::string s;
-
         switch(direction)
         {
         case Direction::Forward: return "Fwd";
         case Direction::Backward: return "Bwd";
         default: MIOPEN_THROW(miopenStatusInvalidValue, "Wrong pooling direction provided");
         }
-
-        return s;
     }
     std::string GetModeStr() const
     {

@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -31,7 +32,10 @@ struct Version
 
     Version(const std::string& versionStr)
     {
-        if(std::sscanf(versionStr.c_str(), "%d.%d.%d", &major, &minor, &patch) != 3)
+        char dot1;
+        char dot2;
+        std::istringstream iss(versionStr);
+        if(!(iss >> major >> dot1 >> minor >> dot2 >> patch) || dot1 != '.' || dot2 != '.')
         {
             throw std::invalid_argument("Version string does not match required format. String = "
                                         + std::string(versionStr)

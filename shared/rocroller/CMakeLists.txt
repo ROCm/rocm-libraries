@@ -13,19 +13,7 @@ include(FetchContent)
 include(CMakeDependentOption)
 include(rocroller_target_configure_sanitizers)
 
-FetchContent_Declare(
-    ROCmCMakeBuildTools
-    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
-    GIT_TAG rocm-6.3.0
-    SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
-)
-FetchContent_MakeAvailable(ROCmCMakeBuildTools)
-list(
-    APPEND CMAKE_MODULE_PATH
-    ${rocmcmakebuildtools_SOURCE_DIR}/share/rocmcmakebuildtools/cmake
-)
-include(ROCMInstallTargets)
-include(ROCMSetupVersion)
+include(fetch_rocm_cmake)
 
 option(ROCROLLER_ENABLE_CLIENT "Build the rocRoller client." ON)
 option(ROCROLLER_ENABLE_YAML_CPP "Enable yaml-cpp backend." ON)

@@ -122,6 +122,12 @@ private:
     }
 };
 
+#ifdef _WIN32
+// Suppress -Wundefined-func-template warning for Windows
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wundefined-func-template"
+#endif
+
 /// Common interface for tunable and non-tunable solvers
 template <class Context, class Problem>
 struct SolverInterface : SolverBase
@@ -145,6 +151,9 @@ struct SolverInterface : SolverBase
 
     /// Returns the workspace size required by the solver for the given Problem
     virtual size_t GetWorkspaceSize(const Context&, const Problem&) const { return 0; };
+
+    /// Returns true if the solver is expected to be slow for the given problem.
+    virtual bool IsSlow(const Context&, const Problem&) const { return false; };
 };
 
 /// Common interface for non-tunable solvers
@@ -230,6 +239,11 @@ struct SolverBaseTunable : SolverInterfaceTunable<Context, Problem>, TunableSolv
         return GetSolution(ctx, problem, config).invoker_factory.value();
     }
 };
+
+#ifdef _WIN32
+// Suppress -Wundefined-func-template warning for Windows
+#pragma GCC diagnostic pop
+#endif
 
 // \todo Should be removed
 template <class Context, class Problem>
