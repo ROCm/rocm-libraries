@@ -54,8 +54,7 @@ TEST_CASE("ControlGraph Basic", "[control-graph]")
         std::vector<int> nodes1 = control.childNodes(kernel_index).to<std::vector>();
         REQUIRE(nodes1.size() == 2);
 
-        std::vector<int> edges1
-            = control.getNeighbours<Graph::Direction::Downstream>(kernel_index);
+        std::vector<int> edges1 = control.getNeighbours<Graph::Direction::Downstream>(kernel_index);
         REQUIRE(edges1.size() == 2);
         REQUIRE(nodes1.size() == edges1.size());
 
@@ -79,21 +78,18 @@ TEST_CASE("ControlGraph Basic", "[control-graph]")
 
         CHECK(control.getInputNodeIndices<Sequence>(loadA_index).to<std::vector>().empty());
         CHECK(control.getInputNodeIndices<Initialize>(loadA_index).to<std::vector>().empty());
-        CHECK(
-            control.getInputNodeIndices<ForLoopIncrement>(loadA_index).to<std::vector>().empty());
+        CHECK(control.getInputNodeIndices<ForLoopIncrement>(loadA_index).to<std::vector>().empty());
     }
 
     {
-        std::vector<int> edges2
-            = control.getNeighbours<Graph::Direction::Downstream>(loadA_index);
+        std::vector<int> edges2 = control.getNeighbours<Graph::Direction::Downstream>(loadA_index);
         REQUIRE(edges2.size() == 1);
 
         std::vector<int> nodes5 = control.parentNodes(loadB_index).to<std::vector>();
         REQUIRE(nodes5.size() == 1);
         CHECK(nodes5[0] == kernel_index);
 
-        std::vector<int> edges3
-            = control.getNeighbours<Graph::Direction::Downstream>(loadB_index);
+        std::vector<int> edges3 = control.getNeighbours<Graph::Direction::Downstream>(loadB_index);
         CHECK(edges3.size() == 2);
     }
 
@@ -108,12 +104,10 @@ TEST_CASE("ControlGraph Basic", "[control-graph]")
     }
 
     {
-        std::vector<int> edges4
-            = control.getNeighbours<Graph::Direction::Upstream>(storeC_index);
+        std::vector<int> edges4 = control.getNeighbours<Graph::Direction::Upstream>(storeC_index);
         REQUIRE(edges4.size() == 1);
 
-        std::vector<int> nodes8
-            = control.getNeighbours<Graph::Direction::Upstream>(edges4[0]);
+        std::vector<int> nodes8 = control.getNeighbours<Graph::Direction::Upstream>(edges4[0]);
         REQUIRE(nodes8.size() == 1);
         CHECK(nodes8[0] == mul_index);
     }
@@ -154,10 +148,8 @@ TEST_CASE("ControlGraph Basic", "[control-graph]")
     {
         auto checkAllPolicies = [&](auto const policy) {
             CHECK_THROWS_AS(control.compareNodes(policy, loadA_index, loadA_index), FatalError);
-            CHECK_THROWS_AS(control.compareNodes(policy, loadA_index, sequence1_index),
-                            FatalError);
-            CHECK_THROWS_AS(control.compareNodes(policy, sequence2_index, loadB_index),
-                            FatalError);
+            CHECK_THROWS_AS(control.compareNodes(policy, loadA_index, sequence1_index), FatalError);
+            CHECK_THROWS_AS(control.compareNodes(policy, sequence2_index, loadB_index), FatalError);
             CHECK_THROWS(control.compareNodes(policy, loadA_index, 9000));
             CHECK_THROWS(control.compareNodes(policy, 9000, loadB_index));
         };
@@ -184,12 +176,10 @@ TEST_CASE("ControlGraph Basic", "[control-graph]")
     SECTION("compareNodes ordering")
     {
         auto checkAllPolicies = [&](auto const policy) {
-            CHECK(NodeOrdering::LeftFirst
-                  == control.compareNodes(policy, loadA_index, mul_index));
+            CHECK(NodeOrdering::LeftFirst == control.compareNodes(policy, loadA_index, mul_index));
             CHECK(NodeOrdering::Undefined
                   == control.compareNodes(policy, loadA_index, loadB_index));
-            CHECK(NodeOrdering::RightFirst
-                  == control.compareNodes(policy, mul_index, add_index));
+            CHECK(NodeOrdering::RightFirst == control.compareNodes(policy, mul_index, add_index));
             CHECK(NodeOrdering::LeftInBodyOfRight
                   == control.compareNodes(policy, mul_index, kernel_index));
             CHECK(NodeOrdering::RightInBodyOfLeft
@@ -280,10 +270,8 @@ TEST_CASE("ControlGraph BeforeAfter", "[control-graph]")
 
             CHECK(NodeOrdering::RightFirst == control.compareNodes(policy, forInc, forInit));
             CHECK(NodeOrdering::Undefined == control.compareNodes(policy, loadA, loadB));
-            CHECK(NodeOrdering::RightInBodyOfLeft
-                  == control.compareNodes(policy, forOp, assign3));
-            CHECK(NodeOrdering::LeftInBodyOfRight
-                  == control.compareNodes(policy, mul, scope3));
+            CHECK(NodeOrdering::RightInBodyOfLeft == control.compareNodes(policy, forOp, assign3));
+            CHECK(NodeOrdering::LeftInBodyOfRight == control.compareNodes(policy, mul, scope3));
 
             CHECK(NodeOrdering::LeftFirst == control.compareNodes(policy, loadC, storeD));
             CHECK(NodeOrdering::LeftFirst == control.compareNodes(policy, loadD, storeD));
@@ -531,14 +519,13 @@ TEST_CASE("ControlGraph AssertOp", "[control-graph]")
     int dummyIndex  = control.addElement(Assign());
     int passedIndex = control.addElement(Sequence(), {assertOp}, {dummyIndex});
 
-    auto assertOps = control
-                         .findNodes(
-                             kernelIndex,
-                             [&](int tag) -> bool {
-                                 return isOperation<AssertOp>(control.getElement(tag));
-                             },
-                             GD::Downstream)
-                         .to<std::vector>();
+    auto assertOps
+        = control
+              .findNodes(
+                  kernelIndex,
+                  [&](int tag) -> bool { return isOperation<AssertOp>(control.getElement(tag)); },
+                  GD::Downstream)
+              .to<std::vector>();
     CHECK(assertOps.size() == 1);
 }
 
@@ -600,8 +587,7 @@ TEST_CASE("ControlGraph getSetCoordinates", "[control-graph]")
     CHECK(5u == getUnrollValueForOp(kg, 3, load3));
 
     CHECK((std::set{topSet1, topSet3}) == getTopSetCoordinates(kg, {load1, load3}));
-    CHECK((std::set{topSet1, topSet2, topSet3})
-          == getTopSetCoordinates(kg, {load1, load2, load3}));
+    CHECK((std::set{topSet1, topSet2, topSet3}) == getTopSetCoordinates(kg, {load1, load2, load3}));
 }
 
 TEST_CASE("ControlGraph hasExistingSetCoordinate", "[control-graph]")
@@ -669,8 +655,7 @@ TEST_CASE("ControlGraph ModifyOrder", "[control-graph]")
     auto checkAllPolicies = [&](int nodeA, int nodeB, NodeOrdering expectedOrder) {
         CHECK(expectedOrder == control.compareNodes(rocRoller::UpdateCache, nodeA, nodeB));
         CHECK(expectedOrder == control.compareNodes(rocRoller::CacheOnly, nodeA, nodeB));
-        CHECK(expectedOrder
-              == control.compareNodes(rocRoller::UseCacheIfAvailable, nodeA, nodeB));
+        CHECK(expectedOrder == control.compareNodes(rocRoller::UseCacheIfAvailable, nodeA, nodeB));
         CHECK(expectedOrder == control.compareNodes(rocRoller::IgnoreCache, nodeA, nodeB));
     };
 

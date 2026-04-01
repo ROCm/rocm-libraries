@@ -1601,8 +1601,8 @@ namespace rocRoller
             }
         }
 
-        Generator<std::pair<int, ControlGraph::ControlEdge>> containingAncestors(int                control,
-                                                                          KernelGraph const& graph)
+        Generator<std::pair<int, ControlGraph::ControlEdge>>
+            containingAncestors(int control, KernelGraph const& graph)
         {
             return containingAncestors(control, graph.control);
         }
@@ -1627,9 +1627,8 @@ namespace rocRoller
                 AssertFatal(!visitedNodes.contains(node), "Graph contains cycle!");
                 visitedNodes.insert(node);
 
-                auto controlEdge = graph.getEdge(edge);
-                auto isContaining
-                    = !std::holds_alternative<ControlGraph::Sequence>(controlEdge);
+                auto controlEdge  = graph.getEdge(edge);
+                auto isContaining = !std::holds_alternative<ControlGraph::Sequence>(controlEdge);
                 if(isContaining)
                     co_yield {node, controlEdge};
 
