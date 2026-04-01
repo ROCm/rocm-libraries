@@ -33,11 +33,12 @@ add_executable(
     IntegrationConvolutionDgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
+    IntegrationCustomOpDescriptorLifting.cpp
+    IntegrationCustomOpDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
-    IntegrationCustomOpDescriptorLifting.cpp
-    IntegrationCustomOpDescriptorLowering.cpp
+    IntegrationGraphKnobsDescriptorLifting.cpp
     IntegrationGraphLifting.cpp
     IntegrationGraphSupportCheck.cpp
     IntegrationLayerNormDescriptorLifting.cpp
