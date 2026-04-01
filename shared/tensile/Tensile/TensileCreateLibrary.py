@@ -479,6 +479,7 @@ def writeKernels(
     kernelWriterAssembly: KernelWriterAssembly,
     errorTolerant: bool = False,
     removeTemporaries: bool = True,
+    libraryPath: Optional[Path] = None,
 ):
     start = time.time()
 
@@ -550,7 +551,7 @@ def writeKernels(
     codeObjectFiles = []
     if not globalParameters["GenerateSourcesAndExit"]:
         codeObjectFiles += SourceCommands.buildSourceCodeObjectFiles(
-            cxxCompiler, kernelFiles, outputPath, removeTemporaries
+            cxxCompiler, kernelFiles, outputPath, removeTemporaries, libraryPath=libraryPath
         )
         codeObjectFiles += AssemblyCommands.buildAssemblyCodeObjectFiles(
             bundler,
@@ -558,6 +559,7 @@ def writeKernels(
             kernelWriterAssembly,
             outputPath,
             removeTemporaries,
+            libraryPath=libraryPath,
         )
 
     stop = time.time()
@@ -793,17 +795,14 @@ def buildObjectFilePaths(
     for asmKernelFile in asmKernelFiles:
         asmKernelPaths += [os.path.join(asmKernelDir, asmKernelFile)]
 
-    # Build full paths for source and asm library files
-    # Code objects (.co, .hsaco) stay in the flat library/ dir; sanityCheck compares
-    # these against writeKernels output which also uses the flat dir.
-    libDir = os.path.join(prefixDir, "library")
-    # Solution catalog .dat/.yaml files move to library/<arch>/ for single-arch builds
-    # so that shard overlays cannot corrupt each other (see libraryDir()).
-    metaDir = str(libraryDir(prefixDir, requestedArchs)) if requestedArchs else libDir
+    # Build full paths for source and asm library files.
+    # For single-arch builds, all library outputs go to library/<arch>/ so that
+    # shard overlays compose additively without last-writer-wins conflicts.
+    libDir = str(libraryDir(prefixDir, requestedArchs)) if requestedArchs else os.path.join(prefixDir, "library")
 
     libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
     if not globalParameters["SeparateArchitectures"] and not globalParameters["LazyLibraryLoading"]:
-        libMetadataPaths = [os.path.join(metaDir, "TensileLibrary" + libraryExt)]
+        libMetadataPaths = [os.path.join(libDir, "TensileLibrary" + libraryExt)]
 
     for sourceLibFile in sourceLibFiles:
         sourceLibPaths += [os.path.join(libDir, sourceLibFile)]
@@ -814,12 +813,12 @@ def buildObjectFilePaths(
         for arch, lib in masterLibraries.items():
             if globalParameters["LazyLibraryLoading"]:
                 newMetadataPaths.add(
-                    os.path.join(metaDir, "TensileLibrary_lazy_" + arch + libraryExt)
+                    os.path.join(libDir, "TensileLibrary_lazy_" + arch + libraryExt)
                 )
             else:
-                newMetadataPaths.add(os.path.join(metaDir, "TensileLibrary_" + arch + libraryExt))
+                newMetadataPaths.add(os.path.join(libDir, "TensileLibrary_" + arch + libraryExt))
             for name, placeholder in lib.lazyLibraries.items():
-                newMetadataPaths.add(os.path.join(metaDir, name + libraryExt))
+                newMetadataPaths.add(os.path.join(libDir, name + libraryExt))
 
     libMetadataPaths += list(newMetadataPaths)
 
@@ -1513,6 +1512,7 @@ def TensileCreateLibrary():
         kernelWriterSource,
         kernelWriterAssembly,
         removeTemporaries=removeTemporaries,
+        libraryPath=libraryDir(outputPath, requestedArchs),
     )
 
     sanityCheck(
