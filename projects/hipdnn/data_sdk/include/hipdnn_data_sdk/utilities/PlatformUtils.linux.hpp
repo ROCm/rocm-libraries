@@ -66,7 +66,7 @@ inline std::filesystem::path getCurrentExecutableDirectory()
 
 inline LibHandle openLibrary(const std::filesystem::path& libraryPath)
 {
-    LibHandle handle = dlopen(libraryPath.string().c_str(), RTLD_NOW);
+    LibHandle handle = dlopen(libraryPath.string().c_str(), RTLD_NOW | RTLD_LOCAL);
     if(handle == nullptr)
     {
         const char* error = dlerror();
