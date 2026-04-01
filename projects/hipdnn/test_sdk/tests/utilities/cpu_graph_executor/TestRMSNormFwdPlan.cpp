@@ -10,6 +10,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdPlan.hpp>
@@ -21,6 +22,7 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
+namespace rmsnorm = hipdnn_test_sdk::utilities::rmsnorm;
 
 TEST(TestRMSNormFwdPlan, ExecutePlan)
 {
@@ -64,7 +66,9 @@ TEST(TestRMSNormFwdPlan, ExecutePlan)
     RMSNormFwdPlan<float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);
 
-    const float tolerance = 1e-5f;
+    // x in [0, 1], scale in [0, 1], C=3, no bias
+    const float tolerance
+        = rmsnorm::calculateRMSNormFwdTolerance<float, float, float>(0.0, 1.0, 0.0, 1.0, dims[1]);
     const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(cpuRefOutputValidation.allClose(
         *directTensorBundle.tensors[attributes.y_tensor_uid()].get(),
@@ -161,7 +165,9 @@ TEST(TestRMSNormFwdPlan, ExecutePlanWithBias)
     RMSNormFwdPlan<float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);
 
-    const float tolerance = 1e-5f;
+    // x in [0, 1], scale in [0, 1], C=3, bias in [-0.5, 0.5]
+    const float tolerance = rmsnorm::calculateRMSNormFwdTolerance<float, float, float>(
+        0.0, 1.0, 0.0, 1.0, dims[1], -0.5, 0.5);
     const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(cpuRefOutputValidation.allClose(
         *directTensorBundle.tensors[attributes.y_tensor_uid()].get(),
