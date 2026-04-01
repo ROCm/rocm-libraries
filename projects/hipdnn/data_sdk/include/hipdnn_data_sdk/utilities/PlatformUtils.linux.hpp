@@ -6,7 +6,6 @@
 #if defined(__linux__)
 #include <array>
 #include <climits>
-#include <dlfcn.h>
 #include <filesystem>
 #include <stdexcept>
 #include <unistd.h>
@@ -17,8 +16,6 @@ namespace hipdnn_data_sdk::utilities
 constexpr const char* SHARED_LIB_EXT = ".so";
 constexpr const char* LIB_PREFIX = "lib";
 constexpr const char* EXECUTABLE_EXT = "";
-
-using LibHandle = void*;
 
 inline std::string getEnv(const char* var, const char* defaultValue = nullptr)
 {
@@ -62,38 +59,6 @@ inline std::filesystem::path getCurrentExecutableDirectory()
     }
     return std::filesystem::path(std::string(result.data(), static_cast<size_t>(count)))
         .parent_path();
-}
-
-inline LibHandle openLibrary(const std::filesystem::path& libraryPath)
-{
-    LibHandle handle = dlopen(libraryPath.string().c_str(), RTLD_NOW | RTLD_LOCAL);
-    if(handle == nullptr)
-    {
-        const char* error = dlerror();
-        throw std::runtime_error("Failed to load library: " + libraryPath.string() + " ("
-                                 + (error != nullptr ? std::string(error) : "Unknown error") + ")");
-    }
-    return handle;
-}
-
-inline void closeLibrary(LibHandle handle)
-{
-    if(handle != nullptr)
-    {
-        dlclose(handle);
-    }
-}
-
-inline void* getSymbol(LibHandle handle, const char* symbolName)
-{
-    void* symbol = dlsym(handle, symbolName);
-    if(symbol == nullptr)
-    {
-        const char* error = dlerror();
-        throw std::runtime_error("Failed to get symbol: " + std::string(symbolName) + " ("
-                                 + (error != nullptr ? std::string(error) : "Unknown error") + ")");
-    }
-    return symbol;
 }
 
 } // namespace hipdnn_data_sdk::utilities
