@@ -189,6 +189,16 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
                  std::runtime_error);
 }
 
+TEST(TestGpuReferenceGraphExecutor, MissingVariantPackEntryThrows)
+{
+    SKIP_IF_NO_DEVICES();
+    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
+    const std::unordered_map<int64_t, void*> emptyPack;
+    GpuReferenceGraphExecutor executor;
+    EXPECT_THROW(executor.execute(builder.GetBufferPointer(), builder.GetSize(), emptyPack),
+                 std::out_of_range);
+}
+
 TEST(TestGpuReferenceGraphExecutor, PointwiseDummyAddOneExecutes)
 {
     SKIP_IF_NO_DEVICES();
