@@ -12,7 +12,7 @@ subtrees:
   - file: install/rocPRIM-build-install-linux.rst
     title: Installing on Linux
   - file: install/rocPRIM-build-install-windows.rst
-    title: Building and installing from source
+    title: Installing on Windows
 
 - caption: Conceptual
   entries:
