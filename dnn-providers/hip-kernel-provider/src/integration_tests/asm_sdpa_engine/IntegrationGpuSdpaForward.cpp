@@ -19,7 +19,7 @@ using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities::conv;
-using namespace asm_sdpa_engine::test_utilities;
+using namespace hip_kernel_provider::test_utilities;
 
 namespace
 {

@@ -176,7 +176,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.oStrideBatch = oStrideBatch;
     params.attnScale = attnScale;
 
-    executionContext.setPlan(std::make_unique<SdpaFwdPlan>(module, function, std::move(params)));
+    executionContext.setPlan(std::make_unique<SdpaFwdPlan>(module, function, params));
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> SdpaFwdPlanBuilder::getCustomKnobs(

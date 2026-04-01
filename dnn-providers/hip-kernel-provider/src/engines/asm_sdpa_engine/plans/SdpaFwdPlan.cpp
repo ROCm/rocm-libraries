@@ -13,7 +13,7 @@ namespace asm_sdpa_engine
 SdpaFwdPlan::SdpaFwdPlan(hipModule_t kernelModule, hipFunction_t function, SdpaFwdParams params)
     : _module(kernelModule)
     , _function(function)
-    , _params(std::move(params))
+    , _params(params)
 {
 }
 
@@ -33,7 +33,7 @@ SdpaFwdPlan::~SdpaFwdPlan()
 SdpaFwdPlan::SdpaFwdPlan(SdpaFwdPlan&& other) noexcept
     : _module(other._module)
     , _function(other._function)
-    , _params(std::move(other._params))
+    , _params(other._params)
 {
     // Transfer ownership - set source to nullptr to prevent double-free
     other._module = nullptr;
@@ -59,7 +59,7 @@ SdpaFwdPlan& SdpaFwdPlan::operator=(SdpaFwdPlan&& other) noexcept
         // Transfer ownership
         _module = other._module;
         _function = other._function;
-        _params = std::move(other._params);
+        _params = other._params;
 
         // Set source to nullptr to prevent double-free
         other._module = nullptr;
