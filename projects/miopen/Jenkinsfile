@@ -444,9 +444,6 @@ pipeline {
                         beforeAgent true
                         expression { params.DBSYNC_TEST && params.TARGET_GFX90A }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx90a") }
                     steps{
                         runDbSyncJob(gfx90a_flags, "gfx90X")
@@ -461,9 +458,6 @@ pipeline {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX90A && params.DATATYPE_BF16 }
-                    }
-                    options {
-                        retry(2)
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
@@ -480,9 +474,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_GFX90A && params.DATATYPE_FP16 }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx90a") }
                     steps{
                         runBuildAndSingleGtestJob(flags: Full_test + Fp16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx90X")
@@ -497,9 +488,6 @@ pipeline {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX90A && params.DATATYPE_FP32 }
-                    }
-                    options {
-                        retry(2)
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
@@ -517,9 +505,6 @@ pipeline {
                         beforeAgent true
                         expression { params.DBSYNC_TEST && (params.TARGET_GFX942 || params.WORKAROUND__TARGET_GFX942_MINIMUM_TEST_ENABLE) }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx942") }
                     steps{
                         runDbSyncJob(gfx942_flags, "gfx942_gfx950")
@@ -535,9 +520,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_GFX942 && params.DATATYPE_BF16 }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx942") }
                     steps{
                         runBuildAndSingleGtestJob(flags: Full_test + Bf16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx942_gfx950")
@@ -547,9 +529,6 @@ pipeline {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX942 && params.DATATYPE_FP16 }
-                    }
-                    options {
-                        retry(2)
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
@@ -566,9 +545,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_GFX942 && params.DATATYPE_FP32 }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx942") }
                     steps{
                         runBuildAndSingleGtestJob(flags: Full_test + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx942_gfx950")
@@ -583,9 +559,6 @@ pipeline {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX942 && params.DATATYPE_TF32 }
-                    }
-                    options {
-                        retry(2)
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
@@ -603,9 +576,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_NAVI32 && params.DATATYPE_FP16 }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("navi32") }
                     steps{
                         runBuildAndSingleGtestJob(flags: Full_test + Fp16_flags + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "navi")
@@ -615,9 +585,6 @@ pipeline {
                     when {
                         beforeAgent true
                         expression { params.TARGET_NAVI32 && params.DATATYPE_FP32 }
-                    }
-                    options {
-                        retry(2)
                     }
                     agent{ label rocmnode("navi32") }
                     steps{
@@ -663,9 +630,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_GFX90A }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx90a") }
                     environment{
                         // Can be removed altogether with when WORKAROUND_SWDEV_290754.
@@ -689,9 +653,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_GFX90A }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx90a") }
                     steps{
                         script {
@@ -711,9 +672,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_GFX90A }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx90a") }
                     steps{
                         script {
@@ -732,9 +690,6 @@ pipeline {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX90A }
-                    }
-                    options {
-                        retry(2)
                     }
                     agent{ label rocmnode("gfx90a") }
                     environment{
@@ -759,9 +714,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_GFX90A }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx90a") }
                     environment{
                         make_targets =   "test_conv2d"
@@ -785,9 +737,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_GFX90A }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx90a") }
                     steps{
                         script {
@@ -806,9 +755,6 @@ pipeline {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX90A }
-                    }
-                    options {
-                        retry(2)
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
@@ -832,9 +778,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_GFX90A }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx90a") }
                     steps{
                         script {
@@ -854,9 +797,6 @@ pipeline {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX942 || params.WORKAROUND__TARGET_GFX942_MINIMUM_TEST_ENABLE }
-                    }
-                    options {
-                        retry(2)
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
@@ -901,9 +841,6 @@ pipeline {
                         beforeAgent true
                         expression { params.DBSYNC_TEST && params.TARGET_GFX908 }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx908") }
                     steps{
                         runDbSyncJob(gfx908_flags, "gfx90X")
@@ -918,9 +855,6 @@ pipeline {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX908 && params.DATATYPE_BF16 }
-                    }
-                    options {
-                        retry(2)
                     }
                     agent{ label rocmnode("gfx908") }
                     steps{
@@ -937,9 +871,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_GFX908 && params.DATATYPE_FP16 }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx908") }
                     steps{
                         runBuildAndSingleGtestJob(flags: Full_test + Fp16_flags + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx90X")
@@ -955,9 +886,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_GFX908 && params.DATATYPE_FP32 }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("gfx908") }
                     steps{
                         runBuildAndSingleGtestJob(flags: Full_test + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx90X")
@@ -972,9 +900,6 @@ pipeline {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX908 }
-                    }
-                    options {
-                        retry(2)
                     }
                     agent{ label rocmnode("gfx908") }
                     steps{
@@ -996,9 +921,6 @@ pipeline {
                         beforeAgent true
                         expression { params.TARGET_NAVI35 && params.DATATYPE_BF16 }
                     }
-                    options {
-                        retry(2)
-                    }
                     agent{ label rocmnode("strix") }
                     environment{
                         gfx115x_filter_flags = " -DMIOPEN_TEST_GFX115X=On "
@@ -1016,9 +938,6 @@ pipeline {
                     when {
                         beforeAgent true
                         expression { params.TARGET_NAVI35 && params.DATATYPE_FP16 }
-                    }
-                    options {
-                        retry(2)
                     }
                     agent{ label rocmnode("strix") }
                     environment{
@@ -1038,9 +957,6 @@ pipeline {
                     when {
                         beforeAgent true
                         expression { params.TARGET_NAVI35 && params.DATATYPE_FP32 }
-                    }
-                    options {
-                        retry(2)
                     }
                     agent{ label rocmnode("strix") }
                     environment{
