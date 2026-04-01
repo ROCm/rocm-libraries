@@ -106,13 +106,6 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
 
     index_t num_kernel = 0;
     auto run_alg       = [&](auto&& run_alg_func) {
-        if(!dummy_run_executed)
-        {
-            // Run first instance twice
-            std::tie(is_supported, avg_time, op_name) =
-                run_alg_func(args, inputs, outputs, s_conf);
-            dummy_run_executed = true;
-        }
         num_kernel++;
         // Skip if a specific instance was requested and this isn't it
         const bool running_specific_instance = (instance_index != -1);
@@ -130,6 +123,13 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                 run_alg_func(args_k_batch, inputs, outputs, s_conf);
             if(is_supported)
             {
+                if((s_conf.time_kernel_ || s_conf.flush_cache_) && !dummy_run_executed)
+                {
+                    // Run first instance twice
+                    std::tie(is_supported, avg_time, op_name) =
+                        run_alg_func(args_k_batch, inputs, outputs, s_conf);
+                    dummy_run_executed = true;
+                }
                 ckt::ValidationReport report;
                 auto&& [rtol, atol] =
                     get_rtol_atol<SIGNATURE>(num_accums, k_batch, max_accumulated_value);
