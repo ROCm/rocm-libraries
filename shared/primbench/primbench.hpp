@@ -80,9 +80,10 @@
 
 #ifdef __HIP__
     /// Exits the program with an error message if the given HIP API call returns a failure status.
-    #define PRIMBENCH_CHECK(status)                                                \
+    #define PRIMBENCH_CHECK(condition)                                             \
         do                                                                         \
         {                                                                          \
+            hipError_t status = condition;                                         \
             if(status != hipSuccess)                                               \
             {                                                                      \
                 std::cerr << __FILE__ << ":" << __LINE__                           \
@@ -93,9 +94,10 @@
         while(0)
 #else
     /// Exits the program with an error message if the given CUDA API call returns a failure status.
-    #define PRIMBENCH_CHECK(status)                                                  \
+    #define PRIMBENCH_CHECK(condition)                                               \
         do                                                                           \
         {                                                                            \
+            cudaError_t status = condition;                                          \
             if(status != cudaSuccess)                                                \
             {                                                                        \
                 std::cerr << __FILE__ << ":" << __LINE__                             \
@@ -108,9 +110,10 @@
 
 #if defined(__HIP__) && PRIMBENCH_HAS_MONITORING
     /// Exits the program with an error message if the given AMD SMI API call returns a failure status.
-    #define PRIMBENCH_AMDSMI_CHECK(status)                                                        \
+    #define PRIMBENCH_AMDSMI_CHECK(condition)                                                     \
         do                                                                                        \
         {                                                                                         \
+            amdsmi_status_t status = condition;                                                   \
             if(status != AMDSMI_STATUS_SUCCESS)                                                   \
             {                                                                                     \
                 const char* errstr = "(unknown)";                                                 \
@@ -122,9 +125,10 @@
         while(0)
 #elif defined(__CUDACC__) && PRIMBENCH_HAS_MONITORING
     /// Exits the program with an error message if the given NVML API call returns a failure status.
-    #define PRIMBENCH_NVML_CHECK(status)                                          \
+    #define PRIMBENCH_NVML_CHECK(condition)                                       \
         do                                                                        \
         {                                                                         \
+            nvmlReturn_t status = condition;                                      \
             if(status != NVML_SUCCESS)                                            \
             {                                                                     \
                 std::cerr << __FILE__ << ":" << __LINE__                          \
