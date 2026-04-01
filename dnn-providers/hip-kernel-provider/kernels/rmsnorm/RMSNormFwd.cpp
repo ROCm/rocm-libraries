@@ -33,11 +33,11 @@ struct DataCast<half>
 {
     static __device__ __forceinline__ float to(half value)
     {
-        return static_cast<float>(value);
+        return __half2float(value);
     }
     static __device__ __forceinline__ half from(float value)
     {
-        return static_cast<_Float16>(value);
+        return __float2half(value);
     }
 };
 
