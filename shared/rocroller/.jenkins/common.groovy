@@ -195,7 +195,21 @@ def runBuildDocsCommand(platform, project)
                     set -ex
                     cd ${project.paths.project_build_prefix}
                     ${sshBlock}
-                    cmake --preset docs -B build -S .
+                    # Detect pytest-cmake installation location for find_package(Pytest)
+                    PYTEST_PATH=""
+                    PYTEST_CMAKE_DIR=\$(python3 -c "import pytest_cmake; import os; print(os.path.dirname(pytest_cmake.__file__))" 2>/dev/null)
+                    if [ -n "\$PYTEST_CMAKE_DIR" ]; then
+                        echo "pytest-cmake found at: \$PYTEST_CMAKE_DIR"
+                        PYTEST_PATH=";\$PYTEST_CMAKE_DIR"
+                    elif command -v pytest &>/dev/null; then
+                        PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                        echo "pytest found at: \$(which pytest), prefix: \$PYTEST_PREFIX"
+                        PYTEST_PATH=";\$PYTEST_PREFIX"
+                    else
+                        echo "Warning: pytest-cmake not found, searching filesystem..."
+                        find /usr /opt /home -name 'PytestConfig.cmake' -type f 2>/dev/null | head -5 || echo "No PytestConfig.cmake found"
+                    fi
+                    cmake --preset docs -B build -S . -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm\$PYTEST_PATH"
                     cmake --build build --target docs
                     """
         platform.runCommand(this, command)
