@@ -11,7 +11,7 @@ def runCI =
     def prj = new rocProject('rocRoller', 'PreCheckin')
 
     //use docker files from this repo
-    prj.repoDockerfile = false
+    prj.repoDockerfile = true
     prj.defaults.ccache = true
 
     def uniqueTag = params?."Unique Docker image tag" ? org.apache.commons.lang.RandomStringUtils.random(9, true, true) : ""
