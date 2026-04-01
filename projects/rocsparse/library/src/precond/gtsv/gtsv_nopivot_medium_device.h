@@ -47,9 +47,9 @@ namespace rocsparse
                                                 T* __restrict__ du_spike,
                                                 T* __restrict__ B_spike)
     {
-        const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
-        const int gid = bid * BLOCKSIZE + tid;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int bid = hipBlockIdx_x;
+        const rocsparse_int gid = bid * BLOCKSIZE + tid;
 
         T a = (gid < m && gid != 0) ? dl[gid] : static_cast<T>(0);
         T b = (gid < m) ? d[gid] : static_cast<T>(1);
@@ -233,8 +233,8 @@ namespace rocsparse
                                                const T* __restrict__ du_spike,
                                                T* __restrict__ B_spike)
     {
-        const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int bid = hipBlockIdx_x;
 
         T a = (tid < num_spikes) ? dl_spike[tid] : static_cast<T>(0);
         T b = (tid < num_spikes) ? d_spike[tid] : static_cast<T>(1);
@@ -339,9 +339,9 @@ namespace rocsparse
                                                  const T* __restrict__ B_spike,
                                                  T* __restrict__ B)
     {
-        const int tid = hipThreadIdx_x;
-        const int gid = hipBlockIdx_x * BLOCKSIZE + tid;
-        const int N   = hipGridDim_x;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int gid = hipBlockIdx_x * BLOCKSIZE + tid;
+        const rocsparse_int N   = hipGridDim_x;
 
         if(gid >= m)
             return;

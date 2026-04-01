@@ -39,9 +39,9 @@ namespace rocsparse
                                  const T* __restrict__ du,
                                  T* __restrict__ B)
     {
-        const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
-        const int gid = BLOCKSIZE * bid + tid;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int bid = hipBlockIdx_x;
+        const rocsparse_int gid = BLOCKSIZE * bid + tid;
 
         if(gid < n)
         {
@@ -79,9 +79,9 @@ namespace rocsparse
                                  const T* __restrict__ du,
                                  T* __restrict__ B)
     {
-        const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
-        const int gid = BLOCKSIZE * bid + tid;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int bid = hipBlockIdx_x;
+        const rocsparse_int gid = BLOCKSIZE * bid + tid;
 
         if(gid < n)
         {
@@ -149,9 +149,9 @@ namespace rocsparse
                                  const T* __restrict__ du,
                                  T* __restrict__ B)
     {
-        const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
-        const int gid = BLOCKSIZE * bid + tid;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int bid = hipBlockIdx_x;
+        const rocsparse_int gid = BLOCKSIZE * bid + tid;
 
         if(gid < n)
         {
@@ -230,9 +230,9 @@ namespace rocsparse
                                  const T* __restrict__ du,
                                  T* __restrict__ B)
     {
-        const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
-        const int gid = BLOCKSIZE * bid + tid;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int bid = hipBlockIdx_x;
+        const rocsparse_int gid = BLOCKSIZE * bid + tid;
 
         if(gid < n)
         {
@@ -324,9 +324,9 @@ namespace rocsparse
                                  const T* __restrict__ du,
                                  T* __restrict__ B)
     {
-        const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
-        const int gid = BLOCKSIZE * bid + tid;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int bid = hipBlockIdx_x;
+        const rocsparse_int gid = BLOCKSIZE * bid + tid;
 
         if(gid < n)
         {
@@ -431,9 +431,9 @@ namespace rocsparse
                                  const T* __restrict__ du,
                                  T* __restrict__ B)
     {
-        const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
-        const int gid = BLOCKSIZE * bid + tid;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int bid = hipBlockIdx_x;
+        const rocsparse_int gid = BLOCKSIZE * bid + tid;
 
         if(gid < n)
         {
@@ -589,9 +589,9 @@ namespace rocsparse
                                     const T* __restrict__ du,
                                     T* __restrict__ B)
     {
-        const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
-        const int gid = BLOCKSIZE * bid + tid;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int bid = hipBlockIdx_x;
+        const rocsparse_int gid = BLOCKSIZE * bid + tid;
 
         if(gid < n)
         {
@@ -639,8 +639,8 @@ namespace rocsparse
                                            const T* __restrict__ du,
                                            T* __restrict__ B)
     {
-        const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int bid = hipBlockIdx_x;
 
         const int lid = tid & (WF_SIZE - 1);
         const int wid = tid / WF_SIZE;
@@ -756,8 +756,8 @@ namespace rocsparse
                                          const T* __restrict__ du,
                                          T* __restrict__ B)
     {
-        const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int bid = hipBlockIdx_x;
 
         const int lid = tid & (WF_SIZE - 1);
         const int wid = tid / WF_SIZE;
@@ -953,8 +953,8 @@ namespace rocsparse
                                           const T* __restrict__ du,
                                           T* __restrict__ B)
     {
-        const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
+        const rocsparse_int tid = hipThreadIdx_x;
+        const rocsparse_int bid = hipBlockIdx_x;
 
         const int tot_iter = rocsparse::log2_pow2<(2 * BLOCKSIZE) / 2>::value;
         const int pcr_iter = rocsparse::log2_pow2<PCR_SIZE / 2>::value;
