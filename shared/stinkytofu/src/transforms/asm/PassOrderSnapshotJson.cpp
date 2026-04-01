@@ -242,4 +242,37 @@ namespace stinkytofu
             return;
         emitFunctionWideRegion(beforeOrder, func, passCtx, passNameJustRan, collector);
     }
+
+    //----------------------------------------------------------------------
+    // PassOrderSnapshotInstrumentation
+    //----------------------------------------------------------------------
+    PassOrderSnapshotInstrumentation::PassOrderSnapshotInstrumentation(
+        std::shared_ptr<DAGScheduleJsonCollector> collector)
+        : collector(std::move(collector))
+    {
+    }
+
+    void PassOrderSnapshotInstrumentation::beforePass(const std::string& passName,
+                                                      Function&          F,
+                                                      PassContext&        ctx)
+    {
+        beforeOrder.clear();
+        if(collector
+           && shouldEmitPassOrderSnapshotAfterPass(ctx.getPassFeatureConfig(), passName))
+        {
+            snapshotProgramOrderStinkyLinear(F, ctx, beforeOrder);
+        }
+    }
+
+    void PassOrderSnapshotInstrumentation::afterPass(const std::string& passName,
+                                                     Function&          F,
+                                                     PassContext&        ctx)
+    {
+        if(!beforeOrder.empty())
+        {
+            appendPassOrderSnapshotJsonAfterPass(F, beforeOrder, ctx, passName, *collector);
+            beforeOrder.clear();
+        }
+    }
+
 } // namespace stinkytofu

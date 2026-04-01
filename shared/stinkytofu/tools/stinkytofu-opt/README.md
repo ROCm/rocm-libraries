@@ -177,19 +177,19 @@ const std::vector<PassInfo> availablePasses = {
 
 **Purpose:** This registry allows dynamic pass creation based on command-line arguments.
 
-#### 2. PassManagerDebugConfig (`getPassManagerDebugConfig()`)
+#### 2. Debug Print Instrumentation (`createDebugPrintInstrumentation()`)
 
-Controls debug output and logging during pass execution:
+Controls debug output and logging during pass execution via the PassInstrumentation callback interface:
 
 ```cpp
-std::unique_ptr<stinkytofu::PassManagerDebugConfig> getPassManagerDebugConfig()
+std::shared_ptr<stinkytofu::PassInstrumentation> createDebugPrintInstrumentation()
 {
     auto debugConfig = std::make_unique<stinkytofu::PassManagerDebugConfig>();
     debugConfig->setPrintBeforeAll(true);     // Print IR before each pass
     debugConfig->setPrintAfterAll(true);      // Print IR after each pass
     debugConfig->setDumpToFileInBefore("before.txt");  // Save pre-pass state
     debugConfig->setDumpToFileInAfter("after.txt");    // Save post-pass state
-    return debugConfig;
+    return std::make_shared<stinkytofu::DebugPrintInstrumentation>(std::move(debugConfig));
 }
 ```
 

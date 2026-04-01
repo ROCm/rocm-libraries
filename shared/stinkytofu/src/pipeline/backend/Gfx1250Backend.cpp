@@ -59,30 +59,22 @@ namespace stinkytofu
                                     OptLevel               optLevel,
                                     bool                   enableWaitCnt)
         {
-            // ========== Phase 0: IR Verification ==========
             // Verify IR integrity before running any passes
             // This catches IR corruption early before it propagates through optimization
             pm.addPass(createStinkyIRVerifierPass());
 
-            // ========== Phase 1: CFG Building ==========
-            // Build CFG first so optimizations can use block structure and liveness info
             pm.addPass(createCFGBuilderPass());
-
-            // ========== Phase 1.5: Remove WaitCnts ==========
             if(enableWaitCnt)
             {
                 pm.addPass(createStinkyRemoveWaitCntPass());
             }
 
-            // ========== Phase 2: Optimization ==========
-            // Run optimizations AFTER CFG (for liveness analysis) but BEFORE scheduling
-            // This ensures scheduling works on the final optimized instruction count
-            // addOptimizationPasses(pm, optLevel);
+            // addPeepholeOptPasses(pm, optLevel);
 
             // ========== Phase 3: Instruction Scheduling ==========
             pm.addPass(createStinkyBuildImplicitDependencyPass());
-            pm.addPass(createScheduleFirstLRsPass());
-            // pm.addPass(createStinkyDAGSchedulerPass());
+            // pm.addPass(createScheduleFirstLRsPass());
+            pm.addPass(createStinkyDAGSchedulerPass());
             // pm.addPass(createScheduleLastLRsPass());
         }
 
@@ -96,32 +88,44 @@ namespace stinkytofu
             const OptLevel optLevel      = static_cast<OptLevel>(
                 std::max(0, std::min(moduleOptions.OptLevel, static_cast<int>(OptLevel::O3))));
 
+            auto debugStreams = createDebugOutputStreams(moduleOptions);
+            configureDebugOutput(pm, moduleOptions, "kernel-OuterPM", debugStreams);
+
             if(optLevel != OptLevel::O0)
             {
-                // Single-region adapter: loopWithPrefetch
-                {
-                    PassManager innerPM;
-                    innerPM.setBasicBlockFilter(
-                        BasicBlockFilterBuilder::byLabelPrefix("label_LoopBegin"));
-                    addGfx1250RegionPasses(
-                        innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion);
-                    pm.addPass(createKernelToRegionPassAdaptor(
-                        module, "loopWithPrefetch", std::move(innerPM)));
-                }
+                PassFeatureConfig passFeatureConfig;
+                passFeatureConfig.barrierConfig.unrollMovableBarrier = true;
+                passFeatureConfig.loopConfig.unrollGemm              = true;
+                passFeatureConfig.dagFeatures.distributeGlobalRead   = true;
+                passFeatureConfig.passOrderSnapshot.jsonPath = moduleOptions.PassOrderSnapshotJson;
 
-                // Single-region adapter: noLoadLoopBody
+                auto snapshotCollector = createPassOrderSnapshotCollector(
+                    passFeatureConfig, moduleOptions, module.getName());
+
+                // Combined adapter: loopWithPrefetch + noLoadLoopBody
+                // Process both regions together so the scheduler sees the full CFG.
                 {
                     PassManager innerPM;
+                    passFeatureConfig.passOrderSnapshot.titlePrefix
+                        = "loopWithPrefetch+noLoadLoopBody";
+                    innerPM.setPassFeatureConfig(passFeatureConfig);
+                    configurePassOrderSnapshot(innerPM, snapshotCollector);
+                    configureDebugOutput(innerPM, moduleOptions,
+                                         "loopWithPrefetch+noLoadLoopBody", debugStreams);
                     addGfx1250RegionPasses(
                         innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion);
-                    pm.addPass(createKernelToRegionPassAdaptor(
-                        module, "noLoadLoopBody", std::move(innerPM)));
+                    pm.addPass(createKernelToRegionsPassAdaptor(
+                        module,
+                        {"loopWithPrefetch", "noLoadLoopBody"},
+                        std::move(innerPM)));
                 }
 
                 // Multi-region adapter for waitcnt reinsertion
                 if(moduleOptions.EnableWaitCntInsertion)
                 {
                     PassManager waitcntPM;
+                    configureDebugOutput(waitcntPM, moduleOptions,
+                                         "loopWithPrefetch+noLoadLoopBody", debugStreams);
                     waitcntPM.addPass(createCFGBuilderPass());
                     waitcntPM.addPass(createStinkyRemoveWaitCntPass());
                     waitcntPM.addPass(createStinkyWaitCntInsertionPass(true));

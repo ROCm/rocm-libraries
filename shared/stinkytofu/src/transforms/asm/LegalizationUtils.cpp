@@ -119,14 +119,7 @@ namespace stinkytofu
         StinkyRegister destReg = destRegs[0];
         if(destReg.reg.type == RegType::EXEC || destReg.reg.type == RegType::EXEC_LO)
         {
-            if(wavefrontSize == 32)
-            {
-                destReg = StinkyRegister(RegType::VCC_LO, 0, 1);
-            }
-            else
-            {
-                destReg = StinkyRegister(RegType::VCC, 0, 1);
-            }
+            destReg = StinkyRegister::getVCCRegister(wavefrontSize);
         }
         cmpInst->addDestReg(destReg);
 

@@ -5242,6 +5242,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "TileB0": kernel["ThreadTile1"],
                                "TileM0": kernel["MacroTile0"],
                                "wavefrontSize": kernel["WavefrontSize"],
+                               "SubGroup0": kernel["SubGroup0"],
+                               "SubGroup1": kernel["SubGroup1"],
                                "WaveGroup0": kernel["MIWaveGroup"][0],
                                "WaveGroup1": kernel["MIWaveGroup"][1],
                                "VectorWidthA": kernel["VectorWidthA"],

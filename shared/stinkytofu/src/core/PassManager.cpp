@@ -17,22 +17,14 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include <fstream>
 #include <iostream>
 
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/support/PassOrderSnapshotJson.hpp"
-#include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
-
-#include <unordered_map>
-#include <vector>
 
 namespace stinkytofu
 {
-    class StinkyInstruction;
-
     void PassContext::setGemmTileConfig(const GemmTileConfig& config)
     {
         gemmConfig = config;
@@ -80,19 +72,6 @@ namespace stinkytofu
     {
     }
 
-    PassManagerDebugConfig::~PassManagerDebugConfig()
-    {
-        if(dumpStreamBefore && static_cast<std::ofstream*>(dumpStreamBefore.get())->is_open())
-        {
-            static_cast<std::ofstream*>(dumpStreamBefore.get())->close();
-        }
-
-        if(dumpStreamAfter && static_cast<std::ofstream*>(dumpStreamAfter.get())->is_open())
-        {
-            static_cast<std::ofstream*>(dumpStreamAfter.get())->close();
-        }
-    }
-
     void PassManagerDebugConfig::setPrintAfterAll(bool v)
     {
         printAfterAll = v;
@@ -123,14 +102,14 @@ namespace stinkytofu
         onlyPrintAfter.insert(passName);
     }
 
-    void PassManagerDebugConfig::setDumpToFileInBefore(const std::string& filename)
+    void PassManagerDebugConfig::setDumpStreamBefore(std::shared_ptr<std::ostream> stream)
     {
-        dumpFileNameBefore = filename;
+        dumpStreamBefore = std::move(stream);
     }
 
-    void PassManagerDebugConfig::setDumpToFileInAfter(const std::string& filename)
+    void PassManagerDebugConfig::setDumpStreamAfter(std::shared_ptr<std::ostream> stream)
     {
-        dumpFileNameAfter = filename;
+        dumpStreamAfter = std::move(stream);
     }
 
     bool PassManagerDebugConfig::shouldPrintBefore(const std::string& passName) const
@@ -146,33 +125,15 @@ namespace stinkytofu
     std::ostream& PassManagerDebugConfig::getOutputStreamInBefore() const
     {
         if(dumpStreamBefore)
-        {
-            return *dumpStreamBefore.get();
-        }
+            return *dumpStreamBefore;
         return std::cout;
     }
 
     std::ostream& PassManagerDebugConfig::getOutputStreamInAfter() const
     {
         if(dumpStreamAfter)
-        {
-            return *dumpStreamAfter.get();
-        }
+            return *dumpStreamAfter;
         return std::cout;
-    }
-
-    void PassManagerDebugConfig::prepareDumpOutputStream()
-    {
-        if(!dumpFileNameBefore.empty() && !dumpStreamBefore)
-        {
-            dumpStreamBefore
-                = std::make_unique<std::ofstream>(dumpFileNameBefore, std::ofstream::out);
-        }
-        if(!dumpFileNameAfter.empty() && !dumpStreamAfter)
-        {
-            dumpStreamAfter
-                = std::make_unique<std::ofstream>(dumpFileNameAfter, std::ofstream::out);
-        }
     }
 
     //----------------------------------------------------------------------
@@ -180,70 +141,26 @@ namespace stinkytofu
     //----------------------------------------------------------------------
     void PassManager::run(Function& F)
     {
-        if(dbgCfg)
-        {
-            dbgCfg->prepareDumpOutputStream();
-        }
-
-        if(dbgCfg && dbgCfg->dumpInitialIR)
-        {
-            dbgCfg->getOutputStreamInBefore() << "\n*** Initial IR (before all passes) ***\n";
-            F.dump(dbgCfg->getOutputStreamInBefore());
-            dbgCfg->getOutputStreamInBefore().flush();
-        }
-
-        // set function GemmTileConfig to pass context GemmTileConfig
         F.setGemmTileConfig(passCtx.getGemmTileConfig());
 
-        const std::string& orderSnapPath = passCtx.getPassFeatureConfig().passOrderSnapshot.jsonPath;
-        std::unique_ptr<DAGScheduleJsonCollector> ownedCollector;
-        DAGScheduleJsonCollector* orderJsonCollector = externalOrderJsonCollector_;
-        if(!orderJsonCollector && !orderSnapPath.empty())
-        {
-            ownedCollector     = std::make_unique<DAGScheduleJsonCollector>(orderSnapPath, F.getName());
-            orderJsonCollector = ownedCollector.get();
-        }
+        for(auto& inst : instrumentations)
+            inst->runBegin(F, passCtx);
 
         for(const auto& pass : passes)
         {
             const std::string passName = pass->getName();
 
-            std::vector<StinkyInstruction*> orderSnapBefore;
-            const bool wantOrderJson
-                = orderJsonCollector
-                  && shouldEmitPassOrderSnapshotAfterPass(passCtx.getPassFeatureConfig(), passName);
-            if(wantOrderJson)
-            {
-                snapshotProgramOrderStinkyLinear(F, passCtx, orderSnapBefore);
-            }
-
-            if(dbgCfg && dbgCfg->shouldPrintBefore(passName))
-            {
-                dbgCfg->getOutputStreamInBefore() << "\n*** Before Pass: " << passName << " ***\n";
-                F.dump(dbgCfg->getOutputStreamInBefore());
-                dbgCfg->getOutputStreamInBefore().flush();
-            }
+            for(auto& inst : instrumentations)
+                inst->beforePass(passName, F, passCtx);
 
             pass->run(F, passCtx);
 
-            if(dbgCfg && dbgCfg->shouldPrintAfter(passName))
-            {
-                dbgCfg->getOutputStreamInAfter() << "\n*** After Pass: " << passName << " ***\n";
-                F.dump(dbgCfg->getOutputStreamInAfter());
-                dbgCfg->getOutputStreamInAfter().flush();
-            }
-
-            if(wantOrderJson)
-            {
-                appendPassOrderSnapshotJsonAfterPass(
-                    F, orderSnapBefore, passCtx, passName, *orderJsonCollector);
-            }
+            for(auto& inst : instrumentations)
+                inst->afterPass(passName, F, passCtx);
         }
-    }
 
-    void PassManager::setDebugConfig(std::unique_ptr<PassManagerDebugConfig> cfg)
-    {
-        dbgCfg = std::move(cfg);
+        for(auto& inst : instrumentations)
+            inst->runEnd(F, passCtx);
     }
 
     void PassManager::setGemmTileConfig(const GemmTileConfig& config)

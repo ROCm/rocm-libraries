@@ -499,6 +499,58 @@ namespace stinkytofu
         }
     }
 
+    static bool isVCCType(RegType t)
+    {
+        return t == RegType::VCC || t == RegType::VCC_LO || t == RegType::VCC_HI;
+    }
+
+    static bool isEXECType(RegType t)
+    {
+        return t == RegType::EXEC || t == RegType::EXEC_LO || t == RegType::EXEC_HI;
+    }
+
+    /// A destination register is implicit (not printed) when it was added
+    /// solely for dependency tracking.  The instruction's HW flags tell us
+    /// which special registers are implicit vs encoded as real operands.
+    static bool isImplicitDest(const StinkyRegister&    reg,
+                               const StinkyInstruction& inst)
+    {
+        if(reg.dataType != StinkyRegister::Type::Register)
+            return false;
+
+        RegType t = reg.reg.type;
+
+        if(t == RegType::SCC)
+            return true;
+
+        if(isEXECType(t) && inst.is(IF_ImplicitWriteEXEC))
+            return true;
+
+        return false;
+    }
+
+    /// A source register is implicit (not printed) when it was added solely
+    /// for dependency tracking.
+    static bool isImplicitSrc(const StinkyRegister&    reg,
+                              const StinkyInstruction& inst)
+    {
+        if(reg.dataType != StinkyRegister::Type::Register)
+            return false;
+
+        RegType t = reg.reg.type;
+
+        if(t == RegType::SCC)
+            return true;
+
+        if(isVCCType(t) && inst.is(IF_ImplicitReadVCC))
+            return true;
+
+        if(isEXECType(t) && inst.is(IF_ImplicitReadEXEC))
+            return true;
+
+        return false;
+    }
+
     static void emitOperands(std::ostream&            os,
                              const StinkyInstruction& inst,
                              const AsmEmitterOptions& options)
@@ -512,8 +564,7 @@ namespace stinkytofu
         size_t destIndex = 0;
         for(const auto& dest : inst.getDestRegs())
         {
-            // Skip pseudo registers and implicit registers
-            if(isPseudoReg(dest) || isImplicitRegister(dest))
+            if(isPseudoReg(dest) || isImplicitDest(dest, inst))
                 continue;
 
             if(!firstOperand)
@@ -552,8 +603,7 @@ namespace stinkytofu
         size_t      nonSkippedIndex = 0; // Track the index of non-skipped operands
         for(size_t i = 0; i < srcRegs.size(); ++i)
         {
-            // Skip pseudo registers and implicit registers
-            if(isPseudoReg(srcRegs[i]) || isImplicitRegister(srcRegs[i]))
+            if(isPseudoReg(srcRegs[i]) || isImplicitSrc(srcRegs[i], inst))
                 continue;
 
             if(!firstOperand)

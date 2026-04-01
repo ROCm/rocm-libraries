@@ -416,6 +416,7 @@ namespace stinkytofu
     }
 
     void SignatureKernelDescriptor::setOptimizationConfig(const std::array<int, 2>& tt,
+                                                          const std::array<int, 2>& sg,
                                                           const std::array<int, 2>& wg,
                                                           int                       vwA,
                                                           int                       vwB,
@@ -426,6 +427,7 @@ namespace stinkytofu
                                                           int                       useSgprForGRO)
     {
         this->threadTile             = tt;
+        this->subGroup               = sg;
         this->waveGroup              = wg;
         this->vectorWidthA           = vwA;
         this->vectorWidthB           = vwB;
@@ -508,7 +510,7 @@ namespace stinkytofu
         kStr += SignatureBase::block3Line("Optimizations and Config:");
         kStr += "/* ThreadTile= " + std::to_string(threadTile[0]) + " x "
                 + std::to_string(threadTile[1]) + " */\n";
-        kStr += "/* WaveGroup= " + std::to_string(waveGroup[0]) + " x " + std::to_string(waveGroup[1])
+        kStr += "/* SubGroup= " + std::to_string(subGroup[0]) + " x " + std::to_string(subGroup[1])
                 + " */\n";
         kStr += "/* VectorWidthA=" + std::to_string(vectorWidthA) + " */\n";
         kStr += "/* VectorWidthB=" + std::to_string(vectorWidthB) + " */\n";
@@ -686,6 +688,7 @@ namespace stinkytofu
     }
 
     void SignatureBase::setOptimizationConfig(const std::array<int, 2>& tt,
+                                              const std::array<int, 2>& sg,
                                               const std::array<int, 2>& wg,
                                               int                       vwA,
                                               int                       vwB,
@@ -696,7 +699,7 @@ namespace stinkytofu
                                               int                       useSgprForGRO)
     {
         kernelDescriptor.setOptimizationConfig(
-            tt, wg, vwA, vwB, glvwA, glvwB, d2lA, d2lB, useSgprForGRO);
+            tt, sg, wg, vwA, vwB, glvwA, glvwB, d2lA, d2lB, useSgprForGRO);
     }
 
     std::string SignatureBase::toString() const

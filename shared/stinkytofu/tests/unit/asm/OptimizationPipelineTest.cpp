@@ -98,7 +98,7 @@ v[0] = "st.v_add_f32"(v[1], v[2])
 
     PassManager pm;
     pm.setGemmTileConfig(gemmConfig);
-    addOptimizationPasses(pm, OptLevel::O0);
+    addPeepholeOptPasses(pm, OptLevel::O0);
     pm.run(*func);
 
     int instCountAfter = countInstructions(*func);
@@ -122,7 +122,7 @@ v[0] = "st.v_add_f32"(v[1], v[2])
 
     PassManager pm;
     pm.setGemmTileConfig(gemmConfig);
-    addOptimizationPasses(pm, OptLevel::O1);
+    addPeepholeOptPasses(pm, OptLevel::O1);
 
     // Should not crash
     pm.run(*func);
@@ -144,7 +144,7 @@ v[0] = "st.v_add_f32"(v[1], v[2])
 
     PassManager pm;
     pm.setGemmTileConfig(gemmConfig);
-    addOptimizationPasses(pm, OptLevel::O2);
+    addPeepholeOptPasses(pm, OptLevel::O2);
 
     // Should not crash
     pm.run(*func);
@@ -166,7 +166,7 @@ v[0] = "st.v_add_f32"(v[1], v[2])
 
     PassManager pm;
     pm.setGemmTileConfig(gemmConfig);
-    addOptimizationPasses(pm, OptLevel::O3);
+    addPeepholeOptPasses(pm, OptLevel::O3);
 
     // Should not crash
     pm.run(*func);

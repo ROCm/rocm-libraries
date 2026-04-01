@@ -63,7 +63,7 @@ namespace stinkytofu
             pm.addPass(createStinkyRemoveWaitCntPass());
 
             // ========== Phase 2: Optimization ==========
-            addOptimizationPasses(pm, optLevel);
+            addPeepholeOptPasses(pm, optLevel);
 
             // ========== Phase 3: Instruction Scheduling ==========
             pm.addPass(createStinkyBuildImplicitDependencyPass());
@@ -78,13 +78,24 @@ namespace stinkytofu
             const OptLevel optLevel      = static_cast<OptLevel>(
                 std::max(0, std::min(moduleOptions.OptLevel, static_cast<int>(OptLevel::O3))));
 
+            auto debugStreams = createDebugOutputStreams(moduleOptions);
+            configureDebugOutput(pm, moduleOptions, "kernel-OuterPM", debugStreams);
+
             if(optLevel != OptLevel::O0)
             {
+                PassFeatureConfig passFeatureConfig;
+                auto snapshotCollector = createPassOrderSnapshotCollector(
+                    passFeatureConfig, moduleOptions, module.getName());
+
                 // Single-region adapter: loopWithPrefetch
                 {
                     PassManager innerPM;
                     innerPM.setBasicBlockFilter(
                         BasicBlockFilterBuilder::byLabelPrefix("label_LoopBegin"));
+                    passFeatureConfig.passOrderSnapshot.titlePrefix = "loopWithPrefetch";
+                    innerPM.setPassFeatureConfig(passFeatureConfig);
+                    configurePassOrderSnapshot(innerPM, snapshotCollector);
+                    configureDebugOutput(innerPM, moduleOptions, "loopWithPrefetch", debugStreams);
                     addGfx942RegionPasses(innerPM, module, optLevel);
                     pm.addPass(createKernelToRegionPassAdaptor(
                         module, "loopWithPrefetch", std::move(innerPM)));
@@ -93,6 +104,10 @@ namespace stinkytofu
                 // Single-region adapter: noLoadLoopBody
                 {
                     PassManager innerPM;
+                    passFeatureConfig.passOrderSnapshot.titlePrefix = "noLoadLoopBody";
+                    innerPM.setPassFeatureConfig(passFeatureConfig);
+                    configurePassOrderSnapshot(innerPM, snapshotCollector);
+                    configureDebugOutput(innerPM, moduleOptions, "noLoadLoopBody", debugStreams);
                     addGfx942RegionPasses(innerPM, module, optLevel);
                     pm.addPass(createKernelToRegionPassAdaptor(
                         module, "noLoadLoopBody", std::move(innerPM)));
@@ -101,6 +116,8 @@ namespace stinkytofu
                 // Multi-region adapter for waitcnt reinsertion
                 {
                     PassManager waitcntPM;
+                    configureDebugOutput(waitcntPM, moduleOptions,
+                                         "loopWithPrefetch+noLoadLoopBody", debugStreams);
                     waitcntPM.addPass(createCFGBuilderPass());
                     waitcntPM.addPass(createStinkyRemoveWaitCntPass());
                     waitcntPM.addPass(createStinkyWaitCntInsertionPass(true));

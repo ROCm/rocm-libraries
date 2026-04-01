@@ -40,7 +40,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
-#include "stinkytofu/pipeline/Backend.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
@@ -62,28 +62,6 @@ namespace
 
     StinkyRegister toStinkyRegister(const Container* container, bool hasVgprMsb);
     StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb);
-
-    /// Check if an instruction reads the SCC register
-    bool doesReadSCC(const Instruction* inst)
-    {
-        if(dynamic_cast<const SCSelectB32*>(inst))
-        {
-            return true;
-        }
-        return false;
-    }
-
-    /// Check if an instruction writes the SCC register
-    bool doesWriteSCC(const Instruction* inst)
-    {
-        if(dynamic_cast<const SCmpEQI32*>(inst) || dynamic_cast<const SCmpEQU32*>(inst)
-           || dynamic_cast<const SSubU32*>(inst) || dynamic_cast<const SAddU32*>(inst)
-           || dynamic_cast<const SAddCU32*>(inst) || dynamic_cast<const SSubBU32*>(inst))
-        {
-            return true;
-        }
-        return false;
-    }
 
     std::string itemToString(const rocisa::Item* item)
     {
@@ -344,16 +322,19 @@ namespace
             }
         }
 
-        // Add SCC register if needed
-        if(doesReadSCC(inst))
-        {
+        // Add implicit special registers driven by HW flags (Flags.def).
+        if(stinkyInst->is(IF_ImplicitReadSCC))
             stinkyInst->addSrcReg(StinkyRegister::getSCCRegister());
-        }
-
-        if(doesWriteSCC(inst))
-        {
+        if(stinkyInst->is(IF_ImplicitWriteSCC))
             stinkyInst->addDestReg(StinkyRegister::getSCCRegister());
-        }
+
+        uint32_t wfs = getWaveFrontSize(archId);
+        if(stinkyInst->is(IF_ImplicitReadVCC))
+            stinkyInst->addSrcReg(StinkyRegister::getVCCRegister(wfs));
+        if(stinkyInst->is(IF_ImplicitReadEXEC))
+            stinkyInst->addSrcReg(StinkyRegister::getEXECRegister(wfs));
+        if(stinkyInst->is(IF_ImplicitWriteEXEC))
+            stinkyInst->addDestReg(StinkyRegister::getEXECRegister(wfs));
     }
 
     /// Helper to extract neg_lo/neg_hi modifiers from instruction string
@@ -1078,8 +1059,7 @@ namespace stinkytofu
 
             if(auto memToken = inst->getMemToken())
             {
-                stinkyInst->addModifier<MemTokenData>(
-                    MemTokenData{memToken->tokens});
+                stinkyInst->addModifier<MemTokenData>(MemTokenData{memToken->tokens});
             }
 
             Legalized legalizedInsts = legalizeInstruction(
@@ -1250,9 +1230,11 @@ void init_stinkytofu(nb::module_ m)
 
             // Set optimization config
             std::array<int, 2> tt = {moduleOptions.TileA0, moduleOptions.TileB0};
+            std::array<int, 2> sg = {moduleOptions.SubGroup0, moduleOptions.SubGroup1};
             std::array<int, 2> wg = {moduleOptions.WaveGroup0, moduleOptions.WaveGroup1};
 
             stinkySig->setOptimizationConfig(tt,
+                                             sg,
                                              wg,
                                              moduleOptions.VectorWidthA,
                                              moduleOptions.VectorWidthB,

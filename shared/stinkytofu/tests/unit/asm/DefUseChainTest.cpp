@@ -45,7 +45,7 @@ static StinkyInstruction* createBarrierDestInBlock(BasicBlock* bb, GfxArchID arc
 {
     AsmIRBuilder       builder(*bb, arch);
     StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_waitcnt, arch));
-    inst->addDestReg(StinkyRegister::getBarrierRegister());
+    inst->addDestReg(StinkyRegister(RegType::LDS, 0, 1));
     inst->addSrcReg(StinkyRegister(0)); // literal 0
     return inst;
 }

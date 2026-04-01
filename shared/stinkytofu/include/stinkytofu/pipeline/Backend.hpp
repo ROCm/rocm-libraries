@@ -22,7 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 
 #include <array>
 #include <string>

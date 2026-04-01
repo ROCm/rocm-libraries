@@ -56,7 +56,7 @@ namespace stinkytofu
     //    initialization for more than 64 bits.
     //
     // 2. (simpler) Just add another std::bitset<32> flag.
-    constexpr size_t flagCapacity = 32;
+    constexpr size_t flagCapacity = 64;
 
     // Helper function to convert flags to a bit pattern at compile time
     constexpr uint64_t makeFlagBits(std::initializer_list<InstFlag> flags)

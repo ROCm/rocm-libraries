@@ -34,7 +34,7 @@ namespace stinkytofu
     /// Add optimization passes (Peephole, RedundantMovElim, DCE) to PassManager.
     /// Pass selection depends on OptLevel.
     /// Shared across backends.
-    inline void addOptimizationPasses(PassManager& pm, OptLevel optLevel)
+    inline void addPeepholeOptPasses(PassManager& pm, OptLevel optLevel)
     {
         if(optLevel >= OptLevel::O1)
             pm.addPass(createPeepholeOptimizationPass());
