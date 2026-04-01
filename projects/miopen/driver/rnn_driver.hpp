@@ -318,7 +318,8 @@ std::vector<int> RNNDriver<Tgpu, Tref>::GetInputTensorLengthsFromCmdLine()
         if(cont > 0 && in_n[cont] > in_n[cont - 1])
         {
             printf("Incorrect input batch size at time %d\n", cont);
-            return std::vector<int>({0});
+            in_n = std::vector<int>({0});
+            return in_n;
         }
         else
         {

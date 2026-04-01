@@ -20,6 +20,7 @@ add_executable(
     hipdnn_backend_tests
     descriptors/TestBackendDescriptor.cpp
     descriptors/TestBlockScaleDequantizeOperationDescriptor.cpp
+    descriptors/TestBlockScaleDequantizeOperationFromNode.cpp
     descriptors/TestBlockScaleQuantizeOperationDescriptor.cpp
     descriptors/TestBlockScaleQuantizeOperationFromNode.cpp
     descriptors/TestDescriptorFactory.cpp
@@ -30,6 +31,7 @@ add_executable(
     descriptors/TestGraphDescriptor.cpp
     descriptors/TestTensorDescriptor.cpp
     descriptors/TestCustomOpOperationDescriptor.cpp
+    descriptors/TestCustomOpOperationFromNode.cpp
     descriptors/TestGraphDescriptorCustomOp.cpp
     descriptors/TestConvolutionFwdOperationDescriptor.cpp
     descriptors/TestConvolutionWrwOperationDescriptor.cpp
@@ -45,6 +47,7 @@ add_executable(
     descriptors/TestKnobDescriptor.cpp
     descriptors/TestKnobSettingDescriptor.cpp
     descriptors/TestBatchnormBackwardOperationDescriptor.cpp
+    descriptors/TestBatchnormBackwardOperationFromNode.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
     descriptors/TestGraphDescriptorBlockScaleQuantize.cpp
     descriptors/TestMatmulOperationDescriptor.cpp
@@ -53,6 +56,7 @@ add_executable(
     descriptors/TestGraphDescriptorBatchnormBackward.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp
+    descriptors/TestBatchnormInferenceVarianceExtOperationFromNode.cpp
     descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
     descriptors/TestGraphDescriptorLayernorm.cpp
     descriptors/TestGraphDescriptorOps.cpp
@@ -60,15 +64,20 @@ add_executable(
     descriptors/TestGraphDescriptorPointwise.cpp
     descriptors/TestGraphDescriptorRMSNorm.cpp
     descriptors/TestGraphDescriptorSdpaFprop.cpp
+    descriptors/TestConvolutionBwdOperationFromNode.cpp
     descriptors/TestLayernormOperationDescriptor.cpp
     descriptors/TestLayernormOperationFromNode.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestPointwiseOperationFromNode.cpp
+    descriptors/TestReductionOperationDescriptor.cpp
+    descriptors/TestReductionOperationFromNode.cpp
+    descriptors/TestGraphDescriptorReduction.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestRMSNormOperationFromNode.cpp
     descriptors/TestSdpaBpropOperationDescriptor.cpp
     descriptors/TestSdpaBpropOperationFromNode.cpp
     descriptors/TestSdpaFpropOperationDescriptor.cpp
+    descriptors/TestSdpaFpropOperationFromNode.cpp
     descriptors/TestGraphDescriptorSdpaBprop.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp

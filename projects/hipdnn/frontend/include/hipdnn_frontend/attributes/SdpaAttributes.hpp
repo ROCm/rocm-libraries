@@ -603,6 +603,12 @@ public:
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_dropout_probability(float probability)
+    {
+        dropout_probability = probability;
+        return *this;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_attn_scale_value(float value)
     {
         attn_scale_value = value;
