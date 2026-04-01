@@ -52,8 +52,9 @@ protected:
 
         ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
 
-        _knobRecorder = std::make_unique<hipdnn_tests::TestPluginKnobRecorder>(
-            hipdnn_tests::plugin_constants::testKnobsPluginPath());
+        const auto pluginPath = hipdnn_tests::TestPluginKnobRecorder::findLoadedPluginPath(
+            _handle, TEST_KNOBS_PLUGIN_NAME);
+        _knobRecorder = std::make_unique<hipdnn_tests::TestPluginKnobRecorder>(pluginPath);
         _knobRecorder->reset();
     }
 
