@@ -96,6 +96,7 @@
 #include <hipdnn_frontend/detail/GraphPacker.hpp>
 #include <hipdnn_frontend/detail/GraphUnpacker.hpp>
 #include <hipdnn_frontend/detail/KnobPacker.hpp>
+#include <hipdnn_frontend/detail/KnobUnpacker.hpp>
 #include <hipdnn_frontend/detail/OperationUnpacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
@@ -822,6 +823,27 @@ public:
     }
 
 protected:
+    /// Get knobs for a specific engine, always using the descriptor-based
+    /// C-API path. Exposed as protected so tests can exercise this path
+    /// directly without relying on the HIPDNN_USE_DESCRIPTOR_API feature flag.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error get_knobs_for_engine_via_descriptors(int64_t engineId, std::vector<Knob>& knobs) const
+    {
+        if(!_graphDesc || !_graphDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Graph has not been built, build the operation graph first. Cannot get knobs "
+                    "for engine."};
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineDesc;
+
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
+            engineDesc, _graphDesc->get(), engineId));
+
+        return detail::unpackKnobsFromDescriptors(engineDesc.get(), knobs);
+    }
+
     // Returns the raw backend graph descriptor, or nullptr if the graph has not been built.
     // NOLINTNEXTLINE(readability-identifier-naming)
     hipdnnBackendDescriptor_t get_raw_graph_descriptor() const
@@ -886,6 +908,77 @@ protected:
         return {ErrorCode::OK, ""};
     }
 
+    /// Reconstruct the Graph from a finalized backend OperationGraph descriptor.
+    ///
+    /// Extracts operations and graph-level data types from a backend descriptor
+    /// and rebuilds the frontend Graph representation. Tensors are shared across
+    /// operations via UID-based lookup.
+    ///
+    /// NOTE: Will be renamed to `deserialize` and made public once the API
+    /// stabilizes.
+    ///
+    /// @param graphDesc A finalized backend OperationGraph descriptor
+    /// @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
+    ///         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message()
+    ///         for the specific failure reason.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error fromBackendDescriptor(hipdnnBackendDescriptor_t graphDesc)
+    {
+        std::vector<std::shared_ptr<graph::INode>> tempNodes;
+        graph::GraphAttributes tempAttrs;
+        std::optional<int64_t> tempEngineId;
+
+        HIPDNN_CHECK_ERROR(
+            detail::unpackGraphDescriptor(graphDesc, tempNodes, tempAttrs, tempEngineId));
+
+        _sub_nodes = std::move(tempNodes);
+        graph_attributes = std::move(tempAttrs);
+        _preferredEngineId = tempEngineId;
+        _graphDesc.reset();
+        _engineConfigDesc.reset();
+        _executionPlanDesc.reset();
+        return {};
+    }
+
+    /// Deserialize the graph from binary via the backend descriptor path.
+    ///
+    /// Creates a backend graph descriptor from serialized bytes and rebuilds
+    /// the frontend Graph. If a handle is provided, the descriptor is
+    /// finalized for full backend support. Graphs containing unsupported
+    /// operation types will fail.
+    ///
+    /// NOTE: This method will eventually replace the public
+    /// deserialize(hipdnnHandle_t, const std::vector<uint8_t>&) once the
+    /// FlatBuffer path is removed.
+    ///
+    /// @param handle The hipDNN handle (can be nullptr)
+    /// @param data The serialized graph bytes
+    /// @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
+    ///         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message()
+    ///         for the specific failure reason.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error deserialize_via_backend(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
+    {
+        std::vector<std::shared_ptr<graph::INode>> tempNodes;
+        graph::GraphAttributes tempAttrs;
+        std::optional<int64_t> tempEngineId;
+
+        auto [graphDesc, err]
+            = detail::deserializeAndUnpackGraph(handle, data, tempNodes, tempAttrs, tempEngineId);
+        if(err.is_bad())
+        {
+            return err;
+        }
+
+        _sub_nodes = std::move(tempNodes);
+        graph_attributes = std::move(tempAttrs);
+        _preferredEngineId = tempEngineId;
+        _graphDesc = std::move(graphDesc);
+        _engineConfigDesc.reset();
+        _executionPlanDesc.reset();
+        return {};
+    }
+
 public:
     /**
      * @brief Get available configuration knobs for a specific engine
@@ -912,6 +1005,12 @@ public:
 
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
             engineDesc, _graphDesc->get(), engineId));
+
+        if(useDescriptorApi())
+        {
+            HIPDNN_FE_LOG_INFO("Using descriptor-based API for knob retrieval");
+            return detail::unpackKnobsFromDescriptors(engineDesc.get(), knobs);
+        }
 
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getKnobsForEngine(knobs, engineDesc.get()));
 
@@ -1300,80 +1399,6 @@ public:
     }
 #endif
     /// @endcond
-
-    /**
-     * @brief Reconstruct the Graph from a finalized backend OperationGraph descriptor
-     *
-     * Extracts operations and graph-level data types from a backend descriptor
-     * and rebuilds the frontend Graph representation. Tensors are shared across
-     * operations via UID-based lookup.
-     *
-     * Currently supports: ConvolutionFprop operations (phased rollout —
-     * additional operation types will be added incrementally).
-     *
-     * @param graphDesc A finalized backend OperationGraph descriptor
-     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
-     *         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message()
-     *         for the specific failure reason.
-     */
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    Error fromBackendDescriptor(hipdnnBackendDescriptor_t graphDesc)
-    {
-        std::vector<std::shared_ptr<graph::INode>> tempNodes;
-        graph::GraphAttributes tempAttrs;
-        std::optional<int64_t> tempEngineId;
-
-        HIPDNN_CHECK_ERROR(
-            detail::unpackGraphDescriptor(graphDesc, tempNodes, tempAttrs, tempEngineId));
-
-        _sub_nodes = std::move(tempNodes);
-        graph_attributes = std::move(tempAttrs);
-        _preferredEngineId = tempEngineId;
-        _graphDesc.reset();
-        _engineConfigDesc.reset();
-        _executionPlanDesc.reset();
-        return {};
-    }
-
-    /**
-     * @brief Deserialize the graph from binary via the backend descriptor path
-     *
-     * Creates a backend graph descriptor from serialized bytes and rebuilds
-     * the frontend Graph. If a handle is provided, the descriptor is
-     * finalized for full backend support.
-     *
-     * Currently supports ConvolutionFprop operations (phased rollout —
-     * additional operation types will be added incrementally). Graphs
-     * containing unsupported operation types will fail.
-     *
-     * @param handle The hipDNN handle (can be nullptr)
-     * @param data The serialized graph bytes
-     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
-     *         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message()
-     *         for the specific failure reason.
-     */
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    Error deserialize_via_backend(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
-    {
-        std::vector<std::shared_ptr<graph::INode>> tempNodes;
-        graph::GraphAttributes tempAttrs;
-        std::optional<int64_t> tempEngineId;
-
-        auto [graphDesc, err]
-            = detail::deserializeAndUnpackGraph(handle, data, tempNodes, tempAttrs, tempEngineId);
-        if(err.is_bad())
-        {
-            return err;
-        }
-
-        _sub_nodes = std::move(tempNodes);
-        graph_attributes = std::move(tempAttrs);
-        _preferredEngineId = tempEngineId;
-        _graphDesc = std::move(graphDesc);
-        _engineConfigDesc.reset();
-        _executionPlanDesc.reset();
-        return {};
-    }
 
     /**
      * @brief Finalize the execution plan
