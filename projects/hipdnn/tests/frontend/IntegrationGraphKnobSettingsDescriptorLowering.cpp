@@ -183,6 +183,18 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithDeprecate
     EXPECT_EQ(_knobRecorder->last(), serializeExpectedKnobSettings(engineId, settings));
 }
 
+TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithEmptyKnobs)
+{
+    TestableGraph graph = createAndBuildSimpleGraph();
+
+    const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    const std::vector<KnobSetting> settings;
+
+    auto result = graph.create_execution_plan_ext(engineId, settings);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(_knobRecorder->last(), serializeExpectedKnobSettings(engineId, settings));
+}
+
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanFiltersUnsupportedKnob)
 {
     TestableGraph graph = createAndBuildSimpleGraph();
