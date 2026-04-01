@@ -65,24 +65,27 @@ auto GetConvTestCasesFloat()
 }
 
 template <miopenDataType_t datatype>
-const auto& GetTestParams()
+miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
-    static const auto params = [] {
-        Gpu supported_gpus = Gpu::gfx906 | Gpu::gfx908;
-        if constexpr(datatype == miopenFloat)
-        {
-            supported_gpus = supported_gpus | Gpu::gfx900;
-        }
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
-        p.CheckXnackDisabled();
-        return p;
-    }();
-    return params;
+    Gpu supported_gpus = Gpu::gfx906 | Gpu::gfx908;
+    if constexpr(datatype == miopenFloat)
+    {
+        supported_gpus = supported_gpus | Gpu::gfx900;
+    }
+    auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
+    p.CheckXnackDisabled();
+    return p;
 }
 
-const auto& GetTestParamsHalf() { return GetTestParams<miopenHalf>(); }
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsHalf()
+{
+    return GetTestParams<miopenHalf>();
+}
 
-const auto& GetTestParamsFloat() { return GetTestParams<miopenFloat>(); }
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsFloat()
+{
+    return GetTestParams<miopenFloat>();
+}
 
 } // namespace
 

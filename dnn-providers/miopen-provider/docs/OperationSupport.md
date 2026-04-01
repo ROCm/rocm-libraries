@@ -10,14 +10,14 @@ The following table lists all operations currently supported in hipDNN:
 
 | Operation | Datatypes | Layouts | Notes |
 |-----------|-----------|---------|-------|
-| Batchnorm Inference | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only<sup>1</sup> |
-| Batchnorm Inference + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3</sup> |
-| Batchnorm Inference with Variance | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1</sup> |
-| Batchnorm Inference with Variance + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3</sup> |
-| Batchnorm Inference + DRelu + Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3</sup> |
-| Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1</sup> |
-| Batchnorm Training + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3</sup> |
-| Batchnorm Backward  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1</sup> |
+| Batchnorm Inference | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1,6</sup> |
+| Batchnorm Inference + Activation | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3,6</sup> |
+| Batchnorm Inference with Variance | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1,6</sup> |
+| Batchnorm Inference with Variance + Activation | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3,6</sup> |
+| Batchnorm Inference + DRelu + Backward | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3,6</sup> |
+| Batchnorm Training  | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1,6</sup> |
+| Batchnorm Training + Activation | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3,6</sup> |
+| Batchnorm Backward  | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1,6</sup> |
 | Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2</sup>, Deterministic<sup>5</sup> |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2</sup>, Deterministic<sup>5</sup> |
 | Convolution Forward + (Bias) + Activation<sup>4</sup> | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>2,3</sup>, Deterministic<sup>5</sup> |
@@ -28,6 +28,7 @@ The following table lists all operations currently supported in hipDNN:
 ³ See Fused Operations note below
 ⁴ See Detailed Requirements below
 ⁵ See Deterministic Engine Support section
+⁶ 3D tensors are internally padded to 4D for MIOpen compatibility
 
 ## Detailed Requirements
 
@@ -100,6 +101,8 @@ graph.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 - **FP32**: Single-precision floating point (32-bit)
 
 ### Layouts
+- **NCL**: Batch, Channels, Length (1D, channel-first)
+- **NLC**: Batch, Length, Channels (1D, channel-last)
 - **NCHW**: Batch, Channels, Height, Width (2D, channel-first)
 - **NHWC**: Batch, Height, Width, Channels (2D, channel-last)
 - **NCDHW**: Batch, Channels, Depth, Height, Width (3D, channel-first)

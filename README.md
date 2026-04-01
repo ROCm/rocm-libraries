@@ -1,14 +1,28 @@
 # ROCm Libraries
 
-Welcome to the ROCm Libraries monorepo. This repository consolidates multiple ROCm-related libraries and shared components into a single repository to streamline development, CI, and integration. The first set of libraries focuses on components required for building PyTorch.
+Welcome to the ROCm Libraries super-repo. This repository consolidates multiple ROCm-related libraries and shared components into a single repository to streamline development, CI, and integration.
 
-# Monorepo Status and CI Health
+## Super-repo Goals
 
-This table provides the current status of the migration of specific ROCm libraries as well as a pointer to their current CI health.
+- Enable unified build and test workflows across ROCm libraries.
+- Facilitate shared tooling, CI, and contributor experience.
+- Improve integration, visibility, and collaboration across ROCm library teams.
+
+## Super-repo Project Status
+
+### TheRock CI Status
+
+TheRock CI performs multi-component testing on top of builds leveraging [TheRock](https://github.com/ROCm/TheRock) build system.
+
+[![TheRock CI](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci.yml/badge.svg?branch=develop&event=push)](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci.yml?query=branch%3Adevelop+event%3Apush) [![TheRock CI Nightly](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci-nightly.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci-nightly.yml?query=branch%3Adevelop)
+
+### Component Migration and Legacy CI Status
+
+This table provides the current status of the migration of specific components as well as a pointer to the health of their legacy CI systems.
 
 **Key:**
-- **Completed**: Fully migrated and integrated. This monorepo should be considered the source of truth for this project. The old repo may still be used for release activities.
-- **In Progress**: Ongoing migration, tests, or integration. Please refrain from submitting new pull requests on the individual repo of the project, and develop on the monorepo.
+- **Completed**: Fully migrated and integrated. This super-repo should be considered the source of truth for this project. The old repo may still be used for certain release activities.
+- **In Progress**: Ongoing migration, tests, or integration. Please refrain from submitting new pull requests on the individual repo of the project, and develop on the super-repo.
 - **Pending**: Not yet started or in the early planning stages. The individual repo should be considered the source of truth for this project.
 
 | Component           | Migration Status |  Math CI Status                        |
@@ -37,14 +51,6 @@ This table provides the current status of the migration of specific ROCm librari
 | `tensile`           | Completed   | [![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/tensile/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/tensile/job/develop/lastBuild/) |
 | `rocwmma`           | Completed   | [![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/rocwmma/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/rocwmma/job/develop/lastBuild/) |
 | `hiptensor`           | Completed  | [![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/hiptensor/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/hiptensor/job/develop/lastBuild/) |
-
-# TheRock CI Status
-
-Note TheRock CI performs multi-component testing on top of builds leveraging [TheRock](https://github.com/ROCm/TheRock) build system.
-
-[![TheRock CI Nightly](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci-nightly.yml/badge.svg)](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci-nightly.yml)
-
----
 
 ## Nomenclature
 
@@ -87,24 +93,19 @@ shared/
 - Each folder under `projects/` corresponds to a ROCm library that was previously maintained in a standalone GitHub repository and released as distinct packages.
 - Each folder under `shared/` contains code that existed in its own repository and is used as a dependency by multiple libraries, but does not produce its own distinct packages in previous ROCm releases.
 
-## Goals
-
-- Enable unified build and test workflows across ROCm libraries.
-- Facilitate shared tooling, CI, and contributor experience.
-- Improve integration, visibility, and collaboration across ROCm library teams.
-
 ## Getting Started
 
 To begin contributing or building, see the [CONTRIBUTING.md](./CONTRIBUTING.md) guide. It includes setup instructions, sparse-checkout configuration, development workflow, and pull request guidelines.
 
 ## License
 
-This monorepo contains multiple subprojects, each of which retains the license under which it was originally published.
+This super-repo contains multiple subprojects, each of which retains the license under which it was originally published.
 
-📁 Refer to the `LICENSE`, `LICENSE.md`, or `LICENSE.txt` file within each `projects/` or `shared/` directory for specific license terms.
-📄 Refer to the header notice in individual files outside `projects/` or `shared/` folders for their specific license terms.
+- 📁 Refer to the `LICENSE`, `LICENSE.md`, or `LICENSE.txt` file within each `projects/` or `shared/` directory for specific license terms.
+- 📄 Refer to the header notice in individual files outside `projects/` or `shared/` folders for their specific license terms.
 
-> **Note**: The root of this repository does not define a unified license across all components.
+> [!NOTE]
+> The root of this repository does not yet define a unified license across all components.
 
 ## Questions or Feedback?
 
