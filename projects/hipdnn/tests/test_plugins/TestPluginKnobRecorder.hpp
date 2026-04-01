@@ -33,10 +33,17 @@ public:
     explicit TestPluginKnobRecorder(const std::filesystem::path& pluginPath)
     {
         _handle = hipdnn_data_sdk::utilities::openLibrary(pluginPath);
-
-        _fnGetCount = resolveSymbol<GetCountFn>("hipdnnTestKnobsPluginGetReceivedKnobsCount");
-        _fnGetAt = resolveSymbol<GetAtFn>("hipdnnTestKnobsPluginGetReceivedKnobsAt");
-        _fnReset = resolveSymbol<ResetFn>("hipdnnTestKnobsPluginResetReceivedKnobs");
+        try
+        {
+            _fnGetCount = resolveSymbol<GetCountFn>("hipdnnTestKnobsPluginGetReceivedKnobsCount");
+            _fnGetAt = resolveSymbol<GetAtFn>("hipdnnTestKnobsPluginGetReceivedKnobsAt");
+            _fnReset = resolveSymbol<ResetFn>("hipdnnTestKnobsPluginResetReceivedKnobs");
+        }
+        catch(...)
+        {
+            cleanup();
+            throw;
+        }
     }
 
     TestPluginKnobRecorder(TestPluginKnobRecorder&& other) noexcept

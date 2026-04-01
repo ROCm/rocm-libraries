@@ -44,10 +44,8 @@ class IntegrationGraphKnobsDescriptorLowering : public ::testing::Test
 protected:
     void SetUp() override
     {
-        const std::array<const char*, 3> paths
-            = {hipdnn_tests::plugin_constants::testKnobsPluginPath().c_str(),
-               hipdnn_tests::plugin_constants::testKnobConstraintValidationPluginPath().c_str(),
-               hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
+        const std::array<const char*, 1> paths
+            = {hipdnn_tests::plugin_constants::testKnobsPluginPath().c_str()};
 
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
                       paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
