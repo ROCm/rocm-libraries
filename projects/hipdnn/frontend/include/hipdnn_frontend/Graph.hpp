@@ -96,6 +96,7 @@
 #include <hipdnn_frontend/detail/GraphPacker.hpp>
 #include <hipdnn_frontend/detail/GraphUnpacker.hpp>
 #include <hipdnn_frontend/detail/KnobPacker.hpp>
+#include <hipdnn_frontend/detail/KnobUnpacker.hpp>
 #include <hipdnn_frontend/detail/OperationUnpacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
@@ -822,6 +823,27 @@ public:
     }
 
 protected:
+    /// Get knobs for a specific engine, always using the descriptor-based
+    /// C-API path. Exposed as protected so tests can exercise this path
+    /// directly without relying on the HIPDNN_USE_DESCRIPTOR_API feature flag.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error get_knobs_for_engine_via_descriptors(int64_t engineId, std::vector<Knob>& knobs) const
+    {
+        if(!_graphDesc || !_graphDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Graph has not been built, build the operation graph first. Cannot get knobs "
+                    "for engine."};
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineDesc;
+
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
+            engineDesc, _graphDesc->get(), engineId));
+
+        return detail::unpackKnobsFromDescriptors(engineDesc.get(), knobs);
+    }
+
     // Returns the raw backend graph descriptor, or nullptr if the graph has not been built.
     // NOLINTNEXTLINE(readability-identifier-naming)
     hipdnnBackendDescriptor_t get_raw_graph_descriptor() const
@@ -983,6 +1005,12 @@ public:
 
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
             engineDesc, _graphDesc->get(), engineId));
+
+        if(useDescriptorApi())
+        {
+            HIPDNN_FE_LOG_INFO("Using descriptor-based API for knob retrieval");
+            return detail::unpackKnobsFromDescriptors(engineDesc.get(), knobs);
+        }
 
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getKnobsForEngine(knobs, engineDesc.get()));
 
