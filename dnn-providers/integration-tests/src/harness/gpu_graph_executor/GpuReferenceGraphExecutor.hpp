@@ -68,18 +68,13 @@ private:
         buildPlanForNode(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
                          const hipdnn_data_sdk::data_objects::Node& node)
     {
-        if(node.attributes_type()
-           == hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes)
-        {
-            throw std::runtime_error("GPU reference executor does not support custom operations");
-        }
-
         auto key = buildSignatureKey(node, graph.getTensorMap());
 
         const auto& planBuilder = _planRegistry.getPlanBuilder(key);
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))
         {
-            const std::string nodeName = node.name() == nullptr ? "" : " " + node.name()->str();
+            const std::string nodeName
+                = node.name() == nullptr ? " unknown" : " " + node.name()->str();
             throw std::runtime_error("GPU plan builder is not applicable for the given node:"
                                      + nodeName);
         }
