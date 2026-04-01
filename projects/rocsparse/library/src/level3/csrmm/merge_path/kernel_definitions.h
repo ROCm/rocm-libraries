@@ -38,6 +38,7 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(WF_SIZE) __global__
+        __attribute__((no_sanitize("address")))
         void csrmmnt_merge_path_main_kernel(bool conj_A,
                                             bool conj_B,
                                             J    ncol_offset,
@@ -99,6 +100,7 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(BLOCKSIZE) __global__
+        __attribute__((no_sanitize("address")))
         void csrmmnt_merge_path_remainder_kernel(bool conj_A,
                                                  bool conj_B,
                                                  J    ncol_offset,
@@ -159,6 +161,7 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(BLOCKSIZE) __global__
+        __attribute__((no_sanitize("address")))
         void csrmmnn_merge_path_kernel(bool conj_A,
                                        bool conj_B,
                                        J    m,

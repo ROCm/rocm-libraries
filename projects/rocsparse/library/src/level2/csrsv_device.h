@@ -31,7 +31,7 @@ extern "C" void __builtin_amdgcn_s_sleep(int);
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void csrsv_analysis_lower_kernel(J m,
                                      const I* __restrict__ csr_row_ptr,
                                      const J* __restrict__ csr_col_ind,
@@ -154,7 +154,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void csrsv_analysis_upper_kernel(J m,
                                      const I* __restrict__ csr_row_ptr,
                                      const J* __restrict__ csr_col_ind,

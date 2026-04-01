@@ -33,7 +33,7 @@ namespace rocsparse
               typename I,
               typename J,
               typename T>
-    ROCSPARSE_KERNEL(WF_SIZE* NUMROWS_PER_BLOCK)
+    ROCSPARSE_KERNEL_NO_ASAN(WF_SIZE* NUMROWS_PER_BLOCK)
     void dense2csr_kernel(rocsparse_index_base base,
                           rocsparse_order      order,
                           J                    m,

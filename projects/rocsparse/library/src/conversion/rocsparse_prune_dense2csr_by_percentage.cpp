@@ -36,7 +36,7 @@
 namespace rocsparse
 {
     template <rocsparse_int DIM_X, rocsparse_int DIM_Y, typename T>
-    ROCSPARSE_KERNEL(DIM_X* DIM_Y)
+    ROCSPARSE_KERNEL_NO_ASAN(DIM_X* DIM_Y)
     void prune_dense2csr_nnz_kernel2(rocsparse_int m,
                                      rocsparse_int n,
                                      const T* __restrict__ A,
@@ -48,7 +48,7 @@ namespace rocsparse
     }
 
     template <rocsparse_int NUMROWS_PER_BLOCK, rocsparse_int WF_SIZE, typename T>
-    ROCSPARSE_KERNEL(WF_SIZE* NUMROWS_PER_BLOCK)
+    ROCSPARSE_KERNEL_NO_ASAN(WF_SIZE* NUMROWS_PER_BLOCK)
     void prune_dense2csr_kernel2_device_pointer(rocsparse_index_base base,
                                                 rocsparse_int        m,
                                                 rocsparse_int        n,

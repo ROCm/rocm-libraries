@@ -29,7 +29,7 @@
 namespace rocsparse
 {
     template <rocsparse_int BLOCK_SIZE, rocsparse_int WF_SEGMENT_SIZE>
-    ROCSPARSE_KERNEL(BLOCK_SIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCK_SIZE)
     void gebsr2gebsr_nnz_fast_kernel(rocsparse_int        mb_A,
                                      rocsparse_int        nb_A,
                                      rocsparse_index_base base_A,
@@ -124,7 +124,7 @@ namespace rocsparse
               rocsparse_int       BLOCK_SIZE,
               rocsparse_int       WF_SEGMENT_SIZE,
               typename T>
-    ROCSPARSE_KERNEL(BLOCK_SIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCK_SIZE)
     void gebsr2gebsr_fast_kernel(rocsparse_int        mb_A,
                                  rocsparse_int        nb_A,
                                  rocsparse_index_base base_A,
@@ -271,7 +271,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void gebsr2gebsr_compute_nnz_total_kernel(rocsparse_int mb,
                                               const rocsparse_int* __restrict__ bsr_row_ptr,
                                               rocsparse_int* __restrict__ nnz_total_dev_host_ptr)

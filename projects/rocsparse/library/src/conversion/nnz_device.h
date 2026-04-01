@@ -141,7 +141,7 @@ namespace rocsparse
     //! @param nnz_per_row      The array storing the results of the nnz per row.
     //!
     template <rocsparse_int DIM_X, rocsparse_int DIM_Y, typename I, typename J, typename T>
-    ROCSPARSE_KERNEL(DIM_X* DIM_Y)
+    ROCSPARSE_KERNEL_NO_ASAN(DIM_X* DIM_Y)
     void nnz_kernel_row(rocsparse_order order,
                         J               m,
                         J               n,

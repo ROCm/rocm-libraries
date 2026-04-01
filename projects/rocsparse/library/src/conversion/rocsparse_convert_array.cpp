@@ -36,6 +36,7 @@ namespace rocsparse
     //
     template <uint32_t BLOCKSIZE, typename TARGET, typename SOURCE>
     __launch_bounds__(BLOCKSIZE) __global__
+        __attribute__((no_sanitize("address")))
         static void copy_indexbase_iarray_mix_safe(const size_t               nitems_,
                                                    TARGET*                    target_,
                                                    const rocsparse_index_base target_indexbase_,
@@ -77,6 +78,7 @@ namespace rocsparse
     //
     template <uint32_t BLOCKSIZE, typename TARGET, typename SOURCE>
     __launch_bounds__(BLOCKSIZE) __global__
+        __attribute__((no_sanitize("address")))
         static void copy_iarray_mix_safe(const size_t  nitems_,
                                          TARGET*       target_,
                                          const size_t  target_inc_,
@@ -339,6 +341,7 @@ namespace rocsparse
     {
         template <uint32_t BLOCKSIZE>
         __launch_bounds__(BLOCKSIZE) __global__
+            __attribute__((no_sanitize("address")))
             static void run(const size_t             nitems_,
                             TARGET*                  target_,
                             const SOURCE*            source_,
@@ -358,6 +361,7 @@ namespace rocsparse
     {
         template <uint32_t BLOCKSIZE>
         __launch_bounds__(BLOCKSIZE) __global__
+            __attribute__((no_sanitize("address")))
             static void run(const size_t             nitems_,
                             TARGET*                  target_,
                             const SOURCE*            source_,
@@ -382,6 +386,7 @@ namespace rocsparse
 
         template <uint32_t BLOCKSIZE>
         __launch_bounds__(BLOCKSIZE) __global__
+            __attribute__((no_sanitize("address")))
             static void run(const size_t             nitems_,
                             TARGET*                  target_,
                             const SOURCE*            source_,
@@ -407,6 +412,7 @@ namespace rocsparse
 
         template <uint32_t BLOCKSIZE>
         __launch_bounds__(BLOCKSIZE) __global__
+            __attribute__((no_sanitize("address")))
             static void run(const size_t             nitems_,
                             TARGET*                  target_,
                             const SOURCE*            source_,
@@ -449,6 +455,7 @@ namespace rocsparse
 
         template <uint32_t BLOCKSIZE>
         __launch_bounds__(BLOCKSIZE) __global__
+            __attribute__((no_sanitize("address")))
             static void run(const size_t             nitems_,
                             TARGET*                  target_,
                             const SOURCE*            source_,
@@ -494,6 +501,7 @@ namespace rocsparse
 
         template <uint32_t BLOCKSIZE>
         __launch_bounds__(BLOCKSIZE) __global__
+            __attribute__((no_sanitize("address")))
             static void run(size_t                   nitems_,
                             TARGET*                  target_,
                             const SOURCE*            source_,
@@ -516,6 +524,7 @@ namespace rocsparse
         using SOURCE = double;
         template <uint32_t BLOCKSIZE>
         __launch_bounds__(BLOCKSIZE) __global__
+            __attribute__((no_sanitize("address")))
             static void run(size_t                   nitems_,
                             TARGET*                  target_,
                             const SOURCE*            source_,

@@ -35,7 +35,7 @@
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, typename T, typename I>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void kernel_get_permuted_array(I size_, const T* a_, T* x_, const I* perm_)
     {
         const I i = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
@@ -63,7 +63,7 @@ namespace rocsparse
     //
     //
     template <uint32_t BLOCKSIZE, typename T, typename I>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void kernel_set_permuted_array(I size_, T* a_, const T* x_, const I* perm_)
     {
         const I i = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
@@ -74,7 +74,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void kernel_nrminf(size_t nitems_,
                        const T* __restrict__ x_,
                        floating_data_t<T>* __restrict__ nrm_,

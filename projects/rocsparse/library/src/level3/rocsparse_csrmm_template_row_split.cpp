@@ -775,6 +775,19 @@ namespace rocsparse
 
         const bool conj_A = (trans_A == rocsparse_operation_conjugate_transpose || force_conj_A);
         const bool conj_B = (trans_B == rocsparse_operation_conjugate_transpose);
+
+        // When only one batch exists for A or B, zero out the corresponding batch strides
+        // to prevent out-of-bounds access when iterating over batch_count_C batches.
+        if(batch_count_A == 1)
+        {
+            offsets_batch_stride_A        = 0;
+            columns_values_batch_stride_A = 0;
+        }
+        if(batch_count_B == 1)
+        {
+            batch_stride_B = 0;
+        }
+
         // Run different csrmv kernels
         if(trans_A == rocsparse_operation_none)
         {

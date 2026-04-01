@@ -86,7 +86,7 @@ namespace rocsparse
     }
 
     template <uint32_t DIM_X, uint32_t DIM_Y, typename I, typename T, typename U>
-    ROCSPARSE_KERNEL(DIM_X* DIM_Y)
+    ROCSPARSE_KERNEL_NO_ASAN(DIM_X* DIM_Y)
     void dense_transpose_strided_batched_kernel(I        m,
                                                 I        n,
                                                 U        alpha_device_host,

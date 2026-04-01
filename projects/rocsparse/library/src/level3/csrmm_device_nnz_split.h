@@ -335,7 +335,7 @@ namespace rocsparse
 
     // Do the final block reduction of the block reduction buffers back into global memory
     template <unsigned int BLOCKSIZE, typename I, typename J, typename C, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void csrmmnn_general_block_reduce(I nblocks,
                                       const J* __restrict__ row_block_red,
                                       const T* __restrict__ val_block_red,
@@ -390,7 +390,7 @@ namespace rocsparse
     }
 
     template <unsigned int BLOCKSIZE, unsigned int NNZ_PER_BLOCK, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void csrmmnn_nnz_split_compute_row_limits(J m,
                                               I nblocks,
                                               I nnz,

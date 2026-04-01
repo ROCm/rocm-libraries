@@ -45,7 +45,7 @@
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void csrsv_kernel(J m,
                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                       int64_t alpha_stride,

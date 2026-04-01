@@ -36,7 +36,7 @@ namespace rocsparse
               typename B,
               typename C,
               typename T>
-    ROCSPARSE_KERNEL(BSR_BLOCK_DIM* BLK_SIZE_Y)
+    ROCSPARSE_KERNEL_NO_ASAN(BSR_BLOCK_DIM* BLK_SIZE_Y)
     void bsrmm_large_blockdim_kernel_ext(bool                nn,
                                          rocsparse_direction direction,
                                          J                   mb,

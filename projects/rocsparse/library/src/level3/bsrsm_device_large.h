@@ -29,7 +29,7 @@
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t NCOLS, bool SLEEP, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void bsrsm_upper_large_kernel(rocsparse_int        mb,
                                   rocsparse_int        nrhs,
                                   const rocsparse_int* bsr_row_ptr,

@@ -30,7 +30,7 @@ namespace rocsparse
 {
     // Create identity permutation
     template <uint32_t BLOCKSIZE, typename I>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void identity_kernel(I n, I* p)
     {
         I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;

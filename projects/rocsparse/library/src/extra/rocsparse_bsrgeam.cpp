@@ -31,7 +31,7 @@
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, uint32_t WFSIZE, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void bsrgeam_wf_per_row_multipass_2_3_kernel(rocsparse_direction dir,
                                                  rocsparse_int       mb,
                                                  rocsparse_int       nb,

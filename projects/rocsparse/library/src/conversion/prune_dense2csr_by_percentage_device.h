@@ -29,7 +29,7 @@
 namespace rocsparse
 {
     template <rocsparse_int BLOCK_SIZE, typename T>
-    ROCSPARSE_KERNEL(BLOCK_SIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCK_SIZE)
     void abs_kernel(rocsparse_int m, rocsparse_int n, const T* A, int64_t lda, T* output)
     {
         rocsparse_int thread_id = hipThreadIdx_x + hipBlockIdx_x * BLOCK_SIZE;

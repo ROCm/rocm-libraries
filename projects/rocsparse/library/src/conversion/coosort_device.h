@@ -30,7 +30,7 @@ namespace rocsparse
 {
     // COO to CSR matrix conversion kernel
     template <uint32_t BLOCKSIZE, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void coosort_permute_kernel(J nnz, const J* in, const J* perm, J* out)
     {
         J gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;

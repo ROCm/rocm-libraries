@@ -35,6 +35,7 @@ namespace rocsparse
               typename C,
               typename T>
     __launch_bounds__(BLOCKSIZE) __global__
+        __attribute__((no_sanitize("address")))
         void csrmmnn_nnz_split_main_kernel(bool conj_A,
                                            bool conj_B,
                                            J    ncol,
@@ -67,6 +68,7 @@ namespace rocsparse
               typename C,
               typename T>
     __launch_bounds__(BLOCKSIZE) __global__
+        __attribute__((no_sanitize("address")))
         void csrmmnn_nnz_split_remainder_kernel(bool conj_A,
                                                 bool conj_B,
                                                 J    offset,
@@ -99,6 +101,7 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(BLOCKSIZE) __global__
+        __attribute__((no_sanitize("address")))
         void csrmmnt_nnz_split_main_kernel(bool conj_A,
                                            bool conj_B,
                                            J    ncol,
@@ -128,6 +131,7 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(BLOCKSIZE) __global__
+        __attribute__((no_sanitize("address")))
         void csrmmnt_nnz_split_remainder_kernel(bool conj_A,
                                                 bool conj_B,
                                                 J    offset,

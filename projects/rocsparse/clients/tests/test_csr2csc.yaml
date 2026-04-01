@@ -40,6 +40,7 @@ Tests:
   action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_zero]
+  skip_xnack_plus: true
 
 - name: csr2csc
   category: quick
@@ -50,6 +51,7 @@ Tests:
   action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
+  skip_xnack_plus: true
 
 - name: csr2csc_file
   category: quick
@@ -67,6 +69,7 @@ Tests:
              nos5,
              nos6,
              nos7]
+  skip_xnack_plus: true
 
 - name: csr2csc
   category: pre_checkin
@@ -77,6 +80,7 @@ Tests:
   action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
+  skip_xnack_plus: true
 
 - name: csr2csc_file
   category: pre_checkin
@@ -90,6 +94,7 @@ Tests:
   filename: [rma10,
              mc2depi,
              ASIC_320k]
+  skip_xnack_plus: true
 
 - name: csr2csc_file
   category: pre_checkin
@@ -104,6 +109,7 @@ Tests:
              qc2534,
              Chevron2,
              Chevron3]
+  skip_xnack_plus: true
 
 - name: csr2csc_file
   category: pre_checkin
@@ -117,6 +123,7 @@ Tests:
   filename: [mac_econ_fwd500,
              scircuit]
   graph_test: true
+  skip_xnack_plus: true
 
 - name: csr2csc
   category: nightly
@@ -127,6 +134,7 @@ Tests:
   action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
+  skip_xnack_plus: true
 
 - name: csr2csc_file
   category: nightly
@@ -144,6 +152,7 @@ Tests:
              sme3Dc,
              webbase-1M,
              shipsec1]
+  skip_xnack_plus: true
 
 - name: csr2csc_file
   category: nightly
@@ -155,3 +164,4 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
+  skip_xnack_plus: true

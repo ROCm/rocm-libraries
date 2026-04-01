@@ -34,7 +34,7 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    ROCSPARSE_KERNEL(BELL_BLOCK_DIM* BLK_SIZE_Y)
+    ROCSPARSE_KERNEL_NO_ASAN(BELL_BLOCK_DIM* BLK_SIZE_Y)
     void bellmm_general_blockdim_kernel(rocsparse_operation trans_A,
                                         rocsparse_operation trans_B,
                                         rocsparse_direction dir_A,

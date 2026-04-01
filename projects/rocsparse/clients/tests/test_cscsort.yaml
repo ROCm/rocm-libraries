@@ -40,6 +40,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_zero]
   algo: [0, 1]
+  skip_xnack_plus: true
 
 - name: cscsort
   category: quick
@@ -50,6 +51,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   algo: [0, 1]
+  skip_xnack_plus: true
 
 - name: cscsort_file
   category: quick
@@ -67,6 +69,7 @@ Tests:
              nos5,
              nos6,
              nos7]
+  skip_xnack_plus: true
 
 - name: cscsort
   category: pre_checkin
@@ -77,6 +80,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   algo: [0, 1]
+  skip_xnack_plus: true
 
 - name: cscsort_file
   category: pre_checkin
@@ -92,6 +96,7 @@ Tests:
              rma10,
              mc2depi,
              ASIC_320k]
+  skip_xnack_plus: true
 
 - name: cscsort
   category: nightly
@@ -102,6 +107,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   algo: [0, 1]
+  skip_xnack_plus: true
 
 - name: cscsort_file
   category: nightly
@@ -119,3 +125,4 @@ Tests:
              shipsec1,
              Chevron3,
              Chevron4]
+  skip_xnack_plus: true

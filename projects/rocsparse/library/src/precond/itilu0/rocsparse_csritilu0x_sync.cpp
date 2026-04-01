@@ -32,7 +32,7 @@
 namespace rocsparse
 {
     template <int BLOCKSIZE, int WFSIZE, typename T, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void kernel_nrm_residual(const J m_,
                              const I nnz_,
                              const I* __restrict__ ptr_begin_,
@@ -210,7 +210,7 @@ namespace rocsparse
     }
 
     template <int BLOCKSIZE, int WFSIZE, typename T, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void kernel_correction(const J m_,
                            const I nnz_,
                            const I* __restrict__ ptr_begin_,

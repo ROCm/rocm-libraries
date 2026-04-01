@@ -27,7 +27,7 @@
 namespace rocsparse
 {
     template <typename T>
-    ROCSPARSE_KERNEL(32)
+    ROCSPARSE_KERNEL_NO_ASAN(32)
     void assign_kernel(T* dest, T value)
     {
         const uint32_t batch_index = blockIdx.y;
@@ -38,7 +38,7 @@ namespace rocsparse
     }
 
     template <typename T>
-    ROCSPARSE_KERNEL(32)
+    ROCSPARSE_KERNEL_NO_ASAN(32)
     void assign_device_kernel(T* dest, const T* value)
     {
         const uint32_t batch_index = blockIdx.y;

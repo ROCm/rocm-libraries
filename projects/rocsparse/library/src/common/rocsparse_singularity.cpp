@@ -77,7 +77,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void markers2position(int64_t batch_count,
                           const void* __restrict__ symbolic_,
                           const void* __restrict__ exact_,

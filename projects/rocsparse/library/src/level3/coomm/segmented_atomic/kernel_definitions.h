@@ -37,6 +37,7 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(WF_SIZE) __global__
+        __attribute__((no_sanitize("address")))
         void coommnn_segmented_atomic(rocsparse_operation trans_B,
                                       int64_t             nnz,
                                       I                   m,

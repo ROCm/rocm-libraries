@@ -29,7 +29,7 @@
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, uint32_t WFSIZE, typename T>
-    ROCSPARSE_DEVICE_ILF void
+    ROCSPARSE_DEVICE_ILF_NO_ASAN void
         bsrgeam_wf_per_row_multipass_2_3_device(rocsparse_direction dir,
                                                 rocsparse_int       mb,
                                                 rocsparse_int       nb,
@@ -294,7 +294,7 @@ namespace rocsparse
     // Splitting row into several chunks such that we can use shared memory to store whether
     // a column index is populated or not.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
-    ROCSPARSE_DEVICE_ILF void
+    ROCSPARSE_DEVICE_ILF_NO_ASAN void
         bsrgeam_wf_per_row_multipass_device(rocsparse_direction dir,
                                             rocsparse_int       mb,
                                             rocsparse_int       nb,
@@ -508,7 +508,7 @@ namespace rocsparse
     // Splitting row into several chunks such that we can use shared memory to store whether
     // a column index is populated or not.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
-    ROCSPARSE_DEVICE_ILF void
+    ROCSPARSE_DEVICE_ILF_NO_ASAN void
         bsrgeam_block_per_row_multipass_device(rocsparse_direction dir,
                                                rocsparse_int       mb,
                                                rocsparse_int       nb,
@@ -796,7 +796,7 @@ namespace rocsparse
     // Splitting row into several chunks such that we can use shared memory to store whether
     // a column index is populated or not.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
-    ROCSPARSE_DEVICE_ILF void
+    ROCSPARSE_DEVICE_ILF_NO_ASAN void
         bsrgeam_block_per_row_multipass_device2(rocsparse_direction dir,
                                                 rocsparse_int       mb,
                                                 rocsparse_int       nb,

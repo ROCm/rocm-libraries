@@ -166,7 +166,7 @@ namespace rocsparse
     }
 
     template <int BLOCKSIZE, int WFSIZE, bool RESIDUAL, typename T, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void kernel_calculate(const J m_,
                           const I nnz_,
                           const I* __restrict__ ptr_begin_,
@@ -911,7 +911,7 @@ namespace rocsparse
     // Calculate the array lptr_end.
     //
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void kernel_compute_lptr_end(J m_,
                                  const I* __restrict__ ptr_begin_,
                                  const I* __restrict__ ptr_end_,
@@ -970,7 +970,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void kernel_compute_coo(J m_,
                             const I* __restrict__ ptr_begin_,
                             const I* __restrict__ ptr_end_,
@@ -1031,7 +1031,7 @@ namespace rocsparse
     // Calculate the array ucsr_ptr.
     //
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void kernel_initialize_ucsr_ptr(J m_,
                                     const I* __restrict__ ptr_begin_,
                                     const I* __restrict__ ptr_end_,
@@ -1088,7 +1088,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void kernel_compute_unnz(J m_,
                              const I* __restrict__ ptr_begin_,
                              const I* __restrict__ ptr_end_,

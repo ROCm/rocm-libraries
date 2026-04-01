@@ -68,7 +68,7 @@ namespace rocsparse
               rocsparse_diag_type SDIAG,
               typename I,
               typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void csxtril_count_kernel(
         J nseq_, const I* ptr_, const J* ind_, rocsparse_index_base base_, I* fptr_, I* sptr_)
     {

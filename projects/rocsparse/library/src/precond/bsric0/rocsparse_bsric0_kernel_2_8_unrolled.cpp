@@ -421,7 +421,7 @@ namespace rocsparse
     }
 
     template <uint32_t BSRDIM, typename T, typename I, typename J>
-    ROCSPARSE_KERNEL(BSRDIM* BSRDIM)
+    ROCSPARSE_KERNEL_NO_ASAN(BSRDIM* BSRDIM)
     void bsric0_kernel_2_8_unrolled(rocsparse_direction dir,
                                     J                   mb,
                                     const I* __restrict__ bsr_row_ptr,

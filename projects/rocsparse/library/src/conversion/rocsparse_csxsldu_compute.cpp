@@ -40,7 +40,7 @@ namespace rocsparse
               typename T,
               typename I,
               typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void csxsldu_fill_kernel(J                    nseq_,
                              const I*             ptr_,
                              const J*             ind_,

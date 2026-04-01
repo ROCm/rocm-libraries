@@ -118,7 +118,13 @@ try
                                    || (hsa_xnack && strcmp(hsa_xnack, "1") == 0);
         if(is_xnack_plus)
         {
-            THROW_IF_HIP_ERROR(hipDeviceSetLimit(hipLimitStackSize, 64 * 1024));
+            size_t current_stack_size = 0;
+            THROW_IF_HIP_ERROR(hipDeviceGetLimit(&current_stack_size, hipLimitStackSize));
+            const size_t required_stack_size = 64 * 1024;
+            if(current_stack_size < required_stack_size)
+            {
+                THROW_IF_HIP_ERROR(hipDeviceSetLimit(hipLimitStackSize, required_stack_size));
+            }
         }
     }
 

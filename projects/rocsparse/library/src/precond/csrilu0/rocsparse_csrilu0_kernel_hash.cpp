@@ -255,7 +255,7 @@ namespace rocsparse
               typename T,
               typename I,
               typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void csrilu0_kernel_hash(J m,
                              const I* __restrict__ csr_row_ptr,
                              const J* __restrict__ csr_col_ind,
@@ -287,8 +287,10 @@ namespace rocsparse
     {
         const auto batch_index = hipBlockIdx_y;
 
-        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(enable_boost, is_tol_host_mode, boost_tol_32);
-        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(enable_boost, is_tol_host_mode, boost_tol_64);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
+            enable_boost && (size_boost_tol == sizeof(float)), is_tol_host_mode, boost_tol_32);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
+            enable_boost && (size_boost_tol == sizeof(double)), is_tol_host_mode, boost_tol_64);
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(enable_boost, is_val_host_mode, boost_val);
 
         const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;

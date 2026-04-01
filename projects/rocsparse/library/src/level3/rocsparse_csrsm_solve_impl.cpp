@@ -37,7 +37,7 @@
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename I, typename J, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void csrsm(rocsparse_operation transB,
                J                   m,
                J                   nrhs,
@@ -493,6 +493,7 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, typename T>
     __launch_bounds__(BLOCKSIZE) __global__
+        __attribute__((no_sanitize("address")))
         static void csrsm_solve_copy_y_to_B(const int64_t m, T* B, const int64_t ldb, const T* y)
     {
         const size_t tid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;

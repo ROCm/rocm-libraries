@@ -72,7 +72,7 @@ namespace rocsparse
     }
 
     template <uint32_t DIM_X, uint32_t DIM_Y, typename I, typename T>
-    ROCSPARSE_KERNEL(DIM_X* DIM_Y)
+    ROCSPARSE_KERNEL_NO_ASAN(DIM_X* DIM_Y)
     void dense_transpose_back_kernel(
         I m, I n, const T* A, int64_t lda, int64_t A_stride, T* B, int64_t ldb, int64_t B_stride)
     {

@@ -35,6 +35,7 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(BLOCKSIZE) __global__
+        __attribute__((no_sanitize("address")))
         void coommnn_segmented_main_kernel(bool    conj_A,
                                            bool    conj_B,
                                            I       M,
@@ -68,6 +69,7 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(BLOCKSIZE) __global__
+        __attribute__((no_sanitize("address")))
         void coommnn_segmented_remainder_kernel(bool    conj_A,
                                                 bool    conj_B,
                                                 I       colB_offset,

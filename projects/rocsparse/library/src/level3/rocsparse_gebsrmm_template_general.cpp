@@ -28,7 +28,7 @@
 namespace rocsparse
 {
     template <rocsparse_int BSR_BLOCK_DIM, rocsparse_int BLK_SIZE_Y, typename T>
-    ROCSPARSE_KERNEL(BSR_BLOCK_DIM* BLK_SIZE_Y)
+    ROCSPARSE_KERNEL_NO_ASAN(BSR_BLOCK_DIM* BLK_SIZE_Y)
     void gebsrmm_general_blockdim_kernel(rocsparse_direction direction,
                                          rocsparse_operation trans_B,
                                          rocsparse_int       mb,

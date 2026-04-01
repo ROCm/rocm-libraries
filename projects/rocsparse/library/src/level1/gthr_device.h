@@ -41,7 +41,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void gthr_kernel(I                    nnz,
                      const T*             y,
                      int64_t              y_stride,

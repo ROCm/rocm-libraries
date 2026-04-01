@@ -563,7 +563,7 @@ namespace rocsparse
         }
 
         // Accumulate each row sum of the BSR block
-        __shared__ T sdata[ROWBSRDIM * COLBSRDIM * NBLOCKS];
+        __shared__ T sdata[BLOCKSIZE];
 
         sdata[hipThreadIdx_x] = sum;
 
@@ -793,7 +793,7 @@ namespace rocsparse
         }
 
         // Accumulate each row sum of the BSR block
-        __shared__ T sdata[ROWBSRDIM * COLBSRDIM * NBLOCKS];
+        __shared__ T sdata[BLOCKSIZE];
 
         sdata[hipThreadIdx_x] = sum;
 

@@ -189,7 +189,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void valset_2d_kernel(I m, I n, int64_t ld, T value, T* array, rocsparse_order order)
     {
         rocsparse::valset_2d_device<BLOCKSIZE>(m, n, ld, value, array, order);
@@ -260,7 +260,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void scale_2d_kernel(I       m,
                          I       n,
                          int64_t ld,

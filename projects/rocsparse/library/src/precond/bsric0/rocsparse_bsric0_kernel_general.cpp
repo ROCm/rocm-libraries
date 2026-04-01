@@ -330,7 +330,7 @@ namespace rocsparse
     }
 
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void bsric0_kernel_general(rocsparse_direction dir,
                                J                   mb,
                                const I* __restrict__ bsr_row_ptr,

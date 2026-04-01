@@ -483,7 +483,7 @@ namespace rocsparse
 
     // Do the final block reduction of the block reduction buffers back into global memory
     template <uint32_t BLOCKSIZE, typename T, typename I, typename C>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void coommnn_general_block_reduce(I n,
                                       I nblocks,
                                       const I* __restrict__ row_block_red,

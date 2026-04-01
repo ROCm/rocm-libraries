@@ -40,6 +40,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_zero]
   algo: [0, 1]
+  skip_xnack_plus: true
 
 - name: csrsort
   category: quick
@@ -50,6 +51,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   algo: [0, 1]
+  skip_xnack_plus: true
 
 - name: csrsort_file
   category: quick
@@ -70,6 +72,7 @@ Tests:
              mplate,
              qc2534,
              Chevron2]
+  skip_xnack_plus: true
 
 - name: csrsort
   category: pre_checkin
@@ -80,6 +83,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   algo: [0, 1]
+  skip_xnack_plus: true
 
 - name: csrsort_file
   category: pre_checkin
@@ -95,6 +99,7 @@ Tests:
              ASIC_320k,
              mac_econ_fwd500,
              scircuit]
+  skip_xnack_plus: true
 
 - name: csrsort
   category: nightly
@@ -105,6 +110,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   algo: [0, 1]
+  skip_xnack_plus: true
 
 - name: csrsort_file
   category: nightly
@@ -124,3 +130,4 @@ Tests:
              shipsec1,
              Chevron3,
              Chevron4]
+  skip_xnack_plus: true

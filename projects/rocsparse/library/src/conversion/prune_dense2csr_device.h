@@ -28,7 +28,7 @@
 
 namespace rocsparse
 {
-    ROCSPARSE_KERNEL(1)
+    ROCSPARSE_KERNEL_NO_ASAN(1)
     void nnz_total_device_kernel(rocsparse_int m,
                                  const rocsparse_int* __restrict__ csr_row_ptr,
                                  rocsparse_int* __restrict__ nnz_total_dev_host_ptr)

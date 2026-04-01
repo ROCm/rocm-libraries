@@ -36,7 +36,7 @@ namespace rocsparse
               rocsparse_int SEGMENTS_PER_BLOCK,
               rocsparse_int SEGMENT_SIZE,
               typename T>
-    ROCSPARSE_KERNEL(BLOCK_SIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCK_SIZE)
     void nnz_compress_kernel(rocsparse_int        m,
                              rocsparse_index_base idx_base_A,
                              const T* __restrict__ csr_val_A,

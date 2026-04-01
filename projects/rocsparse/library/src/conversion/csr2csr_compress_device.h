@@ -31,7 +31,7 @@
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t LOOPS, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void csr2csr_compress_fill_warp_start_device(rocsparse_int nnz_A,
                                                  const T* __restrict__ csr_val_A,
                                                  uint32_t* __restrict__ warp_start,
@@ -77,7 +77,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t LOOPS, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void csr2csr_compress_use_warp_start_device(rocsparse_int        nnz_A,
                                                 rocsparse_index_base idx_base_A,
                                                 const T* __restrict__ csr_val_A,
@@ -133,7 +133,7 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
+    ROCSPARSE_KERNEL_NO_ASAN(BLOCKSIZE)
     void fill_row_ptr_device(rocsparse_int        m,
                              rocsparse_index_base idx_base_C,
                              const rocsparse_int* __restrict__ nnz_per_row,
