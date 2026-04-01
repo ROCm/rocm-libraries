@@ -40,6 +40,35 @@ extern "C" void rocblas_shutdown();
 
 namespace
 {
+    /************************************************************************************
+     * Variable template to map a rocBLAS type into a hipblasltDatatype_t * for scaleType
+     ************************************************************************************/
+    template <typename>
+    constexpr auto hipblaslt_scaletype = HIPBLASLT_DATATYPE_INVALID;
+
+    template <>
+    constexpr auto hipblaslt_scaletype<int8_t> = HIP_R_32I;
+
+    template <>
+    constexpr auto hipblaslt_scaletype<int32_t> = HIP_R_32I;
+
+    template <>
+    constexpr auto hipblaslt_scaletype<rocblas_half> = HIP_R_32F;
+
+    template <>
+    constexpr auto hipblaslt_scaletype<rocblas_bfloat16> = HIP_R_32F;
+
+    template <>
+    constexpr auto hipblaslt_scaletype<float> = HIP_R_32F;
+
+    template <>
+    constexpr auto hipblaslt_scaletype<double> = HIP_R_64F;
+
+    template <>
+    constexpr auto hipblaslt_scaletype<rocblas_float_complex> = HIP_C_32F;
+
+    template <>
+    constexpr auto hipblaslt_scaletype<rocblas_double_complex> = HIP_C_64F;     
     /********************************************************************
      * Variable template to map a rocBLAS type into a hipblasltDatatype_t *
      ********************************************************************/
@@ -80,7 +109,13 @@ namespace
     constexpr auto hipblaslt_compute_type<int32_t> = HIPBLAS_COMPUTE_32I;
 
     template <>
-    constexpr auto hipblaslt_compute_type<rocblas_half> = HIPBLAS_COMPUTE_16F;
+    constexpr auto hipblaslt_compute_type<rocblas_half> = HIPBLAS_COMPUTE_32F;
+
+    template<>
+    constexpr auto hipblaslt_compute_type<int8_t> = HIPBLAS_COMPUTE_32I;
+
+    template<>
+    constexpr auto hipblaslt_compute_type<rocblas_bfloat16> = HIPBLAS_COMPUTE_32F;
 
     template <>
     constexpr auto hipblaslt_compute_type<float> = HIPBLAS_COMPUTE_32F;
@@ -102,6 +137,88 @@ namespace
             rocblas_cerr << std::endl << msg << std::endl;
         }
     }
+
+    constexpr const char* hipblas_status_to_string(hipblasStatus_t status)
+    {
+    #define CASE(x) \
+        case x:     \
+            return #x
+        switch(status)
+        {
+            CASE(HIPBLAS_STATUS_SUCCESS);
+            CASE(HIPBLAS_STATUS_NOT_INITIALIZED);
+            CASE(HIPBLAS_STATUS_ALLOC_FAILED);
+            CASE(HIPBLAS_STATUS_INVALID_VALUE);
+            CASE(HIPBLAS_STATUS_MAPPING_ERROR);
+            CASE(HIPBLAS_STATUS_EXECUTION_FAILED);
+            CASE(HIPBLAS_STATUS_INTERNAL_ERROR);
+            CASE(HIPBLAS_STATUS_NOT_SUPPORTED);
+            CASE(HIPBLAS_STATUS_ARCH_MISMATCH);
+            CASE(HIPBLAS_STATUS_INVALID_ENUM);
+            CASE(HIPBLAS_STATUS_UNKNOWN);
+            CASE(HIPBLAS_STATUS_HANDLE_IS_NULLPTR);
+        }
+    #undef CASE
+        return "<undefined hipblasStatus_t value>";
+    }    
+    inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expect)
+    {
+        if(status != expect)
+        {
+            rocblas_cerr << "hipBLASLt status error: Expected " << hipblas_status_to_string(expect)
+                        << ", received " << hipblas_status_to_string(status) << std::endl;
+            if(expect == HIPBLAS_STATUS_SUCCESS)
+                exit(EXIT_FAILURE);
+        }
+    }
+    #define CHECK_HIP_ERROR(ERROR)                                                           \
+        do                                                                                   \
+        {                                                                                    \
+            /* Use error__ in case ERROR contains "error" */                                 \
+            hipError_t error__ = (ERROR);                                                    \
+            if(error__ != hipSuccess)                                                        \
+            {                                                                                \
+                rocblas_cerr << "error: " << hipGetErrorString(error__) << " (" << error__ \
+                            << ") at " __FILE__ ":" << __LINE__ << std::endl;             \
+                exit(EXIT_FAILURE);                                                          \
+            }                                                                                \
+        } while(0)
+    #define EXPECT_HIPBLAS_STATUS hipblaslt_expect_status
+    #define CHECK_SOLUTION_FOUND(SOL_COUNT)                                                \
+        do                                                                                 \
+        {                                                                                  \
+            if(SOL_COUNT == 0)                                                             \
+            {                                                                              \
+                rocblas_cerr << "error: NO solution found! at " __FILE__ ":" << __LINE__ \
+                            << std::endl;                                               \
+                return;                                                                    \
+            }                                                                              \
+        } while(0)
+    #define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)                \
+        do                                                                                   \
+        {                                                                                    \
+            if(WORKSPACE_SIZE > MAX_WORKSPACE_SIZE)                                          \
+            {                                                                                \
+                rocblas_cerr << "Returned workspace size (" << WORKSPACE_SIZE << ") is   \
+                            larger than user allocated(" \
+                            << MAX_WORKSPACE_SIZE << ")!"                                 \
+                            << " at " __FILE__ ":" << __LINE__ << std::endl;              \
+                return rocblas_status_internal_error;                                                                      \
+            }                                                                                \
+        } while(0)    
+    #define CHECK_HIPBLASLT_ERROR(STATUS) EXPECT_HIPBLAS_STATUS(STATUS, HIPBLAS_STATUS_SUCCESS)
+
+    
+    
+    /********************************************************************
+     * Variable template to map alpha and beta types to compute type    *
+     ********************************************************************/
+    template <typename T>
+    using hipblaslt_alpha_beta_type = std::conditional_t<std::is_same_v<T, rocblas_half> || std::is_same_v<T, rocblas_bfloat16>,
+                                                        float, std::conditional_t<std::is_same_v<T, rocblas_float_complex>, std::complex<float>,
+                                                        std::conditional_t<std::is_same_v<T, rocblas_double_complex>, std::complex<double>,
+                                                        std::conditional_t<std::is_same_v<T, int8_t>, int32_t, T>>>>;
+
 
     /****************************************************************
      * Construct a HipBlasLT GEMM from a RocblasContractionProblem *
@@ -420,110 +537,251 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                               rocblas_gemm_algo                            algo,
                                               int32_t solution_index)
 {
-    bool solution_query = algo == rocblas_gemm_algo_solution_index
-                          && prob.flags & rocblas_gemm_flags_check_solution_index;
-
-    if(prob.strided_batch)
+    hipblasLtHandle_t& handle = *(prob.handle->getHipblasLtHandle());
+    hipblasLtCreate(&handle);
+    int version;
+    hipblasLtGetVersion(handle, &version);
+    std::cout<<"hipBLASLt version: "<<version<<std::endl;
+    //if(version >= 100300)
+    if(prob.batch_A != 0)
     {
-        auto gemm = ConstructHipBlasLTGemm(prob);
-
-        size_t                           workspace_size = 0;
+        int batchMode = 0; // General Batched GEMM support in hipBLASLt
+        int batchCount = prob.batch_count > 0 ? prob.batch_count : 1; // Default to batch count of 1 if not specified
+        //if(prob.batch_A != 0)
+        batchMode = 1;
+        std::cout<<"Using the new hipblaslt integration for General Batched GEMM"<<std::endl;
+        hipblasLtMatrixLayout_t matA, matB, matC, matD;
+        const int requestedAlgoCount = 1;
+        int       returnedAlgoCount  = 0;
+        size_t     max_workspace_size          = prob.handle->get_available_workspace();
+        void *workspace = nullptr;
+        int row_dim, col_dim;
+        hipblasOperation_t transA = (hipblasOperation_t)prob.trans_a;
+        hipblasOperation_t transB = (hipblasOperation_t)prob.trans_b;
+        if(prob.trans_a == rocblas_operation_none)
+        {
+            row_dim = prob.m;
+            col_dim = prob.k;
+        }
+        else
+        {
+            row_dim = prob.k;
+            col_dim = prob.m;
+        }
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matA, hipblaslt_datatype<Ti>, row_dim, col_dim, prob.col_stride_a));
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                    matA, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(matA,
+                                                HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE,
+                                                &batchMode,
+                                                sizeof(int)), HIPBLAS_STATUS_SUCCESS);                                                
+        if(prob.trans_b == rocblas_operation_none)
+        {
+            row_dim = prob.k;
+            col_dim = prob.n;
+        }
+        else
+        {
+            row_dim = prob.n;
+            col_dim = prob.k;
+        }        
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matB, hipblaslt_datatype<Ti>, row_dim, col_dim, prob.col_stride_b));
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                    matB, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(matB,
+                                                HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE,
+                                                &batchMode,
+                                                sizeof(int)), HIPBLAS_STATUS_SUCCESS);          
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matC, hipblaslt_datatype<To>, prob.m, prob.n, prob.col_stride_c));
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                    matC, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(matC,
+                                                HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE,
+                                                &batchMode,
+                                                sizeof(int)), HIPBLAS_STATUS_SUCCESS);         
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matD, hipblaslt_datatype<To>, prob.m, prob.n, prob.col_stride_d));      
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                    matD, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(matD,
+                                                HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE,
+                                                &batchMode,
+                                                sizeof(int)), HIPBLAS_STATUS_SUCCESS);  
+        if(prob.strided_batch)
+        {  
+            EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(matA,
+                                                HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                                &(prob.batch_stride_a),
+                                                sizeof(int64_t)), HIPBLAS_STATUS_SUCCESS); 
+            EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(matB,
+                                                HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                                &(prob.batch_stride_b),
+                                                sizeof(int64_t)), HIPBLAS_STATUS_SUCCESS); 
+            EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(matC,
+                                                HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                                &(prob.batch_stride_c),
+                                                sizeof(int64_t)), HIPBLAS_STATUS_SUCCESS);                                                                                                                                                           
+            EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(matD,
+                                                HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                                &(prob.batch_stride_d),
+                                                sizeof(int64_t)), HIPBLAS_STATUS_SUCCESS); 
+        }                                                        
+        hipblasLtMatmulDesc_t matmulDesc;
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmulDesc, hipblaslt_compute_type<Tc>, hipblaslt_scaletype<Ti>));  
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+            matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t)), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+            matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(int32_t)), HIPBLAS_STATUS_SUCCESS);      
+   
+        hipblasLtMatmulPreference_t pref;
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceCreate(&pref));        
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                              HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                              &max_workspace_size,
+                                              sizeof(max_workspace_size)), HIPBLAS_STATUS_SUCCESS);
         hipblasLtMatmulHeuristicResult_t heuristicResult;
-
-        auto init = hipBlasLTInit(gemm,
-                                  algo,
-                                  solution_index,
-                                  solution_query,
-                                  prob.handle,
-                                  workspace_size,
-                                  heuristicResult);
-        if(solution_query)
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmulAlgoGetHeuristic(handle, matmulDesc, matA, matB, matC, matD, 
+                                     pref, requestedAlgoCount, &heuristicResult, &returnedAlgoCount), HIPBLAS_STATUS_SUCCESS);
+        size_t workspaceSize = heuristicResult.workspaceSize;
+        CHECK_RETURNED_WORKSPACE_SIZE(workspaceSize, max_workspace_size);
+        hipMalloc(&workspace, workspaceSize);
+        hipblaslt_alpha_beta_type<Tc> alpha, beta;
+        auto tmp = *prob.alpha;
+        alpha = tmp;
+        tmp  = *prob.beta;
+        beta = tmp;
+        //if(prob.batch_A != 0)
+        //{
+            EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle, matmulDesc, &alpha, const_cast<void*>(static_cast<const void*>(prob.batch_A)), 
+                        matA, const_cast<void*>(static_cast<const void*>(prob.batch_B)), matB, 
+                        &beta, const_cast<void*>(static_cast<const void*>(prob.batch_C)), matC, 
+                        const_cast<void*>(static_cast<const void*>(prob.batch_D)), matD, 
+                        &heuristicResult.algo, workspace, workspaceSize, 0), HIPBLAS_STATUS_SUCCESS);
+        /*}
+        else
         {
-            return init; // early return either success or invalid value
-        }
-        else if(rocblas_status_success != init)
-        {
-            return init;
-        }
-
-        auto gsu_malloc = prob.handle->gsu_malloc_by_size(workspace_size);
-
-        if(!gsu_malloc)
-        {
-            return rocblas_status_memory_error;
-        }
-
-        void* d_workspace = prob.handle->gsu_workspace;
-
-        if(gemm.initialize(heuristicResult.algo, d_workspace, false) != HIPBLAS_STATUS_SUCCESS)
-        {
-            rocblas_internal_ostream msg;
-            print_if_verbose(msg << "rocBLAS error: hipBLASLt initialization failed!");
-            return rocblas_status_internal_error;
-        }
-        if(gemm.run(prob.handle->get_stream()) != HIPBLAS_STATUS_SUCCESS)
-        {
-            rocblas_internal_ostream msg;
-            print_if_verbose(msg << "rocBLAS warning: hipBLASLt execution failed!");
-            return rocblas_status_internal_error;
-        }
+            EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle, matmulDesc, &alpha, prob.A, 
+                        matA, prob.B, matB, 
+                        &beta, prob.C, matC, 
+                        prob.D, matD, 
+                        &heuristicResult.algo, workspace, workspaceSize, 0), HIPBLAS_STATUS_SUCCESS);            
+        }*/
+        hipblasLtMatmulDescDestroy(matmulDesc);
+        hipblasLtMatrixLayoutDestroy(matA);
+        hipblasLtMatrixLayoutDestroy(matB);
+        hipblasLtMatrixLayoutDestroy(matC);
+        hipblasLtMatrixLayoutDestroy(matD);    
+        hipblasLtMatmulPreferenceDestroy(pref);    
+        hipFree(workspace);  
     }
     else
     {
-        auto gemm         = ConstructHipBlasLTGroupedGemm(prob);
-        auto userArgsSize = prob.batch_count * sizeof(hipblaslt_ext::UserArguments);
+        std::cout<<"Using the old hipblaslt integration"<<std::endl;     
 
-        size_t                           workspace_size = 0;
-        hipblasLtMatmulHeuristicResult_t heuristicResult;
+        bool solution_query = algo == rocblas_gemm_algo_solution_index
+                            && prob.flags & rocblas_gemm_flags_check_solution_index;
 
-        auto init = hipBlasLTInit(gemm,
-                                  algo,
-                                  solution_index,
-                                  solution_query,
-                                  prob.handle,
-                                  workspace_size,
-                                  heuristicResult,
-                                  userArgsSize);
-        if(solution_query)
+        if(prob.strided_batch)
         {
-            return init; // early return either success or invalid value
+            auto gemm = ConstructHipBlasLTGemm(prob);
+
+            size_t                           workspace_size = 0;
+            hipblasLtMatmulHeuristicResult_t heuristicResult;
+
+            auto init = hipBlasLTInit(gemm,
+                                    algo,
+                                    solution_index,
+                                    solution_query,
+                                    prob.handle,
+                                    workspace_size,
+                                    heuristicResult);
+            if(solution_query)
+            {
+                return init; // early return either success or invalid value
+            }
+            else if(rocblas_status_success != init)
+            {
+                return init;
+            }
+
+            auto gsu_malloc = prob.handle->gsu_malloc_by_size(workspace_size);
+
+            if(!gsu_malloc)
+            {
+                return rocblas_status_memory_error;
+            }
+
+            void* d_workspace = prob.handle->gsu_workspace;
+
+            if(gemm.initialize(heuristicResult.algo, d_workspace, false) != HIPBLAS_STATUS_SUCCESS)
+            {
+                rocblas_internal_ostream msg;
+                print_if_verbose(msg << "rocBLAS error: hipBLASLt initialization failed!");
+                return rocblas_status_internal_error;
+            }
+            if(gemm.run(prob.handle->get_stream()) != HIPBLAS_STATUS_SUCCESS)
+            {
+                rocblas_internal_ostream msg;
+                print_if_verbose(msg << "rocBLAS warning: hipBLASLt execution failed!");
+                return rocblas_status_internal_error;
+            }
         }
-        else if(rocblas_status_success != init)
+        else
         {
-            return init;
-        }
+            auto gemm         = ConstructHipBlasLTGroupedGemm(prob);
+            auto userArgsSize = prob.batch_count * sizeof(hipblaslt_ext::UserArguments);
 
-        auto gsu_malloc = prob.handle->gsu_malloc_by_size(workspace_size);
+            size_t                           workspace_size = 0;
+            hipblasLtMatmulHeuristicResult_t heuristicResult;
 
-        if(!gsu_malloc)
-        {
-            return rocblas_status_memory_error;
-        }
-        void* d_workspace = prob.handle->gsu_workspace;
+            auto init = hipBlasLTInit(gemm,
+                                    algo,
+                                    solution_index,
+                                    solution_query,
+                                    prob.handle,
+                                    workspace_size,
+                                    heuristicResult,
+                                    userArgsSize);
+            if(solution_query)
+            {
+                return init; // early return either success or invalid value
+            }
+            else if(rocblas_status_success != init)
+            {
+                return init;
+            }
 
-        if(gemm.initialize(heuristicResult.algo, d_workspace, false) != HIPBLAS_STATUS_SUCCESS)
-        {
-            rocblas_internal_ostream msg;
-            print_if_verbose(msg << "rocBLAS error: hipBLASLt initialization failed!");
-            return rocblas_status_internal_error;
-        }
+            auto gsu_malloc = prob.handle->gsu_malloc_by_size(workspace_size);
 
-        hipblaslt_ext::UserArguments* userArgs;
-        RETURN_IF_HIP_ERROR(hipHostMalloc(&userArgs, userArgsSize));
-        gemm.getDefaultValueForDeviceUserArguments(userArgs);
+            if(!gsu_malloc)
+            {
+                return rocblas_status_memory_error;
+            }
+            void* d_workspace = prob.handle->gsu_workspace;
 
-        // Copy them to device memory
-        hipblaslt_ext::UserArguments* d_userArgs
-            = (hipblaslt_ext::UserArguments*)((char*)(prob.handle->gsu_workspace)
-                                              + (workspace_size - userArgsSize));
-        RETURN_IF_HIP_ERROR(hipMemcpy(d_userArgs, userArgs, userArgsSize, hipMemcpyHostToDevice));
-        RETURN_IF_HIP_ERROR(hipHostFree(userArgs));
+            if(gemm.initialize(heuristicResult.algo, d_workspace, false) != HIPBLAS_STATUS_SUCCESS)
+            {
+                rocblas_internal_ostream msg;
+                print_if_verbose(msg << "rocBLAS error: hipBLASLt initialization failed!");
+                return rocblas_status_internal_error;
+            }
 
-        if(gemm.run(d_userArgs, prob.handle->get_stream()) != HIPBLAS_STATUS_SUCCESS)
-        {
-            rocblas_internal_ostream msg;
-            print_if_verbose(msg << "rocBLAS warning: hipBLASLt execution failed!");
-            return rocblas_status_internal_error;
+            hipblaslt_ext::UserArguments* userArgs;
+            RETURN_IF_HIP_ERROR(hipHostMalloc(&userArgs, userArgsSize));
+            gemm.getDefaultValueForDeviceUserArguments(userArgs);
+
+            // Copy them to device memory
+            hipblaslt_ext::UserArguments* d_userArgs
+                = (hipblaslt_ext::UserArguments*)((char*)(prob.handle->gsu_workspace)
+                                                + (workspace_size - userArgsSize));
+            RETURN_IF_HIP_ERROR(hipMemcpy(d_userArgs, userArgs, userArgsSize, hipMemcpyHostToDevice));
+            RETURN_IF_HIP_ERROR(hipHostFree(userArgs));
+
+            if(gemm.run(d_userArgs, prob.handle->get_stream()) != HIPBLAS_STATUS_SUCCESS)
+            {
+                rocblas_internal_ostream msg;
+                print_if_verbose(msg << "rocBLAS warning: hipBLASLt execution failed!");
+                return rocblas_status_internal_error;
+            }
         }
     }
     return rocblas_status_success;

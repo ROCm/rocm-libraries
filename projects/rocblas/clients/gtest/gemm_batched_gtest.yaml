@@ -330,6 +330,7 @@ Tests:
   alpha_beta: *alpha_beta_range
   transA_transB: *transA_transB_range
   batch_count: [ -1, 0, 1, 3 ]
+  use_hipblaslt: [ 1 ]
 
 - name: gemm_batched_small_int8
   category: quick
@@ -362,6 +363,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
   batch_count: [ 3 ]
+  use_hipblaslt: [ 1 ]  
 
 - name: gemm_batched_medium_complex
   category: pre_checkin
@@ -384,6 +386,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
   batch_count: [ 3 ]
+  use_hipblaslt: [ 1 ]  
 
 - name: gemm_batched_large_complex
   category: pre_checkin
@@ -408,6 +411,7 @@ Tests:
   transA: N
   transB: T
   batch_count: [ 2 ]
+  use_hipblaslt: [ 1 ]  
 
 - name: gemm_batched_conv_resnet50_fwd
   category: nightly
@@ -421,6 +425,7 @@ Tests:
   transA: N
   transB: N
   batch_count: 4
+  use_hipblaslt: [ 1 ]  
 
 - name: gemm_batched_conv_resnet50_bwddata
   category: nightly
@@ -434,6 +439,7 @@ Tests:
   transA: N
   transB: T
   batch_count: 4
+  use_hipblaslt: [ 1 ]  
 
 - name: gemm_batched_conv_inception4_fwd
   category: nightly
@@ -447,6 +453,7 @@ Tests:
   transA: N
   transB: N
   batch_count: 4
+  use_hipblaslt: [ 1 ]  
 
 - name: gemm_batched_conv_inception4_bwddata
   category: nightly
@@ -460,6 +467,7 @@ Tests:
   transA: N
   transB: T
   batch_count: 4
+  use_hipblaslt: [ 1 ]
 
 - name: gemm_batched_conv_ctest_bwddata
   category: nightly
@@ -473,6 +481,7 @@ Tests:
   transA: N
   transB: T
   batch_count: 1
+  use_hipblaslt: [ 1 ]
 
 - name: gemm_batched_conv_ctest_fwd
   category: nightly
@@ -486,6 +495,7 @@ Tests:
   transA: N
   transB: N
   batch_count: 1
+  use_hipblaslt: [ 1 ]
 
 - name: gemm_batched_ex_hpa_fp16
   category: quick
@@ -500,6 +510,7 @@ Tests:
   alpha: 0.001
   beta: 1
   batch_count: [ 1, 5, 10, 12 ]
+  use_hipblaslt: [ 1 ]
 
 - name: gemm_batched_zerok
   category: quick
@@ -533,6 +544,7 @@ Tests:
   transB: [ N, T ]
   alpha: 1
   beta: 1
+  use_hipblaslt: [ 1 ]  
 
 - name: gemm_batched_graph_test
   category: pre_checkin
