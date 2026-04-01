@@ -37,6 +37,8 @@
 #include <miopen/search_options.hpp>
 #include <miopen/solver_id.hpp>
 #include <miopen/solver.hpp>
+#include <miopen/env.hpp>
+#include <miopen/generic_search_controls.hpp>
 
 #include <limits>
 #include <type_traits>
@@ -327,6 +329,10 @@ struct SolverContainer
                 {
                     MIOPEN_LOG_I2(solver.SolverDbId() << ": Not applicable");
                 }
+                else if(env::enabled(MIOPEN_SEARCH_CUTOFF) && solver.IsSlow(ctx, problem))
+                {
+                    MIOPEN_LOG_I2(solver.SolverDbId() << ": Skipped (slow, search cutoff active)");
+                }
                 else
                 {
                     const Solution s =
@@ -381,6 +387,10 @@ struct SolverContainer
                 else if(!solver.IsApplicable(ctx, problem))
                 {
                     MIOPEN_LOG_I2(solver.SolverDbId() << ": Not applicable");
+                }
+                else if(env::enabled(MIOPEN_SEARCH_CUTOFF) && solver.IsSlow(ctx, problem))
+                {
+                    MIOPEN_LOG_I2(solver.SolverDbId() << ": Skipped (slow, search cutoff active)");
                 }
                 else
                 {

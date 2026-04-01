@@ -2802,6 +2802,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwd1x1_0_2 final : GemmFwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
+
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
 
@@ -2838,6 +2841,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwd1x1_0_1 final : GemmFwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
+
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
 
@@ -2855,6 +2861,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwdRest final : GemmFwdBase
                             const miopen::conv::ProblemDescription&) const override;
 
     bool MayNeedWorkspace() const override { return true; }
+
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
@@ -2886,6 +2895,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmBwd1x1_stride2 final : GemmBwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
+
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
 
@@ -2904,6 +2916,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmBwd1x1_stride1 final : GemmBwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
+
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription& problem) const override;
 
@@ -2921,6 +2936,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmBwdRest final : GemmBwdBase
                             const miopen::conv::ProblemDescription&) const override;
 
     bool MayNeedWorkspace() const override { return true; }
+
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
@@ -2946,6 +2964,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmWrw1x1_stride1 final : GemmWrwBase
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<GemmWrw1x1_stride1>(); }
 
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
+
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
 
@@ -2963,6 +2984,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmWrwUniversal final : GemmWrwBase
                             const miopen::conv::ProblemDescription&) const override;
 
     bool MayNeedWorkspace() const override { return true; }
+
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
