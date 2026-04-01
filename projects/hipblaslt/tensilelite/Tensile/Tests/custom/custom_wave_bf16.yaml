@@ -40,12 +40,18 @@ BenchmarkProblems:
       ForkParameters:
         - CustomKernel:
           - name: "wave_bf16_gemm_256x256x64"
-            args: [ { type: address, semantic: AddressA },
-                    { type: address, semantic: AddressB },
-                    { type: address, semantic: AddressD } ]
+            args: [ { type: address, semantic: AddressB },
+                    { type: address, semantic: AddressA },
+                    { type: address, semantic: AddressD },
+                    { type: uint32,  semantic: SizeFree1 },
+                    { type: uint32,  semantic: Padding },
+                    { type: uint32,  semantic: SizeFree0 },
+                    { type: uint32,  semantic: Padding },
+                    { type: uint32,  semantic: SizeSum },
+                    { type: uint32,  semantic: Padding } ]
             macrotile: [256, 256, 64]
             threads: [256, 4, 1]
-            grid: [TilesX, TilesY, One]
+            grid: [TilesY, TilesX, One]
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 4, 4, 4, 4]
         - PreloadKernArgs: [False]
