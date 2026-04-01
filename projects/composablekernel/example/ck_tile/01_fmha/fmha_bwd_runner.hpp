@@ -808,17 +808,18 @@ bwd_result fmha_bwd_run(mode_enum mode,
                     AccDataType sink_val = sink_host(wb, i_h);
                     for(int i_q = 0; i_q < real_seqlen_q; ++i_q)
                     {
-                        // Use numerically stable log-domain arithmetic to avoid exp(lse)
-                        // overflow when lse is large (e.g. lse > 88 overflows float32).
-                        //   lse_new = lse_old + log(1 + exp(sink - lse_old))
-                        //   p_scale = 1 / (1 + exp(sink - lse_old))   [= exp(lse_old - lse_new)]
-                        //   p_sink  = exp(sink - lse_new)
+                        // Use numerically stable log-sum-exp: lse_new = log(exp(lse_old)+exp(sink))
+                        //   = max(lse_old, sink) + log(1 + exp(min - max))
+                        // This handles lse_old = -inf (fully-masked rows) without producing NaN:
+                        //   if lse_old=-inf: max=sink, min=-inf, exp(-inf-sink)=0, lse_new=sink
+                        // It also avoids exp(lse_old) overflow when lse_old is large.
+                        //   p_scale = exp(lse_old - lse_new)   [fraction kept by regular tokens]
+                        //   p_sink  = exp(sink - lse_new)      [sink attention weight]
                         AccDataType lse_old = lse_host_ref(i_h, i_q);
-                        AccDataType diff    = sink_val - lse_old; // sink - lse_old
-                        AccDataType lse_new =
-                            lse_old + ck_tile::log(AccDataType(1) + ck_tile::exp(diff));
-                        AccDataType p_scale =
-                            AccDataType(1) / (AccDataType(1) + ck_tile::exp(diff));
+                        AccDataType hi      = lse_old > sink_val ? lse_old : sink_val;
+                        AccDataType lo      = lse_old > sink_val ? sink_val : lse_old;
+                        AccDataType lse_new = hi + ck_tile::log(AccDataType(1) + ck_tile::exp(lo - hi));
+                        AccDataType p_scale = ck_tile::exp(lse_old - lse_new);
 
                         lse_host_ref(i_h, i_q) = lse_new;
 
