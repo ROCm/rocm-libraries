@@ -106,7 +106,9 @@ namespace TensileLite
 
         using BitWidth        = uint8_t;
         using Size            = uint64_t;
-        using SwizzleCacheKey = std::tuple<BitWidth, Size, Size>;
+        // Cache key includes tensor index (size_t) to prevent A and B from
+        // sharing cached permuted data when they have the same shape.
+        using SwizzleCacheKey = std::tuple<BitWidth, Size, Size, size_t>;
         using SwizzleCacheVal = ::Tensor::Manipulation::Tensor;
         using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
         static thread_local SwizzleCache g_swizzleCache;
@@ -2314,7 +2316,7 @@ namespace TensileLite
                         (unrolledSize / (MiK * PackK) + !!(unrolledSize % (MiK * PackK))) * MiK
                             * PackK};
                     auto swizzleKey
-                        = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize);
+                        = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize, i);
 
                     if(g_swizzleCache.count(swizzleKey))
                     {
@@ -2338,7 +2340,6 @@ namespace TensileLite
 
                         memcpy(
                             tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
-                        //Temporary hack
                         uint64_t padVal{};
                         auto     paddedTensor = ::Tensor::Manipulation::pad(
                             tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
