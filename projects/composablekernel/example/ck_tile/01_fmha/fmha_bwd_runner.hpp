@@ -818,7 +818,8 @@ bwd_result fmha_bwd_run(mode_enum mode,
                         AccDataType lse_old = lse_host_ref(i_h, i_q);
                         AccDataType hi      = lse_old > sink_val ? lse_old : sink_val;
                         AccDataType lo      = lse_old > sink_val ? sink_val : lse_old;
-                        AccDataType lse_new = hi + ck_tile::log(AccDataType(1) + ck_tile::exp(lo - hi));
+                        AccDataType lse_new =
+                            hi + ck_tile::log(AccDataType(1) + ck_tile::exp(lo - hi));
                         AccDataType p_scale = ck_tile::exp(lse_old - lse_new);
 
                         lse_host_ref(i_h, i_q) = lse_new;
