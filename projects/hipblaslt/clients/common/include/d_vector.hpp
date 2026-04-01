@@ -140,8 +140,7 @@ public:
 
         if(use_HMM)
         {
-            // Keep 20% of the available system memory for room of emergency
-            size_t available_host_memory = get_available_host_memory() * 0.8;
+            size_t available_host_memory = get_available_host_memory();
             // Need to ensure sufficient host memory, otherwise hipMallocManaged may OOM and hip api won't return error code,
             // and will cause the gtest get aborted
             if(available_host_memory < capacity || hipMallocManaged(&d, capacity) != hipSuccess)
@@ -192,8 +191,7 @@ public:
     {
         char* d = nullptr;
 
-        // Keep 20% of the available system memory for room of emergency
-        size_t available_host_memory = get_available_host_memory() * 0.8;
+        size_t available_host_memory = get_available_host_memory();
         // Need to ensure sufficient host memory, otherwise hipHostMalloc may OOM and hip api won't return error code,
         // and will cause the gtest get aborted
         if(available_host_memory < capacity || hipHostMalloc(&d, capacity) != hipSuccess)
@@ -239,8 +237,6 @@ public:
 
 private:
     std::vector<M> m_pool, m_pool_managed;
-    // Calculate the total allocated capacity of the host memory
-    size_t host_allocated_capacity = 0;
     std::mutex m_mutex;
 
     static memory_pool& Instance()
@@ -274,9 +270,19 @@ private:
             if(it != pool.begin())
                 pool.erase(it - 1);
 
-            // For Windows system, not suitable for memory pool management, so always clear the pool
+            // For Windows system with not enough system memory, 
+            // not suitable for memory pool management when it needs another allocation
             #ifdef _WIN32
-            pool.clear();
+            MEMORYSTATUSEX memStatus = {};
+            memStatus.dwLength = sizeof(memStatus);
+            if(GlobalMemoryStatusEx(&memStatus))
+            {
+                // If the shared memory is less than 64GB(128 / 2), may not enough for the hipblaslt-test to run
+                if(memStatus.ullTotalPhys < (128ULL << 30))
+                {
+                    pool.clear();
+                }
+            }
             #endif
 
             // Allocate 20% extra if it is not huge_request for later reuse
