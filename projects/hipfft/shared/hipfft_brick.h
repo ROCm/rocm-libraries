@@ -122,10 +122,10 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
     const size_t         nbatch   = batchlength[0];
     fft_result_placement placement;
     fft_io               io;
-    const fft_transform_type dft_type
-        = isrealcomplex ? fft_transform_type_real_forward : fft_transform_type_complex_forward;
-
     const bool isherm = isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+    const bool isreal = isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE;
+    const fft_transform_type dft_type
+        = isreal ? fft_transform_type_real_forward : fft_transform_type_complex_forward;
     
     // The subformat tells us which dimension is split.
     // Real in-place data needs extra padding.
@@ -202,7 +202,7 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
         }
         brick.field_upper[splitdim] = brick.field_lower[splitdim] + bricksplitlen;
 
-        brick.brick_stride = default_strides(isherm ? fft_transform_type_complex_forward :dft_type,
+        brick.brick_stride = default_strides(dft_type,
                                              placement,
                                              io,
                                              brick.field_lower,

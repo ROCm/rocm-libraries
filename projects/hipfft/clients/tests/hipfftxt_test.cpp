@@ -251,7 +251,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
     }
 
     // FIXME: handle variable number of GPUs
-    size_t    ngpus = 2;
+    size_t    ngpus = 8;
     std::vector<int> gpus(ngpus);
     std::iota(gpus.begin(), gpus.end(), 0);
     
@@ -363,9 +363,11 @@ TEST_P(hipfftxtunitdesc, desccreation)
                                          << " (" << hipfftResult_string(hipfft_rt) << ")";
     if(verbose > 2)
         std::cout << "descriptor allocated\n";
-
+    
     for(size_t igpu = 0; igpu < gpus.size(); ++igpu)
     {
+        if(verbose > 3)
+            std::cout << "buffer " << igpu << " size: " << mydesc->descriptor->size[igpu] << "\n";
         // TODO: handle case where some GPUs don't have data because there isn't enough to go
         // around.  (Particularly for multi-batch cases.)
         ASSERT_NE(mydesc->descriptor->size[igpu], 0) << "gpu buffer size is zero for gpu " << igpu;
@@ -592,11 +594,12 @@ TEST_P(hipfftxtunitdesc, desccreation)
         printhostbuf(hostbuf.data(), isreal, hostdatabatchlengths, hostdiststrides);
     }
         
+    if(verbose > 2)
+        std::cout << "starting hipfftXtMemcpy...\n";
     hipfft_rt = hipfftXtMemcpy(plan,
                                reinterpret_cast<void*>(mydesc),
                                reinterpret_cast<void*>(hostbuf.data()),
                                copydir);
-
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy H2D"
                                          << " failed with code "
                                          << hipfft_rt
@@ -612,15 +615,17 @@ TEST_P(hipfftxtunitdesc, desccreation)
     for(const auto igpu : gpus)
     {
         if(verbose > 3)
+        {
             std::cout << "buffer " << igpu << " after xtmemcp\n";
+        }
         const auto device = mydesc->descriptor->GPUs[igpu];
         const auto bufsize = mydesc->descriptor->size[igpu];
-        ASSERT_NE(bufsize, 0) << "gpu buffer size is zero for gpu " << igpu;
         if(verbose > 3)
         {
             std::cout << "device: " << device << "\n";
             std::cout << "buffer size: " << bufsize << "\n";
         }
+        ASSERT_NE(bufsize, 0) << "gpu buffer size is zero for gpu " << igpu;
         hostbufparts[igpu].resize(bufsize);
         auto devbuf = mydesc->descriptor->data[igpu];
         auto hipret = hipMemcpy(hostbufparts[igpu].data(), devbuf, bufsize,

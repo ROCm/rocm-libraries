@@ -592,11 +592,6 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
 
     if(plan->singleProcMultiDevice)
     {
-        // Host buffer setup for hipfftXtMemcpy:
-        // Only in-place is allowed for real/complex transforms.
-        // Complex/complex transforms can be in-place or not, but complex/complex data formats are
-        // quite general.
-
         // Problem dimensions and strides are known, set up the bricks for single-proc multi-GPU
 
         std::vector<size_t> batchlength = {plan->batch};
@@ -1876,9 +1871,13 @@ try
         
         if(isinplace)
         {
-            auto spacebufsize = compute_ptrdiff(plan->spaceBricks[idx].field_lower,
-                                                plan->spaceBricks[idx].field_upper,
-                                                plan->spaceBricks[idx].brick_stride);
+            // NB: we do not use compute_ptrdiff here because we need to be a bit greedy with
+            // allocation: hipfftXtMemcpy will use the entire padded buffer, so we need the extra
+            // one or two worth of real-values of space at the end of the buffer which
+            // compute_ptrdiff would save us from allocating.  
+            auto spacebufsize = (plan->spaceBricks[idx].field_upper[0]
+                                 - plan->spaceBricks[idx].field_lower[0])
+                * plan->spaceBricks[idx].brick_stride[0];
             const size_t space_bytes_per_element
                 = hipDataType_bits(plan->type.spaceType()) / 8;
             auto freqbufsize = compute_ptrdiff(plan->freqBricks[idx].field_lower,
@@ -1969,12 +1968,6 @@ static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
             field_stride.erase(field_stride.begin() + idx - 1);
             --idx;
         }
-    }
-
-    // Fastest dim is expected to be contiguous
-    if(brick_stride.back() != 1 || field_stride.back() != 1)
-    {
-        throw std::runtime_error("fastest dim not contiguous after collapsing");
     }
 }
 
@@ -2071,7 +2064,7 @@ try
             // do contiguous memcpys.
             hostDataLengths[lastdim] = 2 * (hostDataLengths[lastdim] / 2 + 1);
         }
-
+        
         for(size_t idx = 0; idx < static_cast<size_t>(myDesc->descriptor->nGPUs); ++idx)
         {
             rocfft_scoped_device dev(myDesc->descriptor->GPUs[idx]);
@@ -2096,7 +2089,13 @@ try
             auto hostDataStride_collapsed = hostDataStride;
             collapse_contiguous_dims(brick_length_collapsed, brick_stride_collapsed,
                                      hostDataStride_collapsed);
-                
+
+            // Fastest dim is expected to be contiguous
+            if(brick_stride_collapsed.back() != 1 || hostDataStride_collapsed.back() != 1)
+            {
+                throw std::runtime_error("fastest dim not contiguous after collapsing");
+            }
+                                    
             auto destptr = h2d ? myDesc->descriptor->data[idx] : host_offset;
             const auto srcptr = h2d ? host_offset : myDesc->descriptor->data[idx];
             const auto cpdirection = h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost;
@@ -2109,7 +2108,10 @@ try
                                      myDesc->descriptor->size[idx],
                                      hipMemcpyHostToDevice);
                 if(ret != hipSuccess)
+                {
                     return HIPFFT_INTERNAL_ERROR;
+                }
+                    
                 break;
             }
             case 2:
@@ -2146,8 +2148,10 @@ try
                     height,            // height (how many rows)
                     cpdirection);                
                 if(ret != hipSuccess)
+                {
                     return HIPFFT_INTERNAL_ERROR;
-            break;
+                }
+                break;
             }
             default:
                 return HIPFFT_INTERNAL_ERROR;

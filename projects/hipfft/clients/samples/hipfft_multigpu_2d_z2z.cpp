@@ -21,10 +21,13 @@
 
 #include <complex>
 #include <iostream>
+#include <numeric>
 #include <vector>
 
 #include <hipfft/hipfft.h>
 #include <hipfft/hipfftXt.h>
+
+#include "sample_utils.hpp"
 
 DISABLE_WARNING_PUSH
 DISABLE_WARNING_DEPRECATED_DECLARATIONS
@@ -32,9 +35,10 @@ DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
 
+
 int main()
 {
-    std::cout << "Multi-gpu hipFFT 2D double-precision complex-to-complex transform\n";
+    std::cout << "Multi-gpu hipFFT in-place 2D double-precision complex-to-complex transform\n";
 
     // 2D FFTs are encountered in diverse applications of image processing,
     // examples range from image denoising to RTM seismic imaging.
@@ -43,40 +47,41 @@ int main()
     // Note that when using cuFFTXt with two or more GPUs, its latest version requires
     // a minimum size per dimension greater or equal than 32 and less equal than 4096
     // for single precision, and 2048 for double precision.
-    const int Nx        = 512;
-    const int Ny        = 512;
-    int       direction = HIPFFT_FORWARD; // forward=-1, backward=1
+    const int  Nx              = 32;
+    const int  Ny              = 33;
+    int        direction       = HIPFFT_FORWARD; // forward=-1, backward=1
+    hipfftType transform_type  = HIPFFT_Z2Z;     // std::complex<double> to std::complex<double>
+    hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE;
+    size_t     ngpus           = 2;
 
-    int verbose = 0;
+    // We only want to print a subset of the data:
+    const int printlimit = 8;
+
+    int deviceCount;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess)
+        throw std::runtime_error("hipGetDeviceCount failed.");
+    std::cout << "Number of available devices: " << deviceCount << std::endl;
+    if(deviceCount < ngpus)
+    {
+        std::cout << "Sample needs at least " << ngpus << "GPUs\n";
+        return 0;
+    }
+    std::cout << "\n";
 
     // Initialize reference data
     std::vector<std::complex<double>> cinput(Nx * Ny);
-    for(size_t i = 0; i < Nx * Ny; i++)
+    for(size_t xidx = 0; xidx < Nx; ++xidx)
     {
-        cinput[i] = i;
-    }
-
-    if(verbose)
-    {
-        std::cout << "Input:\n";
-        for(int i = 0; i < Nx; i++)
+        for(size_t yidx = 0; yidx < Ny; ++yidx)
         {
-            for(int j = 0; j < Ny; j++)
-            {
-                int pos = i * Ny + j;
-                std::cout << cinput[pos] << " ";
-            }
-            std::cout << "\n";
+            cinput[xidx * Ny + yidx] = std::complex<double>(xidx,yidx);
         }
-        std::cout << std::endl;
     }
 
-    // Define list of GPUs to use
-    std::vector<int> gpus = {0, 1};
-
-    // Create the multi-gpu plan
-    hipLibXtDesc* desc; // input descriptor
-
+    std::cout << "Input:\n";
+    printarraylimit(cinput, Nx, Ny, printlimit);
+    std::cout << "\n";
+        
     hipfftHandle plan;
     if(hipfftCreate(&plan) != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
@@ -89,60 +94,134 @@ int main()
         throw std::runtime_error("hipfftSetStream failed.");
 
     // Assign GPUs to the plan
+    std::vector<int> gpus(ngpus);
+    std::iota(gpus.begin(), gpus.end(), 0);
     hipfftResult hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
     if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftXtSetGPUs failed.");
+        throw std::runtime_error("hipfftXtSetGPUs failed with code" + std::to_string(hipfft_rt));
 
     // Make the 2D plan
-    std::vector<size_t> workSize(gpus.size());
-    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize.data());
+
+    std::vector<size_t> workSize(ngpus);
+    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, transform_type, workSize.data());
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftMakePlan2d failed.");
 
     // Copy input data to GPUs
-    hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE;
-    hipfft_rt                  = hipfftXtMalloc(plan, &desc, format);
+    hipLibXtDesc*       inoutdesc = nullptr;
+    hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, format);
     if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftXtMalloc failed.");
+    {
+        std::stringstream ss;
+        ss << "hipfftXtMalloc failed with error " << hipfft_rt;
+        throw std::runtime_error(ss.str());
+    }
+
+    std::cout << "The descriptor is now allocated:\n";
+    for(size_t idx = 0; idx < ngpus; ++idx)
+    {
+        const size_t vsize
+            = inoutdesc->descriptor->size[idx] / sizeof(decltype(cinput)::value_type);
+        std::cout << "\tbuffer " << idx << ": " << inoutdesc->descriptor->size[idx] << " bytes, "
+                  << vsize << " values\n";
+    }
+    std::cout << "\n";
 
     hipfft_rt = hipfftXtMemcpy(plan,
-                               reinterpret_cast<void*>(desc),
+                               reinterpret_cast<void*>(inoutdesc),
                                reinterpret_cast<void*>(cinput.data()),
                                HIPFFT_COPY_HOST_TO_DEVICE);
     if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftXtMemcpy failed.");
+        throw std::runtime_error("hipfftXtMemcpy failed withd code " + std::to_string(hipfft_rt));
 
-    // Execute the plan
-    hipfft_rt = hipfftXtExecDescriptor(plan, desc, desc, direction);
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftXtMemcpy failed.");
-
-    // Print output
-    if(verbose)
+    std::cout << "Distributed input data on the GPUs:\n";
+    for(size_t idx = 0; idx < ngpus; ++idx)
     {
-        // Move result to the host
-        hipfft_rt = hipfftXtMemcpy(plan,
-                                   reinterpret_cast<void*>(cinput.data()),
-                                   reinterpret_cast<void*>(desc),
-                                   HIPFFT_COPY_DEVICE_TO_HOST);
-        if(hipfft_rt != HIPFFT_SUCCESS)
-            throw std::runtime_error("hipfftXtMemcpy D2H failed.");
-
-        std::cout << "Output:\n";
-        for(size_t i = 0; i < Nx; i++)
+        const int Nxmax = Nx / ngpus + ((idx < Nx % ngpus) ? 1 : 0);
+        const int Nymax = Ny;
+        std::cout << "buffer " << idx << ": "
+                  << Nxmax << " x " << Nymax << ": "
+                  << Nxmax * Nymax <<" elements\n";
+        const size_t vsize
+            = inoutdesc->descriptor->size[idx] / sizeof(decltype(cinput)::value_type);
+        std::vector<decltype(cinput)::value_type> hbuf(vsize);
+        if(hipMemcpy(hbuf.data(),
+                     inoutdesc->descriptor->data[idx],
+                     inoutdesc->descriptor->size[idx],
+                     hipMemcpyDeviceToHost)
+           != hipSuccess)
         {
-            for(size_t j = 0; j < Ny; j++)
-            {
-                auto pos = i * Ny + j;
-                std::cout << cinput[pos] << " ";
-            }
-            std::cout << "\n";
+            throw std::runtime_error("hipMemcpy failed.");
         }
-        std::cout << std::endl;
+        printarraylimit(hbuf, Nxmax, Nymax, printlimit);
+        std::cout << "\n";
     }
 
+
+
+    // Sneakily do a reverse FFT so that we can get identifiable data
+    if(true)
+    {
+        sneakyc2c(cinput, Nx, Ny, direction);
+        hipfft_rt = hipfftXtMemcpy(plan,
+                                   reinterpret_cast<void*>(inoutdesc),
+                                   reinterpret_cast<void*>(cinput.data()),
+                                   HIPFFT_COPY_HOST_TO_DEVICE);
+        if(hipfft_rt != HIPFFT_SUCCESS)
+            throw std::runtime_error("hipfftXtMemcpy failed withd code "
+                                     + std::to_string(hipfft_rt));
+    }
+
+
+    std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n";
+    
+    // Execute the plan
+    hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
+    if(hipfft_rt != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftXtExecDescriptor failed.");
+
+    std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n";
+    
+    std::cout << "Distributed output data on the GPUs:\n";
+    for(size_t idx = 0; idx < ngpus; ++idx)
+    {
+        const int Nxmax = Nx;
+        const int Nymax = Ny / ngpus + ((idx < Ny % ngpus) ? 1 : 0);
+        std::cout << "buffer " << idx << ": "
+                  << Nxmax << " x " << Nymax << ": "
+                  << Nxmax * Nymax <<" elements\n";
+        const size_t vsize
+            = inoutdesc->descriptor->size[idx] / sizeof(decltype(cinput)::value_type);
+
+        std::vector<decltype(cinput)::value_type> hbuf(vsize);
+        if(hipMemcpy(hbuf.data(),
+                     inoutdesc->descriptor->data[idx],
+                     inoutdesc->descriptor->size[idx],
+                     hipMemcpyDeviceToHost)
+           != hipSuccess)
+        {
+            throw std::runtime_error("hipMemcpy failed.");
+        }
+        printarraylimit(hbuf, Nxmax, Nymax, printlimit);
+        std::cout << "\n";
+    }
+
+
+    
+    // Move result to the host
+    hipfft_rt = hipfftXtMemcpy(plan,
+                               reinterpret_cast<void*>(cinput.data()),
+                               reinterpret_cast<void*>(inoutdesc),
+                               HIPFFT_COPY_DEVICE_TO_HOST);
+    if(hipfft_rt != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftXtMemcpy D2H failed.");
+
+    std::cout << "Collected output:\n";
+    printarraylimit(cinput, Nx, Ny, printlimit);
+    std::cout << std::endl;
+
     // Clean up
-    if(hipfftXtFree(desc) != HIPFFT_SUCCESS)
+    if(hipfftXtFree(inoutdesc) != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtFree failed.");
 
     if(hipfftDestroy(plan) != HIPFFT_SUCCESS)
