@@ -45,6 +45,8 @@ namespace hipdnn_frontend::graph
 class ReductionAttributes : public Attributes<ReductionAttributes>
 {
 public:
+    ReductionAttributes() = default;
+
     /// Input tensor identifiers
     // NOLINTNEXTLINE(readability-identifier-naming)
     enum class input_names
