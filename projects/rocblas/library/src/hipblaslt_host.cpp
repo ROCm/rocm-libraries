@@ -543,15 +543,14 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     int version;
     hipblasLtGetVersion(handle, &version);
     std::cout << "hipBLASLt version: " << version << std::endl;
-    //if(version >= 100300)
-    if(prob.batch_A != 0)
+    if(version >= 100300)
     {
         int batchMode  = 0; // General Batched GEMM support in hipBLASLt
         int batchCount = prob.batch_count > 0 ? prob.batch_count
                                               : 1; // Default to batch count of 1 if not specified
-        //if(prob.batch_A != 0)
-        batchMode = 1;
-        std::cout << "Using the new hipblaslt integration for General Batched GEMM" << std::endl;
+        if(prob.batch_A != 0)
+            batchMode = 1;
+        //std::cout << "Using the new hipblaslt integration for General Batched GEMM" << std::endl;
         hipblasLtMatrixLayout_t matA, matB, matC, matD;
         const int               requestedAlgoCount = 1;
         int                     returnedAlgoCount  = 0;
@@ -687,35 +686,47 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         alpha                             = tmp;
         tmp                               = *prob.beta;
         beta                              = tmp;
-        //if(prob.batch_A != 0)
-        //{
-        EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatmul(handle,
-                            matmulDesc,
-                            &alpha,
-                            const_cast<void*>(static_cast<const void*>(prob.batch_A)),
-                            matA,
-                            const_cast<void*>(static_cast<const void*>(prob.batch_B)),
-                            matB,
-                            &beta,
-                            const_cast<void*>(static_cast<const void*>(prob.batch_C)),
-                            matC,
-                            const_cast<void*>(static_cast<const void*>(prob.batch_D)),
-                            matD,
-                            &heuristicResult.algo,
-                            workspace,
-                            workspaceSize,
-                            0),
-            HIPBLAS_STATUS_SUCCESS);
-        /*}
+        if(prob.batch_A != 0)
+        {
+            EXPECT_HIPBLAS_STATUS(
+                hipblasLtMatmul(handle,
+                                matmulDesc,
+                                &alpha,
+                                const_cast<void*>(static_cast<const void*>(prob.batch_A)),
+                                matA,
+                                const_cast<void*>(static_cast<const void*>(prob.batch_B)),
+                                matB,
+                                &beta,
+                                const_cast<void*>(static_cast<const void*>(prob.batch_C)),
+                                matC,
+                                const_cast<void*>(static_cast<const void*>(prob.batch_D)),
+                                matD,
+                                &heuristicResult.algo,
+                                workspace,
+                                workspaceSize,
+                                0),
+                HIPBLAS_STATUS_SUCCESS);
+        }
         else
         {
-            EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle, matmulDesc, &alpha, prob.A, 
-                        matA, prob.B, matB, 
-                        &beta, prob.C, matC, 
-                        prob.D, matD, 
-                        &heuristicResult.algo, workspace, workspaceSize, 0), HIPBLAS_STATUS_SUCCESS);            
-        }*/
+            EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
+                                                  matmulDesc,
+                                                  &alpha,
+                                                  prob.A,
+                                                  matA,
+                                                  prob.B,
+                                                  matB,
+                                                  &beta,
+                                                  prob.C,
+                                                  matC,
+                                                  prob.D,
+                                                  matD,
+                                                  &heuristicResult.algo,
+                                                  workspace,
+                                                  workspaceSize,
+                                                  0),
+                                  HIPBLAS_STATUS_SUCCESS);
+        }
         hipblasLtMatmulDescDestroy(matmulDesc);
         hipblasLtMatrixLayoutDestroy(matA);
         hipblasLtMatrixLayoutDestroy(matB);
@@ -726,7 +737,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     }
     else
     {
-        std::cout << "Using the old hipblaslt integration" << std::endl;
+        //std::cout << "Using the old hipblaslt integration" << std::endl;
 
         bool solution_query = algo == rocblas_gemm_algo_solution_index
                               && prob.flags & rocblas_gemm_flags_check_solution_index;
