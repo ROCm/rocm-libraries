@@ -111,6 +111,13 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback) {
   return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
+hipdnnPluginStatus_t hipdnnPluginSetLogLevel(hipdnnSeverity_t level) {
+  hipdnn_plugin_sdk::logging::setLogLevel(level);
+
+  LOG_API_SUCCESS_AUTO("level=" << level);
+  return HIPDNN_PLUGIN_STATUS_SUCCESS;
+}
+
 // ----------------------------------------------------------------------
 // Implementations for engine plugin API defined in
 // hipDNN/sdk/include/hipdnn_sdk/plugin/EnginePluginApi.h
