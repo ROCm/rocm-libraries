@@ -4,8 +4,17 @@
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
 
+#include "TestKnobExpectation.hpp"
+
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+
+#include <vector>
+
+// Thread-local storage for all received knob settings, serialized as canonical strings.
+// Tests read these via the exported getCount/getAt/reset C functions.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static thread_local std::vector<std::string> gReceivedKnobs;
 
 // NOLINTNEXTLINE
 thread_local char
@@ -325,6 +334,19 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle
                                                         const hipdnnPluginConstData_t* opGraph,
                                                         size_t* workspaceSize)
 {
+    // Record received knob settings so tests can verify lowering via
+    // the exported getCount/getAt/reset C functions.
+    if(engineConfig != nullptr && engineConfig->ptr != nullptr)
+    {
+        const hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+            engineConfig->ptr, engineConfig->size);
+        if(configWrapper.isValid())
+        {
+            gReceivedKnobs.push_back(
+                hipdnn_tests::knob_expectation::serializeActualKnobSettings(configWrapper));
+        }
+    }
+
     return TestPluginBase::enginePluginGetWorkspaceSize(
         handle, engineConfig, opGraph, workspaceSize);
 }
@@ -363,5 +385,24 @@ hipdnnPluginStatus_t
 {
     return TestPluginBase::enginePluginExecuteOpGraph(
         handle, executionContext, workspace, deviceBuffers, numDeviceBuffers);
+}
+
+uint32_t hipdnnTestKnobsPluginGetReceivedKnobsCount()
+{
+    return static_cast<uint32_t>(gReceivedKnobs.size());
+}
+
+const char* hipdnnTestKnobsPluginGetReceivedKnobsAt(uint32_t index)
+{
+    if(index >= gReceivedKnobs.size())
+    {
+        return nullptr;
+    }
+    return gReceivedKnobs[index].c_str();
+}
+
+void hipdnnTestKnobsPluginResetReceivedKnobs()
+{
+    gReceivedKnobs.clear();
 }
 } // extern "C"
