@@ -11,6 +11,7 @@ include "convolution_fwd_attributes.fbs";
 include "convolution_bwd_attributes.fbs";
 include "convolution_wrw_attributes.fbs";
 include "layernorm_attributes.fbs";
+include "layernorm_backward_attributes.fbs";
 include "matmul_attributes.fbs";
 include "pointwise_attributes.fbs";
 include "rmsnorm_attributes.fbs";
@@ -25,7 +26,28 @@ include "resample_fwd_attributes.fbs";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-union NodeAttributes {BatchnormInferenceAttributes, PointwiseAttributes, BatchnormBackwardAttributes, BatchnormAttributes, ConvolutionFwdAttributes, ConvolutionBwdAttributes, ConvolutionWrwAttributes, BatchnormInferenceAttributesVarianceExt, MatmulAttributes, RMSNormAttributes, LayernormAttributes, SdpaAttributes, BlockScaleDequantizeAttributes, BlockScaleQuantizeAttributes, SdpaBackwardAttributes, CustomOpAttributes, RMSNormBackwardAttributes, ReductionAttributes, ResampleFwdAttributes}
+union NodeAttributes {
+	BatchnormInferenceAttributes,
+	PointwiseAttributes,
+	BatchnormBackwardAttributes,
+	BatchnormAttributes,
+	ConvolutionFwdAttributes,
+	ConvolutionBwdAttributes,
+	ConvolutionWrwAttributes,
+	BatchnormInferenceAttributesVarianceExt,
+	MatmulAttributes,
+	RMSNormAttributes,
+	LayernormAttributes,
+	SdpaAttributes,
+	BlockScaleDequantizeAttributes,
+	BlockScaleQuantizeAttributes,
+	SdpaBackwardAttributes,
+	CustomOpAttributes,
+	RMSNormBackwardAttributes,
+	ReductionAttributes,
+        ResampleFwdAttributes,
+	LayernormBackwardAttributes
+}
 
 table Node {
 	name: string;
