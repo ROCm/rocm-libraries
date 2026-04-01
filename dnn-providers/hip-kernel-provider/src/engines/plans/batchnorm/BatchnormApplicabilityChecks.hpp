@@ -38,12 +38,12 @@ private:
     void checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,
                                        const std::vector<int64_t>& affineTensorIds,
                                        const std::vector<int64_t>& statTensorIds,
-                                       const std::vector<int64_t>& intermediateTensorIds) override;
+                                       const std::vector<int64_t>& intermediateTensorIds);
 
     void checkTensorShapesSupported(const std::vector<int64_t>& ioTensorIds,
                                     const std::vector<int64_t>& affineTensorIds,
                                     const std::vector<int64_t>& statTensorIds,
-                                    bool isTraining) override;
+                                    bool isTraining);
 
     void checkTensorConfigSupported(const std::vector<int64_t>& ioTensorIds,
                                     const std::vector<int64_t>& affineTensorIds,

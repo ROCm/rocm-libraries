@@ -65,11 +65,9 @@ void RMSnormValidator::checkTensorLayoutsAndDimsSupported()
     validateConsistentLayouts(tensors);
 }
 
-void RMSnormValidator::checkTensorDataTypesSupported(
-    const std::vector<int64_t>& ioTensorIds,
-    const std::vector<int64_t>& affineTensorIds,
-    const std::vector<int64_t>& statTensorIds,
-    [[maybe_unused]] const std::vector<int64_t>& intermediateTensorIds)
+void RMSnormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,
+                                                     const std::vector<int64_t>& affineTensorIds,
+                                                     const std::vector<int64_t>& statTensorIds)
 {
     std::unordered_set<hipdnn_data_sdk::data_objects::DataType> allowedIOTypes{
         hipdnn_data_sdk::data_objects::DataType::FLOAT,
@@ -100,8 +98,7 @@ void RMSnormValidator::checkTensorDataTypesSupported(
 
 void RMSnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& ioTensorIds,
                                                   const std::vector<int64_t>& affineTensorIds,
-                                                  const std::vector<int64_t>& statTensorIds,
-                                                  [[maybe_unused]] bool isTraining)
+                                                  const std::vector<int64_t>& statTensorIds)
 {
     if(ioTensorIds.empty())
     {
@@ -148,8 +145,8 @@ void RMSnormValidator::checkTensorConfigSupported(
     }
 
     checkTensorLayoutsAndDimsSupported();
-    checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, {});
-    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, false);
+    checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds);
+    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
 }
 
 void RMSnormValidator::checkBwdTensorConfigSupported(
@@ -177,4 +174,4 @@ void RMSnormValidator::checkBwdTensorConfigSupported(
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, false);
 }
 
-} // namespace hip_kernel_provider
+} // namespace hip_kernel_provider::rmsnorm

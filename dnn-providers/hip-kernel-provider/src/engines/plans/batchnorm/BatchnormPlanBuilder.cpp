@@ -252,6 +252,7 @@ bool BatchnormPlanBuilder::isApplicable(
             return false;
         }
 
+        BatchnormValidator validator(opGraph.getTensorMap());
         if(isFwdInferenceFirst)
         {
             const auto& bnInfAttr
@@ -265,7 +266,6 @@ bool BatchnormPlanBuilder::isApplicable(
 
             try
             {
-                BatchnormValidator validator(opGraph.getTensorMap());
                 validator.checkInferenceActivationTensorConfigSupported(bnInfAttr, actAttr);
             }
             catch(const std::exception& e)
@@ -289,7 +289,6 @@ bool BatchnormPlanBuilder::isApplicable(
 
             try
             {
-                BatchnormValidator validator(opGraph.getTensorMap());
                 validator.checkInferenceVarianceExtActivationTensorConfigSupported(bnInfAttr,
                                                                                    actAttr);
             }

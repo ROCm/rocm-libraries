@@ -74,18 +74,6 @@ protected:
 
     virtual void checkTensorLayoutsAndDimsSupported() = 0;
 
-    virtual void checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,
-                                               const std::vector<int64_t>& affineTensorIds,
-                                               const std::vector<int64_t>& statTensorIds,
-                                               const std::vector<int64_t>& intermediateTensorIds)
-        = 0;
-
-    virtual void checkTensorShapesSupported(const std::vector<int64_t>& ioTensorIds,
-                                            const std::vector<int64_t>& affineTensorIds,
-                                            const std::vector<int64_t>& statTensorIds,
-                                            bool isTraining)
-        = 0;
-
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         _tensorMap;
 };
