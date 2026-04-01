@@ -496,7 +496,7 @@ if [[ -n "${rocblas_path+x}" ]]; then
 fi
 
 # Default cmake executable is called cmake
-cmake_executable=/src/cmake-4.3.1-linux-x86_64/bin/cmake
+cmake_executable=cmake
 
 case "${ID}" in
   centos|rhel|almalinux|rocky|ol)
