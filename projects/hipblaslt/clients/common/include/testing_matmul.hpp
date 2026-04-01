@@ -1480,6 +1480,107 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
     return {real_compute_input_typeA, real_compute_input_typeB};
 }
 
+// Swizzle MX scale tensor for the new MX layout expected by the kernel.
+// The kernel expects scale data in a permuted layout where the K-block dimension
+// is split into outer tiles of size dimk (=128/MXBlock) and interleaved with the
+// tiled (M or N) dimension.
+//
+// scaleRows/scaleCols: dimensions of the scale matrix in column-major storage
+// MXBlock: the MX block size (e.g. 16)
+// kAlongRows: true if the K-block dimension is along rows of the scale matrix
+//   transA=T scaleA: scale is (K/MX) x M  -> kAlongRows = true
+//   transA=N scaleA: scale is M x (K/MX)  -> kAlongRows = false
+//   transB=N scaleB: scale is (K/MX) x N  -> kAlongRows = true
+//   transB=T scaleB: scale is N x (K/MX)  -> kAlongRows = false
+//
+// Returns the total number of elements in the swizzled (potentially padded) buffer.
+size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
+                        size_t         scaleRows,
+                        size_t         scaleCols,
+                        size_t         MXBlock,
+                        bool           kAlongRows)
+{
+    using Tensor = Tensor::Manipulation::Tensor;
+    size_t dimk = 128 / MXBlock;
+
+    // hipblaslt-bench stores scale in column-major: (scaleRows x scaleCols) with
+    // scaleRows as the fastest varying dimension (stride 1).
+    // In row-major Tensor convention: Tensor({scaleCols, scaleRows}) has scaleCols
+    // as slow dim and scaleRows as fast dim, matching the column-major layout.
+    //
+    // The tensile-client MXSA descriptor for Alik (transA=T) has sizes [batch, M, K/MX]
+    // with M varying fastest (stride 1). Its tmpTensor({K/MX, M}) has M as fast dim,
+    // matching tensile's memory layout.
+    //
+    // hipblaslt-bench transA=T: scale is (K/MX rows x M cols), col-major:
+    //   K/MX is fastest. As row-major Tensor({M, K/MX}): K/MX is fastest.
+    //   To match tensile-client's Tensor({K/MX, M}) where M is fastest,
+    //   we must interpret it as Tensor({scaleCols, scaleRows}) = Tensor({M, K/MX}).
+    //   But tensile wants Tensor({K/MX, M}), which is a different memory order.
+    //   Since hipblaslt has K/MX fastest and tensile has M fastest, the memory layouts
+    //   differ by a transpose. We handle this by using Tensor({scaleCols, scaleRows})
+    //   which matches hipblaslt's actual memory layout, and adapting the permutation.
+
+    if(kAlongRows)
+    {
+        // K-blocks along rows: scaleRows = K/MX, scaleCols = M (or N)
+        // hipblaslt col-major memory: K/MX fastest → row-major Tensor({M, K/MX})
+        // Tensile: Tensor({K/MX, M}) with M fastest (different layout)
+        //
+        // We work with hipblaslt's native layout: Tensor({scaleCols, scaleRows}) = Tensor({M, K/MX})
+        // The swizzle needs to group K/MX (the fast/last dim) into dimk-sized blocks.
+        auto mnDim = scaleCols; // M
+        auto kDim  = scaleRows; // K/MX
+
+        auto tmpTensor = Tensor({mnDim, kDim}, sizeof(uint8_t));
+        memcpy(tmpTensor.as<void>(), scaleBuf.buf(), mnDim * kDim);
+
+        // Pad kDim (K/MX, the fast dim) to multiple of dimk
+        ::Tensor::Manipulation::Shape paddedShape{mnDim, (kDim + dimk - 1) / dimk * dimk};
+        uint64_t padVal{};
+        auto     paddedTensor
+            = ::Tensor::Manipulation::pad(tmpTensor, paddedShape, &padVal, sizeof(uint8_t));
+
+        // Reshape: {M, padK/dimk, dimk}
+        paddedTensor.reshape({paddedShape[0], paddedShape[1] / dimk, dimk});
+
+        // Permute {1,0,2}: {padK/dimk, M, dimk}
+        Tensor permuted = permute(paddedTensor, {1, 0, 2});
+
+        auto totalElements = permuted.getDesc().flattenSize();
+        memcpy(scaleBuf.buf(), permuted.as<void>(), totalElements);
+        return totalElements;
+    }
+    else
+    {
+        // K-blocks along cols: scaleRows = M (or N), scaleCols = K/MX
+        // hipblaslt col-major memory: M fastest → row-major Tensor({K/MX, M})
+        // This actually matches tensile's layout: Tensor({K/MX, M}) with M fastest
+        auto kDim  = scaleCols; // K/MX
+        auto mnDim = scaleRows; // M
+
+        auto tmpTensor = Tensor({kDim, mnDim}, sizeof(uint8_t));
+        memcpy(tmpTensor.as<void>(), scaleBuf.buf(), kDim * mnDim);
+
+        // Pad mnDim (M, the fast dim) to multiple of dimk
+        ::Tensor::Manipulation::Shape paddedShape{kDim, (mnDim + dimk - 1) / dimk * dimk};
+        uint64_t padVal{};
+        auto     paddedTensor
+            = ::Tensor::Manipulation::pad(tmpTensor, paddedShape, &padVal, sizeof(uint8_t));
+
+        // Reshape: {K/MX, padM/dimk, dimk}
+        paddedTensor.reshape({paddedShape[0], paddedShape[1] / dimk, dimk});
+
+        // Permute {1,0,2}: {padM/dimk, K/MX, dimk}
+        Tensor permuted = permute(paddedTensor, {1, 0, 2});
+
+        auto totalElements = permuted.getDesc().flattenSize();
+        memcpy(scaleBuf.buf(), permuted.as<void>(), totalElements);
+        return totalElements;
+    }
+}
+
+
 void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      TiA,
                               hipDataType      TiB,
@@ -1875,7 +1976,23 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(arg.scaleA == hipblaslt_scaling_format::Vector)
                 size_scaleAVec[i] = M[i];
             else if(isBlockScaling(arg.scaleA))
+            {
+#ifndef HIPBLASLT_USE_ROCROLLER
+                // Account for padding in the swizzled MX layout
+                size_t MXBlock_A = blockSize(arg.scaleA);
+                size_t dimk    = 128 / MXBlock_A;
+                size_t scaleA_r = A_row[i] / ((transA == HIPBLAS_OP_T) ? MXBlock_A : 1);
+                size_t scaleA_c = A_col[i] / ((transA == HIPBLAS_OP_T) ? 1 : MXBlock_A);
+                bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
+                size_t kDim   = kAlongRowsA ? scaleA_r : scaleA_c;
+                size_t mnDim  = kAlongRowsA ? scaleA_c : scaleA_r;
+                size_t padDim    = kAlongRowsA ? kDim : mnDim;
+                size_t paddedDim = (padDim + dimk - 1) / dimk * dimk;
+                size_scaleAVec[i] = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
+#else
                 size_scaleAVec[i] = scaleBufferSize(A_row[i], A_col[i], arg.scaleA);
+#endif
+            }
             else
                 size_scaleAVec[i] = 0;
             if(arg.scaleB == hipblaslt_scaling_format::Scalar)
@@ -1883,7 +2000,22 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(arg.scaleB == hipblaslt_scaling_format::Vector)
                 size_scaleBVec[i] = N[i];
             else if(isBlockScaling(arg.scaleB))
+            {
+#ifndef HIPBLASLT_USE_ROCROLLER
+                size_t MXBlock_B = blockSize(arg.scaleB);
+                size_t dimk    = 128 / MXBlock_B;
+                size_t scaleB_r = B_row[i] / ((transB == HIPBLAS_OP_T) ? 1 : MXBlock_B);
+                size_t scaleB_c = B_col[i] / ((transB == HIPBLAS_OP_T) ? MXBlock_B : 1);
+                bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
+                size_t kDim   = kAlongRowsB ? scaleB_r : scaleB_c;
+                size_t mnDim  = kAlongRowsB ? scaleB_c : scaleB_r;
+                size_t padDim    = kAlongRowsB ? kDim : mnDim;
+                size_t paddedDim = (padDim + dimk - 1) / dimk * dimk;
+                size_scaleBVec[i] = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
+#else
                 size_scaleBVec[i] = scaleBufferSize(B_row[i], B_col[i], arg.scaleB);
+#endif
+            }
             else
                 size_scaleBVec[i] = 0;
         }
@@ -2565,16 +2697,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   (arg.swizzle_a) ? A_row[i] * A_col[i] : stride_a[i],
                                   num_batches[i]);
 
-            hipblaslt_init_device(ABC_dims::A,
-                                  arg.initialization,
-                                  alpha_isnan_type(arg, Talpha),
-                                  dScaleA[i].buf(),
-                                  A_row[i] / scaleA_row,
-                                  A_col[i] / scaleA_col,
-                                  lda[i] / scaleA_row,
-                                  scaleDataType(arg.scaleA),
-                                  stride_a[i] / scaleA_row / scaleA_col,
-                                  num_batches[i]);
+            hipblaslt_init(hScaleA[i].buf(),
+                           A_row[i] / scaleA_row,
+                           A_col[i] / scaleA_col,
+                           lda[i] / scaleA_row,
+                           scaleDataType(arg.scaleA),
+                           stride_a[i] / scaleA_row / scaleA_col,
+                           num_batches[i]);
 #endif
         }
         else
@@ -2677,14 +2806,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   stride_b[i],
                                   num_batches[i]);
 
-            hipblaslt_init_device(ABC_dims::B,
-                                  arg.initialization,
-                                  alpha_isnan_type(arg, Talpha),
-                                  dScaleB[i].buf(),
-                                  B_row[i] / scaleB_row,
-                                  B_col[i] / scaleB_col,
-                                  ldb[i] / scaleB_row,
-                                  scaleDataType(arg.scaleB),
+            hipblaslt_init(hScaleB[i].buf(),
+                           B_row[i] / scaleB_row,
+                           B_col[i] / scaleB_col,
+                           ldb[i] / scaleB_row,
+                           scaleDataType(arg.scaleB),
                                   stride_b[i] / scaleB_row / scaleB_col,
                                   num_batches[i]);
 #endif
@@ -2737,6 +2863,27 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   stride_c[i],
                                   num_batches[i]);
 
+#ifndef HIPBLASLT_USE_ROCROLLER
+        // Swizzle MX scale on CPU and upload to GPU (unconditional — kernel always expects swizzled)
+        if(isBlockScaling(arg.scaleA))
+        {
+            size_t scaleA_r = A_row[i] / scaleA_row;
+            size_t scaleA_c = A_col[i] / scaleA_col;
+            size_t MXBlockA = blockSize(arg.scaleA);
+            bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
+            swizzle_mx_scale(hScaleA[i], scaleA_r, scaleA_c, MXBlockA, kAlongRowsA);
+            CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
+        }
+        if(isBlockScaling(arg.scaleB))
+        {
+            size_t scaleB_r = B_row[i] / scaleB_row;
+            size_t scaleB_c = B_col[i] / scaleB_col;
+            size_t MXBlockB = blockSize(arg.scaleB);
+            bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
+            swizzle_mx_scale(hScaleB[i], scaleB_r, scaleB_c, MXBlockB, kAlongRowsB);
+            CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
+        }
+#endif
             // broadcast first block
             CHECK_HIP_ERROR(broadcast(dA[i], block_count));
             CHECK_HIP_ERROR(broadcast(dB[i], block_count));
@@ -2765,7 +2912,26 @@ void testing_matmul_with_bias(const Arguments& arg,
                                             do_swizzle_b,
                                             stream));
                 CHECK_HIP_ERROR(synchronize(hC[i], dC[i], 0, 0, 0, 0, 1, false, stream));
-
+#ifndef HIPBLASLT_USE_ROCROLLER
+                if(isBlockScaling(arg.scaleA))
+                    refA.emplace_back(mx_type_to_f32(TiA,
+                                                     scaleDataType(arg.scaleA),
+                                                     hA[i],
+                                                     hScaleA[i],
+                                                     A_row[i],
+                                                     A_col[i],
+                                                     scaleA_row,
+                                                     scaleA_col));
+                if(isBlockScaling(arg.scaleB))
+                    refB.emplace_back(mx_type_to_f32(TiB,
+                                                     scaleDataType(arg.scaleB),
+                                                     hB[i],
+                                                     hScaleB[i],
+                                                     B_row[i],
+                                                     B_col[i],
+                                                     scaleB_row,
+                                                     scaleB_col));
+#endif
 
                 if(arg.dump_matrix)
                 {
