@@ -46,37 +46,10 @@ public:
         }
     }
 
-    TestPluginKnobRecorder(TestPluginKnobRecorder&& other) noexcept
-        : _handle(other._handle)
-        , _fnGetCount(other._fnGetCount)
-        , _fnGetAt(other._fnGetAt)
-        , _fnReset(other._fnReset)
-    {
-        other._handle = nullptr;
-        other._fnGetCount = nullptr;
-        other._fnGetAt = nullptr;
-        other._fnReset = nullptr;
-    }
-
-    TestPluginKnobRecorder& operator=(TestPluginKnobRecorder&& other) noexcept
-    {
-        if(this != &other)
-        {
-            cleanup();
-            _handle = other._handle;
-            _fnGetCount = other._fnGetCount;
-            _fnGetAt = other._fnGetAt;
-            _fnReset = other._fnReset;
-            other._handle = nullptr;
-            other._fnGetCount = nullptr;
-            other._fnGetAt = nullptr;
-            other._fnReset = nullptr;
-        }
-        return *this;
-    }
-
     TestPluginKnobRecorder(const TestPluginKnobRecorder&) = delete;
     TestPluginKnobRecorder& operator=(const TestPluginKnobRecorder&) = delete;
+    TestPluginKnobRecorder(TestPluginKnobRecorder&&) = delete;
+    TestPluginKnobRecorder& operator=(TestPluginKnobRecorder&&) = delete;
 
     ~TestPluginKnobRecorder()
     {
