@@ -1,6 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <algorithm>
+#include <filesystem>
+
 #include <gtest/gtest.h>
 #include <hipdnn_frontend.hpp>
 #include <test_plugins/TestKnobExpectation.hpp>
@@ -52,9 +55,19 @@ protected:
 
         ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
 
-        const auto pluginPath = hipdnn_tests::TestPluginKnobRecorder::findLoadedPluginPath(
-            _handle, TEST_KNOBS_PLUGIN_NAME);
-        _knobRecorder = std::make_unique<hipdnn_tests::TestPluginKnobRecorder>(pluginPath);
+        // Query the exact plugin paths the backend resolved when loading,
+        // then find the knobs plugin by name. This ensures we dlopen the same
+        // library instance (plugins are loaded with RTLD_LOCAL).
+        std::vector<std::filesystem::path> loadedPaths;
+        auto pathResult = getLoadedEnginePluginPaths(_handle, loadedPaths);
+        ASSERT_TRUE(pathResult.is_good()) << pathResult.get_message();
+
+        auto it = std::find_if(loadedPaths.begin(), loadedPaths.end(), [](const auto& path) {
+            return path.string().find(TEST_KNOBS_PLUGIN_NAME) != std::string::npos;
+        });
+        ASSERT_NE(it, loadedPaths.end()) << "TestKnobsPlugin not found in loaded plugins";
+
+        _knobRecorder = std::make_unique<hipdnn_tests::TestPluginKnobRecorder>(*it);
         _knobRecorder->reset();
     }
 

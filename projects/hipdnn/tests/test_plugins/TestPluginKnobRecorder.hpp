@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 namespace hipdnn_tests
@@ -23,14 +22,13 @@ namespace hipdnn_tests
 ///   - hipdnnTestKnobsPluginGetReceivedKnobsAt(uint32_t) -> const char*
 ///   - hipdnnTestKnobsPluginResetReceivedKnobs() -> void
 ///
-/// Use findLoadedPluginPath() to obtain the exact path the backend used when loading
-/// the plugin, ensuring dlopen returns a handle to the same loaded library.
+/// The pluginPath passed to the constructor should be the exact resolved path the
+/// backend used when loading the plugin. Use hipdnn_frontend::getLoadedEnginePluginPaths()
+/// to obtain it, ensuring dlopen returns a handle to the same loaded library.
 class TestPluginKnobRecorder
 {
 public:
     /// Opens the plugin library at the given absolute path and resolves recording symbols.
-    /// The path should be the exact resolved path the backend used to load the plugin;
-    /// use findLoadedPluginPath() to obtain it from hipdnnGetLoadedEnginePluginPaths_ext.
     /// Throws std::runtime_error on failure.
     explicit TestPluginKnobRecorder(const std::filesystem::path& pluginPath)
     {
@@ -39,56 +37,6 @@ public:
         _fnGetCount = resolveSymbol<GetCountFn>("hipdnnTestKnobsPluginGetReceivedKnobsCount");
         _fnGetAt = resolveSymbol<GetAtFn>("hipdnnTestKnobsPluginGetReceivedKnobsAt");
         _fnReset = resolveSymbol<ResetFn>("hipdnnTestKnobsPluginResetReceivedKnobs");
-    }
-
-    /// Queries the backend for all loaded plugin paths and returns the one whose
-    /// filename contains the given substring. This ensures we dlopen the exact same
-    /// path the backend used (important because plugins are loaded with RTLD_LOCAL).
-    /// Throws std::runtime_error if no matching plugin is found.
-    static std::filesystem::path findLoadedPluginPath(hipdnnHandle_t handle,
-                                                      const std::string& pluginNameSubstring)
-    {
-        size_t numPlugins = 0;
-        size_t maxPathLength = 0;
-        auto status
-            = hipdnnGetLoadedEnginePluginPaths_ext(handle, &numPlugins, nullptr, &maxPathLength);
-        if(status != HIPDNN_STATUS_SUCCESS)
-        {
-            throw std::runtime_error(
-                "TestPluginKnobRecorder: hipdnnGetLoadedEnginePluginPaths_ext failed");
-        }
-
-        if(numPlugins == 0)
-        {
-            throw std::runtime_error("TestPluginKnobRecorder: no plugins loaded");
-        }
-
-        std::vector<std::vector<char>> pathBuffers(numPlugins, std::vector<char>(maxPathLength));
-        std::vector<char*> pathPtrs(numPlugins);
-        for(size_t i = 0; i < numPlugins; ++i)
-        {
-            pathPtrs[i] = pathBuffers[i].data();
-        }
-
-        status = hipdnnGetLoadedEnginePluginPaths_ext(
-            handle, &numPlugins, pathPtrs.data(), &maxPathLength);
-        if(status != HIPDNN_STATUS_SUCCESS)
-        {
-            throw std::runtime_error(
-                "TestPluginKnobRecorder: hipdnnGetLoadedEnginePluginPaths_ext failed");
-        }
-
-        for(size_t i = 0; i < numPlugins; ++i)
-        {
-            std::string path(pathPtrs[i]);
-            if(path.find(pluginNameSubstring) != std::string::npos)
-            {
-                return std::filesystem::path(path);
-            }
-        }
-
-        throw std::runtime_error("TestPluginKnobRecorder: no loaded plugin matching '"
-                                 + pluginNameSubstring + "'");
     }
 
     TestPluginKnobRecorder(TestPluginKnobRecorder&& other) noexcept
