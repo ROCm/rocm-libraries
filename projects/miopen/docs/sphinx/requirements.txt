@@ -43,7 +43,7 @@ comm==0.2.2
     # via ipykernel
 contourpy==1.3.1
     # via matplotlib
-cryptography==46.0.5
+cryptography==46.0.6
     # via pyjwt
 cycler==0.12.1
     # via matplotlib
@@ -187,7 +187,7 @@ pydata-sphinx-theme==0.15.4
     #   sphinx-book-theme
 pygithub==2.3.0
     # via rocm-docs-core
-pygments==2.18.0
+pygments==2.20.0
     # via
     #   accessible-pygments
     #   ipython
