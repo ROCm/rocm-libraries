@@ -195,19 +195,25 @@ def runBuildDocsCommand(platform, project)
                     set -ex
                     cd ${project.paths.project_build_prefix}
                     ${sshBlock}
-                    # Detect pytest-cmake installation location for find_package(Pytest)
+                    # Detect pytest installation location
+                    echo "Detecting pytest installation..."
                     PYTEST_PATH=""
-                    PYTEST_CMAKE_DIR=\$(python3 -c "import pytest_cmake; import os; print(os.path.dirname(pytest_cmake.__file__))" 2>/dev/null)
-                    if [ -n "\$PYTEST_CMAKE_DIR" ]; then
-                        echo "pytest-cmake found at: \$PYTEST_CMAKE_DIR"
-                        PYTEST_PATH=";\$PYTEST_CMAKE_DIR"
-                    elif command -v pytest &>/dev/null; then
+                    if command -v pytest &>/dev/null; then
+                        echo "pytest found at: \$(which pytest)"
                         PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
-                        echo "pytest found at: \$(which pytest), prefix: \$PYTEST_PREFIX"
+                        echo "Python prefix: \$PYTEST_PREFIX"
+                        PYTEST_PATH=";\$PYTEST_PREFIX"
+                    elif python3 -c "import pytest" &>/dev/null; then
+                        echo "pytest found as Python module"
+                        PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                        echo "Python prefix: \$PYTEST_PREFIX"
                         PYTEST_PATH=";\$PYTEST_PREFIX"
                     else
-                        echo "Warning: pytest-cmake not found, searching filesystem..."
-                        find /usr /opt /home -name 'PytestConfig.cmake' -type f 2>/dev/null | head -5 || echo "No PytestConfig.cmake found"
+                        echo "Warning: pytest not found, searching filesystem..."
+                        echo "Running: find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5"
+                        find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5 || echo "No pytest found via system search"
+                        echo "Running: find /usr -name '*pytest*' -type d 2>/dev/null | head -5"
+                        find /usr -name '*pytest*' -type d 2>/dev/null | head -5 || echo "No pytest directories found"
                     fi
                     cmake --preset docs -B build -S . -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm\$PYTEST_PATH"
                     cmake --build build --target docs
