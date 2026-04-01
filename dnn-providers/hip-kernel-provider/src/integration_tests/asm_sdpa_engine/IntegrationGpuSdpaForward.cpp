@@ -80,7 +80,8 @@ protected:
 
     void runGraphTest(float tolerance)
     {
-        SKIP_IF_WINDOWS();
+        GTEST_SKIP() << "Skipped: ASM SDPA kernel only supports gfx942. "
+                        "Architecture gating will be added in the isApplicable PR.";
 
         const SdpaTestCase& testCase = this->GetParam();
 

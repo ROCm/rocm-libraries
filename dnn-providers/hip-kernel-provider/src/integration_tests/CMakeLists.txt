@@ -45,3 +45,16 @@ endif()
 clang_tidy_check(hip_kernel_provider_integration_tests)
 
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+if(ENABLE_ASM_SDPA_ENGINE)
+    set(ASM_KERNEL_ENV "HIPDNN_AITER_ASM_DIR=${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels")
+    if(COVERAGE_ENVIRONMENT)
+        set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
+            ENVIRONMENT "${COVERAGE_ENVIRONMENT};${ASM_KERNEL_ENV}"
+        )
+    else()
+        set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
+            ENVIRONMENT "${ASM_KERNEL_ENV}"
+        )
+    endif()
+endif()
