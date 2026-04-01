@@ -71,6 +71,14 @@ namespace hipdnn_frontend
 class Knob
 {
 public:
+    /// Shared construction path for parsed knob data from any source.
+    static std::pair<Error, Knob> tryCreate(std::string knobIdStr,
+                                            std::string description,
+                                            KnobValueVariant defaultValue,
+                                            bool deprecated,
+                                            std::shared_ptr<IConstraint> constraint
+                                            = std::make_shared<EmptyConstraint>());
+
     // Factory function to create from flatbuffer
     // Returns {Error, Knob}. On error, the Knob is default-constructed (should be ignored).
     static std::pair<Error, Knob> tryFromFlatbuffer(hipdnnBackendFlatbufferData_t fbData);
@@ -169,7 +177,7 @@ public:
     }
 
 private:
-    // Private default constructor - allows factory function to create empty Knob then populate
+    // Private default constructor - allows factory functions to create an empty Knob on failure.
     Knob() = default;
 
     // Private constructor - use flatbuffer factory function to create instances
@@ -203,10 +211,38 @@ private:
     std::string _knobId; ///< Unique knob identifier
     std::string _description; ///< Human-readable description
     KnobValueVariant _defaultValue; ///< Default value
-    bool _deprecated; ///< Whether this knob is deprecated
+    bool _deprecated = false; ///< Whether this knob is deprecated
 
     std::shared_ptr<IConstraint> _constraint; ///< Optional constraint
 };
+
+inline std::pair<Error, Knob> Knob::tryCreate(std::string knobIdStr,
+                                              std::string description,
+                                              KnobValueVariant defaultValue,
+                                              bool deprecated,
+                                              std::shared_ptr<IConstraint> constraint)
+{
+    if(knobIdStr.empty())
+    {
+        return {{ErrorCode::INVALID_VALUE, "Knob ID must not be empty"}, {}};
+    }
+
+    Knob knob(std::move(knobIdStr), std::move(description), std::move(defaultValue), deprecated);
+    knob._constraint
+        = constraint != nullptr ? std::move(constraint) : std::make_shared<EmptyConstraint>();
+
+    const KnobSetting defaultSetting(knob._knobId, knob._defaultValue);
+    auto validationError = knob._constraint->validateKnobSetting(defaultSetting);
+    if(validationError.code != ErrorCode::OK)
+    {
+        return {{ErrorCode::INVALID_VALUE,
+                 "Knob '" + knob._knobId + "' has default_value that violates its constraint: "
+                     + validationError.err_msg},
+                {}};
+    }
+
+    return {{ErrorCode::OK, ""}, knob};
+}
 
 // Factory method implementation
 inline std::pair<Error, Knob> Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferData_t fbData)
@@ -254,60 +290,44 @@ inline std::pair<Error, Knob> Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferDat
                 {}};
     }
 
-    // Create the knob - strings are already std::string in KnobT
-    Knob knob(std::move(knobT->knob_id),
-              std::move(knobT->description),
-              std::move(defaultValue),
-              knobT->deprecated);
-
     // Handle constraints using the native union types
+    std::shared_ptr<IConstraint> constraint;
     switch(knobT->constraint.type)
     {
     case hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint:
     {
         auto* c = knobT->constraint.AsIntConstraint();
         std::unordered_set<int64_t> validValues(c->valid_values.begin(), c->valid_values.end());
-        knob._constraint = std::make_unique<IntConstraint>(
+        constraint = std::make_shared<IntConstraint>(
             c->min_value, c->max_value, c->step, std::move(validValues));
         break;
     }
     case hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint:
     {
         auto* c = knobT->constraint.AsFloatConstraint();
-        knob._constraint = std::make_unique<FloatConstraint>(c->min_value, c->max_value);
+        constraint = std::make_shared<FloatConstraint>(c->min_value, c->max_value);
         break;
     }
     case hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint:
     {
         auto* c = knobT->constraint.AsStringConstraint();
         std::unordered_set<std::string> validValues(c->valid_values.begin(), c->valid_values.end());
-        knob._constraint
-            = std::make_unique<StringConstraint>(c->max_length, std::move(validValues));
+        constraint = std::make_shared<StringConstraint>(c->max_length, std::move(validValues));
         break;
     }
     case hipdnn_data_sdk::data_objects::KnobConstraint::NONE:
-        knob._constraint = std::make_unique<EmptyConstraint>();
+        constraint = std::make_shared<EmptyConstraint>();
         break;
     default:
         return {{ErrorCode::INVALID_VALUE, "Knob '" + knobId + "' has unknown constraint type"},
                 {}};
     }
 
-    // Validate that the default_value satisfies the constraint
-    if(knob._constraint)
-    {
-        const KnobSetting defaultSetting(knob._knobId, knob._defaultValue);
-        auto validationError = knob._constraint->validateKnobSetting(defaultSetting);
-        if(validationError.code != ErrorCode::OK)
-        {
-            return {{ErrorCode::INVALID_VALUE,
-                     "Knob '" + knob._knobId + "' has default_value that violates its constraint: "
-                         + validationError.err_msg},
-                    {}};
-        }
-    }
-
-    return {{ErrorCode::OK, ""}, knob};
+    return tryCreate(std::move(knobT->knob_id),
+                     std::move(knobT->description),
+                     std::move(defaultValue),
+                     knobT->deprecated,
+                     std::move(constraint));
 }
 
 namespace detail
