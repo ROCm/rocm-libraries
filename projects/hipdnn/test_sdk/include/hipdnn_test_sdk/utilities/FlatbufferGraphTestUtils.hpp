@@ -1530,8 +1530,8 @@ inline flatbuffers::FlatBufferBuilder
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    // For LayerNorm, scale and bias match the normalized dimensions (all dims except batch).
-    // E.g., for input [N, C, H, W], normalized dims are [C, H, W].
+    // For LayerNorm, scale and bias match the normalized dimensions
+    // E.g., for input [N, C, H, W] and normalizedDimCount of 3, normalized dims are [C, H, W] and stat dims are [N].
     const std::vector<int64_t> normalizedDims(dims.begin() + 1, dims.end());
     const std::vector<int64_t> normalizedStrides
         = hipdnn_data_sdk::utilities::generateStrides(normalizedDims);
@@ -1544,20 +1544,10 @@ inline flatbuffers::FlatBufferBuilder
         builder, 2, "y", inputDataType, &strides, &dims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        3,
-        "scale",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &normalizedStrides,
-        &normalizedDims));
+        builder, 3, "scale", inputDataType, &normalizedStrides, &normalizedDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        4,
-        "bias",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &normalizedStrides,
-        &normalizedDims));
+        builder, 4, "bias", inputDataType, &normalizedStrides, &normalizedDims));
 
     // Epsilon (pass-by-value)
     const std::vector<int64_t> passByValueDims = {1};
@@ -1579,7 +1569,8 @@ inline flatbuffers::FlatBufferBuilder
                                                                           3, // scale tensor uid
                                                                           4, // bias tensor uid
                                                                           5, // epsilon tensor uid
-                                                                          2 // y tensor uid
+                                                                          2, // y tensor uid
+                                                                          3 // normalizedDimCount
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
