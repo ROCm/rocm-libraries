@@ -50,6 +50,12 @@ configure_file(
     @ONLY
 )
 
+if(WIN32)
+    configure_file("${PROJECT_SOURCE_DIR}/library/include/rocrand/rocrand_in.rc.in"
+                   "${PROJECT_BINARY_DIR}/library/include/rocrand/rocrand_in.rc"
+		   @ONLY)
+endif()	   
+
 add_library(rocrand ${rocRAND_HIP_SRCS})
 
 set(SOBOL_PRECOMPUTED_SOURCES
