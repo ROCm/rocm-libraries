@@ -21,7 +21,7 @@ Tests:
   func_version: [1, 2]
 
 - name: prune_check_bad_arg
-  category: pre_checkin
+  category: smoke
   function:
     - prune_check_bad_arg: *hpa_half_precision
   transA: N
