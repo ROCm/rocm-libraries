@@ -251,20 +251,27 @@ namespace rocRoller
                 // Handle block scaled tensors
                 // ScaleA dimensions: [M, K/blockSize]
                 // ScaleB dimensions: [K/blockSize, N]
-                auto maybeScaleA = graph.mapper.get(nodeID, NaryArgument::LHS_SCALE);
-                auto maybeScaleB = graph.mapper.get(nodeID, NaryArgument::RHS_SCALE);
+                auto maybeScaleA = [&]() -> std::optional<int> {
+                    auto val = graph.mapper.get(nodeID, NaryArgument::LHS_SCALE);
+                    return (val > 0) ? std::optional<int>(val) : std::nullopt;
+                }();
+                auto maybeScaleB = [&]() -> std::optional<int> {
+                    auto val = graph.mapper.get(nodeID, NaryArgument::RHS_SCALE);
+                    return (val > 0) ? std::optional<int>(val) : std::nullopt;
+                }();
 
-                if(maybeScaleA > 0 || maybeScaleB > 0)
+                if(maybeScaleA.has_value() || maybeScaleB.has_value())
                 {
                     std::vector<int> scaleADims, scaleBDims;
 
                     // ScaleA present
-                    if(maybeScaleA > 0)
+                    if(maybeScaleA.has_value())
                     {
-                        scaleADims = graph.coordinates
-                                         .getInputNodeIndices(maybeScaleA, isConstructMacroTile)
-                                         .filter(notFixedSize)
-                                         .to<std::vector>();
+                        scaleADims
+                            = graph.coordinates
+                                  .getInputNodeIndices(maybeScaleA.value(), isConstructMacroTile)
+                                  .filter(notFixedSize)
+                                  .to<std::vector>();
 
                         // Only match dimensions if scale is not SingleScale
                         if(scaleADims.size() > 1)
@@ -288,12 +295,13 @@ namespace rocRoller
                     }
 
                     // ScaleB present
-                    if(maybeScaleB > 0)
+                    if(maybeScaleB.has_value())
                     {
-                        scaleBDims = graph.coordinates
-                                         .getInputNodeIndices(maybeScaleB, isConstructMacroTile)
-                                         .filter(notFixedSize)
-                                         .to<std::vector>();
+                        scaleBDims
+                            = graph.coordinates
+                                  .getInputNodeIndices(maybeScaleB.value(), isConstructMacroTile)
+                                  .filter(notFixedSize)
+                                  .to<std::vector>();
 
                         // Only match dimensions if scale is not SingleScale
                         if(scaleBDims.size() > 1)
@@ -319,7 +327,7 @@ namespace rocRoller
                     }
 
                     // ScaleA and ScaleB both present
-                    if(maybeScaleA > 0 && maybeScaleB > 0 && scaleADims.size() > 1
+                    if(maybeScaleA.has_value() && maybeScaleB.has_value() && scaleADims.size() > 1
                        && scaleBDims.size() > 1)
                     {
                         Log::debug(
