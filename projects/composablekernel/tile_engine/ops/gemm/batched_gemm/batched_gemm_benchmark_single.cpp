@@ -51,7 +51,8 @@ inline auto create_args(int argc, char* argv[])
         .insert("flush_cache",
                 "true",
                 "To flush cache, possible values are true or false. Default is true.")
-        .insert("rotating_count", "1000", "Number of iterations to rotate the cache. Default is 1000.")
+        .insert(
+            "rotating_count", "1000", "Number of iterations to rotate the cache. Default is 1000.")
         .insert("metric",
                 "0",
                 "Metric with which to measure kernel performance. Set to 0 for latency, 1 for "

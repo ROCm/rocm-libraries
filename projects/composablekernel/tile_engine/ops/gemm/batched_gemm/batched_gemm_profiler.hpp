@@ -31,19 +31,17 @@ class GemmProfiler
     // Overload for single kernel benchmarking
     void benchmark(GemmProblem& gemm_problem,
                    std::function<float(const ck_tile::BatchedGemmHostArgs&,
-                                       const ck_tile::stream_config&)>
-                       kernel_func)
+                                       const ck_tile::stream_config&)> kernel_func)
     {
         std::vector<std::function<std::tuple<std::string, float>(ck_tile::BatchedGemmHostArgs&,
                                                                  const ck_tile::stream_config&)>>
             callables;
 
-        callables.push_back(
-            [kernel_func](ck_tile::BatchedGemmHostArgs& args,
-                          const ck_tile::stream_config& stream) {
-                float time = kernel_func(args, stream);
-                return std::make_tuple(std::string(KERNEL_NAME), time);
-            });
+        callables.push_back([kernel_func](ck_tile::BatchedGemmHostArgs& args,
+                                          const ck_tile::stream_config& stream) {
+            float time = kernel_func(args, stream);
+            return std::make_tuple(std::string(KERNEL_NAME), time);
+        });
 
         benchmark(gemm_problem, callables);
     }
@@ -76,27 +74,27 @@ class GemmProfiler
             gemm_problem.batch_stride_c_ = gemm_problem.m_ * gemm_problem.n_;
         }
 
-        ck_tile::HostTensor<ADataType> a_b_m_k(make_batched_host_tensor_descriptor(
-            gemm_problem.batch_count_,
-            gemm_problem.m_,
-            gemm_problem.k_,
-            gemm_problem.stride_a_,
-            gemm_problem.batch_stride_a_,
-            layout_a));
-        ck_tile::HostTensor<BDataType> b_b_k_n(make_batched_host_tensor_descriptor(
-            gemm_problem.batch_count_,
-            gemm_problem.k_,
-            gemm_problem.n_,
-            gemm_problem.stride_b_,
-            gemm_problem.batch_stride_b_,
-            layout_b));
-        ck_tile::HostTensor<CDataType> c_b_m_n_dev_result(make_batched_host_tensor_descriptor(
-            gemm_problem.batch_count_,
-            gemm_problem.m_,
-            gemm_problem.n_,
-            gemm_problem.stride_c_,
-            gemm_problem.batch_stride_c_,
-            layout_c));
+        ck_tile::HostTensor<ADataType> a_b_m_k(
+            make_batched_host_tensor_descriptor(gemm_problem.batch_count_,
+                                                gemm_problem.m_,
+                                                gemm_problem.k_,
+                                                gemm_problem.stride_a_,
+                                                gemm_problem.batch_stride_a_,
+                                                layout_a));
+        ck_tile::HostTensor<BDataType> b_b_k_n(
+            make_batched_host_tensor_descriptor(gemm_problem.batch_count_,
+                                                gemm_problem.k_,
+                                                gemm_problem.n_,
+                                                gemm_problem.stride_b_,
+                                                gemm_problem.batch_stride_b_,
+                                                layout_b));
+        ck_tile::HostTensor<CDataType> c_b_m_n_dev_result(
+            make_batched_host_tensor_descriptor(gemm_problem.batch_count_,
+                                                gemm_problem.m_,
+                                                gemm_problem.n_,
+                                                gemm_problem.stride_c_,
+                                                gemm_problem.batch_stride_c_,
+                                                layout_c));
 
         if(setting_.init_method_ == 0)
         {
@@ -145,13 +143,13 @@ class GemmProfiler
             gemm_problem.batch_count_,
         };
 
-        ck_tile::HostTensor<CDataType> c_b_m_n_host_result(make_batched_host_tensor_descriptor(
-            gemm_problem.batch_count_,
-            gemm_problem.m_,
-            gemm_problem.n_,
-            gemm_problem.stride_c_,
-            gemm_problem.batch_stride_c_,
-            layout_c));
+        ck_tile::HostTensor<CDataType> c_b_m_n_host_result(
+            make_batched_host_tensor_descriptor(gemm_problem.batch_count_,
+                                                gemm_problem.m_,
+                                                gemm_problem.n_,
+                                                gemm_problem.stride_c_,
+                                                gemm_problem.batch_stride_c_,
+                                                layout_c));
 
         if(setting_.verify_)
         {
@@ -205,12 +203,10 @@ class GemmProfiler
         // compute performance metric
         std::size_t flop = std::size_t(2) * gemm_problem.batch_count_ * gemm_problem.m_ *
                            gemm_problem.n_ * gemm_problem.k_;
-        std::size_t num_byte = sizeof(ADataType) * gemm_problem.batch_count_ * gemm_problem.m_ *
-                                   gemm_problem.k_ +
-                               sizeof(BDataType) * gemm_problem.batch_count_ * gemm_problem.n_ *
-                                   gemm_problem.k_ +
-                               sizeof(CDataType) * gemm_problem.batch_count_ * gemm_problem.m_ *
-                                   gemm_problem.n_;
+        std::size_t num_byte =
+            sizeof(ADataType) * gemm_problem.batch_count_ * gemm_problem.m_ * gemm_problem.k_ +
+            sizeof(BDataType) * gemm_problem.batch_count_ * gemm_problem.n_ * gemm_problem.k_ +
+            sizeof(CDataType) * gemm_problem.batch_count_ * gemm_problem.m_ * gemm_problem.n_;
 
         // update
         kernel_instance.perf_result_.latency_   = avg_time;
@@ -281,7 +277,8 @@ class GemmProfiler
                 if(file.tellp() == 0)
                 {
                     file << "rocm_version,device_name,"
-                         << "split_k,m,n,k,stride_a,stride_b,stride_c,batch_stride_a,batch_stride_b,batch_stride_c,batch_count,"
+                         << "split_k,m,n,k,stride_a,stride_b,stride_c,batch_stride_a,batch_stride_"
+                            "b,batch_stride_c,batch_count,"
                          << "dtype_a,dtype_b,dtype_acc,dtype_c," << "layout_a,layout_b,layout_c,"
                          << "structured_sparsity," << "name,"
                          << "latency(ms),tflops(TFlops),bandwidth(GB/s),metric\n";
@@ -296,14 +293,14 @@ class GemmProfiler
                      << problem.k_ << "," << problem.stride_a_ << "," << problem.stride_b_ << ","
                      << problem.stride_c_ << "," << problem.batch_stride_a_ << ","
                      << problem.batch_stride_b_ << "," << problem.batch_stride_c_ << ","
-                     << problem.batch_count_ << "," << problem.dtype_a_ << ","
-                     << problem.dtype_b_ << "," << problem.dtype_acc_ << "," << problem.dtype_c_
-                     << "," << problem.layout_a_ << "," << problem.layout_b_ << ","
-                     << problem.layout_c_ << "," << problem.structured_sparsity_ << "," << name
-                     << "," << std::fixed << std::setprecision(4) << perf.latency_ << ","
-                     << std::fixed << std::setprecision(4) << perf.tflops_ << "," << std::fixed
-                     << std::setprecision(4) << perf.bandwidth_ << ","
-                     << get_metric_name(metric) << "\n";
+                     << problem.batch_count_ << "," << problem.dtype_a_ << "," << problem.dtype_b_
+                     << "," << problem.dtype_acc_ << "," << problem.dtype_c_ << ","
+                     << problem.layout_a_ << "," << problem.layout_b_ << "," << problem.layout_c_
+                     << "," << problem.structured_sparsity_ << "," << name << "," << std::fixed
+                     << std::setprecision(4) << perf.latency_ << "," << std::fixed
+                     << std::setprecision(4) << perf.tflops_ << "," << std::fixed
+                     << std::setprecision(4) << perf.bandwidth_ << "," << get_metric_name(metric)
+                     << "\n";
 
                 if(!file)
                 {

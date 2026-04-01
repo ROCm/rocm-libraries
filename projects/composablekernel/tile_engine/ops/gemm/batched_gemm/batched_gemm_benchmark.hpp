@@ -237,7 +237,8 @@ inline void gemm_host_reference(int verify,
             b_b_k_n_dev_buf.ToDevice(b_b_k_n.data());
         }
 
-        ck_tile::DeviceMem c_b_m_n_gpu_buf_ref(c_b_m_n_host_result.get_element_space_size_in_bytes());
+        ck_tile::DeviceMem c_b_m_n_gpu_buf_ref(
+            c_b_m_n_host_result.get_element_space_size_in_bytes());
         c_b_m_n_host_result.SetZero();
         c_b_m_n_gpu_buf_ref.SetZero();
 
