@@ -8,6 +8,6 @@
 
 using namespace rocm_ck;
 
-constexpr auto bad = make_kernel(FmhaBwdOGradDotOConfig{
+constexpr auto bad = make_spec(FmhaBwdOGradDotOConfig{
     .signature = {.dtype = DataType::FP16, .hdim_v = 100, .mode = FmhaMode::BATCH},
     .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});

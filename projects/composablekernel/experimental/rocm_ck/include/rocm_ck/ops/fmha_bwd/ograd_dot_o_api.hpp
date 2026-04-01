@@ -4,7 +4,7 @@
 // Host-only helpers for the FMHA BWD OGradDotO kernel family.
 //
 // HOST ONLY: this header must NOT be included from device code (.hip files).
-// Device code should include rocm_fmha_bwd_ograd_dot_o_dev.hpp.
+// Device code should include <rocm_ck/ops/fmha_bwd/ograd_dot_o_dev.hpp>.
 //
 // Compilation boundary:
 //   _spec.hpp — consteval factory + slot constants (both passes)
@@ -15,12 +15,18 @@
 
 #ifdef __HIP_DEVICE_COMPILE__
 #error "ograd_dot_o_api.hpp is host-only." \
-       " Device code should include rocm_fmha_bwd_ograd_dot_o_dev.hpp."
+       " Device code should include <rocm_ck/ops/fmha_bwd/ograd_dot_o_dev.hpp>."
 #endif
 
 #include <rocm_ck/ops/fmha_bwd/ograd_dot_o_spec.hpp>
 
+#include <rocm_ck/args.hpp>
 #include <rocm_ck/grid_dim.hpp>
+
+#ifndef NDEBUG
+#include <cstdio>
+#include <cstdlib>
+#endif
 
 namespace rocm_ck {
 
@@ -29,7 +35,7 @@ namespace rocm_ck {
 // ---------------------------------------------------------------------------
 
 /// Compute the launch grid for OGradDotO.
-/// Matches FmhaBwdOGradDotOKernel::GridSize():
+/// Matches FmhaBwdOGradDotOSpec::GridSize():
 ///   GridDim(ceil(seqlen_q / kM0), nhead, batch).
 /// Precondition: block_size > 0, seqlen_q >= 0, batch > 0, nhead > 0.
 constexpr GridDim ograd_dot_o_grid_size(int batch, int nhead, int seqlen_q, int block_size)
@@ -37,6 +43,44 @@ constexpr GridDim ograd_dot_o_grid_size(int batch, int nhead, int seqlen_q, int 
     return {static_cast<unsigned>((seqlen_q + block_size - 1) / block_size),
             static_cast<unsigned>(nhead),
             static_cast<unsigned>(batch)};
+}
+
+// ---------------------------------------------------------------------------
+// Debug-only runtime Args validation
+// ---------------------------------------------------------------------------
+
+/// Validate that all required tensor slots for OGradDotO are populated.
+/// Compiles to nothing in release builds.
+inline void validateArgs([[maybe_unused]] const Args& args, [[maybe_unused]] FmhaBwdOGradDotOSpec k)
+{
+#ifndef NDEBUG
+    namespace S = fmha_bwd_ograd_dot_o_slots;
+
+    static constexpr const char* tensor_names[] = {"O", "DO", "D", "SEQSTART_Q", "SEQLEN_Q"};
+
+    int n = S::requiredTensors(k);
+    for(int i = 0; i < n; ++i)
+    {
+        if(args.tensors[i].ptr == nullptr)
+        {
+            std::fprintf(stderr,
+                         "rocm_ck::validateArgs(OGradDotO): tensor \"%s\" (slot %d)"
+                         " has null pointer\n",
+                         tensor_names[i],
+                         i);
+            std::abort();
+        }
+    }
+
+    // Sanity-check scalar values
+    float p_undrop = args.scalars[S::P_UNDROP].f32;
+    if(p_undrop == 0.0f)
+    {
+        std::fprintf(
+            stderr, "rocm_ck::validateArgs(OGradDotO): P_UNDROP (slot %d) is zero\n", S::P_UNDROP);
+        std::abort();
+    }
+#endif
 }
 
 } // namespace rocm_ck

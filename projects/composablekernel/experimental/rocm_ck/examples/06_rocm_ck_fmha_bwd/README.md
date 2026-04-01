@@ -71,10 +71,10 @@ ninja -C build
 - **Algorithm** = feature flags + tuning: bias, mask, dropout, deterministic,
   padding mode, occupancy hint
 - **Config** = Signature + Algorithm (user-facing)
-- **Kernel** = validated descriptor (structural type, NTTP-safe)
+- **Spec** = validated descriptor (structural type, NTTP-safe)
 
-Each kernel family has its own Signature/Algorithm/Config/Kernel structs.
-`make_kernel()` is overloaded per Config type (unambiguous).
+Each kernel family has its own Signature/Algorithm/Config/Spec structs.
+`make_spec()` is overloaded per Config type (unambiguous).
 
 ### Generic Args with Named Slot Constants
 
@@ -115,9 +115,9 @@ FmhaBwdConvertQGradKernel<Pipeline>
 
 ```
 rocm_fmha_bwd_common.hpp              — Shared types: FmhaMode, FmhaBiasType, padding docs
-rocm_fmha_bwd_ograd_dot_o_spec.hpp    — OGradDotO: Signature/Algorithm/slots/make_kernel (SHARED)
-rocm_fmha_bwd_dqdkdv_spec.hpp         — DqDkDv: Signature/Algorithm/slots/make_kernel (SHARED)
-rocm_fmha_bwd_convert_dq_spec.hpp     — ConvertDQ: Signature/Algorithm/slots/make_kernel (SHARED)
+rocm_fmha_bwd_ograd_dot_o_spec.hpp    — OGradDotO: Signature/Algorithm/slots/make_spec (SHARED)
+rocm_fmha_bwd_dqdkdv_spec.hpp         — DqDkDv: Signature/Algorithm/slots/make_spec (SHARED)
+rocm_fmha_bwd_convert_dq_spec.hpp     — ConvertDQ: Signature/Algorithm/slots/make_spec (SHARED)
 rocm_fmha_bwd_ograd_dot_o_api.hpp     — OGradDotO: grid_size helper (HOST ONLY)
 rocm_fmha_bwd_dqdkdv_api.hpp          — DqDkDv: grid_size helper (HOST ONLY)
 rocm_fmha_bwd_convert_dq_api.hpp      — ConvertDQ: grid_size helper (HOST ONLY)

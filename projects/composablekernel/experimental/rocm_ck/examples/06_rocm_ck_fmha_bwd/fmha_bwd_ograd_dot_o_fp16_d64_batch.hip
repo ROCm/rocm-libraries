@@ -1,19 +1,16 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "rocm_fmha_bwd_ograd_dot_o_dev.hpp"
+#include <rocm_ck/ops/fmha_bwd/ograd_dot_o_dev.hpp>
 
-static constexpr rocm_ck::FmhaBwdOGradDotOKernel kernel =
-    rocm_ck::make_kernel(
-        rocm_ck::FmhaBwdOGradDotOConfig{
-            .signature = {.dtype = rocm_ck::DataType::FP16,
-                          .hdim_v = 64,
-                          .mode = rocm_ck::FmhaMode::BATCH},
-            .algorithm = {.pad_seqlen_q = true,
-                          .pad_hdim_v = true}});
+#include "rocm_fmha_bwd_registry.hpp"
 
-extern "C" __global__ void
-fmha_bwd_ograd_dot_o_fp16_d64_batch(rocm_ck::Args args)
+// FP16, hdim_v=64, batch mode, padded. hdim axis variant.
+static constexpr rocm_ck::FmhaBwdOGradDotOSpec spec =
+    rocm_ck::fmha_bwd_ograd_dot_o_variant_spec("fmha_bwd_ograd_dot_o_fp16_d64_batch");
+
+extern "C" __global__ __launch_bounds__(spec.block_size, spec.block_per_cu)
+void fmha_bwd_ograd_dot_o_fp16_d64_batch(rocm_ck::Args args)
 {
-    rocm_ck::runFmhaBwdOGradDotO<kernel>(args);
+    rocm_ck::runFmhaBwdOGradDotO<spec>(args);
 }

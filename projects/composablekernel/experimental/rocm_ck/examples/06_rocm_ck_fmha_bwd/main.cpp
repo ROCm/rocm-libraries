@@ -391,7 +391,7 @@ static bool runOGradDotOBatch(const rocm_ck::FmhaBwdOGradDotOVariant& variant,
                               int hdim_v,
                               float p_undrop)
 {
-    const auto dtype      = variant.kernel.dtype;
+    const auto dtype      = variant.spec.dtype;
     const int dtype_bytes = rocm_ck::data_type_bits(dtype) / 8;
     const size_t total_el = size_t(batch) * nhead * seqlen_q * hdim_v;
     const size_t total_d  = size_t(batch) * nhead * seqlen_q;
@@ -446,15 +446,15 @@ static bool runOGradDotOBatch(const rocm_ck::FmhaBwdOGradDotOVariant& variant,
     args.scalars[ODO::P_UNDROP].f32 = p_undrop;
 
     // Launch
-    auto grid = rocm_ck::ograd_dot_o_grid_size(batch, nhead, seqlen_q, variant.kernel.block_size);
+    auto grid = rocm_ck::ograd_dot_o_grid_size(batch, nhead, seqlen_q, variant.spec.block_size);
     std::printf("  %s: grid=(%u,%u,%u), block=%d\n",
                 variant.name,
                 grid.x,
                 grid.y,
                 grid.z,
-                variant.kernel.block_size);
+                variant.spec.block_size);
 
-    launchArgs(lk.function, grid, variant.kernel.block_size, args);
+    launchArgs(lk.function, grid, variant.spec.block_size, args);
 
     // Verify
     std::vector<float> got_D(total_d);
@@ -503,7 +503,7 @@ static bool runOGradDotOGroup(const rocm_ck::FmhaBwdOGradDotOVariant& variant,
                               int hdim_v,
                               float p_undrop)
 {
-    const auto dtype      = variant.kernel.dtype;
+    const auto dtype      = variant.spec.dtype;
     const int dtype_bytes = rocm_ck::data_type_bits(dtype) / 8;
     const size_t total_el = size_t(batch) * nhead * seqlen_q * hdim_v;
     const size_t total_d  = size_t(batch) * nhead * seqlen_q;
@@ -596,15 +596,15 @@ static bool runOGradDotOGroup(const rocm_ck::FmhaBwdOGradDotOVariant& variant,
 
     args.scalars[ODO::P_UNDROP].f32 = p_undrop;
 
-    auto grid = rocm_ck::ograd_dot_o_grid_size(batch, nhead, seqlen_q, variant.kernel.block_size);
+    auto grid = rocm_ck::ograd_dot_o_grid_size(batch, nhead, seqlen_q, variant.spec.block_size);
     std::printf("  %s: grid=(%u,%u,%u), block=%d (group)\n",
                 variant.name,
                 grid.x,
                 grid.y,
                 grid.z,
-                variant.kernel.block_size);
+                variant.spec.block_size);
 
-    launchArgs(lk.function, grid, variant.kernel.block_size, args);
+    launchArgs(lk.function, grid, variant.spec.block_size, args);
 
     // Verify
     std::vector<float> got_D(total_d);
@@ -663,7 +663,7 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
                                   float scale,
                                   bool verify)
 {
-    const auto dtype      = variant.kernel.dtype;
+    const auto dtype      = variant.spec.dtype;
     const int dtype_bytes = rocm_ck::data_type_bits(dtype) / 8;
 
     const size_t q_elems   = size_t(batch) * nhead * seqlen_q * hdim_q;
@@ -809,15 +809,15 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     args.scalars[DKV::NHEAD_RATIO_QK].i32 = 1; // MHA (no GQA)
 
     // Launch
-    auto grid = rocm_ck::dqdkdv_grid_size(batch, nhead, seqlen_k, variant.kernel.block_n0);
+    auto grid = rocm_ck::dqdkdv_grid_size(batch, nhead, seqlen_k, variant.spec.block_n0);
     std::printf("  %s: grid=(%u,%u,%u), block=%d\n",
                 variant.name,
                 grid.x,
                 grid.y,
                 grid.z,
-                variant.kernel.block_size);
+                variant.spec.block_size);
 
-    launchArgs(lk.function, grid, variant.kernel.block_size, args);
+    launchArgs(lk.function, grid, variant.spec.block_size, args);
 
     // Download and verify
     bool passed = true;
@@ -996,7 +996,7 @@ int main(int argc, char** argv)
     std::printf("\nRunning OGradDotO variants:\n");
     for(const auto& v : rocm_ck::ALL_OGRAD_DOT_O_VARIANTS)
     {
-        const int cur_hdim = v.kernel.hdim_v;
+        const int cur_hdim = v.spec.hdim_v;
 
         std::vector<float> host_O, host_dO;
         makeOGradDotOTestData(BATCH, NHEAD, SEQLEN_Q, cur_hdim, host_O, host_dO);
@@ -1006,7 +1006,7 @@ int main(int argc, char** argv)
         cpuOGradDotO(host_O, host_dO, ref_D, BATCH, NHEAD, SEQLEN_Q, cur_hdim, P_UNDROP);
 
         bool passed;
-        if(v.kernel.mode == rocm_ck::FmhaMode::GROUP)
+        if(v.spec.mode == rocm_ck::FmhaMode::GROUP)
         {
             passed = runOGradDotOGroup(v,
                                        archive,
@@ -1164,7 +1164,7 @@ int main(int argc, char** argv)
     for(const auto& v : rocm_ck::ALL_DQDKDV_VARIANTS)
     {
         // Group mode is not yet implemented in the device bridge.
-        if(v.kernel.mode == rocm_ck::FmhaMode::GROUP)
+        if(v.spec.mode == rocm_ck::FmhaMode::GROUP)
         {
             std::printf("  %s: SKIPPED (group mode not yet "
                         "implemented)\n",
@@ -1177,8 +1177,8 @@ int main(int argc, char** argv)
         // no deterministic flag get full verification.
         // Others are compilation proof only.
         bool is_plain_batch =
-            (!v.kernel.has_mask && !v.kernel.has_dropout && !v.kernel.is_deterministic &&
-             v.kernel.bias_type == rocm_ck::FmhaBiasType::NONE);
+            (!v.spec.has_mask && !v.spec.has_dropout && !v.spec.is_deterministic &&
+             v.spec.bias_type == rocm_ck::FmhaBiasType::NONE);
 
         bool passed = runDqDkDvBatchVariant(v,
                                             archive,

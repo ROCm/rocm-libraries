@@ -4,7 +4,7 @@
 // Host-only helpers for the FMHA BWD dQ/dK/dV kernel family.
 //
 // HOST ONLY: this header must NOT be included from device code (.hip files).
-// Device code should include rocm_fmha_bwd_dqdkdv_dev.hpp.
+// Device code should include <rocm_ck/ops/fmha_bwd/dqdkdv_dev.hpp>.
 //
 // Compilation boundary:
 //   _spec.hpp — consteval factory + slot constants (both passes)
@@ -15,12 +15,18 @@
 
 #ifdef __HIP_DEVICE_COMPILE__
 #error "dqdkdv_api.hpp is host-only." \
-       " Device code should include rocm_fmha_bwd_dqdkdv_dev.hpp."
+       " Device code should include <rocm_ck/ops/fmha_bwd/dqdkdv_dev.hpp>."
 #endif
 
 #include <rocm_ck/ops/fmha_bwd/dqdkdv_spec.hpp>
 
+#include <rocm_ck/args.hpp>
 #include <rocm_ck/grid_dim.hpp>
+
+#ifndef NDEBUG
+#include <cstdio>
+#include <cstdlib>
+#endif
 
 namespace rocm_ck {
 
@@ -29,15 +35,68 @@ namespace rocm_ck {
 // ---------------------------------------------------------------------------
 
 /// Compute the launch grid for dQ/dK/dV.
-/// Matches CK Tile's FmhaBwdDQDKDVKernel::GridSize():
+/// Matches CK Tile's FmhaBwdDQDKDVSpec::GridSize():
 ///   GridDim(ceil(seqlen_k / kN0), nhead, batch).
-/// block_n0 comes from FmhaBwdDQDKDVKernel::block_n0 (kN0).
+/// block_n0 comes from FmhaBwdDQDKDVSpec::block_n0 (kN0).
 /// Precondition: block_n0 > 0, seqlen_k >= 0, batch > 0, nhead > 0.
 constexpr GridDim dqdkdv_grid_size(int batch, int nhead, int seqlen_k, int block_n0)
 {
     return {static_cast<unsigned>((seqlen_k + block_n0 - 1) / block_n0),
             static_cast<unsigned>(nhead),
             static_cast<unsigned>(batch)};
+}
+
+// ---------------------------------------------------------------------------
+// Debug-only runtime Args validation
+// ---------------------------------------------------------------------------
+
+/// Validate that all required tensor and scalar slots for DqDkDv are populated.
+/// Compiles to nothing in release builds.
+inline void validateArgs([[maybe_unused]] const Args& args, [[maybe_unused]] FmhaBwdDQDKDVSpec k)
+{
+#ifndef NDEBUG
+    namespace S = fmha_bwd_dqdkdv_slots;
+
+    // clang-format off
+    static constexpr const char* tensor_names[] = {
+        "Q", "K", "V", "LSE", "DO", "D", "DQ_ACC", "DK", "DV",
+        "BIAS", "DBIAS", "RANDVAL"
+    };
+    // clang-format on
+
+    int n = S::requiredTensors(k);
+    for(int i = 0; i < n; ++i)
+    {
+        if(args.tensors[i].ptr == nullptr)
+        {
+            std::fprintf(stderr,
+                         "rocm_ck::validateArgs(DqDkDv): tensor \"%s\" (slot %d)"
+                         " has null pointer\n",
+                         tensor_names[i],
+                         i);
+            std::abort();
+        }
+    }
+
+    // Sanity-check scalar values
+    float scale = args.scalars[S::SCALE].f32;
+    if(scale == 0.0f)
+    {
+        std::fprintf(stderr, "rocm_ck::validateArgs(DqDkDv): SCALE (slot %d) is zero\n", S::SCALE);
+        std::abort();
+    }
+
+    int nhead_ratio = args.scalars[S::NHEAD_RATIO_QK].i32;
+    if(nhead_ratio <= 0)
+    {
+        std::fprintf(stderr,
+                     "rocm_ck::validateArgs(DqDkDv): NHEAD_RATIO_QK (slot %d)"
+                     " must be positive, got %d\n",
+                     S::NHEAD_RATIO_QK,
+                     nhead_ratio);
+        std::abort();
+    }
+#endif
 }
 
 } // namespace rocm_ck

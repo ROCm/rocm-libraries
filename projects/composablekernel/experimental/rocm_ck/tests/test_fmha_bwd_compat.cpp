@@ -3,7 +3,7 @@
 //
 // Frozen baseline tests for FMHA BWD kernel variants.
 //
-// Each test reproduces the exact make_kernel() call from the example
+// Each test reproduces the exact make_spec() call from the example
 // registry and asserts ALL fields. If a schema change breaks a test,
 // the change is not backwards-compatible.
 //
@@ -32,7 +32,7 @@ using namespace rocm_ck;
 
 TEST(FmhaBwdCompat, OGradDotO_FP16_D128_Batch)
 {
-    constexpr auto k = make_kernel(FmhaBwdOGradDotOConfig{
+    constexpr auto k = make_spec(FmhaBwdOGradDotOConfig{
         .signature = {.dtype = DataType::FP16, .hdim_v = 128, .mode = FmhaMode::BATCH},
         .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
 
@@ -47,7 +47,7 @@ TEST(FmhaBwdCompat, OGradDotO_FP16_D128_Batch)
 
 TEST(FmhaBwdCompat, OGradDotO_BF16_D128_Batch)
 {
-    constexpr auto k = make_kernel(FmhaBwdOGradDotOConfig{
+    constexpr auto k = make_spec(FmhaBwdOGradDotOConfig{
         .signature = {.dtype = DataType::BF16, .hdim_v = 128, .mode = FmhaMode::BATCH},
         .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
 
@@ -62,7 +62,7 @@ TEST(FmhaBwdCompat, OGradDotO_BF16_D128_Batch)
 
 TEST(FmhaBwdCompat, OGradDotO_FP16_D64_Batch)
 {
-    constexpr auto k = make_kernel(FmhaBwdOGradDotOConfig{
+    constexpr auto k = make_spec(FmhaBwdOGradDotOConfig{
         .signature = {.dtype = DataType::FP16, .hdim_v = 64, .mode = FmhaMode::BATCH},
         .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
 
@@ -77,7 +77,7 @@ TEST(FmhaBwdCompat, OGradDotO_FP16_D64_Batch)
 
 TEST(FmhaBwdCompat, OGradDotO_FP16_D128_Group)
 {
-    constexpr auto k = make_kernel(FmhaBwdOGradDotOConfig{
+    constexpr auto k = make_spec(FmhaBwdOGradDotOConfig{
         .signature = {.dtype = DataType::FP16, .hdim_v = 128, .mode = FmhaMode::GROUP},
         .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
 
@@ -92,7 +92,7 @@ TEST(FmhaBwdCompat, OGradDotO_FP16_D128_Group)
 
 TEST(FmhaBwdCompat, OGradDotO_FP16_D128_Batch_NoPad)
 {
-    constexpr auto k = make_kernel(FmhaBwdOGradDotOConfig{
+    constexpr auto k = make_spec(FmhaBwdOGradDotOConfig{
         .signature = {.dtype = DataType::FP16, .hdim_v = 128, .mode = FmhaMode::BATCH},
         .algorithm = {.pad_seqlen_q = false, .pad_hdim_v = false}});
 
@@ -112,11 +112,11 @@ TEST(FmhaBwdCompat, OGradDotO_FP16_D128_Batch_NoPad)
 TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch)
 {
     constexpr auto k =
-        make_kernel(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                      .hdim_q = 128,
-                                                      .hdim_v = 128,
-                                                      .mode   = FmhaMode::BATCH},
-                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+        make_spec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                    .hdim_q = 128,
+                                                    .hdim_v = 128,
+                                                    .mode   = FmhaMode::BATCH},
+                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(k.dtype, DataType::FP16);
     EXPECT_EQ(k.hdim_q, 128);
@@ -137,11 +137,11 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch)
 TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch)
 {
     constexpr auto k =
-        make_kernel(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
-                                                      .hdim_q = 128,
-                                                      .hdim_v = 128,
-                                                      .mode   = FmhaMode::BATCH},
-                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+        make_spec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
+                                                    .hdim_q = 128,
+                                                    .hdim_v = 128,
+                                                    .mode   = FmhaMode::BATCH},
+                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(k.dtype, DataType::BF16);
     EXPECT_EQ(k.block_per_cu, 1);
@@ -151,7 +151,7 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch)
 
 TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMask)
 {
-    constexpr auto k = make_kernel(FmhaBwdDQDKDVConfig{
+    constexpr auto k = make_spec(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
         .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
@@ -163,7 +163,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMask)
 
 TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_Det)
 {
-    constexpr auto k = make_kernel(FmhaBwdDQDKDVConfig{
+    constexpr auto k = make_spec(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
         .algorithm = {.is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
@@ -176,11 +176,11 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_Det)
 TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Group)
 {
     constexpr auto k =
-        make_kernel(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                      .hdim_q = 128,
-                                                      .hdim_v = 128,
-                                                      .mode   = FmhaMode::GROUP},
-                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+        make_spec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                    .hdim_q = 128,
+                                                    .hdim_v = 128,
+                                                    .mode   = FmhaMode::GROUP},
+                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(k.mode, FmhaMode::GROUP);
     EXPECT_EQ(k.block_per_cu, 1);
@@ -192,7 +192,7 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Group)
 
 TEST(FmhaBwdCompat, ConvertDQ_FP16_D128_Batch)
 {
-    constexpr auto k = make_kernel(FmhaBwdConvertDQConfig{
+    constexpr auto k = make_spec(FmhaBwdConvertDQConfig{
         .signature = {.dtype = DataType::FP16, .hdim_q = 128, .mode = FmhaMode::BATCH},
         .algorithm = {}});
 
@@ -208,7 +208,7 @@ TEST(FmhaBwdCompat, ConvertDQ_FP16_D128_Batch)
 
 TEST(FmhaBwdCompat, ConvertDQ_FP16_D128_Group)
 {
-    constexpr auto k = make_kernel(FmhaBwdConvertDQConfig{
+    constexpr auto k = make_spec(FmhaBwdConvertDQConfig{
         .signature = {.dtype = DataType::FP16, .hdim_q = 128, .mode = FmhaMode::GROUP},
         .algorithm = {}});
 

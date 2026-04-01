@@ -8,7 +8,7 @@
 // the per-split partial results and type-converts in one pass.
 //
 // SHARED header: compiled in both host and device (--cuda-device-only) passes.
-// Contains structural types, consteval make_kernel() factory, and named slot
+// Contains structural types, consteval make_spec() factory, and named slot
 // constants. No runtime code, no HIP dependency.
 //
 // Compilation boundary:
@@ -55,7 +55,7 @@ struct FmhaBwdConvertDQConfig
 
 /// Validated kernel descriptor -- structural type, safe for use as NTTP.
 /// All optional/default values are resolved; no std::optional.
-struct FmhaBwdConvertDQKernel
+struct FmhaBwdConvertDQSpec
 {
     DataType dtype;
     int hdim_q;
@@ -92,7 +92,7 @@ constexpr int SEQLEN_K   = 5; // [batch]   per-sequence K-lengths
 // constexpr int RESERVED = 0;
 
 /// Number of tensor slots required for a given kernel configuration.
-consteval int requiredTensors(FmhaBwdConvertDQKernel k)
+constexpr int requiredTensors(FmhaBwdConvertDQSpec k)
 {
     int n = 2; // DQ_ACC + DQ
     if(k.mode == FmhaMode::GROUP)
@@ -101,7 +101,7 @@ consteval int requiredTensors(FmhaBwdConvertDQKernel k)
 }
 
 /// Number of scalar slots required for a given kernel configuration.
-consteval int requiredScalars(FmhaBwdConvertDQKernel /* k */)
+constexpr int requiredScalars(FmhaBwdConvertDQSpec /* k */)
 {
     return 0; // ConvertQGrad has no scalar parameters
 }
@@ -109,13 +109,13 @@ consteval int requiredScalars(FmhaBwdConvertDQKernel /* k */)
 } // namespace fmha_bwd_convert_dq_slots
 
 // ---------------------------------------------------------------------------
-// make_kernel -- consteval validation
+// make_spec -- consteval validation
 // ---------------------------------------------------------------------------
 
 /// Validate config and produce a structural kernel descriptor.
 /// Overload resolution: each kernel family has its own Config type,
-/// so make_kernel(FmhaBwdConvertDQConfig) is unambiguous.
-consteval FmhaBwdConvertDQKernel make_kernel(FmhaBwdConvertDQConfig cfg)
+/// so make_spec(FmhaBwdConvertDQConfig) is unambiguous.
+consteval FmhaBwdConvertDQSpec make_spec(FmhaBwdConvertDQConfig cfg)
 {
     auto sig  = cfg.signature;
     auto algo = cfg.algorithm;
@@ -140,21 +140,21 @@ consteval FmhaBwdConvertDQKernel make_kernel(FmhaBwdConvertDQConfig cfg)
     // Matches the CK Tile ConvertQGrad kernel configuration for d128.
     constexpr int block_size = 256;
 
-    FmhaBwdConvertDQKernel k{sig.dtype,
-                             sig.hdim_q,
-                             sig.mode,
-                             algo.is_deterministic,
-                             algo.pad_seqlen_q,
-                             algo.pad_hdim_q,
-                             algo.block_per_cu,
-                             block_size};
+    FmhaBwdConvertDQSpec k{sig.dtype,
+                           sig.hdim_q,
+                           sig.mode,
+                           algo.is_deterministic,
+                           algo.pad_seqlen_q,
+                           algo.pad_hdim_q,
+                           algo.block_per_cu,
+                           block_size};
 
     return k;
 }
 
 // Compile canary: GROUP mode exercises pad_seqlen_q and mode constraints.
 // clang-format off
-static_assert(make_kernel(FmhaBwdConvertDQConfig{
+static_assert(make_spec(FmhaBwdConvertDQConfig{
     .signature = {.dtype = DataType::FP16, .hdim_q = 128,
                   .mode = FmhaMode::GROUP},
     .algorithm = {.pad_seqlen_q = true, .pad_hdim_q = true}

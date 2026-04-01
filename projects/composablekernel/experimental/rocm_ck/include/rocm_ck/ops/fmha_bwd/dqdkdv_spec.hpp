@@ -6,7 +6,7 @@
 // and value gradients via 5 GEMMs.
 //
 // SHARED header: compiled in both host and device (--cuda-device-only) passes.
-// Contains structural types, consteval make_kernel() factory, and named slot
+// Contains structural types, consteval make_spec() factory, and named slot
 // constants. No runtime code, no HIP dependency.
 //
 // Compilation boundary:
@@ -51,7 +51,7 @@ struct FmhaBwdDQDKDVAlgorithm
     // Tuning — padding and occupancy
     int pad_hdim_q   = 0;  // 0 (no pad), 1 (small pad), or 8 (full vec pad)
     int pad_hdim_v   = 0;  // 0, 1, or 8
-    int block_per_cu = -1; // occupancy hint (-1 = auto, resolved in make_kernel)
+    int block_per_cu = -1; // occupancy hint (-1 = auto, resolved in make_spec)
 };
 
 /// Config: user-facing Signature + Algorithm pair.
@@ -63,7 +63,7 @@ struct FmhaBwdDQDKDVConfig
 
 /// Validated kernel descriptor — structural type, safe for use as NTTP.
 /// All optional/default values are resolved; no std::optional.
-struct FmhaBwdDQDKDVKernel
+struct FmhaBwdDQDKDVSpec
 {
     // From Signature
     DataType dtype;
@@ -118,7 +118,7 @@ constexpr int RANDVAL = 11; // optional: present if has_dropout
 /// Minimum tensor slot count (max_used_index + 1) for a given config.
 /// Slot indices are fixed (BIAS=9, DBIAS=10, RANDVAL=11) regardless of
 /// which features are enabled — unused slots are simply not populated.
-consteval int requiredTensors(FmhaBwdDQDKDVKernel k)
+constexpr int requiredTensors(FmhaBwdDQDKDVSpec k)
 {
     if(k.has_dropout)
         return RANDVAL + 1; // 12
@@ -140,7 +140,7 @@ constexpr int DROP_SEED      = 6; // u64: dropout RNG seed
 constexpr int DROP_OFFSET    = 7; // u64: dropout RNG offset
 
 /// Minimum scalar slot count (max_used_index + 1) for a given config.
-consteval int requiredScalars(FmhaBwdDQDKDVKernel k)
+constexpr int requiredScalars(FmhaBwdDQDKDVSpec k)
 {
     if(k.has_dropout)
         return DROP_OFFSET + 1; // 8
@@ -150,15 +150,15 @@ consteval int requiredScalars(FmhaBwdDQDKDVKernel k)
 } // namespace fmha_bwd_dqdkdv_slots
 
 // ---------------------------------------------------------------------------
-// make_kernel — consteval validation
+// make_spec — consteval validation
 // ---------------------------------------------------------------------------
 
 /// Validate config and produce a structural kernel descriptor.
 /// Overload resolution: each kernel family has its own Config type,
-/// so make_kernel(FmhaBwdDQDKDVConfig) is unambiguous.
+/// so make_spec(FmhaBwdDQDKDVConfig) is unambiguous.
 /// All compile-time constraints are checked here; invalid configs produce
 /// a compile error with a descriptive message.
-consteval FmhaBwdDQDKDVKernel make_kernel(FmhaBwdDQDKDVConfig cfg)
+consteval FmhaBwdDQDKDVSpec make_spec(FmhaBwdDQDKDVConfig cfg)
 {
     auto sig  = cfg.signature;
     auto algo = cfg.algorithm;
@@ -212,7 +212,7 @@ consteval FmhaBwdDQDKDVKernel make_kernel(FmhaBwdDQDKDVConfig cfg)
         throw "block_per_cu must be positive (or -1 for auto)";
 
     // --- build the kernel descriptor ---
-    FmhaBwdDQDKDVKernel k{
+    FmhaBwdDQDKDVSpec k{
         .dtype            = sig.dtype,
         .hdim_q           = sig.hdim_q,
         .hdim_v           = sig.hdim_v,
@@ -234,7 +234,7 @@ consteval FmhaBwdDQDKDVKernel make_kernel(FmhaBwdDQDKDVConfig cfg)
 
 // Compile canary: dropout variant exercises bias/dropout/slot count paths.
 // clang-format off
-static_assert(fmha_bwd_dqdkdv_slots::requiredTensors(make_kernel(
+static_assert(fmha_bwd_dqdkdv_slots::requiredTensors(make_spec(
     FmhaBwdDQDKDVConfig{
         .signature = {.dtype = DataType::FP16,
                       .hdim_q = 128, .hdim_v = 128,

@@ -16,6 +16,7 @@
 #include <rocm_ck/ops/fmha_bwd/convert_dq_spec.hpp>
 
 #include <iterator> // std::size
+#include <string_view>
 
 namespace rocm_ck {
 
@@ -26,28 +27,28 @@ namespace rocm_ck {
 struct FmhaBwdOGradDotOVariant
 {
     const char* name;
-    FmhaBwdOGradDotOKernel kernel;
+    FmhaBwdOGradDotOSpec spec;
 };
 
 // clang-format off
 static constexpr FmhaBwdOGradDotOVariant ALL_OGRAD_DOT_O_VARIANTS[] = {
-    {"fmha_bwd_ograd_dot_o_fp16_d128_batch", make_kernel(FmhaBwdOGradDotOConfig{
+    {"fmha_bwd_ograd_dot_o_fp16_d128_batch", make_spec(FmhaBwdOGradDotOConfig{
          .signature = {.dtype = DataType::FP16, .hdim_v = 128,
                        .mode = FmhaMode::BATCH},
          .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}})},
-    {"fmha_bwd_ograd_dot_o_bf16_d128_batch", make_kernel(FmhaBwdOGradDotOConfig{
+    {"fmha_bwd_ograd_dot_o_bf16_d128_batch", make_spec(FmhaBwdOGradDotOConfig{
          .signature = {.dtype = DataType::BF16, .hdim_v = 128,
                        .mode = FmhaMode::BATCH},
          .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}})},
-    {"fmha_bwd_ograd_dot_o_fp16_d64_batch", make_kernel(FmhaBwdOGradDotOConfig{
+    {"fmha_bwd_ograd_dot_o_fp16_d64_batch", make_spec(FmhaBwdOGradDotOConfig{
          .signature = {.dtype = DataType::FP16, .hdim_v = 64,
                        .mode = FmhaMode::BATCH},
          .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}})},
-    {"fmha_bwd_ograd_dot_o_fp16_d128_group", make_kernel(FmhaBwdOGradDotOConfig{
+    {"fmha_bwd_ograd_dot_o_fp16_d128_group", make_spec(FmhaBwdOGradDotOConfig{
          .signature = {.dtype = DataType::FP16, .hdim_v = 128,
                        .mode = FmhaMode::GROUP},
          .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}})},
-    {"fmha_bwd_ograd_dot_o_fp16_d128_batch_npad", make_kernel(FmhaBwdOGradDotOConfig{
+    {"fmha_bwd_ograd_dot_o_fp16_d128_batch_npad", make_spec(FmhaBwdOGradDotOConfig{
          .signature = {.dtype = DataType::FP16, .hdim_v = 128,
                        .mode = FmhaMode::BATCH},
          .algorithm = {.pad_seqlen_q = false, .pad_hdim_v = false}})},
@@ -68,11 +69,10 @@ constexpr const FmhaBwdOGradDotOVariant* findVariant(FmhaBwdOGradDotOConfig cfg)
     for(int i = 0; i < ALL_OGRAD_DOT_O_VARIANTS_COUNT; ++i)
     {
         const auto& v = ALL_OGRAD_DOT_O_VARIANTS[i];
-        if(v.kernel.dtype != sig.dtype || v.kernel.hdim_v != sig.hdim_v ||
-           v.kernel.mode != sig.mode)
+        if(v.spec.dtype != sig.dtype || v.spec.hdim_v != sig.hdim_v || v.spec.mode != sig.mode)
             continue;
 
-        if(!v.kernel.pad_seqlen_q && !v.kernel.pad_hdim_v)
+        if(!v.spec.pad_seqlen_q && !v.spec.pad_hdim_v)
             best_nopad = &ALL_OGRAD_DOT_O_VARIANTS[i];
         else
             best_padded = &ALL_OGRAD_DOT_O_VARIANTS[i];
@@ -91,34 +91,34 @@ constexpr const FmhaBwdOGradDotOVariant* findVariant(FmhaBwdOGradDotOConfig cfg)
 struct FmhaBwdDQDKDVVariant
 {
     const char* name;
-    FmhaBwdDQDKDVKernel kernel;
+    FmhaBwdDQDKDVSpec spec;
 };
 
 // clang-format off
 static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
-    {"fmha_bwd_dqdkdv_fp16_d128_batch", make_kernel(FmhaBwdDQDKDVConfig{
+    {"fmha_bwd_dqdkdv_fp16_d128_batch", make_spec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::BATCH},
          .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
-    {"fmha_bwd_dqdkdv_bf16_d128_batch", make_kernel(FmhaBwdDQDKDVConfig{
+    {"fmha_bwd_dqdkdv_bf16_d128_batch", make_spec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::BF16,
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::BATCH},
          .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
-    {"fmha_bwd_dqdkdv_fp16_d128_batch_cmask", make_kernel(FmhaBwdDQDKDVConfig{
+    {"fmha_bwd_dqdkdv_fp16_d128_batch_cmask", make_spec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::BATCH},
          .algorithm = {.has_mask = true,
                        .pad_hdim_q = 8, .pad_hdim_v = 8}})},
-    {"fmha_bwd_dqdkdv_fp16_d128_batch_det", make_kernel(FmhaBwdDQDKDVConfig{
+    {"fmha_bwd_dqdkdv_fp16_d128_batch_det", make_spec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::BATCH},
          .algorithm = {.is_deterministic = true,
                        .pad_hdim_q = 8, .pad_hdim_v = 8}})},
-    {"fmha_bwd_dqdkdv_fp16_d128_group", make_kernel(FmhaBwdDQDKDVConfig{
+    {"fmha_bwd_dqdkdv_fp16_d128_group", make_spec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::GROUP},
@@ -138,14 +138,13 @@ constexpr const FmhaBwdDQDKDVVariant* findVariant(FmhaBwdDQDKDVConfig cfg)
     for(int i = 0; i < ALL_DQDKDV_VARIANTS_COUNT; ++i)
     {
         const auto& v = ALL_DQDKDV_VARIANTS[i];
-        if(v.kernel.dtype != sig.dtype || v.kernel.hdim_q != sig.hdim_q ||
-           v.kernel.hdim_v != sig.hdim_v || v.kernel.mode != sig.mode)
+        if(v.spec.dtype != sig.dtype || v.spec.hdim_q != sig.hdim_q ||
+           v.spec.hdim_v != sig.hdim_v || v.spec.mode != sig.mode)
             continue;
 
         // Feature flags must match exactly
-        if(v.kernel.has_mask != algo.has_mask || v.kernel.has_dropout != algo.has_dropout ||
-           v.kernel.is_deterministic != algo.is_deterministic ||
-           v.kernel.bias_type != algo.bias_type)
+        if(v.spec.has_mask != algo.has_mask || v.spec.has_dropout != algo.has_dropout ||
+           v.spec.is_deterministic != algo.is_deterministic || v.spec.bias_type != algo.bias_type)
             continue;
 
         return &ALL_DQDKDV_VARIANTS[i];
@@ -160,16 +159,16 @@ constexpr const FmhaBwdDQDKDVVariant* findVariant(FmhaBwdDQDKDVConfig cfg)
 struct FmhaBwdConvertDQVariant
 {
     const char* name;
-    FmhaBwdConvertDQKernel kernel;
+    FmhaBwdConvertDQSpec spec;
 };
 
 // clang-format off
 static constexpr FmhaBwdConvertDQVariant ALL_CONVERT_DQ_VARIANTS[] = {
-    {"fmha_bwd_convert_dq_fp16_d128_batch_det", make_kernel(FmhaBwdConvertDQConfig{
+    {"fmha_bwd_convert_dq_fp16_d128_batch_det", make_spec(FmhaBwdConvertDQConfig{
          .signature = {.dtype = DataType::FP16, .hdim_q = 128,
                        .mode = FmhaMode::BATCH},
          .algorithm = {}})},
-    {"fmha_bwd_convert_dq_fp16_d128_group_det", make_kernel(FmhaBwdConvertDQConfig{
+    {"fmha_bwd_convert_dq_fp16_d128_group_det", make_spec(FmhaBwdConvertDQConfig{
          .signature = {.dtype = DataType::FP16, .hdim_q = 128,
                        .mode = FmhaMode::GROUP},
          .algorithm = {}})},
@@ -186,13 +185,43 @@ constexpr const FmhaBwdConvertDQVariant* findVariant(FmhaBwdConvertDQConfig cfg)
     for(int i = 0; i < ALL_CONVERT_DQ_VARIANTS_COUNT; ++i)
     {
         const auto& v = ALL_CONVERT_DQ_VARIANTS[i];
-        if(v.kernel.dtype != sig.dtype || v.kernel.hdim_q != sig.hdim_q ||
-           v.kernel.mode != sig.mode)
+        if(v.spec.dtype != sig.dtype || v.spec.hdim_q != sig.hdim_q || v.spec.mode != sig.mode)
             continue;
 
         return &ALL_CONVERT_DQ_VARIANTS[i];
     }
     return nullptr;
+}
+
+// =========================================================================
+// Consteval name-based lookup (compile-time variant selection by name)
+// =========================================================================
+
+/// Look up an OGradDotO variant spec by name at compile time.
+consteval FmhaBwdOGradDotOSpec fmha_bwd_ograd_dot_o_variant_spec(const char* name)
+{
+    for(const auto& v : ALL_OGRAD_DOT_O_VARIANTS)
+        if(std::string_view(v.name) == name)
+            return v.spec;
+    throw "unknown FMHA BWD OGradDotO variant name";
+}
+
+/// Look up a DqDkDv variant spec by name at compile time.
+consteval FmhaBwdDQDKDVSpec fmha_bwd_dqdkdv_variant_spec(const char* name)
+{
+    for(const auto& v : ALL_DQDKDV_VARIANTS)
+        if(std::string_view(v.name) == name)
+            return v.spec;
+    throw "unknown FMHA BWD DqDkDv variant name";
+}
+
+/// Look up a ConvertDQ variant spec by name at compile time.
+consteval FmhaBwdConvertDQSpec fmha_bwd_convert_dq_variant_spec(const char* name)
+{
+    for(const auto& v : ALL_CONVERT_DQ_VARIANTS)
+        if(std::string_view(v.name) == name)
+            return v.spec;
+    throw "unknown FMHA BWD ConvertDQ variant name";
 }
 
 } // namespace rocm_ck

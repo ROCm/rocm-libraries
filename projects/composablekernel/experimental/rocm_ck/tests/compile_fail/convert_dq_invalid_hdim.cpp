@@ -8,6 +8,6 @@
 
 using namespace rocm_ck;
 
-constexpr auto bad = make_kernel(FmhaBwdConvertDQConfig{
+constexpr auto bad = make_spec(FmhaBwdConvertDQConfig{
     .signature = {.dtype = DataType::FP16, .hdim_q = 100, .mode = FmhaMode::BATCH},
     .algorithm = {}});

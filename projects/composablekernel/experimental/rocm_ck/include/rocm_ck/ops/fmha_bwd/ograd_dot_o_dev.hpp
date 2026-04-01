@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: MIT
 //
 // Device-side bridge for FMHA BWD OGradDotO. Maps the validated kernel
-// descriptor (FmhaBwdOGradDotOKernel) to the CK Tile template chain.
+// descriptor (FmhaBwdOGradDotOSpec) to the CK Tile template chain.
 //
 // Unpacks generic rocm_ck::Args via named slot constants, then constructs
 // CK Tile's Kargs via aggregate initialization. No __builtin_bit_cast,
 // no ABI matching required.
 //
-// Uses C++20 struct NTTPs: template <FmhaBwdOGradDotOKernel K>.
+// Uses C++20 struct NTTPs: template <FmhaBwdOGradDotOSpec K>.
 //
 // Compilation boundary:
 //   _spec.hpp — consteval factory + slot constants (both passes)
@@ -18,7 +18,7 @@
 #pragma once
 
 #ifndef __HIP_DEVICE_COMPILE__
-#error "rocm_fmha_bwd_ograd_dot_o_dev.hpp requires device compilation." \
+#error "ograd_dot_o_dev.hpp requires device compilation." \
        " Host code should include <rocm_ck/ops/fmha_bwd/ograd_dot_o_api.hpp>."
 #endif
 
@@ -32,15 +32,15 @@
 
 namespace rocm_ck {
 
-/// Maps a FmhaBwdOGradDotOKernel descriptor to the full CK Tile type chain.
+/// Maps a FmhaBwdOGradDotOSpec descriptor to the full CK Tile type chain.
 ///
 /// Template chain (matches dispatcher codegen):
-///   FmhaBwdOGradDotOKernel<Pipeline>
+///   FmhaBwdOGradDotOSpec<Pipeline>
 ///     -> BlockFmhaBwdOGradDotO<PipelineProblem>
 ///       -> BlockFmhaBwdOGradDotOPipelineProblem<OType, dOType, DType,
 ///              bm0, hdim_v, is_group, Traits>
 ///         -> TileFmhaBwdOGradDotOTraits<spad, dvpad, block_per_cu>
-template <FmhaBwdOGradDotOKernel K>
+template <FmhaBwdOGradDotOSpec K>
 struct FmhaBwdOGradDotOTypes
 {
     using ODataType     = typename CkTypeMap<K.dtype>::type;
@@ -60,7 +60,7 @@ struct FmhaBwdOGradDotOTypes
                                                       Traits>;
 
     using Pipeline = ck_tile::BlockFmhaBwdOGradDotO<PipelineProblem>;
-    using Kernel   = ck_tile::FmhaBwdOGradDotOKernel<Pipeline>;
+    using Kernel   = ck_tile::FmhaBwdOGradDotOSpec<Pipeline>;
     using Kargs    = typename Kernel::Kargs;
 };
 
@@ -83,7 +83,7 @@ struct FmhaBwdOGradDotOTypes
 ///   scalars[S::P_UNDROP].f32 = p_undrop
 ///
 /// Call this from an extern "C" __global__ wrapper.
-template <FmhaBwdOGradDotOKernel K>
+template <FmhaBwdOGradDotOSpec K>
 __device__ void runFmhaBwdOGradDotO(Args args)
 {
     using T     = FmhaBwdOGradDotOTypes<K>;

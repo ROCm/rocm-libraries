@@ -5,7 +5,7 @@
 // OGradDotO kernel family.
 //
 // SHARED header: compiled in both host and device (--cuda-device-only) passes.
-// Contains structural types, consteval make_kernel() factory, and named slot
+// Contains structural types, consteval make_spec() factory, and named slot
 // constants. No runtime code, no HIP dependency.
 //
 // Compilation boundary:
@@ -53,7 +53,7 @@ struct FmhaBwdOGradDotOConfig
 
 /// Validated kernel descriptor -- structural type, safe for use as NTTP.
 /// All optional/default values are resolved; no std::optional.
-struct FmhaBwdOGradDotOKernel
+struct FmhaBwdOGradDotOSpec
 {
     DataType dtype;
     int hdim_v;
@@ -66,8 +66,8 @@ struct FmhaBwdOGradDotOKernel
 
 /// Validate config and produce a structural kernel descriptor.
 /// Overload resolution: each kernel family has its own Config type,
-/// so make_kernel(FmhaBwdOGradDotOConfig) is unambiguous.
-consteval FmhaBwdOGradDotOKernel make_kernel(FmhaBwdOGradDotOConfig cfg)
+/// so make_spec(FmhaBwdOGradDotOConfig) is unambiguous.
+consteval FmhaBwdOGradDotOSpec make_spec(FmhaBwdOGradDotOConfig cfg)
 {
     auto sig  = cfg.signature;
     auto algo = cfg.algorithm;
@@ -107,7 +107,7 @@ consteval FmhaBwdOGradDotOKernel make_kernel(FmhaBwdOGradDotOConfig cfg)
 
 // Compile canary: GROUP mode exercises pad_seqlen_q constraint.
 // clang-format off
-static_assert(make_kernel(FmhaBwdOGradDotOConfig{
+static_assert(make_spec(FmhaBwdOGradDotOConfig{
     .signature = {.dtype = DataType::FP16, .hdim_v = 128, .mode = FmhaMode::GROUP},
     .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}}).mode == FmhaMode::GROUP);
 // clang-format on
@@ -133,13 +133,13 @@ constexpr int SEQLEN_Q   = 4; // const int32_t*: per-batch actual lengths
 constexpr int P_UNDROP = 0; // float: 1 / (1 - dropout_rate)
 
 /// Number of tensor slots required for a given kernel configuration.
-consteval int requiredTensors(FmhaBwdOGradDotOKernel k)
+constexpr int requiredTensors(FmhaBwdOGradDotOSpec k)
 {
     return (k.mode == FmhaMode::GROUP) ? 5 : 3;
 }
 
 /// Number of scalar slots required (always 1: p_undrop).
-consteval int requiredScalars(FmhaBwdOGradDotOKernel /*k*/) { return 1; }
+constexpr int requiredScalars(FmhaBwdOGradDotOSpec /*k*/) { return 1; }
 
 } // namespace fmha_bwd_ograd_dot_o_slots
 
