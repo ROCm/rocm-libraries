@@ -51,31 +51,28 @@
 namespace TensileLite
 {
     #define CustomArgSemantic_MACRO \
-        X_MACRO(GemmCount) \
-        X_MACRO(NumWorkGroups) \
+        /* Core GEMM problem args */ \
         X_MACRO(SizeFree0) \
         X_MACRO(SizeFree1) \
         X_MACRO(SizeFree2) \
+        X_MACRO(SizeFree3) \
         X_MACRO(SizeSum) \
-        X_MACRO(AddressA) \
-        X_MACRO(AddressB) \
-        X_MACRO(AddressC) \
-        X_MACRO(AddressD) \
-<<<<<<< HEAD
-        X_MACRO(AddressScaleA) \
-        X_MACRO(AddressScaleB) \
-=======
-        X_MACRO(AddressWorkspace) \
-        X_MACRO(AddressSynchronizer) \
->>>>>>> GemmFromAnywhere_StreamKDemo
+        X_MACRO(SizeSum1) \
+        X_MACRO(SizeSum2) \
         X_MACRO(StrideA0) \
         X_MACRO(StrideA1) \
+        X_MACRO(StrideA2) \
         X_MACRO(StrideB0) \
         X_MACRO(StrideB1) \
+        X_MACRO(StrideB2) \
         X_MACRO(StrideC0) \
         X_MACRO(StrideC1) \
+        X_MACRO(StrideC2) \
         X_MACRO(StrideD0) \
         X_MACRO(StrideD1) \
+        X_MACRO(StrideD2) \
+        X_MACRO(StrideE0) \
+        X_MACRO(StrideE1) \
         X_MACRO(StrideScaleA0) \
         X_MACRO(StrideScaleA1) \
         X_MACRO(StrideScaleB0) \
@@ -84,24 +81,66 @@ namespace TensileLite
         X_MACRO(StrideB0Bytes) \
         X_MACRO(StrideC0Bytes) \
         X_MACRO(StrideD0Bytes) \
-<<<<<<< HEAD
+        X_MACRO(StrideMetadata0) \
+        X_MACRO(StrideMetadata1) \
         X_MACRO(Alpha) \
         X_MACRO(Beta) \
         X_MACRO(SplitK) \
         X_MACRO(OutputBF16) \
-=======
+        X_MACRO(Padding) \
+        X_MACRO(DebugPattern) \
+        /* Pointer args */ \
+        X_MACRO(AddressA) \
+        X_MACRO(AddressB) \
+        X_MACRO(AddressC) \
+        X_MACRO(AddressD) \
+        X_MACRO(AddressE) \
+        X_MACRO(AddressMetadata) \
+        X_MACRO(AddressWS) \
+        X_MACRO(AddressWorkspace) \
+        X_MACRO(AddressFlags) \
+        X_MACRO(AddressSynchronizer) \
+        X_MACRO(AddressTD) \
+        X_MACRO(AddressScaleA) \
+        X_MACRO(AddressScaleB) \
+        X_MACRO(AddressScaleC) \
+        X_MACRO(AddressScaleD) \
+        X_MACRO(AddressScaleAlphaVec) \
+        X_MACRO(AddressBias) \
+        X_MACRO(AddressAmaxOut) \
+        X_MACRO(AmaxWS) \
+        X_MACRO(AmaxSync) \
+        X_MACRO(Synchronizer) \
+        X_MACRO(DebugBuffer) \
+        /* Kernel metadata args */ \
+        X_MACRO(GemmInfo) \
+        X_MACRO(GemmCount) \
+        X_MACRO(InternalArgs) \
+        X_MACRO(InternalArgs1) \
         X_MACRO(TensileInternalArg0) \
         X_MACRO(TensileInternalArg1) \
+        X_MACRO(NumWorkGroups) \
+        /* StreamK scheduling args */ \
         X_MACRO(ItersPerTile) \
         X_MACRO(MagicNumberItersPerTile) \
         X_MACRO(MagicShiftItersPerTile) \
         X_MACRO(TotalIters) \
-        X_MACRO(SKGrid) \
-        X_MACRO(SKTilesAndSplit) \
         X_MACRO(SKItersPerWG) \
->>>>>>> GemmFromAnywhere_StreamKDemo
-        X_MACRO(Padding) \
-        X_MACRO(DebugPattern)
+        X_MACRO(SKGrid) \
+        X_MACRO(SKTiles) \
+        X_MACRO(SKTilesAndSplit) \
+        /* Packed batch dimension divisors */ \
+        X_MACRO(MagicNumberSize) \
+        X_MACRO(MagicShiftSize) \
+        /* Epilogue control args */ \
+        X_MACRO(BiasType) \
+        X_MACRO(StrideBias) \
+        X_MACRO(FactorDim) \
+        X_MACRO(ActivationTypeArg) \
+        X_MACRO(ActivationArg) \
+        X_MACRO(GSUSync) \
+        /* Random seed args */ \
+        X_MACRO(RNDSeed)
 
     enum class CustomArgSemantic
     {
@@ -121,6 +160,7 @@ namespace TensileLite
         CustomArgType type;
         CustomArgSemantic semantic;
         size_t padding = 0;
+        size_t index   = 0;
     };
 
     std::string toString(CustomArgDefinition arg);
@@ -137,7 +177,7 @@ namespace TensileLite
         TilesXYBatch,
         StreamKWithBatch,
         StreamKNoBatch,
-        // TODO SplitK
+        TilesXYBatchGSU,
         CustomGridSize_Count,
     };
 
@@ -595,13 +635,6 @@ namespace TensileLite
                                             ContractionInputs const& inputs,
                                             Hardware const&          hardware,
                                             StreamKSettings const&   sk) const;
-
-        template <bool T_Debug>
-        KernelInvocation generateSingleCall(Problem const&           problem,
-                                            ContractionInputs const& inputs,
-                                            Hardware const&          hardware,
-                                            StreamKSettings const&   sk,
-                                            GSUSettings const&       gsuSettings) const;
 
         template <bool T_Debug, typename KA>
         KernelInvocation generateSingleCallGroupedGemm(std::vector<Problem> const& problems,

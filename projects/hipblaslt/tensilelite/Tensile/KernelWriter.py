@@ -5449,6 +5449,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states = StateValues(version=version, kernel=kernel, kernelName=getKernelNameMin(kernel, self.debugConfig.splitGSU))
     self.vgprs  = StateVgprs()
     self.sgprs  = collections.OrderedDict()
+    self.kernelArgDefs = []
     self.codes  = CodeModules()
     self.labels = LabelManager()
 
@@ -8013,7 +8014,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
     self.states.numStoreSgprToLoad = storeSgprLoad
 
-
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")
     if self.db["InitSgpr"] : print ("\n***WARNING: InitSgpr enabled, may impact performance\n")
     if self.db["InitVgpr"] : print ("\n***WARNING: InitVgpr enabled, may impact performance\n")
@@ -8626,6 +8626,138 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
 
 
+  def _registerKernelArgs(self, kernel):
+    """Register all kernel arguments for the CustomKernel definition.
+
+    Populates self.kernelArgDefs in kernarg-buffer-layout order
+    (matching Signature.py).  Must be called after _initKernel so that
+    self.states is fully set up."""
+
+    def _reg(argType, semantic, index=0):
+      entry = {"type": argType, "semantic": semantic}
+      if index:
+        entry["index"] = index
+      self.kernelArgDefs.append(entry)
+
+    # -- Header ----------------------------------------------------------------
+    _reg("uint32", "GemmInfo")
+    _reg("uint32", "InternalArgs")
+    if kernel["InternalSupportParams"]["KernArgsVersion"] >= 1:
+      _reg("uint32", "InternalArgs1")
+      _reg("uint32", "NumWorkGroups")
+
+    # -- Sizes -----------------------------------------------------------------
+    for i in range(self.states.numSgprSizesFree):
+      _reg("uint32", "SizeFree%d" % i)
+    for i in range(self.states.numSgprSizesSum):
+      _reg("uint32", "SizeSum" if i == 0 else "SizeSum%d" % i)
+
+    # -- Debug buffer ----------------------------------------------------------
+    if self.debugConfig.debugKernel:
+      _reg("address", "DebugBuffer")
+
+    # -- Tensor addresses ------------------------------------------------------
+    _reg("address", "AddressD")
+    _reg("address", "AddressC")
+    _reg("address", "AddressA")
+    _reg("address", "AddressB")
+    if kernel["ProblemType"]["Sparse"]:
+      _reg("address", "AddressMetadata")
+    if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
+      _reg("address", "AddressWS")
+      _reg("address", "AddressFlags")
+
+    # -- Strides ---------------------------------------------------------------
+    for i in range(self.states.d.numSgprStrides):
+      _reg("uint32", "StrideD%d" % i)
+    for i in range(self.states.c.numSgprStrides):
+      _reg("uint32", "StrideC%d" % i)
+    for i in range(self.states.a.numSgprStrides):
+      _reg("uint32", "StrideA%d" % i)
+    for i in range(self.states.b.numSgprStrides):
+      _reg("uint32", "StrideB%d" % i)
+    if kernel["ProblemType"]["Sparse"]:
+      for i in range(self.states.m.numSgprStrides):
+        _reg("uint32", "StrideMetadata%d" % i)
+
+    # -- Packed-batch magic divisors -------------------------------------------
+    for idxChar in kernel["PackedC0IdxChars"][:-1]:
+      _reg("uint32", "MagicNumberSize%s" % idxChar)
+      _reg("uint32", "MagicShiftSize%s" % idxChar)
+    for idxChar in kernel["PackedC1IdxChars"][:-1]:
+      _reg("uint32", "MagicNumberSize%s" % idxChar)
+      _reg("uint32", "MagicShiftSize%s" % idxChar)
+
+    # -- Alpha / Beta ----------------------------------------------------------
+    numSgprAlpha = max(1, int(self.states.bpeCinternal / 4))
+    _reg("float64" if numSgprAlpha > 1 else "uint32", "Alpha")
+    if kernel["ProblemType"]["UseBeta"]:
+      numSgprBeta = max(1, int(self.states.bpeCinternal / 4))
+      _reg("float64" if numSgprBeta > 1 else "uint32", "Beta")
+
+    # -- StreamK scalar args ---------------------------------------------------
+    if kernel["StreamK"]:
+      _reg("uint32", "ItersPerTile")
+      _reg("uint32", "MagicNumberItersPerTile")
+      _reg("uint32", "MagicShiftItersPerTile")
+      _reg("uint32", "TotalIters")
+      _reg("uint32", "SKItersPerWG")
+      if kernel["StreamK"] >= 2:
+        _reg("uint32", "SKGrid")
+        _reg("uint32", "SKTiles")
+
+    # -- Scale addresses -------------------------------------------------------
+    if kernel["ProblemType"]["UseScaleAB"]:
+      _reg("address", "AddressScaleA")
+      _reg("address", "AddressScaleB")
+    if kernel["ProblemType"]["UseScaleCD"]:
+      _reg("address", "AddressScaleC")
+      _reg("address", "AddressScaleD")
+    if kernel["ProblemType"]["UseScaleAlphaVec"]:
+      _reg("address", "AddressScaleAlphaVec")
+
+    # -- Bias ------------------------------------------------------------------
+    if self.states.useBias != DataDirection.NONE:
+      _reg("address", "AddressBias")
+      if self.states.needBiasType:
+        _reg("uint32", "BiasType")
+        _reg("uint32", "StrideBias")
+
+    # -- FactorDim -------------------------------------------------------------
+    enableFactorDim = False
+    if kernel["ProblemType"]["UseScaleAlphaVec"] == 3:
+      enableFactorDim = True
+    if self.states.needBiasType and kernel["ProblemType"]["UseBias"] == 3:
+      enableFactorDim = True
+    if enableFactorDim:
+      _reg("uint32", "FactorDim")
+
+    # -- E tensor --------------------------------------------------------------
+    if kernel["ProblemType"]["UseE"]:
+      _reg("address", "AddressE")
+      for i in range(self.states.e.numSgprStrides):
+        _reg("uint32", "StrideE%d" % i)
+
+    # -- Activation args -------------------------------------------------------
+    if ((kernel["ProblemType"]["ActivationType"] != 'none') and kernel["ActivationFused"]):
+      actArgType = "float64" if self.states.numActivationArgSize > 1 else "uint32"
+      for idx in range(len(kernel["ProblemType"]["ActivationType"].getAdditionalArgStringList())):
+        _reg(actArgType, "ActivationArg", idx)
+      if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
+        _reg("uint32", "ActivationType")
+
+    # -- Amax output -----------------------------------------------------------
+    if kernel["ProblemType"]["OutputAmaxD"]:
+      _reg("address", "AddressAmaxOut")
+      _reg("address", "AmaxWS")
+      _reg("address", "AmaxSync")
+
+    # -- MBSK (MultipleBufferSingleKernel) -------------------------------------
+    if kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel':
+      _reg("address", "AddressTD")
+      _reg("address", "Synchronizer")
+      _reg("uint32", "GSUSync")
+
   def _getKernelSource(self, kernel: Solution):
     """
     Returns the source of the kernel, either C++ or assembly.
@@ -8635,6 +8767,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tensorParametersA = {}
     tensorParametersB = {}
     self._initKernel(kernel, tensorParametersA, tensorParametersB)
+
+    self._registerKernelArgs(kernel)
+    gridX = "TilesXYBatchGSU"
+    if kernel["StreamK"]:
+      gridX = "StreamKWithBatch" if kernel["ProblemType"]["NumIndicesC"] > 2 else "StreamKNoBatch"
+    kernel["CustomKernel"] = {
+      "name": self.states.kernelName,
+      "args": self.kernelArgDefs,
+      "macrotile": [kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"]],
+      "threads": [kernel["NumThreads"], 1, 1],
+      "grid": [gridX, "One", "One"],
+    }
+
     self.stringIdx = 0
     (error, kb) = self.kernelBody(kernel, tensorParametersA, tensorParametersB)
     fileString += str(kb)
