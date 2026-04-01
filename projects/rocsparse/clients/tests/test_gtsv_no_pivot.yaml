@@ -133,3 +133,4 @@ Tests:
   N: [7]
   denseld: [4194304]
   matrix: [rocsparse_matrix_random]
+
