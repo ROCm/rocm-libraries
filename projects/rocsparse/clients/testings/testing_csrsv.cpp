@@ -121,8 +121,8 @@ void testing_csrsv_bad_arg(const Arguments& arg)
 }
 
 // Helper function to setup integer-based manufactured solution for csrsv testing.
-// This creates an integer matrix with diagonal dominance and computes the corresponding
-// right-hand side for a known solution vector.
+// This creates an integer matrix and computes the corresponding right-hand side
+// for a known solution vector.
 template <typename T>
 static void setup_integer_based_manufactured_solution(host_csr_matrix<T>&   hA,
                                                       host_dense_matrix<T>& hx,
@@ -133,43 +133,10 @@ static void setup_integer_based_manufactured_solution(host_csr_matrix<T>&   hA,
                                                       rocsparse_index_base  base,
                                                       rocsparse_int         M)
 {
-    // Initialize matrix values to random integers between 1 and 10
+    // Initialize matrix values to integers between 1 and 10
     for(rocsparse_int i = 0; i < hA.nnz; ++i)
     {
-        // Use simple integer values for off-diagonal elements
         hA.val[i] = static_cast<T>(1 + (i % 10));
-    }
-
-    // Make matrix diagonally dominant to ensure stability
-    for(rocsparse_int i = 0; i < M; ++i)
-    {
-        T             sum        = static_cast<T>(0);
-        rocsparse_int diag_index = -1;
-
-        for(rocsparse_int j = hA.ptr[i] - base; j < hA.ptr[i + 1] - base; ++j)
-        {
-            rocsparse_int col = hA.ind[j] - base;
-
-            if(col == i)
-            {
-                diag_index = j;
-            }
-            else
-            {
-                // Only consider entries in the active triangular part for the sum
-                bool use_entry = (uplo == rocsparse_fill_mode_lower) ? (col < i) : (col > i);
-                if(use_entry)
-                {
-                    sum += std::abs(hA.val[j]);
-                }
-            }
-        }
-
-        // Set diagonal to be greater than sum of off-diagonals (diagonal dominance)
-        if(diag_index >= 0 && diag == rocsparse_diag_type_non_unit)
-        {
-            hA.val[diag_index] = sum + static_cast<T>(1);
-        }
     }
 
     // Set all entries of the expected solution to alpha
