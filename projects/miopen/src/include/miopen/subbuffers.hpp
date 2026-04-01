@@ -26,15 +26,12 @@
 
 #pragma once
 
-#include <miopen/config.hpp>
 #include <cstddef>
 
 namespace miopen {
 
 struct Handle;
 
-// Export required for test code to link. Unlike templates (weak linkage),
-// regular functions need explicit export for visibility in shared library.
-MIOPEN_INTERNALS_EXPORT std::size_t GetSubbufferAlignment(const Handle* handle = nullptr);
+std::size_t GetSubbufferAlignment(const Handle* handle = nullptr);
 
 } // namespace miopen
