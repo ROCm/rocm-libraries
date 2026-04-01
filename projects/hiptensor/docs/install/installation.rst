@@ -185,7 +185,7 @@ Here are the available options to build the hipTensor library, with or without c
         -   Set the hipTensor default data layout to column major
         -   ``ON``
     *   -   ``HIPTENSOR_INLINE_UNARY_OPS``
-        -   Set the default compiling option of unary operations to use __attribute__((noinline))
+        -   Inline all contraction unary ops for best runtime performance (slower compilation)
         -   ``OFF``
 
 Here are some example project configurations:
