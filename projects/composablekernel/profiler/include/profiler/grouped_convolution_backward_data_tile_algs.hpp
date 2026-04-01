@@ -65,7 +65,9 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                                          const ckt::Outputs<SIGNATURE>& outputs,
                                          const ck_tile::stream_config& s_conf)
 {
-    float best_avg_time = std::numeric_limits<float>::max();
+    // Run first instance as dummy to get proper time from the first instance
+    bool dummy_run_executed = false;
+    float best_avg_time     = std::numeric_limits<float>::max();
     std::string best_op_name, op_name;
     int best_split_k                = 0;
     ck::index_t best_instance_index = -1;
@@ -104,6 +106,13 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
 
     index_t num_kernel = 0;
     auto run_alg       = [&](auto&& run_alg_func) {
+        if(!dummy_run_executed)
+        {
+            // Run first instance twice
+            std::tie(is_supported, avg_time, op_name) =
+                run_alg_func(args, inputs, outputs, s_conf);
+            dummy_run_executed = true;
+        }
         num_kernel++;
         // Skip if a specific instance was requested and this isn't it
         const bool running_specific_instance = (instance_index != -1);

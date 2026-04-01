@@ -317,8 +317,13 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
 
             auto invoker_ptr = op_ptr->MakeInvokerPointer();
 
-            float avg_time =
-                invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, time_kernel});
+            float avg_time = invoker_ptr->Run(argument_ptr.get(),
+                                              StreamConfig{nullptr,
+                                                           time_kernel,
+                                                           0 /*log_level*/,
+                                                           5 /*cold_iters*/,
+                                                           50 /*nrepeat_*/,
+                                                           time_kernel /*flush_cache*/});
 
             std::size_t flop      = conv_param.GetFlops();
             std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
@@ -495,7 +500,32 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
     {
         std::cout << "\nValid instances for this problem:" << std::endl;
     }
+    // Run first instance twice to get proper time
+    {
+        auto argument_ptr = op_ptrs[0]->MakeArgumentPointer(
+            static_cast<OutDataType*>(out_device_buf.GetDeviceBuffer()),
+            static_cast<WeiDataType*>(wei_device_buf.GetDeviceBuffer()),
+            {},
+            static_cast<InDataType*>(in_device_buf.GetDeviceBuffer()),
+            out_lengths,
+            out_strides,
+            wei_lengths,
+            wei_strides,
+            {},
+            {},
+            in_lengths,
+            in_strides,
+            conv_filter_strides,
+            conv_filter_dilations,
+            input_left_pads,
+            input_right_pads,
+            out_element_op,
+            wei_element_op,
+            in_element_op,
+            split_k_list[0]);
 
+        run_impl(op_ptrs[0], argument_ptr, split_k_list[0]);
+    }
     for(auto& op_ptr : op_ptrs)
     {
         for(std::size_t split_k_id = 0; split_k_id < split_k_list.size(); split_k_id++)

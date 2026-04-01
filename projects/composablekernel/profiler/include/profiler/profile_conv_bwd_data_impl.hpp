@@ -202,6 +202,37 @@ bool profile_conv_bwd_data_impl(int do_verification,
     float best_gb_per_sec = 0;
     int num_kernel        = 0;
 
+    // Run first instance twice to get proper time
+    {
+        auto argument_ptr = op_ptrs[0]->MakeArgumentPointer(
+            static_cast<InDataType*>(in_device_buf.GetDeviceBuffer()),
+            static_cast<WeiDataType*>(wei_device_buf.GetDeviceBuffer()),
+            static_cast<OutDataType*>(out_device_buf.GetDeviceBuffer()),
+            static_cast<ck::index_t>(conv_param.N_),
+            static_cast<ck::index_t>(conv_param.K_),
+            static_cast<ck::index_t>(conv_param.C_),
+            input_spatial_lengths_i32,
+            filter_spatial_lengths_i32,
+            output_spatial_lengths_i32,
+            conv_filter_strides_i32,
+            conv_filter_dilations_i32,
+            input_left_pads_i32,
+            input_right_pads_i32,
+            in_element_op,
+            wei_element_op,
+            out_element_op);
+        if(op_ptrs[0]->IsSupportedArgument(argument_ptr.get()))
+        {
+            auto invoker_ptr = op_ptrs[0]->MakeInvokerPointer();
+            invoker_ptr->Run(argument_ptr.get(),
+                             StreamConfig{nullptr,
+                                          time_kernel,
+                                          0 /*log_level*/,
+                                          5 /*cold_iters*/,
+                                          50 /*nrepeat_*/,
+                                          time_kernel /*flush_cache*/});
+        }
+    }
     for(auto& op_ptr : op_ptrs)
     {
         auto argument_ptr =
@@ -230,16 +261,25 @@ bool profile_conv_bwd_data_impl(int do_verification,
                 // skip test if instance_index is specified
                 continue;
             }
-            // for conv bwd data, some input tensor element are zero, but not written by kernel,
-            // need to set zero
-            in_device_buf.SetZero();
+            if (!time_kernel) {
+                // Don't clear for perf measurement.
+                // For non-grouped solver user has to clear input on his own.
+                // for conv bwd data, some input tensor element are zero, but not written by kernel,
+                // need to set zero
+                in_device_buf.SetZero();
+            }
 
             std::string op_name = op_ptr->GetTypeString();
 
             auto invoker_ptr = op_ptr->MakeInvokerPointer();
 
-            float avg_time =
-                invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, time_kernel});
+            float avg_time = invoker_ptr->Run(argument_ptr.get(),
+                                              StreamConfig{nullptr,
+                                                           time_kernel,
+                                                           0 /*log_level*/,
+                                                           5 /*cold_iters*/,
+                                                           50 /*nrepeat_*/,
+                                                           time_kernel /*flush_cache*/});
 
             std::size_t flop      = conv_param.GetFlops();
             std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
