@@ -603,6 +603,8 @@ class GpuGroupedConvRunner:
         self._dispatch_lib: Optional[GroupedConvDispatcherLib] = None
         self._hip = None
         self._initialized = False
+        self._init_error = None
+        self._init_traceback = None
 
     def _ensure_initialized(self):
         """Lazy initialization - only load GPU libraries when actually needed."""
@@ -642,8 +644,11 @@ class GpuGroupedConvRunner:
             # Initialize dispatcher
             self._dispatch_lib.initialize()
             self._initialized = True
-        except Exception:
+        except Exception as e:
             self._initialized = False
+            self._init_error = str(e)
+            import traceback
+            self._init_traceback = traceback.format_exc()
 
     def is_available(self) -> bool:
         return self._initialized and self._dispatch_lib is not None
@@ -697,52 +702,81 @@ class GpuGroupedConvRunner:
 
             output_size = output_np.nbytes
 
-            # Allocate GPU memory
-            d_a, d_b, d_c = ctypes.c_void_p(), ctypes.c_void_p(), ctypes.c_void_p()
-            self._hip.hipMalloc(ctypes.byref(d_a), input_np.nbytes)
-            self._hip.hipMalloc(ctypes.byref(d_b), weight_np.nbytes)
-            self._hip.hipMalloc(ctypes.byref(d_c), output_size)
+            # Allocate GPU memory with error checking
+            d_a = ctypes.c_void_p()
+            d_b = ctypes.c_void_p()
+            d_c = ctypes.c_void_p()
+            allocated_ptrs = []  # Track successfully allocated pointers
 
-            # Host to device
-            self._hip.hipMemcpy(
-                d_a, input_np.ctypes.data, input_np.nbytes, self.HIP_MEMCPY_H2D
-            )
-            self._hip.hipMemcpy(
-                d_b, weight_np.ctypes.data, weight_np.nbytes, self.HIP_MEMCPY_H2D
-            )
-            self._hip.hipDeviceSynchronize()
+            try:
+                # Allocate input
+                ret = self._hip.hipMalloc(ctypes.byref(d_a), input_np.nbytes)
+                if ret != 0:
+                    raise RuntimeError(f"hipMalloc failed for input (code {ret}, size {input_np.nbytes})")
+                allocated_ptrs.append(d_a)
 
-            # Launch kernel
-            time_ms = self._dispatch_lib.run(d_a.value, d_b.value, d_c.value, problem)
-            self._hip.hipDeviceSynchronize()
+                # Allocate weight
+                ret = self._hip.hipMalloc(ctypes.byref(d_b), weight_np.nbytes)
+                if ret != 0:
+                    raise RuntimeError(f"hipMalloc failed for weight (code {ret}, size {weight_np.nbytes})")
+                allocated_ptrs.append(d_b)
 
-            result = GroupedConvResult()
+                # Allocate output
+                ret = self._hip.hipMalloc(ctypes.byref(d_c), output_size)
+                if ret != 0:
+                    raise RuntimeError(f"hipMalloc failed for output (code {ret}, size {output_size})")
+                allocated_ptrs.append(d_c)
 
-            if time_ms > 0:
-                # Device to host
-                self._hip.hipMemcpy(
-                    output_np.ctypes.data, d_c, output_size, self.HIP_MEMCPY_D2H
+                # Host to device
+                ret = self._hip.hipMemcpy(
+                    d_a, input_np.ctypes.data, input_np.nbytes, self.HIP_MEMCPY_H2D
                 )
+                if ret != 0:
+                    raise RuntimeError(f"hipMemcpy H2D failed for input (code {ret})")
+
+                ret = self._hip.hipMemcpy(
+                    d_b, weight_np.ctypes.data, weight_np.nbytes, self.HIP_MEMCPY_H2D
+                )
+                if ret != 0:
+                    raise RuntimeError(f"hipMemcpy H2D failed for weight (code {ret})")
+
                 self._hip.hipDeviceSynchronize()
-                result.success = True
-                result.time_ms = time_ms
-                result.tflops = problem.flops / (time_ms * 1e9)
-                result.output = output_np
-            else:
-                result.error = (
-                    "unsupported"
-                    if time_ms == -3.0
-                    else "no kernel"
-                    if time_ms == -2.0
-                    else f"error (code {time_ms})"
-                )
 
-            # Free GPU memory
-            self._hip.hipFree(d_a)
-            self._hip.hipFree(d_b)
-            self._hip.hipFree(d_c)
+                # Launch kernel
+                time_ms = self._dispatch_lib.run(d_a.value, d_b.value, d_c.value, problem)
+                self._hip.hipDeviceSynchronize()
 
-            return result
+                result = GroupedConvResult()
+
+                if time_ms > 0:
+                    # Device to host
+                    ret = self._hip.hipMemcpy(
+                        output_np.ctypes.data, d_c, output_size, self.HIP_MEMCPY_D2H
+                    )
+                    if ret != 0:
+                        raise RuntimeError(f"hipMemcpy D2H failed for output (code {ret})")
+
+                    self._hip.hipDeviceSynchronize()
+                    result.success = True
+                    result.time_ms = time_ms
+                    result.tflops = problem.flops / (time_ms * 1e9)
+                    result.output = output_np
+                else:
+                    result.error = (
+                        "unsupported"
+                        if time_ms == -3.0
+                        else "no kernel"
+                        if time_ms == -2.0
+                        else f"error (code {time_ms})"
+                    )
+
+                return result
+
+            finally:
+                # CRITICAL: Only free successfully allocated pointers
+                for ptr in allocated_ptrs:
+                    if ptr.value:  # Only free non-null pointers
+                        self._hip.hipFree(ptr)
 
         except Exception as e:
             return GroupedConvResult(error=str(e))
@@ -1498,42 +1532,23 @@ class GroupedConvCodegenRunner:
 
         generated_headers: List[Optional[Path]] = [None] * len(configs)
 
-        # CRITICAL FIX: When max_workers=1, run codegen serially in main process
-        # to avoid ProcessPoolExecutor fork() + GPU context issues
-        if self.max_workers == 1:
-            # Serial codegen in main process (no fork)
-            for idx, job in enumerate(gen_jobs):
-                ok, header_path, err = _run_conv_codegen_subprocess(job)
-                if ok and header_path:
-                    generated_headers[idx] = Path(header_path)
-                    if verbose:
-                        print(f"  OK [{idx}] codegen: {Path(header_path).name}")
-                else:
-                    if verbose:
-                        print(f"  FAIL [{idx}] codegen: {err}")
-        else:
-            # Parallel codegen with ProcessPoolExecutor (original code)
-            with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
-                futures = {
-                    executor.submit(_run_conv_codegen_subprocess, job): idx
-                    for idx, job in enumerate(gen_jobs)
-                }
-                for future in as_completed(futures):
-                    idx = futures[future]
-                    ok, header_path, err = future.result()
-                    if ok and header_path:
-                        generated_headers[idx] = Path(header_path)
-                        if verbose:
-                            print(f"  OK [{idx}] codegen: {Path(header_path).name}")
-                    else:
-                        if verbose:
-                            print(f"  FAIL [{idx}] codegen: {err}")
+        # CRITICAL FIX: ALWAYS run serially to avoid ANY ProcessPoolExecutor usage
+        # ProcessPoolExecutor + GPU causes fork() issues even after executor is closed
+        # Serial codegen in main process (no fork, no GPU context issues)
+        for idx, job in enumerate(gen_jobs):
+            ok, header_path, err = _run_conv_codegen_subprocess(job)
+            if ok and header_path:
+                generated_headers[idx] = Path(header_path)
+                if verbose:
+                    print(f"  OK [{idx}] codegen: {Path(header_path).name}")
+            else:
+                if verbose:
+                    print(f"  FAIL [{idx}] codegen: {err}")
 
         if verbose:
             compile_count = sum(1 for h in generated_headers if h is not None)
             print(
-                f"Compiling {compile_count} grouped-conv libraries in parallel "
-                f"(workers={self.max_workers})..."
+                f"Compiling {compile_count} grouped-conv libraries serially..."
             )
 
         compile_jobs: List[Dict[str, Any]] = []
@@ -1600,44 +1615,22 @@ class GroupedConvCodegenRunner:
 
         results_map: Dict[int, Optional[Path]] = {i: None for i in range(len(configs))}
 
-        # CRITICAL FIX: When max_workers=1, compile serially in main process to avoid
-        # ProcessPoolExecutor fork() + GPU context issues that cause memory access faults
-        if self.max_workers == 1:
-            # Serial compilation in main process (no fork, no GPU context issues)
-            for j, job in enumerate(compile_jobs):
-                idx = compile_to_input_index[j]
-                success, lib_path, err = _run_hipcc_subprocess(job)
-                if success and lib_path:
-                    results_map[idx] = Path(lib_path)
-                if verbose:
-                    status = "OK" if success else f"FAIL ({err})"
-                    name = (
-                        Path(lib_path).name
-                        if success and lib_path
-                        else compile_jobs[j]["config_name"]
-                    )
-                    print(f"  {status} {name}")
-        else:
-            # Parallel compilation with ProcessPoolExecutor (original code)
-            with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
-                futures = {
-                    executor.submit(_run_hipcc_subprocess, job): j
-                    for j, job in enumerate(compile_jobs)
-                }
-                for future in as_completed(futures):
-                    job_idx = futures[future]
-                    idx = compile_to_input_index[job_idx]
-                    success, lib_path, err = future.result()
-                    if success and lib_path:
-                        results_map[idx] = Path(lib_path)
-                    if verbose:
-                        status = "OK" if success else f"FAIL ({err})"
-                        name = (
-                            Path(lib_path).name
-                            if success and lib_path
-                            else compile_jobs[job_idx]["config_name"]
-                        )
-                        print(f"  {status} {name}")
+        # CRITICAL FIX: ALWAYS compile serially to avoid ANY ProcessPoolExecutor usage
+        # ProcessPoolExecutor + GPU causes fork() issues even after executor is closed
+        # Serial compilation in main process (no fork, no GPU context issues)
+        for j, job in enumerate(compile_jobs):
+            idx = compile_to_input_index[j]
+            success, lib_path, err = _run_hipcc_subprocess(job)
+            if success and lib_path:
+                results_map[idx] = Path(lib_path)
+            if verbose:
+                status = "OK" if success else f"FAIL ({err})"
+                name = (
+                    Path(lib_path).name
+                    if success and lib_path
+                    else compile_jobs[j]["config_name"]
+                )
+                print(f"  {status} {name}")
 
         return [results_map.get(i) for i in range(len(configs))]
 
