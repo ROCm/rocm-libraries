@@ -340,6 +340,9 @@ struct GemmConfigPreshufflePrefillAsync : public GemmConfigPreshufflePrefill<Pre
 {
     static constexpr ck_tile::index_t N_Tile = 256;
 
+    // N_Repeat is even in this config
+    static constexpr bool TiledMMAPermuteN = true;
+
     static constexpr bool Async = true;
 };
 

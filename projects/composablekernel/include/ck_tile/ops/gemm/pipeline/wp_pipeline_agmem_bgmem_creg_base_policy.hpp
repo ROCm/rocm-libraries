@@ -60,6 +60,19 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
         }
     }
 
+    // The swizzle factor is defined base on the number of contiguous lanes
+    // in the instruction.
+    template <typename Problem>
+    static constexpr auto get_swizzle_factor = [](auto kpack) {
+        using WarpTile              = typename Problem::BlockGemmShape::WarpTile;
+        using ADataType             = remove_cvref_t<typename Problem::ADataType>;
+        constexpr index_t WarpTileK = WarpTile::at(I2);
+        constexpr bool is_8bit_float =
+            std::is_same_v<ADataType, fp8_t> || std::is_same_v<ADataType, bf8_t>;
+        constexpr index_t NumAccess = is_8bit_float ? 2 : 1;
+        return WarpTileK / kpack / NumAccess;
+    };
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeALdsBlockDescriptorAsync()
     {
@@ -80,15 +93,7 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
         using TileShape            = typename Problem::BlockGemmShape;
         constexpr index_t MPerXdl  = TileShape::WarpTile::at(I0);
 
-        using WarpTile              = typename Problem::BlockGemmShape::WarpTile;
-        constexpr index_t WarpTileK = WarpTile::at(I2);
-        constexpr bool is_8bit_float =
-            std::is_same_v<ADataType, fp8_t> || std::is_same_v<ADataType, bf8_t>;
-        constexpr index_t NumAccess                   = is_8bit_float ? 2 : 1;
-        constexpr index_t NumberContiguousThreadsRead = WarpTileK / KPack / NumAccess;
-        // M3 is the swizzle factor and it's defined base on the number of contiguous lanes
-        // in the instruction.
-        constexpr index_t M3 = NumberContiguousThreadsRead;
+        constexpr index_t M3 = get_swizzle_factor<Problem>(KPack);
         constexpr index_t M2 = WaveSize / K1 / M3;
         constexpr index_t M1 = MPerXdl / (M2 * M3);
         constexpr index_t M0 = MPerBlock / (M1 * M2 * M3);
@@ -311,20 +316,15 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
             const index_t K0     = cols / (K1 * K2);
             const auto col_lens  = make_tuple(K0, number<K1>{}, number<K2>{});
 
-            using WarpTile              = typename Problem::BlockGemmShape::WarpTile;
-            constexpr index_t WarpTileK = WarpTile::at(I2);
-            constexpr bool is_8bit_float =
-                std::is_same_v<ADataType, fp8_t> || std::is_same_v<ADataType, bf8_t>;
-            constexpr index_t NumAccess                   = is_8bit_float ? 2 : 1;
-            constexpr index_t NumberContiguousThreadsRead = WarpTileK / KPack / NumAccess;
-            // M1 is the swizzle factor and it's defined base on the number of contiguous lanes
-            // in the instruction.
-            constexpr index_t M1 = NumberContiguousThreadsRead;
+            constexpr index_t M1 = get_swizzle_factor<Problem>(KPack);
             const index_t M0     = integer_divide_ceil(rows, M1);
             const auto row_lens  = make_tuple(M0, number<M1>{});
 
+            // fully-packed descriptor with element_space_size = M0*M1*K0*K1*K2 =
+            // MPerBlock*KPerBlock (only needed for decltype)
             const auto d0 =
                 make_naive_tensor_descriptor_packed(container_concat(row_lens, col_lens));
+            // get transforms of d0 tensor descriptor
             const auto desc_0 =
                 decltype(d0)(d0.get_transforms(),
                              tensor_view_tmp.get_tensor_descriptor().get_element_space_size());
