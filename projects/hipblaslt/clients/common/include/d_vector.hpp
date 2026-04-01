@@ -278,10 +278,8 @@ private:
             if(GlobalMemoryStatusEx(&memStatus))
             {
                 // If the shared memory is less than 64GB(128 / 2), may not enough for the hipblaslt-test to run
-                hipblaslt_cout << "Available host memory: " << memStatus.ullTotalPhys << " bytes" << std::endl;
                 if(memStatus.ullTotalPhys < (128ULL << 30))
                 {
-                    hipblaslt_cout << "Available host memory is less than 64GB, clearing memory pool" << std::endl;
                     pool.clear();
                 }
             }
