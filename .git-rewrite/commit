@@ -1,0 +1,11 @@
+tree 0ad4b1cec2228e48bd6c4823fd71e12da2190f75
+parent 46efd6168cee69863ac9da4f985706bc8b6d0425
+parent dbf81e912b807b93f6f6885da978e19192c9175d
+author Jing Zhou <jingz@amd.com> 1523992582 -0700
+committer GitHub <noreply@github.com> 1523992582 -0700
+
+Merge pull request #37 from AMDComputeLibraries/develop
+
+update to develop
+
+[ROCm/MIOpen commit: 224c433a0d5ad85738367181145f04aee720a54f]
