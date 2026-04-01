@@ -76,7 +76,7 @@ RUN wget -O /tmp/ccache.tar.gz https://github.com/ccache/ccache/archive/${CCACHE
     cd / 
 
 # Purge packages conflicting with doc-requirements
-RUN apt-get remove --purge -y python3-pyparsing python3-cryptography 
+RUN apt-get remove --purge -y python3-pyparsing python3-cryptography python3-jwt
 
 # Add requirements files
 ADD miopen/docs/sphinx/requirements.txt /doc-requirements.txt
