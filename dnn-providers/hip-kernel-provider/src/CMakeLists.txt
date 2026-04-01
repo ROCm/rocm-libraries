@@ -23,10 +23,6 @@ add_library(
 if(ENABLE_ASM_SDPA_ENGINE)
     add_subdirectory(engines/asm_sdpa_engine)
 endif()
-
-target_compile_definitions(
-    hip_kernel_provider_impl PRIVATE COMPONENT_NAME="hip_kernel_provider"
-)
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_BINARY_DIR}
