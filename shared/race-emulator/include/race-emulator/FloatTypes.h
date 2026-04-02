@@ -106,6 +106,66 @@ inline uint16_t floatToF16(float f) {
 #endif
 }
 
+/// FP4 (E2M1): 1 sign, 2 exponent (bias 1), 1 mantissa.
+/// No INF or NaN. Max = ±6.0, min normal = ±1.0, min denorm = ±0.5.
+/// Reference: CDNA4 ISA Table 30 (E2M1).
+inline float fp4ToFloat(uint8_t nibble) {
+  // Only the low 4 bits matter. Lookup is exhaustive (16 values).
+  // Derived from E2M1 (bias=1) rules; boundary values confirmed by CDNA4 ISA
+  // Table 30. TODO(newling) verify intermediate values against hardware.
+  static constexpr float table[16] = {
+      0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f,        // positive
+      -0.0f, -0.5f, -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f, // negative
+  };
+  return table[nibble & 0xF];
+}
+
+/// E8M0: 8-bit shared exponent, no sign, no mantissa.
+/// value = 2^(exponent - 127). exponent=255 is NaN (returns 0).
+/// Reference: CDNA4 ISA Section 7.1.5 (Scale format is E8M0).
+inline float e8m0ToFloat(uint8_t exponent) {
+  if (exponent == 255) {
+    return 0.0f; // NaN in E8M0 spec; treat as zero for safety.
+  }
+  // Build an IEEE 754 float with the given exponent and zero mantissa.
+  uint32_t f32 = static_cast<uint32_t>(exponent) << 23;
+  return std::bit_cast<float>(f32);
+}
+
+/// Convert 32 packed MXFP4 values to F32, applying a shared E8M0 scale.
+/// fp4Data: 16 bytes containing 32 nibbles (low nibble = even element).
+/// scale: E8M0 shared exponent applied to all 32 values.
+/// out: 32 floats written sequentially.
+inline void mxfp4BlockToF32(float *out, const uint8_t *fp4Data,
+                            uint8_t scale) {
+  float s = e8m0ToFloat(scale);
+  for (int i = 0; i < 16; ++i) {
+    uint8_t byte = fp4Data[i];
+    out[2 * i] = fp4ToFloat(byte & 0xF) * s;
+    out[2 * i + 1] = fp4ToFloat(byte >> 4) * s;
+  }
+}
+
+/// Convert a packed MXFP4 matrix to F32, applying E8M0 per-block scales.
+///
+/// Data layout (row-major, packed FP4 = 2 nibbles per byte, low nibble first):
+///   fp4Data: Rows × (K/2) bytes. Element [i][k] is nibble k of row i.
+///   scales:  Rows × (K/32) bytes. scales[i * (K/32) + b] is the E8M0
+///            exponent for elements [i][32b .. 32b+31].
+///   out:     Rows × K floats (row-major).
+template <int Rows, int K>
+inline void mxfp4MatrixToF32(float *out, const uint8_t *fp4Data,
+                             const uint8_t *scales) {
+  static_assert(K % 32 == 0, "K must be a multiple of 32 (MXBlock size)");
+  constexpr int numBlocks = K / 32;
+  for (int i = 0; i < Rows; ++i) {
+    for (int b = 0; b < numBlocks; ++b) {
+      mxfp4BlockToF32(&out[i * K + b * 32], &fp4Data[i * (K / 2) + b * 16],
+                      scales[i * numBlocks + b]);
+    }
+  }
+}
+
 } // namespace raceemulator
 
 #endif // RACE_EMULATOR_FLOAT_TYPES_H
