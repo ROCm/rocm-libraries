@@ -11,6 +11,7 @@
 #include "HipdnnNormFwdPhase.h"
 #include "HipdnnOperationType.h"
 #include "HipdnnPointwiseMode.h"
+#include "HipdnnReduceTensorOp.h"
 #include "TensorDescriptor.hpp"
 #include <cstring>
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
@@ -18,6 +19,7 @@
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <memory>
 #include <string>
@@ -389,6 +391,19 @@ void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
                                 int64_t* elementCount,
                                 void* arrayOfElements,
                                 const char* errorPrefix);
+
+void setReductionMode(hipdnn_data_sdk::data_objects::ReductionMode& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* errorPrefix);
+
+void getReductionMode(hipdnn_data_sdk::data_objects::ReductionMode source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* errorPrefix);
 
 /// Conditionally adds a non-null tensor descriptor to a vector.
 /// Used by getTensorDescriptors() to collect optional tensors.
