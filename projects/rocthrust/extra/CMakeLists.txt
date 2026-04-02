@@ -23,23 +23,18 @@ endif()
 
 # Verify that supported compilers are used
 include(VerifyCompiler)
-include(FetchContent)
+include(cmake/FetchContentIsolated.cmake)
 
 # Download rocPRIM (only for ROCm platform)
 if(NOT DEFINED rocprim_LOCAL_DIR)
   message(STATUS "Downloading and building rocPRIM.")
   set(rocprim_LOCAL_DIR "${CMAKE_CURRENT_BINARY_DIR}/rocprim" CACHE PATH "")
 
-  FetchContent_Declare(
+  fetch_content_isolated(
     rocprim
     GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
     GIT_TAG             master
-    INSTALL_DIR         ${rocprim_LOCAL_DIR}
-    CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-    LOG_DOWNLOAD        TRUE
-    LOG_CONFIGURE       TRUE
-    LOG_BUILD           TRUE
-    LOG_INSTALL         TRUE
+    CMAKE_ARGS          -DBUILD_TEST=OFF
     UPDATE_DISCONNECTED TRUE
   )
   FetchContent_MakeAvailable(rocprim)

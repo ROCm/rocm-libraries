@@ -245,7 +245,7 @@ function(fetch_dep method repo_name repo_path download_branch)
   endif()
 endfunction()
 
-include(FetchContent)
+include(cmake/FetchContentIsolated.cmake)
 
 # NOTE: HIPCC includes the default ROCm install directory as a system include directory (-isystem) for header files.
 #       This makes it possible that different rocRAND headers are found than those of the package found with
@@ -265,17 +265,11 @@ if (NOT BUILD_WITH_LIB STREQUAL "CUDA")
 
             # Install rocRAND.
             # This assumes that there is no system-installed rocRAND or that CMAKE_NO_SYSTEM_FROM_IMPORTED is ON.
-            FetchContent_Declare(
+            fetch_content_isolated(
                 rocrand
                 SOURCE_DIR    ${ROCRAND_PATH}
-                # ${ROCRAND_ROOT}
-                INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand
-                CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-                LOG_CONFIGURE TRUE
-                LOG_BUILD     TRUE
-                LOG_INSTALL   TRUE
+                CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_PREFIX_PATH=/opt/rocm
             )
-            FetchContent_MakeAvailable(rocrand)
 
             if (NOT TARGET roc::rocrand)
                 add_library(roc::rocrand ALIAS rocrand)
@@ -313,21 +307,18 @@ if(BUILD_TEST)
   if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
     message(STATUS "GTest not found or force download GTest on. Downloading and building GTest.")
 
-    FetchContent_Declare(
+    fetch_content_isolated(
       googletest
       GIT_REPOSITORY      https://github.com/google/googletest.git
       GIT_TAG             release-1.11.0
-      INSTALL_DIR         ${GTEST_ROOT}
-      CMAKE_ARGS          -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-      LOG_DOWNLOAD        TRUE
-      LOG_CONFIGURE       TRUE
-      LOG_BUILD           TRUE
-      LOG_INSTALL         TRUE
-      UPDATE_DISCONNECTED TRUE
+      CMAKE_ARGS          -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=OFF
     )
-    FetchContent_MakeAvailable(googletest)
 
-    list( APPEND CMAKE_PREFIX_PATH ${GTEST_ROOT} )
-    find_package(GTest CONFIG REQUIRED PATHS ${GTEST_ROOT})
+    if(NOT TARGET GTest::GTest)
+        add_library(GTest::GTest ALIAS gtest)
+    endif()
+    if(NOT TARGET GTest::Main)
+        add_library(GTest::Main ALIAS gtest_main)
+    endif()
   endif()
 endif()
