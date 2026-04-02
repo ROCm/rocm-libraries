@@ -1491,9 +1491,13 @@ def main():
                 )
 
         if has_bwd_data:
-            bwd_data_kernel = find_kernel_by_dtype_type(kernel_headers, "fp16", "_bwd_data_")
+            bwd_data_kernel = find_kernel_by_dtype_type(
+                kernel_headers, "fp16", "_bwd_data_"
+            )
             if not bwd_data_kernel:
-                bwd_data_kernel = find_kernel_by_dtype_type(kernel_headers, "fp16", "_bwdd_")
+                bwd_data_kernel = find_kernel_by_dtype_type(
+                    kernel_headers, "fp16", "_bwdd_"
+                )
             if bwd_data_kernel:
                 bwd_data_ns = f"ns_{bwd_data_kernel.stem}"
                 launcher_aliases.append(
@@ -1505,9 +1509,13 @@ def main():
                     )
 
         if has_bwd_weight:
-            bwd_weight_kernel = find_kernel_by_dtype_type(kernel_headers, "fp16", "_bwd_weight_")
+            bwd_weight_kernel = find_kernel_by_dtype_type(
+                kernel_headers, "fp16", "_bwd_weight_"
+            )
             if not bwd_weight_kernel:
-                bwd_weight_kernel = find_kernel_by_dtype_type(kernel_headers, "fp16", "_bwdw_")
+                bwd_weight_kernel = find_kernel_by_dtype_type(
+                    kernel_headers, "fp16", "_bwdw_"
+                )
             if bwd_weight_kernel:
                 bwd_weight_ns = f"ns_{bwd_weight_kernel.stem}"
                 launcher_aliases.append(

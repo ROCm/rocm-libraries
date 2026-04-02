@@ -168,7 +168,6 @@ int main(int argc, char* argv[])
 
     input_dev.ToDevice(input.data());
     weight_dev.ToDevice(weight.data());
-    output_dev.SetZero();
 
     float elapsed_ms = dispatcher.run(input_dev.GetDeviceBuffer(),
                                       weight_dev.GetDeviceBuffer(),

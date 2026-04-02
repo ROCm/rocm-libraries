@@ -210,8 +210,8 @@ launch_fwd_3d(const void* in, const void* wei, void* out, const ConvProblemC* p,
 #endif
 
 #ifdef CONV_BWD_DATA_2D_AVAILABLE
-static float
-launch_bwd_data_2d(const void* dy, const void* wei, void* dx, const ConvProblemC* p, hipStream_t stream)
+static float launch_bwd_data_2d(
+    const void* dy, const void* wei, void* dx, const ConvProblemC* p, hipStream_t stream)
 {
     auto param = make_param_2d(p);
     ck_tile::GroupedConvBwdDataHostArgs args(param, dx, wei, {}, dy, 1);
@@ -221,8 +221,8 @@ launch_bwd_data_2d(const void* dy, const void* wei, void* dx, const ConvProblemC
 #endif
 
 #ifdef CONV_BWD_DATA_3D_AVAILABLE
-static float
-launch_bwd_data_3d(const void* dy, const void* wei, void* dx, const ConvProblemC* p, hipStream_t stream)
+static float launch_bwd_data_3d(
+    const void* dy, const void* wei, void* dx, const ConvProblemC* p, hipStream_t stream)
 {
     auto param = make_param_3d(p);
     ck_tile::GroupedConvBwdDataHostArgs args(param, dx, wei, {}, dy, 1);
@@ -232,10 +232,10 @@ launch_bwd_data_3d(const void* dy, const void* wei, void* dx, const ConvProblemC
 #endif
 
 #ifdef CONV_BWD_WEIGHT_2D_AVAILABLE
-static float
-launch_bwd_weight_2d(const void* x, const void* dy, void* dw, const ConvProblemC* p, hipStream_t stream)
+static float launch_bwd_weight_2d(
+    const void* x, const void* dy, void* dw, const ConvProblemC* p, hipStream_t stream)
 {
-    auto param = make_param_2d(p);
+    auto param        = make_param_2d(p);
     const int k_batch = (p->split_k > 1) ? p->split_k : 1;
     ck_tile::GroupedConvBwdWeightHostArgs args(param, x, dw, {}, dy, k_batch);
     ck_tile::stream_config sc{stream, true, 1, 3, 10};
@@ -244,10 +244,10 @@ launch_bwd_weight_2d(const void* x, const void* dy, void* dw, const ConvProblemC
 #endif
 
 #ifdef CONV_BWD_WEIGHT_3D_AVAILABLE
-static float
-launch_bwd_weight_3d(const void* x, const void* dy, void* dw, const ConvProblemC* p, hipStream_t stream)
+static float launch_bwd_weight_3d(
+    const void* x, const void* dy, void* dw, const ConvProblemC* p, hipStream_t stream)
 {
-    auto param = make_param_3d(p);
+    auto param        = make_param_3d(p);
     const int k_batch = (p->split_k > 1) ? p->split_k : 1;
     ck_tile::GroupedConvBwdWeightHostArgs args(param, x, dw, {}, dy, k_batch);
     ck_tile::stream_config sc{stream, true, 1, 3, 10};

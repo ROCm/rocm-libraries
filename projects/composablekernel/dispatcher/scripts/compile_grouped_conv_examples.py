@@ -80,9 +80,7 @@ def extract_grouped_conv_declarations(source_file: Path) -> list:
         for add_match in re.finditer(simple_add, set_body):
             conv_type = add_match.group(3)
             default_pipeline = (
-                "compv3"
-                if conv_type in ("bwd_data", "bwd_weight")
-                else "compv4"
+                "compv3" if conv_type in ("bwd_data", "bwd_weight") else "compv4"
             )
             declarations.append(
                 {

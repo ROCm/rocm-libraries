@@ -127,8 +127,8 @@ template <typename LauncherType, int NDim>
 inline GroupedConvKernelInstance::RunFn make_conv_bwd_weight_run_fn()
 {
     return [](const GroupedConvProblem& problem, void* stream) -> float {
-        auto& ctx  = g_conv_dispatch_buffers;
-        auto param = (NDim == 2) ? make_conv_param_2d(problem) : make_conv_param_3d(problem);
+        auto& ctx         = g_conv_dispatch_buffers;
+        auto param        = (NDim == 2) ? make_conv_param_2d(problem) : make_conv_param_3d(problem);
         const int k_batch = (ctx.split_k > 1) ? ctx.split_k : 1;
         ck_tile::GroupedConvBwdWeightHostArgs args(param,
                                                    ctx.input_ptr,  // in_ptr = X

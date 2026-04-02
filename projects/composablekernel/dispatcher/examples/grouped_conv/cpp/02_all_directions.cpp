@@ -133,7 +133,6 @@ int main(int argc, char* argv[])
     {
         auto problem =
             create_grouped_conv2d_problem(N, C, K, Hi, Wi, Y, X, 1, 1, GroupedConvOp::Forward);
-        output_dev.SetZero();
         float time_ms = dispatcher.run(input_dev.GetDeviceBuffer(),
                                        weight_dev.GetDeviceBuffer(),
                                        output_dev.GetDeviceBuffer(),

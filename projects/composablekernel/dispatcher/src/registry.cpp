@@ -23,12 +23,14 @@ Registry::~Registry()
 
 Registry::Registry(Registry&& other) noexcept : Base(std::move(other))
 {
+    // Base move constructor already locked+released other.mutex_.
+    // Re-acquire to safely read the remaining fields.
+    std::lock_guard<std::mutex> lock(other.mutex());
     auto_export_enabled_               = other.auto_export_enabled_;
     auto_export_filename_              = std::move(other.auto_export_filename_);
     auto_export_include_statistics_    = other.auto_export_include_statistics_;
     auto_export_on_every_registration_ = other.auto_export_on_every_registration_;
 
-    // Disable auto-export on the moved-from object
     other.auto_export_enabled_ = false;
 }
 

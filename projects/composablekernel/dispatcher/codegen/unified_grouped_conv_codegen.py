@@ -1191,7 +1191,9 @@ namespace ck_tile {{ namespace generated {{
                 log.info(f"Generated: {header_name} ({len(kernel_headers)} kernels)")
 
         # Generate registration header (following GEMM pattern)
-        self._generate_registration_header(fwd_kernels, bwd_data_kernels, bwd_weight_kernels)
+        self._generate_registration_header(
+            fwd_kernels, bwd_data_kernels, bwd_weight_kernels
+        )
 
     def _generate_registration_header(
         self,
