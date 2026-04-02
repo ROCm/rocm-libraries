@@ -154,36 +154,42 @@ struct MmaLayoutTestKernel
                 // offset (remainder) within our packed element to get to the value element.
                 auto a_coords         = ARegMap::calc_matrix_indices_from_lane_vector(lane, v);
                 index_t k_target      = k / (MmaOp::kCompressionRatio * MmaOp::APackedSize);
-                index_t k_rem         = k % (MmaOp::APackedSize);
-                uint32_t k_rem_sparse = k % (MmaOp::kCompressionRatio);
-
-                // TODO: Sparse + Compression requires some extra thought...
-                static_assert(MmaOp::kCompressionRatio == 1 || MmaOp::APackedSize == 1);
+                index_t k_rem         = k % (MmaOp::kCompressionRatio * MmaOp::APackedSize);
+                index_t k_rem_pack    = k_rem / MmaOp::kCompressionRatio;
+                uint32_t k_rem_sparse = k_rem % MmaOp::kCompressionRatio;
 
                 if(a_coords[0] == m && a_coords[1] == k_target)
                 {
-                    a_frag[v] = packed_one<typename MmaOp::ADataType>(k_rem);
+                    a_frag[v] = packed_one<typename MmaOp::ADataType>(k_rem_pack);
 
                     // Calc an appropriate sparse idx value for a single 1 in position k. We use a
                     // baseline index of 0x88888888. This sends each compressed index i to
                     // uncompressed index i * 2. If k is odd, we should send it to i * 2 + 1
                     // instead. We update only the absolutely necessary pair of bits for this
-                    // (idx[v*2:v*2+1]). Note that this simple calculation works for any 4:2 sparse
-                    // intrinsic with up to 16 packed k elements per lane.
-                    sparse_idx = 0x88888888 | (k_rem_sparse << (v * 2));
+                    // (idx[v*2:v*2+1]), where v is meant to be the idx of the *value items* in the
+                    // lane. Note that this simple calculation works for any 4:2 sparse intrinsic
+                    // with up to 16 packed k elements per lane.
+
+                    // Calc vector item idx as if the datatype were not packed (value item).
+                    uint32_t vec_value_item_idx = v * MmaOp::APackedSize + k_rem_pack;
+                    sparse_idx = 0x88888888 | (k_rem_sparse << (vec_value_item_idx * 2));
                 }
             }
 
+            // Sparse_idx is calced in *exactly* one lane (check), but it must be broadcast to all.
+            assert(__popcll(__ballot(sparse_idx)) == 1);
+            sparse_idx = __reduce_or_sync(__activemask(), sparse_idx);
+
             for(index_t v = 0; v < b_vec_size; ++v)
             {
-                // Same considerations as for A (but not compression), see comment above.
-                auto b_coords    = BRegMap::calc_matrix_indices_from_lane_vector(lane, v);
-                index_t k_target = k / (MmaOp::BPackedSize);
-                index_t k_rem    = k % (MmaOp::BPackedSize);
+                // Same considerations as for A (but no compression), see comment above.
+                auto b_coords      = BRegMap::calc_matrix_indices_from_lane_vector(lane, v);
+                index_t k_target   = k / (MmaOp::BPackedSize);
+                index_t k_rem_pack = k % (MmaOp::BPackedSize);
 
                 if(b_coords[0] == n && b_coords[1] == k_target)
                 {
-                    b_frag[v] = packed_one<typename MmaOp::ADataType>(k_rem);
+                    b_frag[v] = packed_one<typename MmaOp::ADataType>(k_rem_pack);
                 }
             }
 
@@ -283,14 +289,14 @@ void run_mma_layout_test()
 // Lists of intrinsics to test.
 // clang-format off
 using Gfx9Intrinsics = ::testing::Types<
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_16x16x16f16
-    amdgcn_mma<F16, F16, F32, 64u, 32u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_32x32x4f16
-    amdgcn_mma<F16, F16, F32, 32u, 64u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_32x32x4f16
-    amdgcn_mma<F16, F16, F32, 64u, 4u,  4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_4x4x4f16
-    amdgcn_mma<F16, F16, F32, 4u,  64u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>  // mfma_f32_4x4x4f16
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>,  // mfma_f32_16x16x16f16
+    amdgcn_mma<F16, F16, F32, 64u, 32u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>,  // mfma_f32_32x32x4f16
+    amdgcn_mma<F16, F16, F32, 32u, 64u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>,  // mfma_f32_32x32x4f16
+    amdgcn_mma<F16, F16, F32, 64u, 4u,  4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>,  // mfma_f32_4x4x4f16
+    amdgcn_mma<F16, F16, F32, 4u,  64u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>   // mfma_f32_4x4x4f16
     >;
 using Gfx942Intrinsics = ::testing::Types<
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 32u, DefaultSparseMfmaCtrlFlags,          Target942, MmaOpFamily::SPARSE> // smfmac_f32_16x16x32_f16
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 32u, DefaultSparseMfmaCtrlFlags,          Target942, MmaOpFamily::SPARSE>  // smfmac_f32_16x16x32_f16
 >;
 using Gfx950Intrinsics = ::testing::Types<
     amdgcn_mma<F16, F16, F32, 16u, 16u, 32u,  DefaultMfmaCtrlFlags,                Target950, MmaOpFamily::DENSE>, // mfma_f32_16x16x32_f16
@@ -319,7 +325,9 @@ using Gfx12Intrinsics = ::testing::Types<
     amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 16u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_bf8_bf8_w32_gfx12
     amdgcn_mma<I4,   I4,   I32,  16u, 16u, 16u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::DENSE>, // wmma_i32_16x16x16_iu4_w32_gfx12
     amdgcn_mma<I4,   I4,   I32,  16u, 16u, 32u, DefaultWmmaCtrlFlags,             Target12,  MmaOpFamily::DENSE>, // wmma_i32_16x16x32_iu4_w32_gfx12
-    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 32u, DefaultSparseMfmaCtrlFlags,       Target12,  MmaOpFamily::SPARSE> // swmmac_f32_16x16x32_f16_w32
+    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 32u, DefaultSparseMfmaCtrlFlags,       Target12,  MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_f16_w32
+    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 32u, DefaultSparseMfmaCtrlFlags,       Target12,  MmaOpFamily::SPARSE>, // swmmac_i32_16x16x32_iu4_w32
+    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 64u, DefaultSparseMfmaCtrlFlags,       Target12,  MmaOpFamily::SPARSE>  // swmmac_i32_16x16x64_iu4_w32
 >;
 // clang-format on
 
