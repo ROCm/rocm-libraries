@@ -11,6 +11,7 @@
 #include <miopen/util.hpp>
 
 #include <ranges>
+#include <set>
 
 namespace miopen {
 namespace solver {
@@ -122,6 +123,50 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     std::ignore = problem;
     return 0;
 #endif
+}
+
+bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
+                                const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto b                  = problem.GetBatchSize();
+    auto s                  = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                  = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                  = problem.GetGroupCount();
+    auto spatial_per_batch  = s / b;
+    auto channels_per_group = c / g;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        // GemmWrw1x1_stride1 - Batch-based filtering
+        // Analysis: 8.4% terrible cases - moderate filtering benefit
+        //
+        // INVERTED PATTERN discovered: Terrible cases have HIGH batch but LOW channels
+        // - Batch separation: 16-32x (terrible > decent)
+        // - CPG separation: 0.12-0.60x (terrible < decent)
+        // - SWPG separation: 0.12-0.41x (terrible < decent)
+        //
+        // Physical interpretation: High batch + low channels = poor wave occupancy
+        //
+        // Threshold: batch > 16 AND cpg < 1400
+        // Performance: FPR=3-15%, TPR=73-87%, Score=1.65-1.79
+        if(b > 16 && channels_per_group < 1400)
+            return true;
+    }
+    else if(is_mi)
+    {
+        // SPB-ONLY: Batch fragmentation detection
+        // SPB < 48.0: Each batch item has < 48 pixels of spatial work
+        if(spatial_per_batch < 48.0)
+            return true;
+    }
+
+    return false;
 }
 
 bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
@@ -318,6 +363,43 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
     std::ignore = problem;
     return 0;
 #endif
+}
+
+bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
+                              const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto b                 = problem.GetBatchSize();
+    auto s                 = problem.GetOutHeight() * problem.GetOutWidth();
+    auto spatial_per_batch = s / b;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        // GemmWrwUniversal - SPB-only filtering
+        // Analysis: 18.4% terrible cases - significant filtering benefit
+        //
+        // Terrible cases have high batch (16x) but very low SPB (0.00x)
+        // This indicates extreme batch fragmentation
+        //
+        // SPB < 100: Low spatial-per-batch = batch fragmentation
+        // Performance: FPR=19-27%, TPR=72-92%, Score=1.49-1.66
+        if(spatial_per_batch < 100)
+            return true;
+    }
+    else if(is_mi)
+    {
+        // SPB-ONLY: Batch fragmentation detection
+        // SPB < 48.0: Each batch item has < 48 pixels of spatial work
+        if(spatial_per_batch < 48.0)
+            return true;
+    }
+
+    return false;
 }
 
 bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
