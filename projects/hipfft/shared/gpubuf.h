@@ -80,16 +80,13 @@ public:
         if(dev_id < 0 || static_cast<size_t>(dev_id) >= num_devices())
             throw std::invalid_argument(
                 "Invalid device ID given to device memory accountant (observation).");
-        rocfft_scoped_device dev(dev_id);
-        update_free_bytes_on_valid_current_device(dev_id);
         std::shared_lock lock(dev_mem_account_mutex);
         const auto&      dev_account = mem_account_on_device[dev_id];
 
         if(dev_account.limit_bytes <= dev_account.used_bytes)
             return 0;
 
-        auto usable_bytes
-            = std::min(dev_account.limit_bytes - dev_account.used_bytes, dev_account.free_bytes);
+        auto usable_bytes = dev_account.limit_bytes - dev_account.used_bytes;
         if(dev_account.is_integrated_device)
             usable_bytes = std::min(usable_bytes, system_memory::singleton().get_usable_bytes());
         return usable_bytes;
@@ -113,10 +110,8 @@ public:
         std::shared_lock  lock(dev_mem_account_mutex);
         std::stringstream ss;
         ss << "\tUsable device memory: " << byte_size_to_str(usable_bytes) << "\n"
-           << "\tFree device memory: " << byte_size_to_str(dev_account.free_bytes) << "\n"
            << "\tUsed device memory: " << byte_size_to_str(dev_account.used_bytes) << "\n"
-           << "\tEnforced limit on device memory usage: "
-           << byte_size_to_str(dev_account.limit_bytes);
+           << "\tLimit on device memory usage: " << byte_size_to_str(dev_account.limit_bytes);
         if(dev_account.is_integrated_device)
         {
             constexpr bool use_double_tabs = true;
@@ -148,14 +143,12 @@ private:
     {
         mem_account_t(size_t total_dev_mem, bool integrated_device)
             : total_bytes(total_dev_mem)
-            , free_bytes(total_dev_mem)
             , limit_bytes(total_dev_mem)
             , used_bytes(0)
             , is_integrated_device(integrated_device)
         {
         }
         const size_t total_bytes;
-        size_t       free_bytes;
         size_t       limit_bytes;
         size_t       used_bytes;
         const bool   is_integrated_device;
@@ -181,22 +174,6 @@ private:
             rocfft_scoped_device dev(dev_id);
             const auto           dev_prop = get_curr_device_prop();
             mem_account_on_device.emplace_back(dev_prop.totalGlobalMem, dev_prop.integrated);
-            update_free_bytes_on_valid_current_device(dev_id);
-        }
-    }
-
-    // private function assuming dev_id is valid and is indeed the current device ID (hence the name)
-    void update_free_bytes_on_valid_current_device(int dev_id)
-    {
-        std::unique_lock lock(dev_mem_account_mutex);
-        size_t     placeholder; // hipMemGetInfo also returns total memory, we don't need it here
-        const auto hip_status
-            = hipMemGetInfo(&mem_account_on_device[dev_id].free_bytes, &placeholder);
-        if(hip_status != hipSuccess)
-        {
-            throw std::runtime_error("hipMemGetInfo failed with code " + std::to_string(hip_status)
-                                     + " while updating free device memory available on device ID "
-                                     + std::to_string(dev_id) + ".");
         }
     }
 };
