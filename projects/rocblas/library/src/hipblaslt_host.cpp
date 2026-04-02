@@ -193,17 +193,16 @@ namespace
             return;                                                                                \
         }                                                                                          \
     } while(0)
-#define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)                 \
-    do                                                                                    \
-    {                                                                                     \
-        if(WORKSPACE_SIZE > MAX_WORKSPACE_SIZE)                                           \
-        {                                                                                 \
-            rocblas_cerr << "Returned workspace size (" << WORKSPACE_SIZE << ") is   \
-                            larger than user allocated("    \
-                         << MAX_WORKSPACE_SIZE << ")!" << " at " __FILE__ ":" << __LINE__ \
-                         << std::endl;                                                    \
-            return rocblas_status_internal_error;                                         \
-        }                                                                                 \
+#define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)               \
+    do                                                                                  \
+    {                                                                                   \
+        if(WORKSPACE_SIZE > MAX_WORKSPACE_SIZE)                                         \
+        {                                                                               \
+            rocblas_cerr << "Returned workspace size (" << WORKSPACE_SIZE << ") is "    \
+                         << "larger than user allocated(" << MAX_WORKSPACE_SIZE << ")!" \
+                         << " at " __FILE__ ":" << __LINE__ << std::endl;               \
+            return rocblas_status_internal_error;                                       \
+        }                                                                               \
     } while(0)
 #define CHECK_HIPBLASLT_ERROR(STATUS) EXPECT_HIPBLAS_STATUS(STATUS, HIPBLAS_STATUS_SUCCESS)
 
@@ -538,16 +537,12 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                               rocblas_gemm_algo                            algo,
                                               int32_t solution_index)
 {
-    hipblasLtHandle_t& handle = *(prob.handle->getHipblasLtHandle());
-    hipblasLtCreate(&handle);
-    int version;
-    hipblasLtGetVersion(handle, &version);
-    std::cout << "hipBLASLt version: " << version << std::endl;
 #if defined(HIPBLASLT_VERSION_MAJOR) && HIPBLASLT_VERSION_MAJOR >= 1 \
     && defined(HIPBLASLT_VERSION_MINOR) && HIPBLASLT_VERSION_MINOR >= 3
-    int batchMode  = 0; // General Batched GEMM support in hipBLASLt
-    int batchCount = prob.batch_count > 0 ? prob.batch_count
-                                          : 1; // Default to batch count of 1 if not specified
+    hipblasLtHandle_t& handle     = *(prob.handle->getHipblasLtHandle());
+    int                batchMode  = 0; // General Batched GEMM support in hipBLASLt
+    int                batchCount = prob.batch_count > 0 ? prob.batch_count
+                                                         : 1; // Default to batch count of 1 if not specified
     if(!prob.strided_batch)
         batchMode = 1;
     //std::cout << "Using the new hipblaslt integration for General Batched GEMM" << std::endl;
