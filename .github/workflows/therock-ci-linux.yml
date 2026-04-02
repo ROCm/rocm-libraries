@@ -234,12 +234,13 @@ jobs:
       - name: Run project coverage
         shell: bash
         run: |
-          BUILD_DIR="/build/TheRock/rocm-libraries/${{ inputs.projects_to_test }}/build"
+          BUILD_DIR="/build/TheRock/rocm-libraries/${{ inputs.project_name }}/build"
+          echo "Running coverage for ${{ inputs.project_name }} in ${BUILD_DIR}"
           cmake --build "${BUILD_DIR}" --target coverage || make -C "${BUILD_DIR}" coverage
-
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           files: ${{ env.REPORTS }}
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
+
