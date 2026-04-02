@@ -35,8 +35,8 @@ namespace hipdnn_frontend::graph
  *
  * **Tensor Shapes (BHSD ordering):**
  * - **Q** (query): `(B, H, S_q, D)` — batch, heads, query sequence length, head dimension
- * - **K** (key): `(B, H_kv, S_kv, D)` — batch, key/value heads, key/value sequence length, head dimension
- * - **V** (value): `(B, H_kv, S_kv, D_v)` — batch, key/value heads, key/value sequence length, value head dimension
+ * - **K** (key): `(B, H_k, S_kv, D)` — batch, key heads, key/value sequence length, head dimension
+ * - **V** (value): `(B, H_v, S_kv, D_v)` — batch, value heads, key/value sequence length, value head dimension
  * - **O** (output): `(B, H, S_q, D_v)` — batch, heads, query sequence length, value head dimension
  * - **Stats** (optional): `(B, H, S_q, 1)` — softmax statistics (when generate_stats is true)
  *
