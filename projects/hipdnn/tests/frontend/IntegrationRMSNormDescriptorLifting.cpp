@@ -8,10 +8,10 @@
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_test_sdk/constants/RMSNormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -19,6 +19,8 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::liftGraph;
+using hipdnn_tests::liftGraphWithoutFinalization;
 using hipdnn_tests::TestableGraphLifting;
 using hipdnn_tests::toVec;
 namespace rms_constants = hipdnn_tests::constants;
@@ -80,19 +82,8 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormTrainingRoundTripViaCApi)
 {
     auto graph = buildTrainingGraph();
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    // Lift back into a new graph
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -205,19 +196,8 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormInferenceRoundTripViaCApi)
     // invRms should be nullptr in INFERENCE mode
     EXPECT_EQ(invRms, nullptr);
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    // Lift back into a new graph
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify tensors by UID (4 tensors: x, scale, epsilon, y -- no inv_rms)
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -252,18 +232,8 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormTensorSharingPreserved)
     auto graph = buildTrainingGraph();
     graph->set_name("RMSNormTensorSharingTest");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
     auto& subNodes = liftedGraph->getSubNodes();
@@ -293,21 +263,8 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormLiftWithoutFinalization)
     auto graph = buildTrainingGraph();
     graph->set_name("RMSNormFlatBufferLiftTest");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Serialize to binary
-    auto data = graph->toBinary();
-    ASSERT_FALSE(data.empty());
-
-    // Create backend descriptor from bytes (no handle, no finalize)
-    const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
-    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
-
-    // Lift into a new graph
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(graphDesc.get());
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraphWithoutFinalization(*graph);
+    ASSERT_NE(liftedGraph, nullptr);
 
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
 
@@ -441,18 +398,8 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormWithBiasRoundTrip)
         .set_output(true)
         .set_name("INV_RMS");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // 6 tensors: x, scale, epsilon, bias, y, inv_rms
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -515,19 +462,8 @@ TEST_F(IntegrationRMSNormDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip
     ASSERT_NE(invRms, nullptr);
     invRms->set_output(true).set_name("INV_RMS");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    // Lift back into a new graph
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify all auto-assigned UIDs are unique
     auto tensorMap = liftedGraph->getTensorsByUid();

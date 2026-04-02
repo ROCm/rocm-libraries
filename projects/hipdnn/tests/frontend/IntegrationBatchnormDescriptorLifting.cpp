@@ -8,10 +8,10 @@
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -21,6 +21,8 @@ using namespace hipdnn_frontend::graph;
 using hipdnn_tests::toVec;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::liftGraph;
+using hipdnn_tests::liftGraphWithoutFinalization;
 using hipdnn_tests::TestableGraphLifting;
 
 namespace
@@ -152,18 +154,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BasicBatchnormRoundTrip)
 {
     auto originalGraph = buildBatchnormGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -305,18 +297,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormTensorSharingPreserved)
 {
     auto originalGraph = buildBatchnormGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
 
@@ -358,21 +340,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormLiftWithoutFinalization)
 {
     auto originalGraph = buildBatchnormGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
-    ASSERT_FALSE(data.empty());
-
-    // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
-    const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
-    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
-
-    // Lift into a new graph via fromBackendDescriptor
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(graphDesc.get());
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -460,18 +429,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormMinimalRequiredTensorsRou
 {
     auto originalGraph = buildMinimalBatchnormGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -543,18 +502,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormRunningStatsPreserved)
 {
     auto originalGraph = buildBatchnormGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
@@ -638,18 +587,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormAutoAssignedUidsPreserved
     meanOut->set_output(true).set_name("Mean");
     invVarOut->set_output(true).set_name("InvVariance");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 7u)
@@ -780,18 +719,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormPeerStatsPreserved)
         .set_output(true)
         .set_name("NextRunVar");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify tensor map includes the 2 peer_stats tensors (12 base + 2 peer = 14)
     auto tensorMap = liftedGraph->getTensorsByUid();

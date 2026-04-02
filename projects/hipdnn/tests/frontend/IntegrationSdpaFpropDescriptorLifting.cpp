@@ -8,10 +8,10 @@
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <hipdnn_test_sdk/constants/SdpaFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -20,6 +20,8 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::liftGraph;
+using hipdnn_tests::liftGraphWithoutFinalization;
 using hipdnn_tests::TestableGraphLifting;
 using hipdnn_tests::toVec;
 
@@ -73,18 +75,8 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, BasicSdpaFpropRoundTrip)
 {
     auto originalGraph = buildGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -147,18 +139,8 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropTensorSharingPreserved)
 {
     auto originalGraph = buildGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
 
@@ -189,21 +171,8 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropLiftWithoutFinalization)
 {
     auto originalGraph = buildGraph();
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
-    ASSERT_FALSE(data.empty());
-
-    // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
-    const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
-    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
-
-    // Lift into a new graph via fromBackendDescriptor
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(graphDesc.get());
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -316,18 +285,8 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropWithAllOptionalAttributes
         .set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT)
         .set_mma_core_mode(DataType::HALF);
 
-    auto result = originalGraph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = originalGraph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = originalGraph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify node attributes on the lifted SdpaFpropNode
     auto& liftedNodes = liftedGraph->getSubNodes();
@@ -452,18 +411,8 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, AutoAssignedUidsPreservedInRoundTr
     auto results = graph->sdpa(q, k, v, std::move(sdpaAttrs));
     results[0]->set_output(true);
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // All auto-assigned UIDs should be unique
     auto tensorMap = liftedGraph->getTensorsByUid();

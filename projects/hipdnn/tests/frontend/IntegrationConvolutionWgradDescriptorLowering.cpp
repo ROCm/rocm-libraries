@@ -13,6 +13,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/ConvWgradConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -26,7 +27,9 @@ using hipdnn_tests::toVec;
 using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
 using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
 using ConvModeSdk = hipdnn_data_sdk::data_objects::ConvMode;
+using hipdnn_tests::buildTensorMap;
 using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::lowerAndDeserialize;
 using hipdnn_tests::TestableGraphLowering;
 
 namespace
@@ -80,32 +83,7 @@ TEST_F(IntegrationConvolutionWgradDescriptorLowering, ConvWgradGraphRoundTrip)
     auto dw = graph->conv_wgrad(dy, x, convAttrs);
     dw->set_uid(K_TENSOR_DW_UID).set_output(true).set_name("DW");
 
-    // -- Validate and lower --
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // -- Retrieve serialized graph --
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    // -- Deserialize into GraphT --
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
-    ASSERT_NE(graphFb, nullptr);
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    graphFb->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // -- Verify graph-level attributes --
     EXPECT_EQ(graphT.compute_data_type, DataTypeSdk::FLOAT);
@@ -115,11 +93,7 @@ TEST_F(IntegrationConvolutionWgradDescriptorLowering, ConvWgradGraphRoundTrip)
     // -- Verify tensors --
     ASSERT_EQ(graphT.tensors.size(), 3u);
 
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
-    for(const auto& t : graphT.tensors)
-    {
-        tensorMap[t->uid] = t.get();
-    }
+    auto tensorMap = buildTensorMap(graphT);
 
     // Verify X tensor
     ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
@@ -192,26 +166,7 @@ TEST_F(IntegrationConvolutionWgradDescriptorLowering, AutoAssignedUidsPreservedI
     auto dw = graph->conv_wgrad(dy, x, convAttrs);
     dw->set_output(true);
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Retrieve serialized graph
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // All tensors should have been auto-assigned unique UIDs
     ASSERT_EQ(graphT.tensors.size(), 3u);

@@ -13,6 +13,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/SdpaFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -27,7 +28,9 @@ using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
 using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
 using DiagonalAlignmentSdk = hipdnn_data_sdk::data_objects::DiagonalAlignment;
 using AttentionImplementationSdk = hipdnn_data_sdk::data_objects::AttentionImplementation;
+using hipdnn_tests::buildTensorMap;
 using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::lowerAndDeserialize;
 using hipdnn_tests::TestableGraphLowering;
 
 namespace
@@ -41,8 +44,6 @@ hipdnn_data_sdk::data_objects::GraphT buildAndDeserializeSdpaGraph(hipdnnHandle_
                                                                    DataType tensorDataType
                                                                    = DataType::FLOAT)
 {
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-
     const bool wantStats = sdpaAttrs.generate_stats.has_value() && sdpaAttrs.generate_stats.value();
 
     auto graph = std::make_shared<TestableGraphLowering>();
@@ -71,53 +72,7 @@ hipdnn_data_sdk::data_objects::GraphT buildAndDeserializeSdpaGraph(hipdnnHandle_
         stats->set_uid(K_SDPA_TENSOR_STATS_UID).set_output(true).set_name("STATS");
     }
 
-    auto result = graph->validate();
-    if(result.code != ErrorCode::OK)
-    {
-        ADD_FAILURE() << "validate() failed: " << result.err_msg;
-        return graphT;
-    }
-
-    result = graph->build_operation_graph_via_descriptors(handle);
-    if(result.code != ErrorCode::OK)
-    {
-        ADD_FAILURE() << "build_operation_graph_via_descriptors() failed: " << result.err_msg;
-        return graphT;
-    }
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    if(rawDesc == nullptr)
-    {
-        ADD_FAILURE() << "get_raw_graph_descriptor() returned null";
-        return graphT;
-    }
-
-    size_t serializedSize = 0;
-    if(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr)
-       != HIPDNN_STATUS_SUCCESS)
-    {
-        ADD_FAILURE() << "Failed to get serialized size";
-        return graphT;
-    }
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    if(hipdnnBackendGetSerializedBinaryGraph_ext(
-           rawDesc, serializedSize, &serializedSize, serializedData.data())
-       != HIPDNN_STATUS_SUCCESS)
-    {
-        ADD_FAILURE() << "Failed to serialize graph";
-        return graphT;
-    }
-
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
-    if(graphFb == nullptr)
-    {
-        ADD_FAILURE() << "GetGraph returned null";
-        return graphT;
-    }
-    graphFb->UnPackTo(&graphT);
-
-    return graphT;
+    return lowerAndDeserialize(*graph, handle);
 }
 
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
@@ -156,32 +111,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropGraphRoundTrip)
     auto [o, stats] = graph->sdpa(q, k, v, std::move(sdpaAttrs));
     o->set_uid(K_SDPA_TENSOR_O_UID).set_output(true).set_name("O");
 
-    // -- Validate and lower --
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // -- Retrieve serialized graph --
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    // -- Deserialize into GraphT --
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
-    ASSERT_NE(graphFb, nullptr);
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    graphFb->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // -- Verify graph-level attributes --
     EXPECT_EQ(graphT.compute_data_type, DataTypeSdk::FLOAT);
@@ -191,11 +121,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropGraphRoundTrip)
     // -- Verify tensors (Q, K, V, O = 4 tensors) --
     ASSERT_EQ(graphT.tensors.size(), 4u);
 
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
-    for(const auto& t : graphT.tensors)
-    {
-        tensorMap[t->uid] = t.get();
-    }
+    auto tensorMap = buildTensorMap(graphT);
 
     // Verify Q tensor
     ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_Q_UID), 0u);
@@ -279,26 +205,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     auto [o, stats] = graph->sdpa(q, k, v, std::move(sdpaAttrs));
     o->set_output(true);
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Retrieve serialized graph
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // All tensors should have been auto-assigned unique UIDs (Q, K, V, O = 4)
     ASSERT_EQ(graphT.tensors.size(), 4u);
@@ -361,32 +268,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropWithStatsRoundTrip)
     ASSERT_NE(stats, nullptr) << "Stats tensor should be created when generate_stats is true";
     stats->set_uid(K_SDPA_TENSOR_STATS_UID).set_output(true).set_name("STATS");
 
-    // -- Validate and lower --
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // -- Retrieve serialized graph --
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    // -- Deserialize into GraphT --
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
-    ASSERT_NE(graphFb, nullptr);
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    graphFb->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // -- Verify tensors (Q, K, V, O, STATS = 5 tensors) --
     ASSERT_EQ(graphT.tensors.size(), 5u);
@@ -405,11 +287,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropWithStatsRoundTrip)
     EXPECT_TRUE(sdpa->generate_stats);
 
     // Verify inferred stats tensor shape
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
-    for(const auto& t : graphT.tensors)
-    {
-        tensorMap[t->uid] = t.get();
-    }
+    auto tensorMap = buildTensorMap(graphT);
     ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_STATS_UID), 0u);
     auto* statsT = tensorMap[K_SDPA_TENSOR_STATS_UID];
     EXPECT_EQ(statsT->dims, toVec(K_SDPA_TENSOR_STATS_DIMS));

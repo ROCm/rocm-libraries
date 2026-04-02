@@ -7,10 +7,10 @@
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_test_sdk/constants/LayernormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -18,6 +18,8 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::liftGraph;
+using hipdnn_tests::liftGraphWithoutFinalization;
 using hipdnn_tests::TestableGraphLifting;
 using hipdnn_tests::toVec;
 namespace ln_constants = hipdnn_tests::constants;
@@ -88,19 +90,8 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormTrainingRoundTripViaCApi)
 {
     auto graph = buildTrainingGraph();
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    // Lift back into a new graph
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -235,19 +226,8 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormInferenceRoundTripViaCApi
     EXPECT_EQ(mean, nullptr);
     EXPECT_EQ(invVariance, nullptr);
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    // Lift back into a new graph
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     // Verify tensors by UID (5 tensors: x, scale, bias, epsilon, y — no mean or inv_variance)
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -285,18 +265,8 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormTensorSharingPreserved)
     auto graph = buildTrainingGraph();
     graph->set_name("LayernormTensorSharingTest");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(rawDesc);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraph(*graph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
     auto& subNodes = liftedGraph->getSubNodes();
@@ -330,21 +300,8 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormLiftWithoutFinalization)
     auto graph = buildTrainingGraph();
     graph->set_name("LayernormFlatBufferLiftTest");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Serialize to binary
-    auto data = graph->toBinary();
-    ASSERT_FALSE(data.empty());
-
-    // Create backend descriptor from bytes (no handle, no finalize)
-    const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
-    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
-
-    // Lift into a new graph
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
-    result = liftedGraph->fromBackendDescriptor(graphDesc.get());
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    auto liftedGraph = liftGraphWithoutFinalization(*graph);
+    ASSERT_NE(liftedGraph, nullptr);
 
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
 

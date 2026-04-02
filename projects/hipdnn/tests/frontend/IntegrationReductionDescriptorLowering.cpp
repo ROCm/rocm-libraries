@@ -12,6 +12,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/ReductionConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -25,7 +26,9 @@ using hipdnn_tests::toVec;
 using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
 using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
 using ReductionModeSdk = hipdnn_data_sdk::data_objects::ReductionMode;
+using hipdnn_tests::buildTensorMap;
 using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::lowerAndDeserialize;
 using hipdnn_tests::TestableGraphLowering;
 
 namespace
@@ -57,27 +60,7 @@ protected:
         y->set_dim(toVec(K_REDUCTION_TENSOR_Y_DIMS))
             .set_stride(toVec(K_REDUCTION_TENSOR_Y_STRIDES));
 
-        auto result = graph->validate();
-        EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-        result = graph->build_operation_graph_via_descriptors(_handle);
-        EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-        auto rawDesc = graph->get_raw_graph_descriptor();
-        EXPECT_NE(rawDesc, nullptr);
-
-        size_t serializedSize = 0;
-        EXPECT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-                  HIPDNN_STATUS_SUCCESS);
-
-        std::vector<uint8_t> serializedData(serializedSize);
-        EXPECT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                      rawDesc, serializedSize, &serializedSize, serializedData.data()),
-                  HIPDNN_STATUS_SUCCESS);
-
-        hipdnn_data_sdk::data_objects::GraphT graphT;
-        hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
-        return graphT;
+        return lowerAndDeserialize(*graph, _handle);
     }
 };
 
@@ -95,11 +78,7 @@ TEST_F(IntegrationReductionDescriptorLowering, ReductionLoweringRoundTrip)
     ASSERT_EQ(graphT.tensors.size(), 2u);
 
     // Verify tensor attributes
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
-    for(const auto& t : graphT.tensors)
-    {
-        tensorMap[t->uid] = t.get();
-    }
+    auto tensorMap = buildTensorMap(graphT);
     ASSERT_NE(tensorMap.count(K_REDUCTION_TENSOR_X_UID), 0u);
     EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->dims, toVec(K_REDUCTION_TENSOR_X_DIMS));
     EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->strides, toVec(K_REDUCTION_TENSOR_X_STRIDES));
