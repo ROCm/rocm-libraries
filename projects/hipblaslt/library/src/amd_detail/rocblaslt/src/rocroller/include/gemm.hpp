@@ -115,7 +115,6 @@ public:
     std::shared_ptr<SolutionParameters> params;
     int occupancy = 1;
 
-    std::optional<std::array<int, 3>> customBlockSize;
     std::optional<ShapeCondition>     shapeCondition;
 
     virtual ~GemmKernel() = default;
@@ -206,11 +205,20 @@ public:
  * @brief CustomGemmKernel - Pre-compiled custom kernels
  *
  * Abstract base class for custom kernels loaded from pre-compiled code objects.
+ * Holds the HIP module wrapper for the embedded kernel symbol and \c .co path.
  *
  */
 class CustomGemmKernel : public GemmKernel
 {
+protected:
+    GemmHipModuleWrapper module;
+
 public:
+    CustomGemmKernel(const std::string& functionName, const std::string& path)
+        : module(functionName, path)
+    {
+    }
+
     ~CustomGemmKernel() override = default;
 
     size_t workspaceRequired(const RocblasltContractionProblem& prob) override = 0;
@@ -229,26 +237,34 @@ public:
  */
 class AssemblyStoreRowOrderGemm : public CustomGemmKernel
 {
-    GemmHipModuleWrapper module;
-
 public:
     AssemblyStoreRowOrderGemm(const std::string& functionName, const std::string& path)
-        : module(functionName, path)
+        : CustomGemmKernel(functionName, path)
     {
     }
 
-    /**
-     * @brief Generate an AssemblyStoreRowOrderGemm Kernel
-     *
-     * @param customKernelName The name of the kernel function in the code object
-     * @param kernelType The kernel type specification
-     * @param wgt The workgroup tile size
-     * @return std::shared_ptr<AssemblyStoreRowOrderGemm>
-     */
-    static std::shared_ptr<AssemblyStoreRowOrderGemm>
-        generate(const std::string& customKernelName,
-                 const KernelType&  kernelType,
-                 const WorkGroupTileSize& wgt);
+    size_t workspaceRequired(const RocblasltContractionProblem& prob) override;
+
+    bool isSupportedProblem(const RocblasltContractionProblem& prob) override;
+
+    rocblaslt_status run(const RocblasltContractionProblem& prob) override;
+};
+
+/**
+ * @brief WaveKernel - Wave MXFP4 dynamic GEMM kernels (kernarg ABI and launch differ from AITER path)
+ *
+ * Selected when the embedded kernel name starts with \c wave (see createCustomGemmKernel).
+ */
+class WaveKernel : public CustomGemmKernel
+{
+    dim3 blockSize;
+
+public:
+    WaveKernel(const std::string& functionName, const std::string& path, dim3 blockSize)
+        : CustomGemmKernel(functionName, path)
+        , blockSize(blockSize)
+    {
+    }
 
     size_t workspaceRequired(const RocblasltContractionProblem& prob) override;
 
