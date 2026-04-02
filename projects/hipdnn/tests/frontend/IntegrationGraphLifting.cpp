@@ -9,70 +9,33 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
-
-#include "test_plugins/TestPluginConstants.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::toVec;
 using namespace hipdnn_tests::constants::integration;
+using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::TestableGraphLifting;
 
 namespace
 {
-
-// Exposes protected Graph methods for testing
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
-    using Graph::fromBackendDescriptor;
-    using Graph::get_raw_graph_descriptor;
-
-    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
-    {
-        return _sub_nodes;
-    }
-};
-
 // Builds a conv fprop graph via the frontend, lowers it through the backend C-API
 // via build_operation_graph(), then lifts it back with fromBackendDescriptor()
 // and verifies the reconstructed graph matches the original.
-class IntegrationGraphLifting : public ::testing::Test
+class IntegrationGraphLifting : public IntegrationTestFixture
 {
 protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
     // Builds a standard conv fprop graph for round-trip testing
-    static std::shared_ptr<TestableGraph>
+    static std::shared_ptr<TestableGraphLifting>
         buildConvFpropGraph(DataType computeType = DataType::FLOAT,
                             DataType intermediateType = DataType::FLOAT,
                             DataType ioType = DataType::FLOAT)
     {
-        auto graph = std::make_shared<TestableGraph>();
+        auto graph = std::make_shared<TestableGraphLifting>();
         graph->set_name("LiftingTestGraph")
             .set_compute_data_type(computeType)
             .set_intermediate_data_type(intermediateType)
@@ -99,8 +62,6 @@ protected:
 
         return graph;
     }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 // Builds a conv fprop graph, lowers via build_operation_graph(handle), extracts the
@@ -120,7 +81,7 @@ TEST_F(IntegrationGraphLifting, ConvFpropRoundTripViaCApi)
     ASSERT_NE(rawDesc, nullptr);
 
     // Lift back into a new graph
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -185,7 +146,7 @@ TEST_F(IntegrationGraphLifting, ConvFpropTensorSharingPreserved)
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -229,7 +190,7 @@ TEST_F(IntegrationGraphLifting, PreferredEngineIdPreservedThroughCApi)
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -241,7 +202,7 @@ TEST_F(IntegrationGraphLifting, PreferredEngineIdPreservedThroughCApi)
 // Verifies that fromBackendDescriptor(nullptr) returns an error.
 TEST_F(IntegrationGraphLifting, NullDescriptorReturnsError)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLifting>();
     auto result = graph->fromBackendDescriptor(nullptr);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
         << "fromBackendDescriptor(nullptr) should return INVALID_VALUE";
@@ -262,7 +223,7 @@ TEST_F(IntegrationGraphLifting, DataTypesPreservedThroughCApi)
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -290,7 +251,7 @@ TEST_F(IntegrationGraphLifting, ConvFpropLiftWithoutFinalization)
     ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
 
     // Lift into a new graph via fromBackendDescriptor
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(graphDesc.get());
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -336,7 +297,7 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithHandle)
     ASSERT_FALSE(data.empty());
 
     // Create a new graph and use deserialize_via_backend with handle
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize_via_backend(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -379,7 +340,7 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithoutHandle)
     ASSERT_FALSE(data.empty());
 
     // Create a new graph and use deserialize_via_backend without handle
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize_via_backend(nullptr, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -420,7 +381,7 @@ TEST_F(IntegrationGraphLifting, EmptyGraphDescriptorReturnsError)
               HIPDNN_STATUS_SUCCESS);
 
     // Attempt to lift — should return an error since no operations are set
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLifting>();
     auto result = graph->fromBackendDescriptor(desc);
     EXPECT_NE(result.code, ErrorCode::OK)
         << "fromBackendDescriptor should fail on a descriptor with no operations";
@@ -434,7 +395,7 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendCorruptDataReturnsError)
 {
     const std::vector<uint8_t> garbage = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03};
 
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLifting>();
     auto result = graph->deserialize_via_backend(_handle, garbage);
     EXPECT_NE(result.code, ErrorCode::OK) << "deserialize_via_backend should fail on corrupt data";
 }
@@ -445,7 +406,7 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendEmptyDataReturnsError)
 {
     const std::vector<uint8_t> empty;
 
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLifting>();
     auto result = graph->deserialize_via_backend(_handle, empty);
     EXPECT_NE(result.code, ErrorCode::OK) << "deserialize_via_backend should fail on empty data";
 }
@@ -464,7 +425,7 @@ TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughCApi)
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -484,7 +445,7 @@ TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughDeserializeViaBackend)
     ASSERT_FALSE(data.empty());
 
     // Create a new graph and use deserialize_via_backend without handle
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize_via_backend(nullptr, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 

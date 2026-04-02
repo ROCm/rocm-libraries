@@ -12,7 +12,9 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/PointwiseConstants.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
@@ -24,53 +26,22 @@ using namespace hipdnn_tests::constants::integration;
 using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
 using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
 using PointwiseModeSdk = hipdnn_data_sdk::data_objects::PointwiseMode;
+using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::TestableGraphLowering;
 
 namespace
 {
 
-// Exposes protected Graph methods for testing
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph_via_descriptors;
-    using Graph::get_raw_graph_descriptor;
-};
-
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
-class IntegrationPointwiseDescriptorLowering : public ::testing::Test
+class IntegrationPointwiseDescriptorLowering : public IntegrationTestFixture
 {
-protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 // Binary pointwise (ADD) round-trip: lower and verify deserialized graph
 TEST_F(IntegrationPointwiseDescriptorLowering, PointwiseGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestPointwiseGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -167,7 +138,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, PointwiseGraphRoundTrip)
 // Unary pointwise (RELU_FWD) round-trip with single input
 TEST_F(IntegrationPointwiseDescriptorLowering, UnaryPointwiseRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestUnaryPointwiseGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -218,7 +189,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, UnaryPointwiseRoundTrip)
 // RELU_FWD with activation scalar parameters round-trip
 TEST_F(IntegrationPointwiseDescriptorLowering, ScalarAttributesPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestScalarAttrsGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -280,7 +251,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, ScalarAttributesPreservedInRoundT
 // Ternary pointwise (BINARY_SELECT) round-trip with 3 inputs
 TEST_F(IntegrationPointwiseDescriptorLowering, TernaryPointwiseRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestTernaryPointwiseGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -342,7 +313,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, TernaryPointwiseRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationPointwiseDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidPointwiseGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -414,7 +385,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 // Additional activation scalars (swish_beta, elu_alpha, softplus_beta) round-trip
 TEST_F(IntegrationPointwiseDescriptorLowering, AdditionalScalarAttributesPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestAdditionalScalarAttrsGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -476,7 +447,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AdditionalScalarAttributesPreserv
 // GEN_INDEX mode with axis attribute round-trip
 TEST_F(IntegrationPointwiseDescriptorLowering, AxisAttributePreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestAxisAttrGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)

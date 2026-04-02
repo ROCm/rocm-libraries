@@ -11,70 +11,33 @@
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <hipdnn_test_sdk/constants/SdpaFpropConstants.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
-
-#include "test_plugins/TestPluginConstants.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::TestableGraphLifting;
 using hipdnn_tests::toVec;
 
 namespace
 {
-
-// Exposes protected Graph methods for lifting integration tests
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
-    using Graph::fromBackendDescriptor;
-    using Graph::get_raw_graph_descriptor;
-
-    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
-    {
-        return _sub_nodes;
-    }
-};
-
 // Use SDK constants from SdpaFpropConstants.hpp:
 // K_SDPA_TENSOR_Q_UID, K_SDPA_TENSOR_K_UID, K_SDPA_TENSOR_V_UID, K_SDPA_TENSOR_O_UID,
 // K_SDPA_TENSOR_Q_DIMS, K_SDPA_TENSOR_Q_STRIDES, etc.
 
 // Lifts a frontend graph via build_operation_graph(handle), then
 // reconstructs it with fromBackendDescriptor() for verification.
-class IntegrationSdpaFpropDescriptorLifting : public ::testing::Test
+class IntegrationSdpaFpropDescriptorLifting : public IntegrationTestFixture
 {
 protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
     /// Builds a standard SdpaFprop graph for round-trip testing.
-    static std::shared_ptr<TestableGraph> buildGraph()
+    static std::shared_ptr<TestableGraphLifting> buildGraph()
     {
-        auto graph = std::make_shared<TestableGraph>();
+        auto graph = std::make_shared<TestableGraphLifting>();
         graph->set_name("SdpaFpropLiftingTestGraph")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
@@ -101,8 +64,6 @@ protected:
 
         return graph;
     }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 // Builds a standard SdpaFprop graph, lowers via build_operation_graph(handle),
@@ -121,7 +82,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, BasicSdpaFpropRoundTrip)
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -195,7 +156,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropTensorSharingPreserved)
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -240,7 +201,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropLiftWithoutFinalization)
     ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
 
     // Lift into a new graph via fromBackendDescriptor
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(graphDesc.get());
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -364,7 +325,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropWithAllOptionalAttributes
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -467,7 +428,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropWithAllOptionalAttributes
 // auto-assigned UIDs are unique and correctly referenced after a round-trip.
 TEST_F(IntegrationSdpaFpropDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AutoUidSdpaFpropGraph")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -500,7 +461,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, AutoAssignedUidsPreservedInRoundTr
     auto rawDesc = graph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -539,7 +500,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropDeserializeViaBackendWith
     auto data = originalGraph->toBinary();
     ASSERT_FALSE(data.empty());
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize_via_backend(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 

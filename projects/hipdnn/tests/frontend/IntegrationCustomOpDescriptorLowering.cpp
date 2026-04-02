@@ -12,7 +12,9 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/CustomOpConstants.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
 
@@ -21,49 +23,19 @@ using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
 using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
 using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
+using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::TestableGraphLowering;
 
 namespace
 {
 
-class TestableGraph : public Graph
+class IntegrationCustomOpDescriptorLowering : public IntegrationTestFixture
 {
-public:
-    using Graph::build_operation_graph_via_descriptors;
-    using Graph::get_raw_graph_descriptor;
-};
-
-class IntegrationCustomOpDescriptorLowering : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 TEST_F(IntegrationCustomOpDescriptorLowering, CustomOpGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestCustomOpGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -169,7 +141,7 @@ TEST_F(IntegrationCustomOpDescriptorLowering, CustomOpGraphRoundTrip)
 // Verifies minimal custom op with 1 input, 1 output, and no opaque data payload.
 TEST_F(IntegrationCustomOpDescriptorLowering, MinimalCustomOpRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("MinimalCustomOpGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -223,7 +195,7 @@ TEST_F(IntegrationCustomOpDescriptorLowering, MinimalCustomOpRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationCustomOpDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidCustomOpGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -304,7 +276,7 @@ TEST_F(IntegrationCustomOpDescriptorLowering, AutoAssignedUidsPreservedInRoundTr
 // through the descriptor path (e.g. a side-effect-only custom op).
 TEST_F(IntegrationCustomOpDescriptorLowering, ZeroInputZeroOutputCustomOpRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("ZeroIOCustomOpGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
