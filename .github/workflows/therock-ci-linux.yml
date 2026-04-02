@@ -224,14 +224,6 @@ jobs:
     if: ${{ inputs.test_type == 'coverage' && inputs.amdgpu_families != 'gfx950-dcgpu'}}
     needs: [therock-build-linux]
     runs-on: ubuntu-latest
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        files: ${{ env.REPORTS }}
-        fail_ci_if_error: true
-        token: ${{ secrets.CODECOV_TOKEN }}
-      secrets: inherit
     steps:
       - name: Run project coverage
         shell: bash
