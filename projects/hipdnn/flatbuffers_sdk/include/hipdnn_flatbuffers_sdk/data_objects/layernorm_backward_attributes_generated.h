@@ -29,12 +29,12 @@ struct LayernormBackwardAttributesT : public ::flatbuffers::NativeTable {
   typedef LayernormBackwardAttributes TableType;
   int64_t dy_tensor_uid = 0;
   int64_t x_tensor_uid = 0;
-  ::flatbuffers::Optional<int64_t> scale_tensor_uid = ::flatbuffers::nullopt;
+  int64_t scale_tensor_uid = 0;
   ::flatbuffers::Optional<int64_t> mean_tensor_uid = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<int64_t> inv_variance_tensor_uid = ::flatbuffers::nullopt;
   int64_t dx_tensor_uid = 0;
-  ::flatbuffers::Optional<int64_t> dscale_tensor_uid = ::flatbuffers::nullopt;
-  ::flatbuffers::Optional<int64_t> dbias_tensor_uid = ::flatbuffers::nullopt;
+  int64_t dscale_tensor_uid = 0;
+  int64_t dbias_tensor_uid = 0;
   int64_t normalized_dim_count = 0;
 };
 
@@ -64,11 +64,11 @@ struct LayernormBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
   bool mutate_x_tensor_uid(int64_t _x_tensor_uid = 0) {
     return SetField<int64_t>(VT_X_TENSOR_UID, _x_tensor_uid, 0);
   }
-  ::flatbuffers::Optional<int64_t> scale_tensor_uid() const {
-    return GetOptional<int64_t, int64_t>(VT_SCALE_TENSOR_UID);
+  int64_t scale_tensor_uid() const {
+    return GetField<int64_t>(VT_SCALE_TENSOR_UID, 0);
   }
-  bool mutate_scale_tensor_uid(int64_t _scale_tensor_uid) {
-    return SetField<int64_t>(VT_SCALE_TENSOR_UID, _scale_tensor_uid);
+  bool mutate_scale_tensor_uid(int64_t _scale_tensor_uid = 0) {
+    return SetField<int64_t>(VT_SCALE_TENSOR_UID, _scale_tensor_uid, 0);
   }
   ::flatbuffers::Optional<int64_t> mean_tensor_uid() const {
     return GetOptional<int64_t, int64_t>(VT_MEAN_TENSOR_UID);
@@ -88,17 +88,17 @@ struct LayernormBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
   bool mutate_dx_tensor_uid(int64_t _dx_tensor_uid = 0) {
     return SetField<int64_t>(VT_DX_TENSOR_UID, _dx_tensor_uid, 0);
   }
-  ::flatbuffers::Optional<int64_t> dscale_tensor_uid() const {
-    return GetOptional<int64_t, int64_t>(VT_DSCALE_TENSOR_UID);
+  int64_t dscale_tensor_uid() const {
+    return GetField<int64_t>(VT_DSCALE_TENSOR_UID, 0);
   }
-  bool mutate_dscale_tensor_uid(int64_t _dscale_tensor_uid) {
-    return SetField<int64_t>(VT_DSCALE_TENSOR_UID, _dscale_tensor_uid);
+  bool mutate_dscale_tensor_uid(int64_t _dscale_tensor_uid = 0) {
+    return SetField<int64_t>(VT_DSCALE_TENSOR_UID, _dscale_tensor_uid, 0);
   }
-  ::flatbuffers::Optional<int64_t> dbias_tensor_uid() const {
-    return GetOptional<int64_t, int64_t>(VT_DBIAS_TENSOR_UID);
+  int64_t dbias_tensor_uid() const {
+    return GetField<int64_t>(VT_DBIAS_TENSOR_UID, 0);
   }
-  bool mutate_dbias_tensor_uid(int64_t _dbias_tensor_uid) {
-    return SetField<int64_t>(VT_DBIAS_TENSOR_UID, _dbias_tensor_uid);
+  bool mutate_dbias_tensor_uid(int64_t _dbias_tensor_uid = 0) {
+    return SetField<int64_t>(VT_DBIAS_TENSOR_UID, _dbias_tensor_uid, 0);
   }
   int64_t normalized_dim_count() const {
     return GetField<int64_t>(VT_NORMALIZED_DIM_COUNT, 0);
@@ -135,7 +135,7 @@ struct LayernormBackwardAttributesBuilder {
     fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_X_TENSOR_UID, x_tensor_uid, 0);
   }
   void add_scale_tensor_uid(int64_t scale_tensor_uid) {
-    fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_SCALE_TENSOR_UID, scale_tensor_uid);
+    fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_SCALE_TENSOR_UID, scale_tensor_uid, 0);
   }
   void add_mean_tensor_uid(int64_t mean_tensor_uid) {
     fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_MEAN_TENSOR_UID, mean_tensor_uid);
@@ -147,10 +147,10 @@ struct LayernormBackwardAttributesBuilder {
     fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_DX_TENSOR_UID, dx_tensor_uid, 0);
   }
   void add_dscale_tensor_uid(int64_t dscale_tensor_uid) {
-    fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_DSCALE_TENSOR_UID, dscale_tensor_uid);
+    fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_DSCALE_TENSOR_UID, dscale_tensor_uid, 0);
   }
   void add_dbias_tensor_uid(int64_t dbias_tensor_uid) {
-    fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_DBIAS_TENSOR_UID, dbias_tensor_uid);
+    fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_DBIAS_TENSOR_UID, dbias_tensor_uid, 0);
   }
   void add_normalized_dim_count(int64_t normalized_dim_count) {
     fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_NORMALIZED_DIM_COUNT, normalized_dim_count, 0);
@@ -170,21 +170,21 @@ inline ::flatbuffers::Offset<LayernormBackwardAttributes> CreateLayernormBackwar
     ::flatbuffers::FlatBufferBuilder &_fbb,
     int64_t dy_tensor_uid = 0,
     int64_t x_tensor_uid = 0,
-    ::flatbuffers::Optional<int64_t> scale_tensor_uid = ::flatbuffers::nullopt,
+    int64_t scale_tensor_uid = 0,
     ::flatbuffers::Optional<int64_t> mean_tensor_uid = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<int64_t> inv_variance_tensor_uid = ::flatbuffers::nullopt,
     int64_t dx_tensor_uid = 0,
-    ::flatbuffers::Optional<int64_t> dscale_tensor_uid = ::flatbuffers::nullopt,
-    ::flatbuffers::Optional<int64_t> dbias_tensor_uid = ::flatbuffers::nullopt,
+    int64_t dscale_tensor_uid = 0,
+    int64_t dbias_tensor_uid = 0,
     int64_t normalized_dim_count = 0) {
   LayernormBackwardAttributesBuilder builder_(_fbb);
   builder_.add_normalized_dim_count(normalized_dim_count);
-  if(dbias_tensor_uid) { builder_.add_dbias_tensor_uid(*dbias_tensor_uid); }
-  if(dscale_tensor_uid) { builder_.add_dscale_tensor_uid(*dscale_tensor_uid); }
+  builder_.add_dbias_tensor_uid(dbias_tensor_uid);
+  builder_.add_dscale_tensor_uid(dscale_tensor_uid);
   builder_.add_dx_tensor_uid(dx_tensor_uid);
   if(inv_variance_tensor_uid) { builder_.add_inv_variance_tensor_uid(*inv_variance_tensor_uid); }
   if(mean_tensor_uid) { builder_.add_mean_tensor_uid(*mean_tensor_uid); }
-  if(scale_tensor_uid) { builder_.add_scale_tensor_uid(*scale_tensor_uid); }
+  builder_.add_scale_tensor_uid(scale_tensor_uid);
   builder_.add_x_tensor_uid(x_tensor_uid);
   builder_.add_dy_tensor_uid(dy_tensor_uid);
   return builder_.Finish();
