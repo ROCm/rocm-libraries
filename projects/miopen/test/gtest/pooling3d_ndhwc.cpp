@@ -28,137 +28,71 @@
 #include <miopen/env.hpp>
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "pooling3d.hpp"
-
-MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_TEST_FLAGS_ARGS)
-
-namespace env = miopen::env;
+#include "pooling2d_common.hpp"
 
 namespace pooling3d_ndhwc {
 
-class GPU_Pooling3d_NDHWC_FP32 : public testing::TestWithParam<std::vector<std::string>>
+using namespace pooling2d_gtest;
+
+struct GPU_Pooling3d_NDHWC_FP32 : public Pooling2dCommon<float> {};
+struct GPU_Pooling3d_NDHWC_FP16 : public Pooling2dCommon<half_float::half> {};
+struct GPU_Pooling3d_NDHWC_BFP16 : public Pooling2dCommon<bfloat16> {};
+
+std::vector<PoolingTestCase> GetTestCases(miopenDataType_t prec)
 {
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
-};
+    std::vector<int> wsidx_values = {1};
+    std::vector<miopenPoolingMode_t> modes = {miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
+    std::vector<miopenIndexType_t> index_types = {miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
 
-class GPU_Pooling3d_NDHWC_FP16 : public testing::TestWithParam<std::vector<std::string>>
-{
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
-};
-
-class GPU_Pooling3d_NDHWC_BFP16 : public testing::TestWithParam<std::vector<std::string>>
-{
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
-};
-
-void GetArgs(const std::string& param, std::vector<std::string>& tokens)
-{
-    std::stringstream ss(param);
-    std::istream_iterator<std::string> begin(ss);
-    std::istream_iterator<std::string> end;
-    while(begin != end)
-        tokens.push_back(*begin++);
-}
-
-void Run3dDriver(miopenDataType_t prec)
-{
-
-    std::vector<std::string> params;
-    switch(prec)
-    {
-    case miopenFloat: params = GPU_Pooling3d_NDHWC_FP32::GetParam(); break;
-    case miopenHalf: params = GPU_Pooling3d_NDHWC_FP16::GetParam(); break;
-    case miopenBFloat16: params = GPU_Pooling3d_NDHWC_BFP16::GetParam(); break;
-    case miopenInt8:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenInt32:
-    case miopenInt64:
-    case miopenDouble:
-        FAIL() << "miopenInt8, miopenInt32, miopenDouble, miopenFloat8_fnuz, "
-                  "miopenBFloat8_fnuz "
-                  "data type not supported by "
-                  "pooling3d_ndhwc test";
-
-    default: params = GPU_Pooling3d_NDHWC_FP32::GetParam();
-    }
-
-    for(const auto& test_value : params)
-    {
-        std::vector<std::string> tokens;
-        GetArgs(test_value, tokens);
-        std::vector<const char*> ptrs;
-
-        std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
-            return str.data();
-        });
-
-        testing::internal::CaptureStderr();
-        test_drive<pooling3d_driver>(ptrs.size(), ptrs.data());
-        auto capture = testing::internal::GetCapturedStderr();
-        std::cerr << capture;
-    }
-};
-
-bool IsTestSupportedForDevice() { return true; }
-
-std::vector<std::string> GetTestCases(const std::string& precision)
-{
-    const auto& flag_arg = env::value(MIOPEN_TEST_FLAGS_ARGS);
-
-    return std::vector<std::string>{
-        // clang-format off
-        // Forward pooling with NDHWC layout (universal transpose - 3D)
-        {"test_pooling3d " + precision + " --all --in_layout NDHWC --out_layout NDHWC " + flag_arg},
-        // Backward pooling with NDHWC layout (universal transpose - 3D)
-        {"test_pooling3d " + precision + " --forw 0 --in_layout NDHWC --out_layout NDHWC " + flag_arg}
-        // clang-format on
+    // 3D pooling shapes
+    std::vector<std::vector<int>> in_shapes = {
+        {16, 64, 3, 4, 4}, {16, 32, 4, 9, 9}, {8, 512, 3, 14, 14}, {8, 512, 4, 28, 28},
+        {16, 64, 56, 56, 56}, {4, 3, 4, 227, 227}, {4, 4, 4, 161, 700}, {1, 3, 4, 4, 4},
+        {2, 8, 2, 8, 8}, {1, 16, 3, 5, 5}, {1, 32, 4, 14, 14}, {2, 64, 8, 8, 8},
+        {1, 16, 4, 28, 28}, {1, 3, 8, 56, 56}, {2, 64, 4, 28, 28}, {1, 32, 16, 32, 32}
     };
+    std::vector<std::vector<int>> lens_list = {{2, 2, 2}, {3, 3, 3}, {1, 2, 2}};
+    std::vector<std::vector<int>> strides_list = {{2, 2, 2}, {1, 1, 1}, {1, 2, 2}};
+    std::vector<std::vector<int>> pads_list = {{0, 0, 0}, {1, 1, 1}};
+
+    std::vector<PoolingTestCase> test_cases;
+    for(const auto& in_shape : in_shapes)
+    {
+        AddTestCasesForInput(in_shape,
+                             lens_list,
+                             strides_list,
+                             pads_list,
+                             index_types,
+                             modes,
+                             wsidx_values,
+                             test_cases,
+                             false, // skip_wide_check
+                             false, // is_wide_dataset
+                             "NDHWC",
+                             "NDHWC");
+    }
+    return test_cases;
 }
 
 } // namespace pooling3d_ndhwc
+
 using namespace pooling3d_ndhwc;
 
-TEST_P(GPU_Pooling3d_NDHWC_FP32, FloatTest_pooling3d_ndhwc)
-{
-    if(IsTestSupportedForDevice())
-    {
-        Run3dDriver(miopenFloat);
-    }
-    else
-    {
-        GTEST_SKIP();
-    }
-};
+TEST_P(GPU_Pooling3d_NDHWC_FP32, FloatTest) { RunTest(); }
+TEST_P(GPU_Pooling3d_NDHWC_FP16, HalfTest) { RunTest(); }
+TEST_P(GPU_Pooling3d_NDHWC_BFP16, BFloat16Test) { RunTest(); }
 
-TEST_P(GPU_Pooling3d_NDHWC_FP16, HalfTest_pooling3d_ndhwc)
-{
-    if(IsTestSupportedForDevice())
-    {
-        Run3dDriver(miopenHalf);
-    }
-    else
-    {
-        GTEST_SKIP();
-    }
-};
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Pooling3d_NDHWC_FP32,
+                         testing::ValuesIn(GetTestCases(miopenFloat)),
+                         GetPoolingTestCaseName);
 
-TEST_P(GPU_Pooling3d_NDHWC_BFP16, BFloat16Test_pooling3d_ndhwc)
-{
-    if(IsTestSupportedForDevice())
-    {
-        Run3dDriver(miopenBFloat16);
-    }
-    else
-    {
-        GTEST_SKIP();
-    }
-};
-
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_FP32, testing::Values(GetTestCases("--float")));
-
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_FP16, testing::Values(GetTestCases("--half")));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Pooling3d_NDHWC_FP16,
+                         testing::ValuesIn(GetTestCases(miopenHalf)),
+                         GetPoolingTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Pooling3d_NDHWC_BFP16,
-                         testing::Values(GetTestCases("--bfloat16")));
+                         testing::ValuesIn(GetTestCases(miopenBFloat16)),
+                         GetPoolingTestCaseName);
