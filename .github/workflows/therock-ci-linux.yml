@@ -117,7 +117,7 @@ jobs:
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
 
       - name: Configure Projects
-        if: {{ "${{ inputs.test_type }}" != "coverage" }}
+        if: ${{ inputs.test_type != 'coverage' }}
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ${{ inputs.rocm_package_version }}
@@ -126,11 +126,11 @@ jobs:
         run: python3 TheRock/build_tools/github_actions/build_configure.py
 
       - name: Configure Projects
-        if: {{ "${{ inputs.test_type }}" == "coverage" }}
+        if: ${{ inputs.test_type == 'coverage' }}
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          extra_cmake_options: "-D{{ inputs.project_name }}_ENABLE_COVERAGE -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-D${{ inputs.project_name }}_ENABLE_COVERAGE -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: python3 TheRock/build_tools/github_actions/build_configure.py
 
