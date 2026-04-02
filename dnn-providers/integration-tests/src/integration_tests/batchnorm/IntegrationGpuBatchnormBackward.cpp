@@ -172,6 +172,11 @@ protected:
     }
 };
 
+// 1D layout tests (NCL, NLC)
+using IntegrationGpuBatchnormBackward1dFp32 = BatchnormBackward<float>;
+using IntegrationGpuBatchnormBackward1dBfp16 = BatchnormBackward<bfloat16>;
+using IntegrationGpuBatchnormBackward1dFp16 = BatchnormBackward<half>;
+
 // 2D layout tests (NCHW, NHWC)
 using IntegrationGpuBatchnormBackward2dFp32 = BatchnormBackward<float>;
 using IntegrationGpuBatchnormBackward2dBfp16 = BatchnormBackward<bfloat16>;
@@ -181,6 +186,11 @@ using IntegrationGpuBatchnormBackward2dFp16 = BatchnormBackward<half>;
 using IntegrationGpuBatchnormBackward3dFp32 = BatchnormBackward<float>;
 using IntegrationGpuBatchnormBackward3dBfp16 = BatchnormBackward<bfloat16>;
 using IntegrationGpuBatchnormBackward3dFp16 = BatchnormBackward<half>;
+
+// 1D CalcStats layout tests
+using IntegrationGpuBatchnormBackwardCalcStats1dFp32 = BatchnormBackward<float, true>;
+using IntegrationGpuBatchnormBackwardCalcStats1dBfp16 = BatchnormBackward<bfloat16, true>;
+using IntegrationGpuBatchnormBackwardCalcStats1dFp16 = BatchnormBackward<half, true>;
 
 // 2D CalcStats layout tests
 using IntegrationGpuBatchnormBackwardCalcStats2dFp32 = BatchnormBackward<float, true>;
@@ -193,6 +203,58 @@ using IntegrationGpuBatchnormBackwardCalcStats3dBfp16 = BatchnormBackward<bfloat
 using IntegrationGpuBatchnormBackwardCalcStats3dFp16 = BatchnormBackward<half, true>;
 
 } // namespace
+
+// ============================================================================
+// 1D Tests - Standard (saved mean/inv_variance)
+// ============================================================================
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackward1dFp32);
+TEST_P(IntegrationGpuBatchnormBackward1dFp32, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackward1dFp32,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnBwd1dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackward1dFp32,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnBwd1dFullTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackward1dBfp16);
+TEST_P(IntegrationGpuBatchnormBackward1dBfp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackward1dBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnBwd1dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackward1dBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnBwd1dFullTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackward1dFp16);
+TEST_P(IntegrationGpuBatchnormBackward1dFp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackward1dFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnBwd1dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackward1dFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnBwd1dFullTestCases())));
 
 // ============================================================================
 // 2D Tests - Standard (saved mean/inv_variance)
@@ -282,6 +344,43 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormBackward3dFp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getBnBwd3dTestCases())));
+
+// ============================================================================
+// 1D Tests - CalcStats (no saved mean/inv_variance)
+// ============================================================================
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardCalcStats1dFp32);
+TEST_P(IntegrationGpuBatchnormBackwardCalcStats1dFp32, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardCalcStats1dFp32,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnBwd1dTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardCalcStats1dBfp16);
+TEST_P(IntegrationGpuBatchnormBackwardCalcStats1dBfp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardCalcStats1dBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnBwd1dTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardCalcStats1dFp16);
+TEST_P(IntegrationGpuBatchnormBackwardCalcStats1dFp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardCalcStats1dFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnBwd1dTestCases())));
 
 // ============================================================================
 // 2D Tests - CalcStats (no saved mean/inv_variance)

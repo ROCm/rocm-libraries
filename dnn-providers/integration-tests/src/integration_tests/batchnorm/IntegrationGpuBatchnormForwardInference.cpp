@@ -116,6 +116,11 @@ protected:
     }
 };
 
+// 1D layout tests (NCL, NLC)
+using IntegrationGpuBatchnormForwardInference1dFp32 = BatchnormForwardInference<float>;
+using IntegrationGpuBatchnormForwardInference1dBfp16 = BatchnormForwardInference<bfloat16>;
+using IntegrationGpuBatchnormForwardInference1dFp16 = BatchnormForwardInference<half>;
+
 // 2D layout tests (NCHW, NHWC)
 using IntegrationGpuBatchnormForwardInference2dFp32 = BatchnormForwardInference<float>;
 using IntegrationGpuBatchnormForwardInference2dBfp16 = BatchnormForwardInference<bfloat16>;
@@ -127,6 +132,58 @@ using IntegrationGpuBatchnormForwardInference3dBfp16 = BatchnormForwardInference
 using IntegrationGpuBatchnormForwardInference3dFp16 = BatchnormForwardInference<half>;
 
 } // namespace
+
+// ============================================================================
+// 1D Tests
+// ============================================================================
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference1dFp32);
+TEST_P(IntegrationGpuBatchnormForwardInference1dFp32, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInference1dFp32,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnFwdInference1dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInference1dFp32,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnFwdInference1dFullTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference1dBfp16);
+TEST_P(IntegrationGpuBatchnormForwardInference1dBfp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInference1dBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnFwdInference1dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInference1dBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnFwdInference1dFullTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference1dFp16);
+TEST_P(IntegrationGpuBatchnormForwardInference1dFp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInference1dFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnFwdInference1dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInference1dFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnFwdInference1dFullTestCases())));
 
 // ============================================================================
 // 2D Tests
