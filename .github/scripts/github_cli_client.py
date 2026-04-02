@@ -389,11 +389,11 @@ class GitHubCLIClient:
         """
         url = f"{self.api_url}/repos/{repo}/pulls/{pr_number}/update-branch"
         result = self._request_json(
-            "PUT", url, {"expected_head_sha": None},
+            "PUT", url, {},
             f"Failed to update branch for PR #{pr_number} in {repo}",
         )
-        # Empty dict with no error means 204/success, or result has "message"
-        if result.get("message") and "merge conflict" in result["message"].lower():
+        msg = result.get("message", "").lower()
+        if "merge conflict" in msg:
             return False
         return True
 

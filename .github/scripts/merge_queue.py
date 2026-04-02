@@ -276,10 +276,14 @@ def update_pr_branch(
     if not pr_data:
         return False
 
-    # Check if already up to date
-    mergeable_state = pr_data.get("mergeable_state", "")
-    if mergeable_state == "clean":
-        logger.info(f"PR #{pr_number} is already up to date")
+    # Check if already up to date — several mergeable_state values mean
+    # the branch doesn't need updating (clean, unstable, has_hooks, etc.)
+    behind = pr_data.get("mergeable_state", "") == "behind"
+    if not behind:
+        logger.info(
+            f"PR #{pr_number} branch does not need updating "
+            f"(mergeable_state={pr_data.get('mergeable_state')})"
+        )
         return True
 
     return client.update_pr_branch(repo, pr_number)
