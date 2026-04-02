@@ -12,7 +12,7 @@
 #include "engines/plans/RMSnorm/RMSnormApplicabilityChecks.hpp"
 #include "engines/plans/RMSnorm/RMSnormBwdPlan.hpp"
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::rmsnorm
 {
 
 RMSnormBwdPlanBuilder::RMSnormBwdPlanBuilder(const IKernelCompiler& kernelCompiler,
@@ -139,4 +139,4 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT> RMSnormBwdPlanBuilder::getCust
     return {};
 }
 
-} // hip_kernel_provider
+} // hip_kernel_provider::rmsnorm

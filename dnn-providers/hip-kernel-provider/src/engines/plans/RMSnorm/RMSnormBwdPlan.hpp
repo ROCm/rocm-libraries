@@ -15,8 +15,10 @@
 
 namespace hip_kernel_provider
 {
-
 class IKernelCompiler;
+
+namespace rmsnorm
+{
 
 class RMSnormBwdParams
 {
@@ -70,8 +72,6 @@ public:
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
 
-    static const unsigned LOCAL_SIZE = 256;
-
 private:
     RMSnormBwdParams _params;
 
@@ -80,4 +80,5 @@ private:
     std::unique_ptr<IRunnableKernel> _runnableKernel;
 };
 
+} // namespace hip_kernel_provider::rmsnorm
 } // namespace hip_kernel_provider

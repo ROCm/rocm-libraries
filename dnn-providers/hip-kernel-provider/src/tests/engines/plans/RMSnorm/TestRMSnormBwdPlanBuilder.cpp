@@ -17,6 +17,7 @@
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 
 using namespace hip_kernel_provider;
+using namespace hip_kernel_provider::rmsnorm;
 using hipdnn_test_sdk::utilities::MockEngineConfig;
 
 class TestRMSnormBwdPlanBuilder : public ::testing::Test

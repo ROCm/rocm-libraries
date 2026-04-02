@@ -12,7 +12,7 @@
 #include "hip/IKernelCompiler.hpp"
 #include "hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::rmsnorm
 {
 class RMSnormBwdPlanBuilder
     : public hipdnn_plugin_sdk::IPlanBuilder<HipKernelHandle, HipKernelSettings, HipKernelContext>
@@ -53,4 +53,4 @@ private:
     const IDevicePropertyProvider& _devicePropertyProvider;
 };
 
-} // hip_kernel_provider
+} // hip_kernel_provider::rmsnorm

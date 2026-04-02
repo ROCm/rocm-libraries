@@ -14,7 +14,7 @@
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::rmsnorm
 {
 
 RMSnormBwdParams::RMSnormBwdParams(
@@ -99,4 +99,4 @@ void RMSnormBwdPlan::execute([[maybe_unused]] const HipKernelHandle& handle,
                                                    "RMSNorm backward execute not yet implemented");
 }
 
-} // namespace hip_kernel_provider
+} // namespace hip_kernel_provider::rmsnorm

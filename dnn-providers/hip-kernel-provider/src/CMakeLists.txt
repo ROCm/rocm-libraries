@@ -23,9 +23,6 @@ add_library(
     engines/plans/RMSnorm/RMSnormBwdPlan.cpp
     engines/plans/RMSnorm/RMSnormBwdPlanBuilder.cpp
 )
-target_compile_definitions(
-    hip_kernel_provider_impl PRIVATE COMPONENT_NAME="hip_kernel_provider"
-)
 if(ENABLE_ASM_SDPA_ENGINE)
     add_subdirectory(engines/asm_sdpa_engine)
 endif()

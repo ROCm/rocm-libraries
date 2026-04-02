@@ -10,6 +10,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hip_kernel_provider;
+using namespace hip_kernel_provider::rmsnorm;
 
 // ============================================================================
 // RMSnormBwdParams - construction from valid graph data
