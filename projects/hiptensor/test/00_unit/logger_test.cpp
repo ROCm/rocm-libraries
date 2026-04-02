@@ -121,6 +121,12 @@ bool hiptensorLoggerSetFileTest()
     //Check size after API call
     fseek(fp, 0, SEEK_END);
     fileSizeAfter = ftell(fp);
+
+    // Redirect the logger away from fp before closing it. The logger holds mWriteStream = fp
+    // with mOwnsStream = false (caller-owned), so it will not close fp itself. If we close fp
+    // first, any subsequent logAPITrace call (e.g. at the start of the next test) would
+    // fprintf to a dangling pointer, causing intermittent heap corruption on Linux.
+    hiptensorLoggerSetFile(stdout);
     fclose(fp);
     std::remove(fname.c_str());
 
