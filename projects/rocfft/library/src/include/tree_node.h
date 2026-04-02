@@ -158,7 +158,7 @@ struct SchemeTree
     size_t                                   numKernels = 0;
     std::vector<std::unique_ptr<SchemeTree>> children;
 
-    SchemeTree() { }
+    SchemeTree() {}
     SchemeTree(ComputeScheme s)
         : curScheme(s)
     {
@@ -186,7 +186,7 @@ public:
         : comm_rank(comm_rank)
     {
     }
-    InternalTempBuffer(const InternalTempBuffer&)            = delete;
+    InternalTempBuffer(const InternalTempBuffer&) = delete;
     InternalTempBuffer& operator=(const InternalTempBuffer&) = delete;
     ~InternalTempBuffer()                                    = default;
 
@@ -242,8 +242,8 @@ private:
 class BufferPtr
 {
 public:
-    BufferPtr()                            = default;
-    BufferPtr(const BufferPtr&)            = default;
+    BufferPtr()                 = default;
+    BufferPtr(const BufferPtr&) = default;
     BufferPtr& operator=(const BufferPtr&) = default;
     ~BufferPtr()                           = default;
 
@@ -987,7 +987,7 @@ public:
 
     void BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) final {
     } // nothing to do in leaf node
-    void AssignParams_internal() final { } // nothing to do in leaf node
+    void AssignParams_internal() final {} // nothing to do in leaf node
     bool CreateLargeTwdTable();
 
     virtual size_t GetTwiddleTableLength();
@@ -1101,7 +1101,7 @@ struct MultiPlanItem
 {
     MultiPlanItem();
     virtual ~MultiPlanItem();
-    MultiPlanItem(const MultiPlanItem&)            = delete;
+    MultiPlanItem(const MultiPlanItem&) = delete;
     MultiPlanItem& operator=(const MultiPlanItem&) = delete;
 
     // multi-process requests
@@ -1116,7 +1116,8 @@ struct MultiPlanItem
                               void*                                   out_buffer[],
                               const rocfft_execution_info_internal&   info,
                               size_t                                  multiPlanIdx,
-                              const std::map<int, device_callback_t>& callbacks) = 0;
+                              const std::map<int, device_callback_t>& callbacks)
+        = 0;
 
     // wait for async operations to finish
     virtual void Wait() = 0;
