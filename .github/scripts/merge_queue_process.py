@@ -46,8 +46,23 @@ def main() -> None:
     client = GitHubCLIClient()
     repo = os.environ["REPO"]
 
-    # Track PRs already processed this cycle to avoid duplicate work when a
-    # PR appears at the head of multiple queues.
+    # Collect every unique queued PR across all queues so we can update
+    # status comments for *all* of them, not just the heads.
+    all_queued: dict[int, dict] = {}  # pr_number -> member dict
+    for queue in ALL_QUEUES:
+        for member in get_queue_members(client, repo, queue):
+            if member["pr_number"] not in all_queued and member["queues"]:
+                all_queued[member["pr_number"]] = member
+
+    # Update status comments for every queued PR
+    for pr_number, member in all_queued.items():
+        pr_queues = member["queues"]
+        _, blocking = is_at_front_of_all_queues(
+            client, repo, pr_number, pr_queues
+        )
+        update_status_comment(client, repo, pr_number, pr_queues, blocking)
+
+    # Now process heads: only the PR at the front of ALL its queues advances.
     processed: set[int] = set()
 
     for queue in ALL_QUEUES:
@@ -64,16 +79,12 @@ def main() -> None:
 
         pr_queues = head["queues"]
         if not pr_queues:
-            # Missing metadata — skip
             logger.warning(f"PR #{pr_number} has no queue metadata, skipping")
             continue
 
         is_ready, blocking = is_at_front_of_all_queues(
             client, repo, pr_number, pr_queues
         )
-
-        # Update the status comment on this PR every cycle
-        update_status_comment(client, repo, pr_number, pr_queues, blocking)
 
         if not is_ready:
             logger.info(
