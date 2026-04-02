@@ -1,0 +1,690 @@
+{
+  "metadata": {
+    "dtype": "fp16",
+    "layout": "rcr",
+    "num_kernels": 2,
+    "num_problems": 25,
+    "warmup": 2,
+    "repeat": 5,
+    "timestamp": "2026-03-19 23:24:02"
+  },
+  "problem_sizes": [
+    {
+      "m": 64,
+      "n": 64,
+      "k": 64
+    },
+    {
+      "m": 128,
+      "n": 128,
+      "k": 128
+    },
+    {
+      "m": 256,
+      "n": 256,
+      "k": 256
+    },
+    {
+      "m": 512,
+      "n": 512,
+      "k": 512
+    },
+    {
+      "m": 1024,
+      "n": 1024,
+      "k": 1024
+    },
+    {
+      "m": 2048,
+      "n": 2048,
+      "k": 2048
+    },
+    {
+      "m": 4096,
+      "n": 4096,
+      "k": 4096
+    },
+    {
+      "m": 8192,
+      "n": 8192,
+      "k": 8192
+    },
+    {
+      "m": 1,
+      "n": 4096,
+      "k": 4096
+    },
+    {
+      "m": 8,
+      "n": 4096,
+      "k": 4096
+    },
+    {
+      "m": 32,
+      "n": 4096,
+      "k": 4096
+    },
+    {
+      "m": 128,
+      "n": 4096,
+      "k": 4096
+    },
+    {
+      "m": 1,
+      "n": 4096,
+      "k": 11008
+    },
+    {
+      "m": 1,
+      "n": 11008,
+      "k": 4096
+    },
+    {
+      "m": 32,
+      "n": 4096,
+      "k": 11008
+    },
+    {
+      "m": 32,
+      "n": 11008,
+      "k": 4096
+    },
+    {
+      "m": 1,
+      "n": 8192,
+      "k": 8192
+    },
+    {
+      "m": 32,
+      "n": 8192,
+      "k": 8192
+    },
+    {
+      "m": 1,
+      "n": 8192,
+      "k": 28672
+    },
+    {
+      "m": 32,
+      "n": 8192,
+      "k": 28672
+    },
+    {
+      "m": 1024,
+      "n": 4096,
+      "k": 1024
+    },
+    {
+      "m": 4096,
+      "n": 1024,
+      "k": 4096
+    },
+    {
+      "m": 2048,
+      "n": 8192,
+      "k": 2048
+    },
+    {
+      "m": 256,
+      "n": 256,
+      "k": 8192
+    },
+    {
+      "m": 8192,
+      "n": 8192,
+      "k": 256
+    }
+  ],
+  "results": [
+    {
+      "kernel_config": {
+        "name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+        "dtype": "fp16",
+        "layout": "rcr",
+        "pipeline": "compv3",
+        "epilogue": "cshuffle",
+        "scheduler": "intrawave",
+        "pad_m": false,
+        "pad_n": false,
+        "pad_k": false,
+        "persistent": false,
+        "tile_m": 64,
+        "tile_n": 64,
+        "tile_k": 64,
+        "warp_m": 4,
+        "warp_n": 1,
+        "warp_k": 1,
+        "warp_tile_m": 16,
+        "warp_tile_n": 16,
+        "warp_tile_k": 16
+      },
+      "benchmarks": [
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 64,
+          "n": 64,
+          "k": 64,
+          "avg_time_ms": 0.0,
+          "tflops": 0.14,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 128,
+          "n": 128,
+          "k": 128,
+          "avg_time_ms": 0.0,
+          "tflops": 0.99,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 256,
+          "n": 256,
+          "k": 256,
+          "avg_time_ms": 0.01,
+          "tflops": 6.65,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 512,
+          "n": 512,
+          "k": 512,
+          "avg_time_ms": 0.01,
+          "tflops": 40.09,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 1024,
+          "n": 1024,
+          "k": 1024,
+          "avg_time_ms": 0.01,
+          "tflops": 203.98,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 2048,
+          "n": 2048,
+          "k": 2048,
+          "avg_time_ms": 0.04,
+          "tflops": 387.7,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 4096,
+          "n": 4096,
+          "k": 4096,
+          "avg_time_ms": 0.32,
+          "tflops": 423.79,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 8192,
+          "n": 8192,
+          "k": 8192,
+          "avg_time_ms": 2.49,
+          "tflops": 440.93,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 1,
+          "n": 4096,
+          "k": 4096,
+          "avg_time_ms": 0.03,
+          "tflops": 1.17,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 8,
+          "n": 4096,
+          "k": 4096,
+          "avg_time_ms": 0.03,
+          "tflops": 9.27,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 32,
+          "n": 4096,
+          "k": 4096,
+          "avg_time_ms": 0.03,
+          "tflops": 35.88,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 128,
+          "n": 4096,
+          "k": 4096,
+          "avg_time_ms": 0.03,
+          "tflops": 143.36,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 1,
+          "n": 4096,
+          "k": 11008,
+          "avg_time_ms": 0.07,
+          "tflops": 1.27,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 1,
+          "n": 11008,
+          "k": 4096,
+          "avg_time_ms": 0.03,
+          "tflops": 3.07,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 32,
+          "n": 4096,
+          "k": 11008,
+          "avg_time_ms": 0.07,
+          "tflops": 40.36,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 32,
+          "n": 11008,
+          "k": 4096,
+          "avg_time_ms": 0.03,
+          "tflops": 97.17,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 1,
+          "n": 8192,
+          "k": 8192,
+          "avg_time_ms": 0.05,
+          "tflops": 2.47,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 32,
+          "n": 8192,
+          "k": 8192,
+          "avg_time_ms": 0.06,
+          "tflops": 78.03,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 1,
+          "n": 8192,
+          "k": 28672,
+          "avg_time_ms": 0.25,
+          "tflops": 1.86,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 32,
+          "n": 8192,
+          "k": 28672,
+          "avg_time_ms": 0.25,
+          "tflops": 58.98,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 1024,
+          "n": 4096,
+          "k": 1024,
+          "avg_time_ms": 0.03,
+          "tflops": 335.54,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 4096,
+          "n": 1024,
+          "k": 4096,
+          "avg_time_ms": 0.08,
+          "tflops": 416.46,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 2048,
+          "n": 8192,
+          "k": 2048,
+          "avg_time_ms": 0.15,
+          "tflops": 444.34,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 256,
+          "n": 256,
+          "k": 8192,
+          "avg_time_ms": 0.05,
+          "tflops": 20.01,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_64x64x64_4x1x1_16x16x16",
+          "m": 8192,
+          "n": 8192,
+          "k": 256,
+          "avg_time_ms": 0.1,
+          "tflops": 337.25,
+          "is_valid": true,
+          "error": null
+        }
+      ]
+    },
+    {
+      "kernel_config": {
+        "name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+        "dtype": "fp16",
+        "layout": "rcr",
+        "pipeline": "compv3",
+        "epilogue": "cshuffle",
+        "scheduler": "intrawave",
+        "pad_m": false,
+        "pad_n": false,
+        "pad_k": false,
+        "persistent": true,
+        "tile_m": 64,
+        "tile_n": 64,
+        "tile_k": 64,
+        "warp_m": 4,
+        "warp_n": 1,
+        "warp_k": 1,
+        "warp_tile_m": 16,
+        "warp_tile_n": 16,
+        "warp_tile_k": 16
+      },
+      "benchmarks": [
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 64,
+          "n": 64,
+          "k": 64,
+          "avg_time_ms": 0.0,
+          "tflops": 0.14,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 128,
+          "n": 128,
+          "k": 128,
+          "avg_time_ms": 0.0,
+          "tflops": 0.97,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 256,
+          "n": 256,
+          "k": 256,
+          "avg_time_ms": 0.01,
+          "tflops": 6.39,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 512,
+          "n": 512,
+          "k": 512,
+          "avg_time_ms": 0.01,
+          "tflops": 38.66,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 1024,
+          "n": 1024,
+          "k": 1024,
+          "avg_time_ms": 0.01,
+          "tflops": 191.06,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 2048,
+          "n": 2048,
+          "k": 2048,
+          "avg_time_ms": 0.04,
+          "tflops": 385.48,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 4096,
+          "n": 4096,
+          "k": 4096,
+          "avg_time_ms": 0.36,
+          "tflops": 387.03,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 8192,
+          "n": 8192,
+          "k": 8192,
+          "avg_time_ms": 2.73,
+          "tflops": 402.29,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 1,
+          "n": 4096,
+          "k": 4096,
+          "avg_time_ms": 0.03,
+          "tflops": 1.17,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 8,
+          "n": 4096,
+          "k": 4096,
+          "avg_time_ms": 0.03,
+          "tflops": 9.27,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 32,
+          "n": 4096,
+          "k": 4096,
+          "avg_time_ms": 0.03,
+          "tflops": 37.19,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 128,
+          "n": 4096,
+          "k": 4096,
+          "avg_time_ms": 0.03,
+          "tflops": 141.36,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 1,
+          "n": 4096,
+          "k": 11008,
+          "avg_time_ms": 0.07,
+          "tflops": 1.27,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 1,
+          "n": 11008,
+          "k": 4096,
+          "avg_time_ms": 0.03,
+          "tflops": 3.03,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 32,
+          "n": 4096,
+          "k": 11008,
+          "avg_time_ms": 0.07,
+          "tflops": 40.33,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 32,
+          "n": 11008,
+          "k": 4096,
+          "avg_time_ms": 0.03,
+          "tflops": 95.45,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 1,
+          "n": 8192,
+          "k": 8192,
+          "avg_time_ms": 0.05,
+          "tflops": 2.44,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 32,
+          "n": 8192,
+          "k": 8192,
+          "avg_time_ms": 0.06,
+          "tflops": 77.33,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 1,
+          "n": 8192,
+          "k": 28672,
+          "avg_time_ms": 0.25,
+          "tflops": 1.85,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 32,
+          "n": 8192,
+          "k": 28672,
+          "avg_time_ms": 0.26,
+          "tflops": 58.74,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 1024,
+          "n": 4096,
+          "k": 1024,
+          "avg_time_ms": 0.03,
+          "tflops": 337.55,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 4096,
+          "n": 1024,
+          "k": 4096,
+          "avg_time_ms": 0.08,
+          "tflops": 415.7,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 2048,
+          "n": 8192,
+          "k": 2048,
+          "avg_time_ms": 0.17,
+          "tflops": 398.62,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 256,
+          "n": 256,
+          "k": 8192,
+          "avg_time_ms": 0.05,
+          "tflops": 19.95,
+          "is_valid": true,
+          "error": null
+        },
+        {
+          "kernel_name": "gemm_universal_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_True_64x64x64_4x1x1_16x16x16",
+          "m": 8192,
+          "n": 8192,
+          "k": 256,
+          "avg_time_ms": 0.12,
+          "tflops": 279.09,
+          "is_valid": true,
+          "error": null
+        }
+      ]
+    }
+  ]
+}
