@@ -276,7 +276,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: true
-    UseCustomMainLoopSchedule: -1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UsePLRPack: 0
     UseSgprForGRO: -1
@@ -506,7 +506,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: true
-    UseCustomMainLoopSchedule: -1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UsePLRPack: 0
     UseSgprForGRO: -1
@@ -736,7 +736,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: true
-    UseCustomMainLoopSchedule: -1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UsePLRPack: 0
     UseSgprForGRO: -1
@@ -966,7 +966,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: true
-    UseCustomMainLoopSchedule: -1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UsePLRPack: 0
     UseSgprForGRO: -1
