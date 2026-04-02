@@ -18,54 +18,42 @@
         },
         {
             "name": "mxdatagenerator",
-            "inherits": [
-                "default:release"
-            ],
+            "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator"
             }
         },
         {
             "name": "rocroller",
-            "inherits": [
-                "default:release"
-            ],
+            "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator;rocroller"
             }
         },
         {
             "name": "origami",
-            "inherits": [
-                "default:release"
-            ],
+            "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "origami"
             }
         },
         {
             "name": "hipblaslt",
-            "inherits": [
-                "default:release"
-            ],
+            "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator;rocroller;origami;hipblas-common;hipblaslt"
             }
         },
         {
             "name": "rocprim",
-            "inherits": [
-                "default:release"
-            ],
+            "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "rocprim"
             }
         },
         {
             "name": "rocrand",
-            "inherits": [
-                "default:release"
-            ],
+            "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "rocrand"
             }
@@ -73,9 +61,7 @@
         {
             "name": "hipdnn",
             "description": "Build hipdnn only",
-            "inherits": [
-                "default:release"
-            ],
+            "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn"
             }
@@ -83,9 +69,7 @@
         {
             "name": "hipdnn-integration-tests",
             "description": "Build hipdnn and hipdnn-integration-tests",
-            "inherits": [
-                "default:release"
-            ],
+            "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests"
             }
@@ -93,9 +77,7 @@
         {
             "name": "miopen-provider",
             "description": "Build hipdnn, miopen-provider and integration tests",
-            "inherits": [
-                "default:release"
-            ],
+            "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider"
             }
@@ -103,9 +85,7 @@
         {
             "name": "hipblaslt-provider",
             "description": "Build hipdnn and hipblaslt-provider",
-            "inherits": [
-                "default:release"
-            ],
+            "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipblaslt-provider"
             }
