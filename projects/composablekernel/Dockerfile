@@ -8,6 +8,9 @@ ARG compiler_version=""
 ARG compiler_commit=""
 ENV APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=DontWarn
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH=$PATH:/opt/rocm/bin
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib
+ENV HIP_PLATFORM=amd
 
 # Add rocm repository
 RUN set -xe && \
