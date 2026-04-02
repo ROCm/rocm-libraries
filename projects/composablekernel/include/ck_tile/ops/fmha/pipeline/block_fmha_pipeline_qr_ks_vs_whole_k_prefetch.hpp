@@ -34,6 +34,7 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
     static constexpr bool kQLoadOnce = true;
     static_assert(kQLoadOnce == Policy::QLoadOnce);
+    static_assert(!Problem::kUseTrLoad, "This pipeline does not use trload!");
 
     static constexpr bool kUseN0Loop       = true;
     static constexpr bool kIgnoreFastExp2  = true;
@@ -41,9 +42,10 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
 
-    static constexpr index_t kM0           = BlockFmhaShape::kM0;
-    static constexpr index_t kN0           = BlockFmhaShape::kN0;
-    static constexpr index_t kN0Sub        = BlockFmhaShape::kN0Sub;
+    static constexpr index_t kM0 = BlockFmhaShape::kM0;
+    static constexpr index_t kN0 = BlockFmhaShape::kN0;
+    static constexpr index_t kN0Sub =
+        BlockFmhaShape::kK0; // subdivision of kN0 used in N0-loop, same value as kK0
     static constexpr index_t kN1           = BlockFmhaShape::kN1;
     static constexpr index_t kK1           = BlockFmhaShape::kK1;
     static constexpr index_t kQKHeaddim    = BlockFmhaShape::kQKHeaddim;

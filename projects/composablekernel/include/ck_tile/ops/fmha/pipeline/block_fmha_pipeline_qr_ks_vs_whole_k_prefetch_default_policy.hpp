@@ -758,6 +758,7 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSizeDropout()
     {
+        static_assert(!Problem::kHasDropout, "This pipeline does not support dropout!");
         return 0;
     };
 

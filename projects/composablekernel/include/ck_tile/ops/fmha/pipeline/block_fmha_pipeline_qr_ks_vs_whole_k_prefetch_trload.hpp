@@ -41,9 +41,10 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchTrLoad
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
 
-    static constexpr index_t kM0           = BlockFmhaShape::kM0;
-    static constexpr index_t kN0           = BlockFmhaShape::kN0;
-    static constexpr index_t kN0Sub        = BlockFmhaShape::kN0Sub;
+    static constexpr index_t kM0 = BlockFmhaShape::kM0;
+    static constexpr index_t kN0 = BlockFmhaShape::kN0;
+    static constexpr index_t kN0Sub =
+        BlockFmhaShape::kK0; // subdivision of kN0 used in N0-loop, same value as kK0
     static constexpr index_t kN1           = BlockFmhaShape::kN1;
     static constexpr index_t kK1           = BlockFmhaShape::kK1;
     static constexpr index_t kQKHeaddim    = BlockFmhaShape::kQKHeaddim;
