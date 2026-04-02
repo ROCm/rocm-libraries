@@ -218,7 +218,7 @@ namespace rocRoller
                 co_yield m_context->brancher()->branchIfNonZero(
                     exitLabel,
                     EXECZ,
-                    concatenate("If EXECZ is set(1), jump to ", elseLabel->toString()));
+                    concatenate("If EXECZ is set(1), jump to ", exitLabel->toString()));
                 co_yield generateFn(elseBody);
             }
 
