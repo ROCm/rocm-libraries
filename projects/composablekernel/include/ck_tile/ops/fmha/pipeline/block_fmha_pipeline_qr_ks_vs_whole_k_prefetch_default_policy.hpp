@@ -27,28 +27,7 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetNumPrefetchV()
     {
-        constexpr index_t n0_loops = Problem::BlockFmhaShape::kN0 / Problem::BlockFmhaShape::kN0Sub;
-        constexpr index_t k1_loops = Problem::BlockFmhaShape::kN0 / Problem::BlockFmhaShape::kK1;
-
-        if constexpr(Problem::kUseTrLoad)
-        {
-            // kM0 is 64, kN0 is 128, prefetch all k_tiles
-            if constexpr(IsPreloadWholeNextIterationK<Problem>())
-            {
-                if constexpr(n0_loops >= 4 && k1_loops >= 6)
-                    return 2;
-                return 2;
-            }
-            else // kM0 is 128, kN0 is 64, prefetch one k_tile
-            {
-                // kN0 == 64, try to prefetch more v_tiles
-                return 2;
-            };
-        }
-        else
-        {
-            return 2;
-        };
+        return 2;
     };
 
     template <typename Problem>
@@ -134,7 +113,7 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
         using KDataType = remove_cvref_t<typename Problem::KDataType>;
 
         constexpr index_t kBlockSize = Problem::kBlockSize;
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0Sub;
+        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kK0;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kQKHeaddim;
 
         return detail::
@@ -194,7 +173,7 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetKSingleSmemElementSpaceSize()
     {
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0Sub;
+        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kK0;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kQKHeaddim;
         constexpr index_t kKPack     = GetSmemKPackK<Problem>();
         constexpr index_t kKVector   = GetAlignmentK<Problem>();
@@ -249,7 +228,7 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
     CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsBlockDescriptor()
     {
         constexpr index_t NumKLdsBuffers = GetNumKVLdsBuffers<Problem>();
-        constexpr index_t kNPerBlock     = Problem::BlockFmhaShape::kN0Sub;
+        constexpr index_t kNPerBlock     = Problem::BlockFmhaShape::kK0;
         constexpr index_t kKPerBlock     = Problem::BlockFmhaShape::kQKHeaddim;
         constexpr index_t kKPack         = GetSmemKPackK<Problem>();
         constexpr index_t kKVector       = GetAlignmentK<Problem>();
@@ -385,7 +364,7 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
     CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
     {
         constexpr index_t kBlockSize = Problem::kBlockSize;
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0Sub;
+        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kK0;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kQKHeaddim;
 
         constexpr index_t kKVector = GetAlignmentK<Problem>();
@@ -609,7 +588,7 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
                              typename Problem::SaccDataType,
                              Problem::kNumGemm0Warps * get_warp_size(),
                              TileGemmShape<sequence<Problem::BlockFmhaShape::kM0,
-                                                    Problem::BlockFmhaShape::kN0Sub,
+                                                    Problem::BlockFmhaShape::kK0,
                                                     Problem::BlockFmhaShape::kQKHeaddim>,
                                            typename Problem::BlockFmhaShape::Gemm0BlockWarps,
                                            typename Problem::BlockFmhaShape::Gemm0WarpTile>>;
@@ -729,8 +708,8 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
         using WarpGemm = remove_cvref_t<decltype(warp_gemm)>;
 
         using BlockGemmPolicy =
-            BlockGemmARegBSmemCRegV2CustomPolicy<typename Problem::QDataType,
-                                                 typename Problem::KDataType,
+            BlockGemmARegBSmemCRegV2CustomPolicy<typename Problem::PDataType,
+                                                 typename Problem::VDataType,
                                                  typename Problem::OaccDataType,
                                                  typename Problem::BlockFmhaShape::Gemm1BlockWarps,
                                                  WarpGemm>;
