@@ -105,7 +105,7 @@ std::vector<std::string>& GetLogBuffer()
     return log_buffer;
 }
 
-bool IsLogBufferOn() { return GetBufferSize() != 0; }
+bool IsLogBufferOn() { return GetBufferSize() != 0 && !IsLogging(LoggingLevel::Info2); }
 
 void ClearLogBuffer()
 {
@@ -140,7 +140,7 @@ void LogXQCustomImpl(const LoggingLevel level,
         // Also buffer if buffer is enabled.
         if(IsLogBufferOn())
         {
-            if(!IsLogging(LoggingLevel::Info2, disableQuieting) && level < LoggingLevel::Trace)
+            if(level < LoggingLevel::Trace)
             {
                 BufferLog(miopen_log_ss.str());
             }
@@ -153,7 +153,7 @@ void LogXQCustomImpl(const LoggingLevel level,
         // Path 2: Logging disabled, buffer-only - use minimal prefix.
         if(IsLogBufferOn())
         {
-            if(!IsLogging(LoggingLevel::Info2, disableQuieting) && level < LoggingLevel::Trace)
+            if(level < LoggingLevel::Trace)
             {
                 auto& miopen_log_ss = GetThreadLocalLogStream();
                 miopen_log_ss << LoggingPrefixMinimal() << category << " [" << fn_name << "] "
