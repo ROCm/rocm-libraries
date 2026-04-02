@@ -1044,9 +1044,6 @@ if(NOT WIN32 AND NOT APPLE)
     target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
     set_target_properties(MIOpen PROPERTIES CXX_VISIBILITY_PRESET hidden)
     set_target_properties(MIOpen PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
-    # fin_interface.cpp uses explicit template instantiation with MIOPEN_INTERNALS_EXPORT,
-    # which requires -fno-visibility-inlines-hidden to actually export the symbols.
-    set_source_files_properties(fin/fin_interface.cpp PROPERTIES COMPILE_FLAGS "-fno-visibility-inlines-hidden")
 endif()
 #######################################
 if(MIOPEN_ENABLE_SQLITE)
