@@ -7,11 +7,9 @@
 #define DEBUG_ONLY(x)
 #endif
 
-//#define VERSION_PREFIX_MAJOR @VERSION_MAJOR_AMDHIP@
-//#define VERSION_PREFIX_MINOR @VERSION_MINOR_AMDHIP@
-
-
-
+#define ROCRAND_VERSION_MAJOR @rocRAND_VERSION_MAJOR@
+#define ROCRAND_VERSION_MINOR @rocRAND_VERSION_MINOR@
+#define ROCRAND_VERSION_PATCH @rocRAND_VERSION_PATCH@
 
 #define APSTUDIO_READONLY_SYMBOLS
 /////////////////////////////////////////////////////////////////////////////
@@ -63,7 +61,7 @@ VALUE "CompanyName", "Advanced Micro Devices Inc.\0"
 //VALUE "FileDescription", AMD_PLATFORM_NAME " amdhip64 " XSTR(VERSION_PREFIX_MAJOR) "." XSTR(VERSION_PREFIX_MINOR) " Runtime\0"
 VALUE "FileDescription", "file description\0"
 //VALUE "FileVersion", "10.0." XSTR(AMD_PLATFORM_BUILD_NUMBER) "." XSTR(AMD_PLATFORM_REVISION_NUMBER)
-VALUE "FileVersion", "10.0.123.456"
+VALUE "FileVersion", XSTR(ROCRAND_VERSION_MAJOR) "." XSTR(ROCRAND_VERSION_MINOR) "." XSTR(ROCRAND_VERSION_PATCH) 
 VALUE "InternalName", "rocrand"
 VALUE "LegalCopyright", "Copyright (C) 2026 Advanced Micro Devices Inc.\0"
 VALUE "OriginalFilename", "rocrand.dll"
