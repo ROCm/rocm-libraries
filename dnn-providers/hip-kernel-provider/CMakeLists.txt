@@ -37,6 +37,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib
 )
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
+option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
@@ -187,3 +188,9 @@ install(TARGETS hip_kernel_provider EXPORT hip-kernel-provider
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+
+if(ENABLE_ASM_SDPA_ENGINE)
+    install(DIRECTORY src/engines/asm_sdpa_engine/asm/asm_kernels/
+            DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels
+            FILES_MATCHING PATTERN "*.co")
+endif()
