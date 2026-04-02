@@ -399,7 +399,7 @@ protected:
     void verify() // verify if the output tensors are same
     {
         auto error = miopen::rms_range(tensC_ocl, tensC_hip);
-        EXPECT_TRUE(miopen::float_equal(error, 0))
+        EXPECT_TRUE(miopen::float_equal_sentinel(error, 0))
             << "GPU outputs do not match each other. Error: " << error;
     }
 

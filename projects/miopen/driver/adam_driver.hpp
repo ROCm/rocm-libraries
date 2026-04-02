@@ -96,7 +96,7 @@ void mloAdamRunHost(miopenTensorDescriptor_t paramDesc,
         if(is_amp)
             grad *= inv_grad_scale;
 
-        if(!miopen::float_equal(weight_decay, 0))
+        if(!miopen::float_equal_sentinel(weight_decay, 0))
         {
             if(adamw)
                 param *= one_minus_lr_by_weight_decay;

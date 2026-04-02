@@ -148,7 +148,7 @@ bool equal_values(T const& lhs, T const& rhs)
 template <class T, std::enable_if_t<std::is_floating_point_v<T>, bool> = true>
 bool equal_values(T const& lhs, T const& rhs)
 {
-    return miopen::float_equal(lhs, rhs);
+    return miopen::float_equal_sentinel(lhs, rhs);
 }
 
 template <class R1>

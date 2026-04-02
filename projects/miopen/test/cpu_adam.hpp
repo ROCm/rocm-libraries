@@ -83,7 +83,7 @@ void cpu_adam(tensor<T1>& params,
             const float bias_correction1 = 1.0 - pow(beta1, step);
             const float bias_correction2 = 1.0 - pow(beta2, step);
 
-            if(!miopen::float_equal(weight_decay, 0.f))
+            if(!miopen::float_equal_sentinel(weight_decay, 0.f))
             {
                 if(adamw)
                     param *= one_minus_lr_by_weight_decay;
