@@ -42,6 +42,18 @@ std::shared_ptr<EnginePluginManager> persistentPmPtr;
 
 } // namespace
 
+void EnginePluginResourceManager::setPluginLogLevel(hipdnnSeverity_t level)
+{
+    const std::lock_guard<std::mutex> lock(pluginMutex);
+    if(auto pm = pmPtr.lock())
+    {
+        for(const auto& plugin : pm->getPlugins())
+        {
+            plugin->setLogLevel(level);
+        }
+    }
+}
+
 void EnginePluginResourceManager::setPluginPaths(
     const std::vector<std::filesystem::path>& pluginPaths,
     hipdnnPluginLoadingMode_ext_t loadingMode)
