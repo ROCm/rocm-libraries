@@ -84,6 +84,7 @@
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
@@ -115,6 +116,7 @@
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
 #include <hipdnn_frontend/node/ResampleFwdNode.hpp>
@@ -2275,6 +2277,52 @@ public:
             std::make_shared<RMSNormNode>(std::move(attributes), graph_attributes));
 
         return {y, invRmsOut};
+    }
+
+    /** @brief RMS normalization backward pass
+     *
+     * Computes gradients with respect to input, scale, and optionally bias.
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. output, same shape as x)
+     * @param x Original input from forward pass
+     * @param scale Per-channel scale (gamma)
+     * @param attributes Configuration; optionally set saved inv_rms from
+     *        the forward pass via set_inv_rms()
+     * @return Array of 3 output tensors:
+     *         - [0] dx: Gradient w.r.t. input (same shape as x)
+     *         - [1] dscale: Per-channel gradient w.r.t. scale
+     *         - [2] dbias: Per-channel gradient w.r.t. bias (nullptr if not requested)
+     *
+     * @see hipdnn_frontend::graph::RMSNormBackwardAttributes
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 3>
+        rmsnorm_backward(std::shared_ptr<TensorAttributes> dy,
+                         std::shared_ptr<TensorAttributes> x,
+                         std::shared_ptr<TensorAttributes> scale,
+                         RMSNormBackwardAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("RMSNormBackward_" + std::to_string(_sub_nodes.size()));
+        }
+
+        auto dx = outputTensor(attributes.get_name() + "::DX");
+        auto dscale = outputTensor(attributes.get_name() + "::DSCALE");
+        auto dbias = outputTensor(attributes.get_name() + "::DBIAS");
+
+        attributes.set_dy(std::move(dy));
+        attributes.set_x(std::move(x));
+        attributes.set_scale(std::move(scale));
+        attributes.set_dx(dx);
+        attributes.set_dscale(dscale);
+        attributes.set_dbias(dbias);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<RMSNormBackwardNode>(std::move(attributes), graph_attributes));
+
+        return {dx, dscale, dbias};
     }
 
     /** @brief Block-scale dequantization
