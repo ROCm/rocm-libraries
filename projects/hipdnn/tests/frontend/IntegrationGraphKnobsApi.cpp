@@ -65,17 +65,22 @@ protected:
     Graph createAndBuildSimpleGraph()
     {
         Graph graph;
-        graph.set_compute_data_type(DataType::FLOAT).set_io_data_type(DataType::FLOAT);
+        graph.set_compute_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_io_data_type(DataType::FLOAT);
 
         auto x = std::make_shared<TensorAttributes>();
-        x->set_name("X").set_dim({2, 3, 4, 4});
+        x->set_name("X").set_dim({2, 3, 4, 4}).set_stride({48, 16, 4, 1});
 
         PointwiseAttributes attrs;
         attrs.set_mode(PointwiseMode::RELU_FWD);
         auto y = graph.pointwise(x, attrs);
         y->set_name("Y");
 
-        auto result = graph.build_operation_graph(_handle);
+        auto result = graph.validate();
+        EXPECT_TRUE(result.is_good()) << result.get_message();
+
+        result = graph.build_operation_graph(_handle);
         EXPECT_TRUE(result.is_good()) << result.get_message();
 
         return graph;

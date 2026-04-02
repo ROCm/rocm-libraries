@@ -38,6 +38,7 @@ add_executable(
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationGraphKnobSettingsDescriptorLowering.cpp
     IntegrationGraphKnobsDescriptorLifting.cpp
     IntegrationGraphLifting.cpp
     IntegrationGraphSupportCheck.cpp
@@ -70,6 +71,7 @@ target_link_libraries(
     hipdnn_test_sdk
     hipdnn_backend
     hip::host
+    ${CMAKE_DL_LIBS}
 )
 
 target_include_directories(hipdnn_public_frontend_tests PRIVATE ${HIPDNN_TEST_INCLUDE_DIRS})

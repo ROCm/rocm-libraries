@@ -189,21 +189,13 @@ private:
         return s_useDescriptorApi;
     }
 
-    /// Apply validated knob settings to the engine config descriptor, using
-    /// either the descriptor-based or FlatBuffer serialization path depending
-    /// on the HIPDNN_USE_DESCRIPTOR_API feature flag.
+    /// Apply validated knob settings to the engine config descriptor using
+    /// the FlatBuffer serialization path.
     Error applyKnobSettingsToEngineConfig(const std::vector<KnobSetting>& validatedSettings)
     {
         if(validatedSettings.empty())
         {
             return {ErrorCode::OK, ""};
-        }
-
-        if(useDescriptorApi())
-        {
-            HIPDNN_FE_LOG_INFO("Using descriptor-based API for knob settings");
-            return detail::applyKnobSettingsViaDescriptors(_engineConfigDesc->get(),
-                                                           validatedSettings);
         }
 
         // FlatBuffer serialization path (existing default)
@@ -236,6 +228,60 @@ private:
                                              static_cast<int64_t>(flatbufferDataArray.size()),
                                              flatbufferDataArray.data()),
                                          "Failed to set knob settings on engine config.");
+
+        return {ErrorCode::OK, ""};
+    }
+
+    Error validateAndFilterKnobSettings(const std::vector<KnobSetting>& settings,
+                                        const std::unordered_map<KnobType_t, Knob>& existingKnobs,
+                                        std::vector<KnobSetting>& validatedSettings)
+    {
+        validatedSettings.clear();
+        validatedSettings.reserve(settings.size());
+
+        for(const auto& setting : settings)
+        {
+            auto knobIt = existingKnobs.find(setting.knobId());
+            if(knobIt == existingKnobs.end())
+            {
+                HIPDNN_FE_LOG_WARN("Ignoring knob " << setting.knobId()
+                                                    << " when creating execution plan for graph "
+                                                    << graph_attributes.get_name()
+                                                    << ".  Engine doesn't support chosen knob.");
+                continue;
+            }
+
+            const auto& knob = knobIt->second;
+
+            if(knob.isDeprecated())
+            {
+                HIPDNN_FE_LOG_WARN("Knob " << knob.knobId() << " has been marked as deprecated.");
+            }
+
+            HIPDNN_CHECK_ERROR(knob.validate(setting));
+
+            validatedSettings.emplace_back(setting);
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    Error finalizeExecutionPlanDescriptor()
+    {
+        // Finalize engine config after knobs have been set
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendFinalize(_engineConfigDesc->get()),
+            "Failed to finalize engine config descriptor");
+
+        // Create execution plan descriptor
+        _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+            HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+
+        if(!_executionPlanDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Failed to create backend execution descriptor."};
+        }
 
         return {ErrorCode::OK, ""};
     }
@@ -979,6 +1025,55 @@ protected:
         return {};
     }
 
+    /// Get knobs for a specific engine, indexed by knob type, always using
+    /// the descriptor-based C-API path.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error get_knob_lookup_for_engine_via_descriptors(
+        int64_t engineId, std::unordered_map<KnobType_t, Knob>& knobs) const
+    {
+        knobs.clear();
+
+        std::vector<Knob> knobVector;
+        HIPDNN_CHECK_ERROR(get_knobs_for_engine_via_descriptors(engineId, knobVector));
+
+        for(auto& knob : knobVector)
+        {
+            knobs.try_emplace(knob.knobId(), std::move(knob));
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /// Create an execution plan with specific engine and knob settings,
+    /// always using the descriptor-based path. Exposed as protected so tests
+    /// can exercise this path directly without relying on the
+    /// HIPDNN_USE_DESCRIPTOR_API feature flag.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error create_execution_plan_ext_via_descriptors(int64_t engineId,
+                                                    const std::vector<KnobSetting>& settings)
+    {
+        HIPDNN_FE_LOG_INFO("Creating execution plans for graph " << graph_attributes.get_name());
+
+        if(!_graphDesc || !_graphDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Graph has not been built, build the operation graph first. Cannot create "
+                    "execution plan."};
+        }
+
+        std::unordered_map<KnobType_t, Knob> existingKnobs;
+        HIPDNN_CHECK_ERROR(get_knob_lookup_for_engine_via_descriptors(engineId, existingKnobs));
+        HIPDNN_CHECK_ERROR(initializeEngineConfig(engineId));
+
+        std::vector<KnobSetting> validatedSettings;
+        HIPDNN_CHECK_ERROR(
+            validateAndFilterKnobSettings(settings, existingKnobs, validatedSettings));
+        HIPDNN_CHECK_ERROR(
+            detail::applyKnobSettingsViaDescriptors(_engineConfigDesc->get(), validatedSettings));
+
+        return finalizeExecutionPlanDescriptor();
+    }
+
 public:
     /**
      * @brief Get available configuration knobs for a specific engine
@@ -1131,6 +1226,11 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plan_ext(int64_t engineId, const std::vector<KnobSetting>& settings)
     {
+        if(useDescriptorApi())
+        {
+            return create_execution_plan_ext_via_descriptors(engineId, settings);
+        }
+
         HIPDNN_FE_LOG_INFO("Creating execution plans for graph " << graph_attributes.get_name());
 
         if(!_graphDesc || !_graphDesc->valid())
@@ -1145,48 +1245,11 @@ public:
         HIPDNN_CHECK_ERROR(initializeEngineConfig(engineId));
 
         std::vector<KnobSetting> validatedSettings;
-        for(const auto& setting : settings)
-        {
-            auto knobIt = existingKnobs.find(setting.knobId());
-            if(knobIt == existingKnobs.end())
-            {
-                HIPDNN_FE_LOG_WARN("Ignoring knob " << setting.knobId()
-                                                    << " when creating execution plan for graph "
-                                                    << graph_attributes.get_name()
-                                                    << ".  Engine doesn't support chosen knob.");
-                continue;
-            }
-
-            const auto& knob = knobIt->second;
-
-            if(knob.isDeprecated())
-            {
-                HIPDNN_FE_LOG_WARN("Knob " << knob.knobId() << " has been marked as deprecated.");
-            }
-
-            HIPDNN_CHECK_ERROR(knob.validate(setting));
-
-            validatedSettings.emplace_back(setting);
-        }
-
+        HIPDNN_CHECK_ERROR(
+            validateAndFilterKnobSettings(settings, existingKnobs, validatedSettings));
         HIPDNN_CHECK_ERROR(applyKnobSettingsToEngineConfig(validatedSettings));
 
-        // Finalize engine config after knobs have been set
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            detail::hipdnnBackend()->backendFinalize(_engineConfigDesc->get()),
-            "Failed to finalize engine config descriptor");
-
-        // Create execution plan descriptor
-        _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
-            HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
-
-        if(!_executionPlanDesc->valid())
-        {
-            return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    "Failed to create backend execution descriptor."};
-        }
-
-        return {ErrorCode::OK, ""};
+        return finalizeExecutionPlanDescriptor();
     }
 
     /**
