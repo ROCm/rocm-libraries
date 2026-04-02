@@ -22,11 +22,52 @@
 #
 ################################################################################
 
+import contextlib
+import os
 import pytest
+import shutil
+import subprocess
+import sys
 
-from Tensile import Tensile
-from config_helpers import findConfigs
+from artifact_helpers import compress_output, extract_artifact
 
-@pytest.mark.parametrize("config", findConfigs())
-def test_config(tensile_args, config, tmpdir):
-    Tensile.Tensile([config, tmpdir.strpath, *tensile_args])
+
+def _run_tensile_in_subprocess(args):
+    """Run Tensile in a subprocess so each phase starts with clean global state.
+
+    PYTHONPATH is set from sys.path so the child can import Tensile even
+    when only reachable via Tests/conftest.py's runtime sys.path.append
+    (uninstalled checkouts).
+    """
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+    subprocess.run(
+        [sys.executable, "-c",
+         "from Tensile.Tensile import Tensile; import sys; Tensile(sys.argv[1:])",
+         *args],
+        check=True,
+        env=env,
+    )
+
+
+def test_config(tensile_args, config, tmpdir, pytestconfig):
+    """Build -> compress -> wipe -> extract -> run, verifying the artifact round-trips."""
+    if pytestconfig.getoption("--build-only") or pytestconfig.getoption("--use-cache"):
+        pytest.skip("split mode active — use test_config_build or test_config_run")
+
+    output_dir = os.path.join(tmpdir.strpath, "output")
+    artifact_path = None
+
+    build_args = [config, output_dir, "--build-only", *tensile_args]
+    _run_tensile_in_subprocess(build_args)
+
+    try:
+        artifact_path = compress_output(output_dir)
+        shutil.rmtree(output_dir)
+        extract_artifact(artifact_path, output_dir)
+
+        run_args = [config, output_dir, "--use-cache", *tensile_args]
+        _run_tensile_in_subprocess(run_args)
+    finally:
+        if artifact_path:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(artifact_path)
