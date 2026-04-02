@@ -52,7 +52,7 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
     };
 
     template <typename Problem>
-    CK_TILE_DEVICE static constexpr auto GetNumKVLdsBuffers()
+    CK_TILE_HOST_DEVICE static constexpr auto GetNumKVLdsBuffers()
     {
         return 4;
     }
