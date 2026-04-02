@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -108,41 +108,42 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->gtsv_interleaved_alg = static_cast<rocsparse_gtsv_interleaved_alg>(0);
         this->gpsv_interleaved_alg = static_cast<rocsparse_gpsv_interleaved_alg>(0);
 
-        this->matrix                      = static_cast<rocsparse_matrix_init>(0);
-        this->matrix_init_kind            = static_cast<rocsparse_matrix_init_kind>(0);
-        this->unit_check                  = static_cast<rocsparse_int>(0);
-        this->timing                      = static_cast<rocsparse_int>(1);
-        this->iters                       = static_cast<rocsparse_int>(0);
-        this->iters_inner                 = static_cast<rocsparse_int>(0);
-        this->nfreeiter                   = static_cast<rocsparse_int>(0);
-        this->nmaxiter                    = static_cast<rocsparse_int>(0);
-        this->denseld                     = static_cast<int64_t>(0);
-        this->batch_count                 = static_cast<rocsparse_int>(0);
-        this->batch_count_A               = static_cast<rocsparse_int>(0);
-        this->batch_count_B               = static_cast<rocsparse_int>(0);
-        this->batch_count_C               = static_cast<rocsparse_int>(0);
-        this->batch_stride                = static_cast<rocsparse_int>(0);
-        this->ld_multiplier_B             = static_cast<rocsparse_int>(2);
-        this->ld_multiplier_C             = static_cast<rocsparse_int>(2);
-        this->algo                        = static_cast<uint32_t>(0);
-        this->numericboost                = static_cast<int>(0);
-        this->boosttol                    = static_cast<double>(0);
-        this->boostval                    = static_cast<double>(0);
-        this->boostvali                   = static_cast<double>(0);
-        this->tolm                        = static_cast<double>(0);
-        this->rand_gen_min                = static_cast<double>(0);
-        this->rand_gen_max                = static_cast<double>(1);
-        this->graph_test                  = false;
-        this->skip_reproducibility        = false;
-        this->sparsity_pattern_statistics = false;
-        this->call_stage_analysis         = true;
-        this->convert_to_int              = false;
-        this->filename[0]                 = '\0';
-        this->function[0]                 = '\0';
-        this->name[0]                     = '\0';
-        this->category[0]                 = '\0';
-        this->hardware[0]                 = '\0';
-        this->skip_hardware[0]            = '\0';
+        this->matrix                              = static_cast<rocsparse_matrix_init>(0);
+        this->matrix_init_kind                    = static_cast<rocsparse_matrix_init_kind>(0);
+        this->unit_check                          = static_cast<rocsparse_int>(0);
+        this->timing                              = static_cast<rocsparse_int>(1);
+        this->iters                               = static_cast<rocsparse_int>(0);
+        this->iters_inner                         = static_cast<rocsparse_int>(0);
+        this->nfreeiter                           = static_cast<rocsparse_int>(0);
+        this->nmaxiter                            = static_cast<rocsparse_int>(0);
+        this->denseld                             = static_cast<int64_t>(0);
+        this->batch_count                         = static_cast<rocsparse_int>(0);
+        this->batch_count_A                       = static_cast<rocsparse_int>(0);
+        this->batch_count_B                       = static_cast<rocsparse_int>(0);
+        this->batch_count_C                       = static_cast<rocsparse_int>(0);
+        this->batch_stride                        = static_cast<rocsparse_int>(0);
+        this->ld_multiplier_B                     = static_cast<rocsparse_int>(2);
+        this->ld_multiplier_C                     = static_cast<rocsparse_int>(2);
+        this->algo                                = static_cast<uint32_t>(0);
+        this->numericboost                        = static_cast<int>(0);
+        this->boosttol                            = static_cast<double>(0);
+        this->boostval                            = static_cast<double>(0);
+        this->boostvali                           = static_cast<double>(0);
+        this->tolm                                = static_cast<double>(0);
+        this->rand_gen_min                        = static_cast<double>(0);
+        this->rand_gen_max                        = static_cast<double>(1);
+        this->graph_test                          = false;
+        this->skip_reproducibility                = false;
+        this->sparsity_pattern_statistics         = false;
+        this->call_stage_analysis                 = true;
+        this->convert_to_int                      = false;
+        this->integer_based_manufactured_solution = false;
+        this->filename[0]                         = '\0';
+        this->function[0]                         = '\0';
+        this->name[0]                             = '\0';
+        this->category[0]                         = '\0';
+        this->hardware[0]                         = '\0';
+        this->skip_hardware[0]                    = '\0';
     }
 
     this->precision = 's';

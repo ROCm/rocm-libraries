@@ -608,6 +608,7 @@ Arguments:
   - sparsity_pattern_statistics: c_bool
   - call_stage_analysis: c_bool
   - convert_to_int: c_bool
+  - integer_based_manufactured_solution: c_bool
   - filename: c_char*128
   - function: c_char*64
   - name: c_char*64
@@ -762,6 +763,7 @@ Defaults:
   sparsity_pattern_statistics: false
   call_stage_analysis: true
   convert_to_int: false
+  integer_based_manufactured_solution: false
   workspace_size: 0
   category: nightly
   hardware: all
