@@ -3,6 +3,9 @@ FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 ARG ROCMVERSION=7.1.1
 ARG DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/.apt_$ROCMVERSION/
+ARG TARBALL_URL=https://rocm.nightlies.amd.com/tarball/therock-dist-linux-gfx90X-dcgpu-7.12.0a20260218.tar.gz
+ARG compiler_version=""
+ARG compiler_commit=""
 ENV APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=DontWarn
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -10,13 +13,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN set -xe && \
     apt-get update && apt-get install -y --allow-unauthenticated apt-utils wget gnupg2 curl
 
-ARG TARBALL_URL=https://rocm.nightlies.amd.com/tarball/therock-dist-linux-gfx90X-dcgpu-7.12.0a20260218.tar.gz
-
 RUN if [ "$compiler_version" = "therock" ]; then \
         rm -rf /opt/rocm && mkdir /opt/rocm && \
         echo "Downloading ROCm tarball from $TARBALL_URL..." && \
         wget -q -O /tmp/rocm.tar.gz "$TARBALL_URL" && \
-+       echo "Extracting tarball to /opt/rocm..." && \
+        echo "Extracting tarball to /opt/rocm..." && \
         tar -xzf /tmp/rocm.tar.gz -C /opt/rocm --strip-components=1 ; \
     else echo "using the release compiler" && \
         wget https://repo.radeon.com/amdgpu-install/7.1.1/ubuntu/noble/amdgpu-install_7.1.1.70101-1_all.deb && \
@@ -25,12 +26,6 @@ RUN if [ "$compiler_version" = "therock" ]; then \
         apt install python3-setuptools python3-wheel -y && \
         apt install rocm-dev -y; \
     fi
-
-RUN wget https://repo.radeon.com/amdgpu-install/7.1.1/ubuntu/noble/amdgpu-install_7.1.1.70101-1_all.deb && \
-    apt install ./amdgpu-install_7.1.1.70101-1_all.deb -y && \
-    apt update && \
-    apt install python3-setuptools python3-wheel -y && \
-    apt install rocm-dev -y
     
 # Install SCCACHE
 ENV SCCACHE_VERSION="0.14.0"
