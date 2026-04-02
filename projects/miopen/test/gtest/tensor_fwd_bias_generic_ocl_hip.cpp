@@ -35,6 +35,8 @@
 #include "perf_helper.hpp"
 #endif
 
+namespace {
+
 struct TensorsConfig
 {
     std::vector<int> aclens;
@@ -144,6 +146,8 @@ std::vector<TensorsConfig> TensorsConfigs()
     return configs;
 #endif
 }
+
+} // namespace
 
 template <typename T>
 struct OpTensorFwdBiasGenericTest
