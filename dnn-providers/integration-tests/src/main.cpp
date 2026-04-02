@@ -136,15 +136,17 @@ int main(int argc, char** argv) noexcept
         hipdnn_integration_tests::TestConfig::initialize(std::move(articlePathObj),
                                                          std::move(engineNameArg));
 
-        // Reconstruct argc/argv for GTest from remaining (unknown) args
+        // Reconstruct argc/argv for GTest from remaining (unknown) args.
+        // argv[0] (program name) must be first — GTest requires it.
         std::vector<char*> gtestArgv;
-        gtestArgv.reserve(remainingArgs.size() + 1);
+        gtestArgv.reserve(remainingArgs.size() + 2);
+        gtestArgv.push_back(argv[0]);
         for(auto& arg : remainingArgs)
         {
             gtestArgv.push_back(arg.data());
         }
         gtestArgv.push_back(nullptr);
-        auto gtestArgc = static_cast<int>(remainingArgs.size());
+        auto gtestArgc = static_cast<int>(remainingArgs.size()) + 1;
         ::testing::InitGoogleTest(&gtestArgc, gtestArgv.data());
 
         // Initialize test logging infrastructure to forward logs to std::cerr based
