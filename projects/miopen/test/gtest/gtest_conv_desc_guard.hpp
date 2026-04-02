@@ -8,7 +8,7 @@
 class ConvDescGuard
 {
 public:
-    ConvDescGuard() { miopenCreateConvolutionDescriptor(&desc); }
+    ConvDescGuard() : status(miopenCreateConvolutionDescriptor(&desc)) {}
 
     ~ConvDescGuard()
     {
@@ -21,6 +21,7 @@ public:
     operator miopenConvolutionDescriptor_t() { return desc; }
 
     miopenConvolutionDescriptor_t get() { return desc; }
+    miopenStatus_t getStatus() const { return status; }
 
     ConvDescGuard(const ConvDescGuard&)            = delete;
     ConvDescGuard& operator=(const ConvDescGuard&) = delete;
@@ -29,4 +30,5 @@ public:
 
 private:
     miopenConvolutionDescriptor_t desc = nullptr;
+    miopenStatus_t status;
 };

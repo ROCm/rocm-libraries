@@ -64,6 +64,7 @@ struct DeterministicConvApiTest : public testing::TestWithParam<TestCase>
         std::tie(conv_params, conv_attr) = GetParam();
 
         ConvDescGuard conv_desc;
+        EXPECT_EQ(conv_desc.getStatus(), miopenStatusSuccess);
 
         auto status = miopenInitConvolutionDescriptor(conv_desc,
                                                       miopenConvolutionMode_t::miopenConvolution,

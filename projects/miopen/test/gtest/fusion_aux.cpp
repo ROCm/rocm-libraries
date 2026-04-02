@@ -71,6 +71,8 @@ struct FusionAuxTest : public testing::TestWithParam<TestCase>
         miopenFusionOpDescriptor_t convoOp{};
         const auto& [inputs, conv_filter, conv_desc] = RawTestCase{GetParam()};
 
+        EXPECT_EQ(convDesc.getStatus(), miopenStatusSuccess);
+
         // input descriptor
         auto status = miopenSet4dTensorDescriptor(
             &inputTensor, miopenFloat, inputs[0], inputs[1], inputs[2], inputs[3]);
