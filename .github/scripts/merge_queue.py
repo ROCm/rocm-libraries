@@ -24,8 +24,12 @@ from merge_queue_config import (
     MERGE_METHOD,
     METADATA_COMMENT_MARKER,
     PATH_TO_QUEUES,
-    STATUS_COMMENT_MARKER,
 )
+
+# All merge-queue state for a PR lives in a single comment.  The hidden
+# metadata marker stores the JSON payload; the visible portion shows the
+# queue status table.  Both ``enqueue_pr`` and ``update_status_comment``
+# write to this same comment, keeping PR timelines clean.
 
 logger = logging.getLogger(__name__)
 
@@ -64,34 +68,74 @@ def _parse_metadata_comment(body: str) -> Optional[dict]:
     return None
 
 
-def _build_metadata_comment(metadata: dict) -> str:
-    """Build the hidden HTML comment that stores queue metadata on a PR."""
-    return f"{METADATA_COMMENT_MARKER} {json.dumps(metadata)} -->"
+def _build_status_body(
+    metadata: dict,
+    queues: List[str],
+    queue_positions: Optional[List[dict]] = None,
+    blocking: Optional[List[str]] = None,
+    extra_msg: Optional[str] = None,
+) -> str:
+    """Build the single comment body that holds metadata + status table."""
+    hidden = f"{METADATA_COMMENT_MARKER} {json.dumps(metadata)} -->"
+
+    rows: list[str] = []
+    if queue_positions:
+        for qp in queue_positions:
+            rows.append(
+                f"| `{qp['queue']}` | {qp['position']}/{qp['total']} | {qp['status']} |"
+            )
+    else:
+        # Initial enqueue — no position data yet
+        for q in queues:
+            rows.append(f"| `{q}` | — | Queued |")
+
+    blocking = blocking or []
+    if blocking:
+        overall = f"Waiting for: {', '.join(f'`{q}`' for q in blocking)}"
+    elif queue_positions:
+        overall = "At front of all queues — processing"
+    else:
+        overall = "Queued"
+
+    table = "\n".join(rows)
+    user = metadata.get("enqueued_by", "")
+    header = f"**Merge Queue** — enqueued by @{user}" if user else "**Merge Queue**"
+
+    body = (
+        f"{hidden}\n"
+        f"## {header}\n\n"
+        f"| Queue | Position | Status |\n"
+        f"|-------|----------|--------|\n"
+        f"{table}\n\n"
+        f"**Overall:** {overall}"
+    )
+    if extra_msg:
+        body += f"\n\n{extra_msg}"
+    return body
+
+
+def _find_mq_comment(
+    client: GitHubCLIClient, repo: str, pr_number: int
+) -> Optional[dict]:
+    """Find the merge-queue comment on a PR.  Returns {id, body} or None."""
+    comments = client.get_comments(repo, pr_number)
+    for comment in comments:
+        if METADATA_COMMENT_MARKER in comment.get("body", ""):
+            return {"id": comment["id"], "body": comment["body"]}
+    return None
 
 
 def get_enqueue_metadata(
     client: GitHubCLIClient, repo: str, pr_number: int
 ) -> Optional[dict]:
-    """Read merge-queue metadata from PR comments.  Returns None if not queued."""
-    comments = client.get_comments(repo, pr_number)
-    for comment in comments:
-        meta = _parse_metadata_comment(comment.get("body", ""))
+    """Read merge-queue metadata from the PR's queue comment."""
+    comment = _find_mq_comment(client, repo, pr_number)
+    if comment:
+        meta = _parse_metadata_comment(comment["body"])
         if meta is not None:
             meta["_comment_id"] = comment["id"]
             return meta
     return None
-
-
-def _delete_metadata_comment(
-    client: GitHubCLIClient, repo: str, pr_number: int
-) -> None:
-    """Remove the metadata comment from a PR (cleanup on dequeue)."""
-    comments = client.get_comments(repo, pr_number)
-    for comment in comments:
-        if METADATA_COMMENT_MARKER in comment.get("body", ""):
-            url = f"{client.api_url}/repos/{repo}/issues/comments/{comment['id']}"
-            client._request_json("DELETE", url, None, "Failed to delete metadata comment")
-            break
 
 
 # ── Enqueue / Dequeue ────────────────────────────────────────────────
@@ -106,8 +150,8 @@ def enqueue_pr(
 ) -> None:
     """Add a PR to the merge queue.
 
-    Adds the ``mq:queued`` label plus one ``mq:<queue>`` label per queue,
-    and posts a hidden metadata comment for FIFO ordering.
+    Adds labels and posts a single comment containing both the hidden
+    metadata and the initial status table.
     """
     now = datetime.now(timezone.utc).isoformat()
     metadata = {
@@ -118,7 +162,9 @@ def enqueue_pr(
 
     labels = [LABEL_QUEUED] + [f"{LABEL_PREFIX}{q}" for q in queues]
     client.add_labels(repo, pr_number, labels)
-    client.add_comment(repo, pr_number, _build_metadata_comment(metadata))
+
+    body = _build_status_body(metadata, queues)
+    client.add_comment(repo, pr_number, body)
 
     logger.info(f"PR #{pr_number} enqueued in {queues} by @{user}")
 
@@ -131,15 +177,21 @@ def dequeue_pr(
 ) -> None:
     """Remove a PR from all merge queues.
 
-    Strips every ``mq:*`` label and posts a comment explaining why.
+    Strips every ``mq:*`` label and updates the queue comment with the reason.
     """
     existing = client.get_existing_labels_on_pr(repo, pr_number)
     mq_labels = [l for l in existing if l.startswith(LABEL_PREFIX)]
     for label in mq_labels:
         client.remove_label(repo, pr_number, label)
 
-    _delete_metadata_comment(client, repo, pr_number)
-    client.add_comment(repo, pr_number, f"**Merge Queue:** {reason}")
+    # Update the existing queue comment rather than posting a new one
+    comment = _find_mq_comment(client, repo, pr_number)
+    if comment:
+        client.update_comment(
+            repo, comment["id"], f"**Merge Queue:** {reason}"
+        )
+    else:
+        client.add_comment(repo, pr_number, f"**Merge Queue:** {reason}")
     logger.info(f"PR #{pr_number} dequeued: {reason}")
 
 
@@ -299,17 +351,6 @@ def merge_pr(
 # ── Status comment ───────────────────────────────────────────────────
 
 
-def _find_status_comment(
-    client: GitHubCLIClient, repo: str, pr_number: int
-) -> Optional[int]:
-    """Find the ID of the existing status comment on a PR, if any."""
-    comments = client.get_comments(repo, pr_number)
-    for comment in comments:
-        if STATUS_COMMENT_MARKER in comment.get("body", ""):
-            return comment["id"]
-    return None
-
-
 def update_status_comment(
     client: GitHubCLIClient,
     repo: str,
@@ -317,8 +358,16 @@ def update_status_comment(
     queues: List[str],
     blocking: List[str],
 ) -> None:
-    """Create or update the queue status table comment on a PR."""
-    rows: list[str] = []
+    """Update the queue comment in place with current position data."""
+    comment = _find_mq_comment(client, repo, pr_number)
+    if not comment:
+        return  # no queue comment to update
+
+    metadata = _parse_metadata_comment(comment["body"])
+    if not metadata:
+        return
+
+    queue_positions: list[dict] = []
     for queue in queues:
         members = get_queue_members(client, repo, queue)
         total = len(members)
@@ -333,25 +382,9 @@ def update_status_comment(
             status = "At front"
         else:
             status = f"Position {position}"
-        rows.append(f"| `{queue}` | {position}/{total} | {status} |")
+        queue_positions.append(
+            {"queue": queue, "position": position, "total": total, "status": status}
+        )
 
-    if blocking:
-        overall = f"Waiting for: {', '.join(f'`{q}`' for q in blocking)}"
-    else:
-        overall = "At front of all queues — processing"
-
-    table = "\n".join(rows)
-    body = (
-        f"{STATUS_COMMENT_MARKER} -->\n"
-        f"## Merge Queue Status\n\n"
-        f"| Queue | Position | Status |\n"
-        f"|-------|----------|--------|\n"
-        f"{table}\n\n"
-        f"**Overall:** {overall}"
-    )
-
-    comment_id = _find_status_comment(client, repo, pr_number)
-    if comment_id:
-        client.update_comment(repo, comment_id, body)
-    else:
-        client.add_comment(repo, pr_number, body)
+    body = _build_status_body(metadata, queues, queue_positions, blocking)
+    client.update_comment(repo, comment["id"], body)

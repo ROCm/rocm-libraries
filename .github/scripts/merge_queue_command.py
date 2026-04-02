@@ -28,7 +28,6 @@ from merge_queue import (
     dequeue_pr,
     enqueue_pr,
     get_enqueue_metadata,
-    get_queue_members,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -104,22 +103,8 @@ def handle_merge(
         )
         return
 
-    # Enqueue
+    # Enqueue — posts a single comment with metadata + status table
     enqueue_pr(client, repo, pr_number, queues, user)
-
-    # Build confirmation with queue positions
-    lines = [f"**Merge Queue:** PR #{pr_number} has been enqueued by @{user}.\n"]
-    lines.append("| Queue | Position |")
-    lines.append("|-------|----------|")
-    for q in queues:
-        members = get_queue_members(client, repo, q)
-        position = next(
-            (i + 1 for i, m in enumerate(members) if m["pr_number"] == pr_number),
-            len(members),
-        )
-        lines.append(f"| `{q}` | {position}/{len(members)} |")
-
-    client.add_comment(repo, pr_number, "\n".join(lines))
     logger.info(f"PR #{pr_number} enqueued in {queues}")
 
 

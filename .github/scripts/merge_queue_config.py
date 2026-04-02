@@ -39,7 +39,6 @@ LABEL_QUEUED = f"{LABEL_PREFIX}queued"
 LABEL_ACTIVE = f"{LABEL_PREFIX}active"
 
 METADATA_COMMENT_MARKER = "<!-- merge-queue-metadata"
-STATUS_COMMENT_MARKER = "<!-- merge-queue-status"
 
 # The base branch that queued PRs target.
 TARGET_BRANCH = "develop"
