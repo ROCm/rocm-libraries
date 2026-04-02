@@ -72,7 +72,11 @@ int main(int argc, char* argv[])
     float hdu[] = {-1.0, -1.0, -1.0, -1.0, 0.0};
 
     // Host right-hand side column vectors
-    float* hB = (float*)malloc((ldb * n, 1.0) * sizeof(float));
+    float* hB = (float*)malloc((ldb * n) * sizeof(float));
+    for(int i = 0; i < ldb * n; i++)
+    {
+        hB[i] = 1.0f;
+    }
 
     float* ddl = NULL;
     float* dd  = NULL;
