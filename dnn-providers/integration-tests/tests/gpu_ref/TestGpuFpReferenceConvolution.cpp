@@ -447,6 +447,7 @@ TEST(TestConvolutionValidation, ThrowsOnOutputDimValueMismatch)
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnInvalidDimCount)
 {
+    SKIP_IF_NO_DEVICES();
     Tensor<float> x({8, 8});
     Tensor<float> w({8, 8});
     Tensor<float> y({8, 8});
@@ -457,6 +458,7 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnInvalidDimCount)
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnWeightDimMismatch)
 {
+    SKIP_IF_NO_DEVICES();
     Tensor<float> x({1, 1, 4, 4});
     Tensor<float> w({1, 1, 3});
     Tensor<float> y({1, 1, 2, 2});
@@ -468,6 +470,7 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnWeightDimMismatch)
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnOutputDimMismatch)
 {
+    SKIP_IF_NO_DEVICES();
     Tensor<float> x({1, 1, 4, 4});
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2});
@@ -479,6 +482,7 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnOutputDimMismatch)
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnStridesSizeMismatch)
 {
+    SKIP_IF_NO_DEVICES();
     Tensor<float> x({1, 1, 4, 4});
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
@@ -490,6 +494,7 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnStridesSizeMismatch)
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnDilationsSizeMismatch)
 {
+    SKIP_IF_NO_DEVICES();
     Tensor<float> x({1, 1, 4, 4});
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
@@ -501,6 +506,7 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnDilationsSizeMismatch)
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnPrePaddingSizeMismatch)
 {
+    SKIP_IF_NO_DEVICES();
     Tensor<float> x({1, 1, 4, 4});
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
@@ -512,6 +518,7 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnPrePaddingSizeMismatch)
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnPostPaddingSizeMismatch)
 {
+    SKIP_IF_NO_DEVICES();
     Tensor<float> x({1, 1, 4, 4});
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
@@ -523,6 +530,7 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnPostPaddingSizeMismatch)
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnZeroStride)
 {
+    SKIP_IF_NO_DEVICES();
     Tensor<float> x({1, 1, 4, 4});
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
@@ -534,6 +542,7 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnZeroStride)
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnNegativeDilation)
 {
+    SKIP_IF_NO_DEVICES();
     Tensor<float> x({1, 1, 4, 4});
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
@@ -545,6 +554,7 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnNegativeDilation)
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnNegativePrePadding)
 {
+    SKIP_IF_NO_DEVICES();
     Tensor<float> x({1, 1, 4, 4});
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
@@ -556,6 +566,7 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnNegativePrePadding)
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnNegativePostPadding)
 {
+    SKIP_IF_NO_DEVICES();
     Tensor<float> x({1, 1, 4, 4});
     Tensor<float> w({1, 1, 3, 3});
     Tensor<float> y({1, 1, 2, 2});
@@ -567,6 +578,7 @@ TEST(TestGpuConvFwdRefValidation, ThrowsOnNegativePostPadding)
 
 TEST(TestGpuConvFwdRefValidation, ThrowsOnOutputDimValueMismatch)
 {
+    SKIP_IF_NO_DEVICES();
     // Input [1,1,4,4], kernel [1,1,3,3], no padding, stride 1 → expected output [1,1,2,2]
     // Provide wrong output dims [1,1,3,3]
     Tensor<float> x({1, 1, 4, 4});
