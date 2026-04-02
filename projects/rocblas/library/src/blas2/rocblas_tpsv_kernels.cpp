@@ -86,7 +86,7 @@ ROCBLAS_KERNEL_ILF void rocblas_tpsv_forward_substitution_calc(bool is_unit_diag
                 break;
 
             // 2. Sum result (across columns) to be subtracted from original value
-            T val = 0;
+            T           val  = 0;
             rocblas_int rowA = tx + j;
             rocblas_int colA = i;
             size_t indexA = rocblas_packed_matrix_index(is_transpose, is_transpose, n, rowA, colA);
@@ -164,7 +164,7 @@ ROCBLAS_KERNEL_ILF void rocblas_tpsv_backward_substitution_calc(bool is_unit_dia
                 break;
 
             // 2. Sum result (across columns) to be subtracted from the original value
-            T val = 0;
+            T           val  = 0;
             rocblas_int rowA = tx + j;
             rocblas_int colA = i;
             size_t indexA = rocblas_packed_matrix_index(!is_transpose, is_transpose, n, rowA, colA);
