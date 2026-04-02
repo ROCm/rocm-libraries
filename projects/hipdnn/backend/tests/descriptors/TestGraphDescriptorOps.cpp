@@ -1650,10 +1650,10 @@ TEST_F(TestGraphDescriptorOps, GetAttributeReturnsOperations)
 
     // Verify the returned operation is a conv forward operation
     int64_t opTypeCount = 0;
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     ASSERT_NO_THROW(returnedOps[0]->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType));
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT);
 
     auto returnedOp0 = std::unique_ptr<HipdnnBackendDescriptor>(returnedOps[0]);
     EXPECT_TRUE(returnedOp0->isFinalized());
@@ -1838,10 +1838,10 @@ TEST_F(TestGraphDescriptorOps, OperationsPreservedAfterFinalize)
 
     // Verify the returned operation is a conv forward operation
     int64_t opTypeCount = 0;
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     ASSERT_NO_THROW(returnedOps[0]->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType));
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT);
 
     auto returnedOp0 = std::unique_ptr<HipdnnBackendDescriptor>(returnedOps[0]);
     EXPECT_TRUE(returnedOp0->isFinalized());

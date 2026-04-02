@@ -419,7 +419,7 @@ void getReductionMode(hipdnn_data_sdk::data_objects::ReductionMode source,
     }
 }
 
-void getOperationType(hipdnnOperationType_t source,
+void getOperationType(hipdnnOperationType_ext_t source,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t requestedElementCount,
                       int64_t* elementCount,
@@ -440,7 +440,7 @@ void getOperationType(hipdnnOperationType_t source,
     THROW_IF_FALSE(requestedElementCount >= 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": requestedElementCount < 1");
-    std::memcpy(arrayOfElements, &source, sizeof(hipdnnOperationType_t));
+    std::memcpy(arrayOfElements, &source, sizeof(hipdnnOperationType_ext_t));
     if(elementCount != nullptr)
     {
         *elementCount = 1;

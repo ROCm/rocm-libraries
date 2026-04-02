@@ -41,15 +41,15 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<ConvolutionWrwOperationDescriptor>();
     auto desc = wrapper->asDescriptor<ConvolutionWrwOperationDescriptor>();
 
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&xDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&dyDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&dwDesc));

@@ -394,7 +394,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecInt32Success)
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int32_t> values;
     auto err = getDescriptorAttrVec(desc,
-                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
                                     HIPDNN_TYPE_INT32,
                                     values,
                                     "test block_size");
@@ -414,7 +414,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecInt32ZeroCount)
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int32_t> values;
     auto err = getDescriptorAttrVec(desc,
-                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
                                     HIPDNN_TYPE_INT32,
                                     values,
                                     "test block_size");
@@ -436,7 +436,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecInt32CountMismatch)
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int32_t> values;
     auto err = getDescriptorAttrVec(desc,
-                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
                                     HIPDNN_TYPE_INT32,
                                     values,
                                     "test block_size");

@@ -5,7 +5,7 @@ operation:
   fbs_generated_header: "convolution_bwd_attributes_generated.h"
 
   descriptor_type:
-    enum_name: "HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR"
+    enum_name: "HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR"
 
   operation_attr_prefix: "HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD"
 
@@ -126,7 +126,7 @@ operation:
   compute_data_type_attr: "HIPDNN_ATTR_CONVOLUTION_COMP_TYPE"
   compute_data_type_shared: true
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_DATA"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_DATA_EXT"
 
   test_data:
     tensor_uids: { dy: 10, w: 11, dx: 12 }

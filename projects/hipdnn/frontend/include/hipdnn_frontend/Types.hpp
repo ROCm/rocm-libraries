@@ -853,9 +853,9 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
     case DataType::INT4:
         return HIPDNN_DATA_INT4;
     case DataType::FP6_E2M3:
-        return HIPDNN_DATA_FP6_E2M3;
+        return HIPDNN_DATA_FP6_E2M3_EXT;
     case DataType::FP6_E3M2:
-        return HIPDNN_DATA_FP6_E3M2;
+        return HIPDNN_DATA_FP6_E3M2_EXT;
     case DataType::INT64:
         return HIPDNN_DATA_INT64;
     case DataType::NOT_SET:
@@ -900,9 +900,9 @@ inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
         return {DataType::FP4_E2M1, {}};
     case HIPDNN_DATA_INT4:
         return {DataType::INT4, {}};
-    case HIPDNN_DATA_FP6_E2M3:
+    case HIPDNN_DATA_FP6_E2M3_EXT:
         return {DataType::FP6_E2M3, {}};
-    case HIPDNN_DATA_FP6_E3M2:
+    case HIPDNN_DATA_FP6_E3M2_EXT:
         return {DataType::FP6_E3M2, {}};
     case HIPDNN_DATA_INT64:
         return {DataType::INT64, {}};

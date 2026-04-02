@@ -292,8 +292,8 @@ TEST(TestTypes, ToHipdnnDataType)
     EXPECT_EQ(toHipdnnDataType(DataType::FP8_E8M0), HIPDNN_DATA_FP8_E8M0);
     EXPECT_EQ(toHipdnnDataType(DataType::FP4_E2M1), HIPDNN_DATA_FP4_E2M1);
     EXPECT_EQ(toHipdnnDataType(DataType::INT4), HIPDNN_DATA_INT4);
-    EXPECT_EQ(toHipdnnDataType(DataType::FP6_E2M3), HIPDNN_DATA_FP6_E2M3);
-    EXPECT_EQ(toHipdnnDataType(DataType::FP6_E3M2), HIPDNN_DATA_FP6_E3M2);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP6_E2M3), HIPDNN_DATA_FP6_E2M3_EXT);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP6_E3M2), HIPDNN_DATA_FP6_E3M2_EXT);
     EXPECT_EQ(toHipdnnDataType(DataType::INT64), HIPDNN_DATA_INT64);
     EXPECT_EQ(toHipdnnDataType(DataType::NOT_SET), std::nullopt);
 }
@@ -321,8 +321,8 @@ TEST(TestTypes, FromHipdnnDataTypeAllValidTypes)
     check(HIPDNN_DATA_FP8_E8M0, DataType::FP8_E8M0);
     check(HIPDNN_DATA_FP4_E2M1, DataType::FP4_E2M1);
     check(HIPDNN_DATA_INT4, DataType::INT4);
-    check(HIPDNN_DATA_FP6_E2M3, DataType::FP6_E2M3);
-    check(HIPDNN_DATA_FP6_E3M2, DataType::FP6_E3M2);
+    check(HIPDNN_DATA_FP6_E2M3_EXT, DataType::FP6_E2M3);
+    check(HIPDNN_DATA_FP6_E3M2_EXT, DataType::FP6_E3M2);
     check(HIPDNN_DATA_INT64, DataType::INT64);
 }
 

@@ -16,7 +16,7 @@ operation:
   data_fields_section_label: "Convolution Parameters"
   build_node_attrs_var: "convAttrs"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT"
 
   frontend:
     packer_function: "createConvFpropOperation"

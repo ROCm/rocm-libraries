@@ -155,7 +155,7 @@ This generates lifting-related files including the unpacker, fromNode tests, lif
 | `tests/frontend/Integration<Op>DescriptorLifting.cpp` | Lifting round-trip integration tests |
 | `fragments/node_factory_case.txt` | NodeFactory switch case for this operation |
 | `fragments/operation_unpacker_case.txt` | OperationUnpacker switch case |
-| `fragments/operation_type_enum.txt` | hipdnnOperationType_t enum entry |
+| `fragments/operation_type_enum.txt` | hipdnnOperationType_ext_t enum entry |
 | `fragments/node_unpack_override.txt` | Node class unpack_from_descriptor override |
 | `fragments/descriptor_lifting_additions.txt` | Manual changes for existing descriptor files |
 
@@ -393,7 +393,7 @@ operation:
   # attr_name values. Do NOT create new per-operation copies.
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_CONVOLUTION_COMP_TYPE"  # Shared across conv ops
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD"  # For HIPDNN_ATTR_OPERATION_TYPE_EXT
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT"  # For HIPDNN_ATTR_OPERATION_TYPE_EXT
 
   # Test data — UIDs should be distinct across operations to avoid confusion
   test_data:

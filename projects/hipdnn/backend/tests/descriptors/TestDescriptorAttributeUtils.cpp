@@ -533,7 +533,7 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnNullArray)
 {
     int64_t count = 0;
 
-    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                      HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                      1,
                                      &count,
@@ -545,9 +545,9 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnNullArray)
 TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnZeroRequestedCount)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                      HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                      0,
                                      &count,
@@ -558,7 +558,7 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnZeroRequeste
 
 TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryThrowsWhenBothPointersNull)
 {
-    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                                 HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                                 1,
                                                 nullptr,
@@ -570,9 +570,9 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryThrowsWhenBothPointersNu
 TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnNullErrorPrefix)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                                 HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                                 1,
                                                 &count,
@@ -584,9 +584,9 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnNullErrorPrefix)
 TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnWrongAttributeType)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                                 HIPDNN_TYPE_INT64,
                                                 1,
                                                 &count,
@@ -598,29 +598,29 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnWrongAttributeType)
 TEST(TestDescriptorAttributeUtils, GetOperationTypeSuccessConvForward)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                      HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                      1,
                                      &count,
                                      &output,
                                      "test"));
-    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
+    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT);
 }
 
 TEST(TestDescriptorAttributeUtils, GetOperationTypeSuccessBatchnormInference)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE,
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT,
                                      HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                      1,
                                      &count,
                                      &output,
                                      "test"));
-    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE);
+    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT);
 }
 
 // --- setTensorDescriptor ---

@@ -9,8 +9,8 @@
 
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
-#include <hipdnn_frontend/node/SdpaBpropNode.hpp>
-#include <hipdnn_test_sdk/constants/SdpaBpropConstants.hpp>
+#include <hipdnn_frontend/node/SdpaBwdNode.hpp>
+#include <hipdnn_test_sdk/constants/SdpaBwdConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -42,7 +42,7 @@ public:
 // Builds an SDPA backward graph via the frontend, lowers it through the backend C-API
 // via build_operation_graph(), then lifts it back with fromBackendDescriptor()
 // and verifies the reconstructed graph matches the original.
-class IntegrationSdpaBpropLifting : public ::testing::Test
+class IntegrationSdpaBwdLifting : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -69,53 +69,49 @@ protected:
     }
 
     // Builds a standard SDPA backward graph for round-trip testing
-    static std::shared_ptr<TestableGraph> buildSdpaBpropGraph()
+    static std::shared_ptr<TestableGraph> buildSdpaBwdGraph()
     {
         auto graph = std::make_shared<TestableGraph>();
-        graph->set_name("LiftingSdpaBpropGraph")
+        graph->set_name("LiftingSdpaBwdGraph")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
         auto q = std::make_shared<TensorAttributes>();
-        q->set_uid(K_SDPA_BPROP_TENSOR_Q_UID).set_name("Q").set_data_type(DataType::FLOAT);
-        q->set_dim(toVec(K_SDPA_BPROP_TENSOR_Q_DIMS))
-            .set_stride(toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES));
+        q->set_uid(K_SDPA_BWD_TENSOR_Q_UID).set_name("Q").set_data_type(DataType::FLOAT);
+        q->set_dim(toVec(K_SDPA_BWD_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_BWD_TENSOR_Q_STRIDES));
 
         auto k = std::make_shared<TensorAttributes>();
-        k->set_uid(K_SDPA_BPROP_TENSOR_K_UID).set_name("K").set_data_type(DataType::FLOAT);
-        k->set_dim(toVec(K_SDPA_BPROP_TENSOR_K_DIMS))
-            .set_stride(toVec(K_SDPA_BPROP_TENSOR_K_STRIDES));
+        k->set_uid(K_SDPA_BWD_TENSOR_K_UID).set_name("K").set_data_type(DataType::FLOAT);
+        k->set_dim(toVec(K_SDPA_BWD_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_BWD_TENSOR_K_STRIDES));
 
         auto v = std::make_shared<TensorAttributes>();
-        v->set_uid(K_SDPA_BPROP_TENSOR_V_UID).set_name("V").set_data_type(DataType::FLOAT);
-        v->set_dim(toVec(K_SDPA_BPROP_TENSOR_V_DIMS))
-            .set_stride(toVec(K_SDPA_BPROP_TENSOR_V_STRIDES));
+        v->set_uid(K_SDPA_BWD_TENSOR_V_UID).set_name("V").set_data_type(DataType::FLOAT);
+        v->set_dim(toVec(K_SDPA_BWD_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_BWD_TENSOR_V_STRIDES));
 
         auto o = std::make_shared<TensorAttributes>();
-        o->set_uid(K_SDPA_BPROP_TENSOR_O_UID).set_name("O").set_data_type(DataType::FLOAT);
-        o->set_dim(toVec(K_SDPA_BPROP_TENSOR_O_DIMS))
-            .set_stride(toVec(K_SDPA_BPROP_TENSOR_O_STRIDES));
+        o->set_uid(K_SDPA_BWD_TENSOR_O_UID).set_name("O").set_data_type(DataType::FLOAT);
+        o->set_dim(toVec(K_SDPA_BWD_TENSOR_O_DIMS)).set_stride(toVec(K_SDPA_BWD_TENSOR_O_STRIDES));
 
         auto dO = std::make_shared<TensorAttributes>();
-        dO->set_uid(K_SDPA_BPROP_TENSOR_DO_UID).set_name("dO").set_data_type(DataType::FLOAT);
-        dO->set_dim(toVec(K_SDPA_BPROP_TENSOR_DO_DIMS))
-            .set_stride(toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES));
+        dO->set_uid(K_SDPA_BWD_TENSOR_DO_UID).set_name("dO").set_data_type(DataType::FLOAT);
+        dO->set_dim(toVec(K_SDPA_BWD_TENSOR_DO_DIMS))
+            .set_stride(toVec(K_SDPA_BWD_TENSOR_DO_STRIDES));
 
         auto stats = std::make_shared<TensorAttributes>();
-        stats->set_uid(K_SDPA_BPROP_TENSOR_STATS_UID)
+        stats->set_uid(K_SDPA_BWD_TENSOR_STATS_UID)
             .set_name("Stats")
             .set_data_type(DataType::FLOAT);
-        stats->set_dim(toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS))
-            .set_stride(toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES));
+        stats->set_dim(toVec(K_SDPA_BWD_TENSOR_STATS_DIMS))
+            .set_stride(toVec(K_SDPA_BWD_TENSOR_STATS_STRIDES));
 
         SdpaBackwardAttributes sdpaAttrs;
-        sdpaAttrs.set_name("sdpa_bprop_op");
+        sdpaAttrs.set_name("sdpa_bwd_op");
 
         auto [dq, dk, dv] = graph->sdpa_backward(q, k, v, o, dO, stats, sdpaAttrs);
-        dq->set_uid(K_SDPA_BPROP_TENSOR_DQ_UID).set_output(true).set_name("dQ");
-        dk->set_uid(K_SDPA_BPROP_TENSOR_DK_UID).set_output(true).set_name("dK");
-        dv->set_uid(K_SDPA_BPROP_TENSOR_DV_UID).set_output(true).set_name("dV");
+        dq->set_uid(K_SDPA_BWD_TENSOR_DQ_UID).set_output(true).set_name("dQ");
+        dk->set_uid(K_SDPA_BWD_TENSOR_DK_UID).set_output(true).set_name("dK");
+        dv->set_uid(K_SDPA_BWD_TENSOR_DV_UID).set_output(true).set_name("dV");
 
         return graph;
     }
@@ -126,9 +122,9 @@ protected:
 // Builds an SDPA backward graph with required tensors only, lowers via
 // build_operation_graph(handle), lifts back with fromBackendDescriptor(), and verifies
 // tensor dimensions, data types, graph-level types, graph name, and operation name.
-TEST_F(IntegrationSdpaBpropLifting, SdpaBpropRoundTripViaCApi)
+TEST_F(IntegrationSdpaBwdLifting, SdpaBwdRoundTripViaCApi)
 {
-    auto originalGraph = buildSdpaBpropGraph();
+    auto originalGraph = buildSdpaBwdGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -147,73 +143,69 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropRoundTripViaCApi)
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
     EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
     EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
-    EXPECT_EQ(liftedGraph->get_name(), "LiftingSdpaBpropGraph");
+    EXPECT_EQ(liftedGraph->get_name(), "LiftingSdpaBwdGraph");
 
     // Verify tensors by UID — 9 required tensors
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 9u) << "Expected 9 tensors in lifted SDPA backward graph";
 
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_Q_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_Q_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_Q_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_Q_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_Q_UID]->get_data_type(), DataType::FLOAT);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_Q_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_Q_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_Q_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_Q_UID]->get_stride(), toVec(K_SDPA_BWD_TENSOR_Q_STRIDES));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_Q_UID]->get_data_type(), DataType::FLOAT);
 
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_K_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_K_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_K_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_K_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_K_STRIDES));
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_K_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_K_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_K_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_K_UID]->get_stride(), toVec(K_SDPA_BWD_TENSOR_K_STRIDES));
 
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_V_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_V_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_V_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_V_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_V_STRIDES));
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_V_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_V_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_V_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_V_UID]->get_stride(), toVec(K_SDPA_BWD_TENSOR_V_STRIDES));
 
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_O_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_O_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_O_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_O_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_O_STRIDES));
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_O_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_O_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_O_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_O_UID]->get_stride(), toVec(K_SDPA_BWD_TENSOR_O_STRIDES));
 
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DO_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DO_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DO_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DO_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES));
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DO_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DO_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DO_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DO_UID]->get_stride(),
+              toVec(K_SDPA_BWD_TENSOR_DO_STRIDES));
 
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_STATS_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_STATS_UID]->get_dim(),
-              toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_STATS_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES));
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_STATS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_STATS_UID]->get_dim(),
+              toVec(K_SDPA_BWD_TENSOR_STATS_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_STATS_UID]->get_stride(),
+              toVec(K_SDPA_BWD_TENSOR_STATS_STRIDES));
 
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DQ_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DQ_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DQ_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_DQ_STRIDES));
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DQ_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DQ_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DQ_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DQ_UID]->get_stride(),
+              toVec(K_SDPA_BWD_TENSOR_DQ_STRIDES));
 
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DK_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DK_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DK_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DK_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_DK_STRIDES));
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DK_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DK_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DK_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DK_UID]->get_stride(),
+              toVec(K_SDPA_BWD_TENSOR_DK_STRIDES));
 
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DV_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DV_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DV_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DV_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_DV_STRIDES));
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DV_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DV_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DV_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DV_UID]->get_stride(),
+              toVec(K_SDPA_BWD_TENSOR_DV_STRIDES));
 
     // Verify the lifted graph has 1 SDPA backward operation node with the correct name
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
 
-    auto* sdpaNode = dynamic_cast<SdpaBpropNode*>(subNodes[0].get());
-    ASSERT_NE(sdpaNode, nullptr) << "Expected a SdpaBpropNode";
-    EXPECT_EQ(sdpaNode->attributes.get_name(), "sdpa_bprop_op");
+    auto* sdpaNode = dynamic_cast<SdpaBwdNode*>(subNodes[0].get());
+    ASSERT_NE(sdpaNode, nullptr) << "Expected a SdpaBwdNode";
+    EXPECT_EQ(sdpaNode->attributes.get_name(), "sdpa_bwd_op");
 }
 
 // Verifies that tensors are accessible by UID on the reconstructed graph and that the
 // tensor objects are shared between the tensor map and the node attributes.
-TEST_F(IntegrationSdpaBpropLifting, SdpaBpropTensorSharingPreserved)
+TEST_F(IntegrationSdpaBwdLifting, SdpaBwdTensorSharingPreserved)
 {
-    auto originalGraph = buildSdpaBpropGraph();
+    auto originalGraph = buildSdpaBwdGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -232,102 +224,100 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropTensorSharingPreserved)
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
 
-    auto* sdpaNode = dynamic_cast<SdpaBpropNode*>(subNodes[0].get());
+    auto* sdpaNode = dynamic_cast<SdpaBwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
 
     // Verify UIDs on node attributes
-    EXPECT_EQ(sdpaNode->attributes.get_q()->get_uid(), K_SDPA_BPROP_TENSOR_Q_UID);
-    EXPECT_EQ(sdpaNode->attributes.get_k()->get_uid(), K_SDPA_BPROP_TENSOR_K_UID);
-    EXPECT_EQ(sdpaNode->attributes.get_v()->get_uid(), K_SDPA_BPROP_TENSOR_V_UID);
-    EXPECT_EQ(sdpaNode->attributes.get_o()->get_uid(), K_SDPA_BPROP_TENSOR_O_UID);
-    EXPECT_EQ(sdpaNode->attributes.get_do()->get_uid(), K_SDPA_BPROP_TENSOR_DO_UID);
-    EXPECT_EQ(sdpaNode->attributes.get_stats()->get_uid(), K_SDPA_BPROP_TENSOR_STATS_UID);
-    EXPECT_EQ(sdpaNode->attributes.get_dq()->get_uid(), K_SDPA_BPROP_TENSOR_DQ_UID);
-    EXPECT_EQ(sdpaNode->attributes.get_dk()->get_uid(), K_SDPA_BPROP_TENSOR_DK_UID);
-    EXPECT_EQ(sdpaNode->attributes.get_dv()->get_uid(), K_SDPA_BPROP_TENSOR_DV_UID);
+    EXPECT_EQ(sdpaNode->attributes.get_q()->get_uid(), K_SDPA_BWD_TENSOR_Q_UID);
+    EXPECT_EQ(sdpaNode->attributes.get_k()->get_uid(), K_SDPA_BWD_TENSOR_K_UID);
+    EXPECT_EQ(sdpaNode->attributes.get_v()->get_uid(), K_SDPA_BWD_TENSOR_V_UID);
+    EXPECT_EQ(sdpaNode->attributes.get_o()->get_uid(), K_SDPA_BWD_TENSOR_O_UID);
+    EXPECT_EQ(sdpaNode->attributes.get_do()->get_uid(), K_SDPA_BWD_TENSOR_DO_UID);
+    EXPECT_EQ(sdpaNode->attributes.get_stats()->get_uid(), K_SDPA_BWD_TENSOR_STATS_UID);
+    EXPECT_EQ(sdpaNode->attributes.get_dq()->get_uid(), K_SDPA_BWD_TENSOR_DQ_UID);
+    EXPECT_EQ(sdpaNode->attributes.get_dk()->get_uid(), K_SDPA_BWD_TENSOR_DK_UID);
+    EXPECT_EQ(sdpaNode->attributes.get_dv()->get_uid(), K_SDPA_BWD_TENSOR_DV_UID);
 
     // Verify the node references the same tensor objects as the tensor map
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_Q_UID].get(), sdpaNode->attributes.get_q().get());
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_K_UID].get(), sdpaNode->attributes.get_k().get());
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_V_UID].get(), sdpaNode->attributes.get_v().get());
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_O_UID].get(), sdpaNode->attributes.get_o().get());
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DO_UID].get(), sdpaNode->attributes.get_do().get());
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_STATS_UID].get(),
-              sdpaNode->attributes.get_stats().get());
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DQ_UID].get(), sdpaNode->attributes.get_dq().get());
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DK_UID].get(), sdpaNode->attributes.get_dk().get());
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DV_UID].get(), sdpaNode->attributes.get_dv().get());
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_Q_UID].get(), sdpaNode->attributes.get_q().get());
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_K_UID].get(), sdpaNode->attributes.get_k().get());
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_V_UID].get(), sdpaNode->attributes.get_v().get());
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_O_UID].get(), sdpaNode->attributes.get_o().get());
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DO_UID].get(), sdpaNode->attributes.get_do().get());
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_STATS_UID].get(), sdpaNode->attributes.get_stats().get());
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DQ_UID].get(), sdpaNode->attributes.get_dq().get());
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DK_UID].get(), sdpaNode->attributes.get_dk().get());
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DV_UID].get(), sdpaNode->attributes.get_dv().get());
 }
 
 // Builds an SDPA backward graph with all optional tensors, boolean flags, and scalar
 // parameters set, lowers via the C-API, lifts back, and verifies every attribute survives.
-TEST_F(IntegrationSdpaBpropLifting, SdpaBpropWithAllOptionalAttributesViaCApi)
+TEST_F(IntegrationSdpaBwdLifting, SdpaBwdWithAllOptionalAttributesViaCApi)
 {
-    auto originalGraph = buildSdpaBpropGraph();
+    auto originalGraph = buildSdpaBwdGraph();
 
     auto& subNodes = originalGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
-    auto* sdpaNode = dynamic_cast<SdpaBpropNode*>(subNodes[0].get());
+    auto* sdpaNode = dynamic_cast<SdpaBwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
 
     // Optional input tensors
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(K_SDPA_BPROP_TENSOR_SCALE_UID).set_name("SCALE");
+    scale->set_uid(K_SDPA_BWD_TENSOR_SCALE_UID).set_name("SCALE");
     scale->set_value(0.125f); // pass-by-value scalar
 
     auto attnMask = std::make_shared<TensorAttributes>();
-    attnMask->set_uid(K_SDPA_BPROP_TENSOR_ATTN_MASK_UID)
+    attnMask->set_uid(K_SDPA_BWD_TENSOR_ATTN_MASK_UID)
         .set_name("ATTN_MASK")
         .set_data_type(DataType::FLOAT);
-    attnMask->set_dim(toVec(K_SDPA_BPROP_TENSOR_ATTN_MASK_DIMS))
-        .set_stride(toVec(K_SDPA_BPROP_TENSOR_ATTN_MASK_STRIDES));
+    attnMask->set_dim(toVec(K_SDPA_BWD_TENSOR_ATTN_MASK_DIMS))
+        .set_stride(toVec(K_SDPA_BWD_TENSOR_ATTN_MASK_STRIDES));
 
     auto seqLenQ = std::make_shared<TensorAttributes>();
-    seqLenQ->set_uid(K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID)
+    seqLenQ->set_uid(K_SDPA_BWD_TENSOR_SEQ_LEN_Q_UID)
         .set_name("SEQ_LEN_Q")
         .set_data_type(DataType::INT32);
-    seqLenQ->set_dim(toVec(K_SDPA_BPROP_TENSOR_SEQ_LEN_DIMS))
-        .set_stride(toVec(K_SDPA_BPROP_TENSOR_SEQ_LEN_STRIDES));
+    seqLenQ->set_dim(toVec(K_SDPA_BWD_TENSOR_SEQ_LEN_DIMS))
+        .set_stride(toVec(K_SDPA_BWD_TENSOR_SEQ_LEN_STRIDES));
 
     auto seqLenKv = std::make_shared<TensorAttributes>();
-    seqLenKv->set_uid(K_SDPA_BPROP_TENSOR_SEQ_LEN_KV_UID)
+    seqLenKv->set_uid(K_SDPA_BWD_TENSOR_SEQ_LEN_KV_UID)
         .set_name("SEQ_LEN_KV")
         .set_data_type(DataType::INT32);
-    seqLenKv->set_dim(toVec(K_SDPA_BPROP_TENSOR_SEQ_LEN_DIMS))
-        .set_stride(toVec(K_SDPA_BPROP_TENSOR_SEQ_LEN_STRIDES));
+    seqLenKv->set_dim(toVec(K_SDPA_BWD_TENSOR_SEQ_LEN_DIMS))
+        .set_stride(toVec(K_SDPA_BWD_TENSOR_SEQ_LEN_STRIDES));
 
     auto seed = std::make_shared<TensorAttributes>();
-    seed->set_uid(K_SDPA_BPROP_TENSOR_SEED_UID).set_name("SEED");
+    seed->set_uid(K_SDPA_BWD_TENSOR_SEED_UID).set_name("SEED");
     seed->set_value(int32_t{42});
 
     auto offset = std::make_shared<TensorAttributes>();
-    offset->set_uid(K_SDPA_BPROP_TENSOR_OFFSET_UID).set_name("OFFSET");
+    offset->set_uid(K_SDPA_BWD_TENSOR_OFFSET_UID).set_name("OFFSET");
     offset->set_value(int32_t{0});
 
     auto dropoutMask = std::make_shared<TensorAttributes>();
-    dropoutMask->set_uid(K_SDPA_BPROP_TENSOR_DROPOUT_MASK_UID)
+    dropoutMask->set_uid(K_SDPA_BWD_TENSOR_DROPOUT_MASK_UID)
         .set_name("DROPOUT_MASK")
         .set_data_type(DataType::UINT8);
-    dropoutMask->set_dim(toVec(K_SDPA_BPROP_TENSOR_DROPOUT_MASK_DIMS))
-        .set_stride(toVec(K_SDPA_BPROP_TENSOR_DROPOUT_MASK_STRIDES));
+    dropoutMask->set_dim(toVec(K_SDPA_BWD_TENSOR_DROPOUT_MASK_DIMS))
+        .set_stride(toVec(K_SDPA_BWD_TENSOR_DROPOUT_MASK_STRIDES));
 
     auto dropoutScale = std::make_shared<TensorAttributes>();
-    dropoutScale->set_uid(K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_UID).set_name("DROPOUT_SCALE");
+    dropoutScale->set_uid(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID).set_name("DROPOUT_SCALE");
     dropoutScale->set_value(1.0f / (1.0f - 0.1f));
 
     auto dropoutScaleInv = std::make_shared<TensorAttributes>();
-    dropoutScaleInv->set_uid(K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID)
-        .set_name("DROPOUT_SCALE_INV");
+    dropoutScaleInv->set_uid(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID).set_name("DROPOUT_SCALE_INV");
     dropoutScaleInv->set_value(1.0f - 0.1f);
 
     // Optional output tensor
     auto dBias = std::make_shared<TensorAttributes>();
-    dBias->set_uid(K_SDPA_BPROP_TENSOR_DBIAS_UID)
+    dBias->set_uid(K_SDPA_BWD_TENSOR_DBIAS_UID)
         .set_name("DBIAS")
         .set_data_type(DataType::FLOAT)
         .set_output(true);
-    dBias->set_dim(toVec(K_SDPA_BPROP_TENSOR_DBIAS_DIMS))
-        .set_stride(toVec(K_SDPA_BPROP_TENSOR_DBIAS_STRIDES));
+    dBias->set_dim(toVec(K_SDPA_BWD_TENSOR_DBIAS_DIMS))
+        .set_stride(toVec(K_SDPA_BWD_TENSOR_DBIAS_STRIDES));
 
     sdpaNode->attributes.set_attn_scale(scale)
         .set_bias(attnMask)
@@ -365,101 +355,101 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropWithAllOptionalAttributesViaCApi)
     ASSERT_EQ(tensorMap.size(), 19u) << "Expected 9 required + 10 optional tensors";
 
     // Verify all optional tensor UIDs are present and their properties match.
-    const auto scalarDims = toVec(K_SDPA_BPROP_TENSOR_SCALAR_DIMS);
-    const auto scalarStrides = toVec(K_SDPA_BPROP_TENSOR_SCALAR_STRIDES);
-    const auto seqLenDims = toVec(K_SDPA_BPROP_TENSOR_SEQ_LEN_DIMS);
-    const auto seqLenStrides = toVec(K_SDPA_BPROP_TENSOR_SEQ_LEN_STRIDES);
+    const auto scalarDims = toVec(K_SDPA_BWD_TENSOR_SCALAR_DIMS);
+    const auto scalarStrides = toVec(K_SDPA_BWD_TENSOR_SCALAR_STRIDES);
+    const auto seqLenDims = toVec(K_SDPA_BWD_TENSOR_SEQ_LEN_DIMS);
+    const auto seqLenStrides = toVec(K_SDPA_BWD_TENSOR_SEQ_LEN_STRIDES);
 
     // scale — scalar tensor
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_SCALE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_SCALE_UID]->get_dim(), scalarDims);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_SCALE_UID]->get_stride(), scalarStrides);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SCALE_UID]->get_dim(), scalarDims);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SCALE_UID]->get_stride(), scalarStrides);
 
     // attn_mask — [batch, num_heads, seq_q, seq_kv]
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_ATTN_MASK_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_ATTN_MASK_UID]->get_dim(),
-              toVec(K_SDPA_BPROP_TENSOR_ATTN_MASK_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_ATTN_MASK_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_ATTN_MASK_STRIDES));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_ATTN_MASK_UID]->get_data_type(), DataType::FLOAT);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_ATTN_MASK_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_ATTN_MASK_UID]->get_dim(),
+              toVec(K_SDPA_BWD_TENSOR_ATTN_MASK_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_ATTN_MASK_UID]->get_stride(),
+              toVec(K_SDPA_BWD_TENSOR_ATTN_MASK_STRIDES));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_ATTN_MASK_UID]->get_data_type(), DataType::FLOAT);
 
     // seq_len_q — [batch, 1, 1, 1] INT32
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID]->get_dim(), seqLenDims);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID]->get_stride(), seqLenStrides);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID]->get_data_type(), DataType::INT32);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_SEQ_LEN_Q_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SEQ_LEN_Q_UID]->get_dim(), seqLenDims);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SEQ_LEN_Q_UID]->get_stride(), seqLenStrides);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SEQ_LEN_Q_UID]->get_data_type(), DataType::INT32);
 
     // seq_len_kv — [batch, 1, 1, 1] INT32
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_SEQ_LEN_KV_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_SEQ_LEN_KV_UID]->get_dim(), seqLenDims);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_SEQ_LEN_KV_UID]->get_stride(), seqLenStrides);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_SEQ_LEN_KV_UID]->get_data_type(), DataType::INT32);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_SEQ_LEN_KV_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SEQ_LEN_KV_UID]->get_dim(), seqLenDims);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SEQ_LEN_KV_UID]->get_stride(), seqLenStrides);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SEQ_LEN_KV_UID]->get_data_type(), DataType::INT32);
 
     // seed — scalar tensor
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_SEED_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_SEED_UID]->get_dim(), scalarDims);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_SEED_UID]->get_stride(), scalarStrides);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_SEED_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SEED_UID]->get_dim(), scalarDims);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SEED_UID]->get_stride(), scalarStrides);
 
     // offset — scalar tensor
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_OFFSET_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_OFFSET_UID]->get_dim(), scalarDims);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_OFFSET_UID]->get_stride(), scalarStrides);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_OFFSET_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_OFFSET_UID]->get_dim(), scalarDims);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_OFFSET_UID]->get_stride(), scalarStrides);
 
     // dropout_mask — [batch, num_heads, seq_q, seq_kv]
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DROPOUT_MASK_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DROPOUT_MASK_UID]->get_dim(),
-              toVec(K_SDPA_BPROP_TENSOR_DROPOUT_MASK_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DROPOUT_MASK_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_DROPOUT_MASK_STRIDES));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DROPOUT_MASK_UID]->get_data_type(), DataType::UINT8);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DROPOUT_MASK_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DROPOUT_MASK_UID]->get_dim(),
+              toVec(K_SDPA_BWD_TENSOR_DROPOUT_MASK_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DROPOUT_MASK_UID]->get_stride(),
+              toVec(K_SDPA_BWD_TENSOR_DROPOUT_MASK_STRIDES));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DROPOUT_MASK_UID]->get_data_type(), DataType::UINT8);
 
     // dropout_scale — scalar tensor
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_UID]->get_dim(), scalarDims);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_UID]->get_stride(), scalarStrides);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID]->get_dim(), scalarDims);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID]->get_stride(), scalarStrides);
 
     // dropout_scale_inv — scalar tensor
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID]->get_dim(), scalarDims);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID]->get_stride(), scalarStrides);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID]->get_dim(), scalarDims);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID]->get_stride(), scalarStrides);
 
     // dBias — [batch, num_heads, seq_q, seq_kv]
-    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DBIAS_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DBIAS_UID]->get_dim(),
-              toVec(K_SDPA_BPROP_TENSOR_DBIAS_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DBIAS_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_DBIAS_STRIDES));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DBIAS_UID]->get_data_type(), DataType::FLOAT);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DBIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DBIAS_UID]->get_dim(),
+              toVec(K_SDPA_BWD_TENSOR_DBIAS_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DBIAS_UID]->get_stride(),
+              toVec(K_SDPA_BWD_TENSOR_DBIAS_STRIDES));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DBIAS_UID]->get_data_type(), DataType::FLOAT);
 
-    // Verify node attributes on the lifted SdpaBpropNode
+    // Verify node attributes on the lifted SdpaBwdNode
     auto& liftedNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(liftedNodes.size(), 1u);
-    auto* liftedNode = dynamic_cast<SdpaBpropNode*>(liftedNodes[0].get());
+    auto* liftedNode = dynamic_cast<SdpaBwdNode*>(liftedNodes[0].get());
     ASSERT_NE(liftedNode, nullptr);
 
     const auto& attrs = liftedNode->attributes;
 
     // Optional tensor UIDs on the node
     ASSERT_NE(attrs.get_attn_scale(), nullptr);
-    EXPECT_EQ(attrs.get_attn_scale()->get_uid(), K_SDPA_BPROP_TENSOR_SCALE_UID);
+    EXPECT_EQ(attrs.get_attn_scale()->get_uid(), K_SDPA_BWD_TENSOR_SCALE_UID);
     ASSERT_NE(attrs.get_bias(), nullptr);
-    EXPECT_EQ(attrs.get_bias()->get_uid(), K_SDPA_BPROP_TENSOR_ATTN_MASK_UID);
+    EXPECT_EQ(attrs.get_bias()->get_uid(), K_SDPA_BWD_TENSOR_ATTN_MASK_UID);
     ASSERT_NE(attrs.get_seq_len_q(), nullptr);
-    EXPECT_EQ(attrs.get_seq_len_q()->get_uid(), K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID);
+    EXPECT_EQ(attrs.get_seq_len_q()->get_uid(), K_SDPA_BWD_TENSOR_SEQ_LEN_Q_UID);
     ASSERT_NE(attrs.get_seq_len_kv(), nullptr);
-    EXPECT_EQ(attrs.get_seq_len_kv()->get_uid(), K_SDPA_BPROP_TENSOR_SEQ_LEN_KV_UID);
+    EXPECT_EQ(attrs.get_seq_len_kv()->get_uid(), K_SDPA_BWD_TENSOR_SEQ_LEN_KV_UID);
     ASSERT_NE(attrs.get_seed(), nullptr);
-    EXPECT_EQ(attrs.get_seed()->get_uid(), K_SDPA_BPROP_TENSOR_SEED_UID);
+    EXPECT_EQ(attrs.get_seed()->get_uid(), K_SDPA_BWD_TENSOR_SEED_UID);
     ASSERT_NE(attrs.get_offset(), nullptr);
-    EXPECT_EQ(attrs.get_offset()->get_uid(), K_SDPA_BPROP_TENSOR_OFFSET_UID);
+    EXPECT_EQ(attrs.get_offset()->get_uid(), K_SDPA_BWD_TENSOR_OFFSET_UID);
     ASSERT_NE(attrs.get_dropout_mask(), nullptr);
-    EXPECT_EQ(attrs.get_dropout_mask()->get_uid(), K_SDPA_BPROP_TENSOR_DROPOUT_MASK_UID);
+    EXPECT_EQ(attrs.get_dropout_mask()->get_uid(), K_SDPA_BWD_TENSOR_DROPOUT_MASK_UID);
     ASSERT_NE(attrs.get_dropout_scale(), nullptr);
-    EXPECT_EQ(attrs.get_dropout_scale()->get_uid(), K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_UID);
+    EXPECT_EQ(attrs.get_dropout_scale()->get_uid(), K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID);
     ASSERT_NE(attrs.get_dropout_scale_inv(), nullptr);
-    EXPECT_EQ(attrs.get_dropout_scale_inv()->get_uid(), K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID);
+    EXPECT_EQ(attrs.get_dropout_scale_inv()->get_uid(), K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID);
     ASSERT_NE(attrs.get_dbias(), nullptr);
-    EXPECT_EQ(attrs.get_dbias()->get_uid(), K_SDPA_BPROP_TENSOR_DBIAS_UID);
+    EXPECT_EQ(attrs.get_dbias()->get_uid(), K_SDPA_BWD_TENSOR_DBIAS_UID);
 
     // Boolean flags
     EXPECT_TRUE(attrs.alibi_mask);
@@ -483,10 +473,10 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropWithAllOptionalAttributesViaCApi)
 
 // Builds an SDPA backward graph without explicit tensor UIDs, then verifies
 // auto-assigned UIDs are unique and correctly referenced after a round-trip.
-TEST_F(IntegrationSdpaBpropLifting, AutoAssignedUidsPreservedInRoundTrip)
+TEST_F(IntegrationSdpaBwdLifting, AutoAssignedUidsPreservedInRoundTrip)
 {
     auto graph = std::make_shared<TestableGraph>();
-    graph->set_name("AutoUidSdpaBpropGraph")
+    graph->set_name("AutoUidSdpaBwdGraph")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
@@ -494,29 +484,28 @@ TEST_F(IntegrationSdpaBpropLifting, AutoAssignedUidsPreservedInRoundTrip)
     // Create tensors WITHOUT explicit UIDs
     auto q = std::make_shared<TensorAttributes>();
     q->set_name("Q").set_data_type(DataType::FLOAT);
-    q->set_dim(toVec(K_SDPA_BPROP_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES));
+    q->set_dim(toVec(K_SDPA_BWD_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_BWD_TENSOR_Q_STRIDES));
 
     auto k = std::make_shared<TensorAttributes>();
     k->set_name("K").set_data_type(DataType::FLOAT);
-    k->set_dim(toVec(K_SDPA_BPROP_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_BPROP_TENSOR_K_STRIDES));
+    k->set_dim(toVec(K_SDPA_BWD_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_BWD_TENSOR_K_STRIDES));
 
     auto v = std::make_shared<TensorAttributes>();
     v->set_name("V").set_data_type(DataType::FLOAT);
-    v->set_dim(toVec(K_SDPA_BPROP_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_BPROP_TENSOR_V_STRIDES));
+    v->set_dim(toVec(K_SDPA_BWD_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_BWD_TENSOR_V_STRIDES));
 
     auto o = std::make_shared<TensorAttributes>();
     o->set_name("O").set_data_type(DataType::FLOAT);
-    o->set_dim(toVec(K_SDPA_BPROP_TENSOR_O_DIMS)).set_stride(toVec(K_SDPA_BPROP_TENSOR_O_STRIDES));
+    o->set_dim(toVec(K_SDPA_BWD_TENSOR_O_DIMS)).set_stride(toVec(K_SDPA_BWD_TENSOR_O_STRIDES));
 
     auto dO = std::make_shared<TensorAttributes>();
     dO->set_name("dO").set_data_type(DataType::FLOAT);
-    dO->set_dim(toVec(K_SDPA_BPROP_TENSOR_DO_DIMS))
-        .set_stride(toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES));
+    dO->set_dim(toVec(K_SDPA_BWD_TENSOR_DO_DIMS)).set_stride(toVec(K_SDPA_BWD_TENSOR_DO_STRIDES));
 
     auto stats = std::make_shared<TensorAttributes>();
     stats->set_name("Stats").set_data_type(DataType::FLOAT);
-    stats->set_dim(toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS))
-        .set_stride(toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES));
+    stats->set_dim(toVec(K_SDPA_BWD_TENSOR_STATS_DIMS))
+        .set_stride(toVec(K_SDPA_BWD_TENSOR_STATS_STRIDES));
 
     SdpaBackwardAttributes sdpaAttrs;
 
@@ -552,7 +541,7 @@ TEST_F(IntegrationSdpaBpropLifting, AutoAssignedUidsPreservedInRoundTrip)
     // Verify the node references resolve to tensors in the map
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
-    auto* sdpaNode = dynamic_cast<SdpaBpropNode*>(subNodes[0].get());
+    auto* sdpaNode = dynamic_cast<SdpaBwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
 
     EXPECT_NE(uids.count(sdpaNode->attributes.get_q()->get_uid()), 0u);
@@ -569,9 +558,9 @@ TEST_F(IntegrationSdpaBpropLifting, AutoAssignedUidsPreservedInRoundTrip)
 // Builds an SDPA backward graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
 // the reconstructed graph matches the original.
-TEST_F(IntegrationSdpaBpropLifting, SdpaBpropLiftWithoutFinalization)
+TEST_F(IntegrationSdpaBwdLifting, SdpaBwdLiftWithoutFinalization)
 {
-    auto originalGraph = buildSdpaBpropGraph();
+    auto originalGraph = buildSdpaBwdGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -598,26 +587,25 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropLiftWithoutFinalization)
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
 
-    auto* sdpaNode = dynamic_cast<SdpaBpropNode*>(subNodes[0].get());
-    ASSERT_NE(sdpaNode, nullptr) << "Expected a SdpaBpropNode";
+    auto* sdpaNode = dynamic_cast<SdpaBwdNode*>(subNodes[0].get());
+    ASSERT_NE(sdpaNode, nullptr) << "Expected a SdpaBwdNode";
 
     // Verify tensor dims survive the serialization round-trip
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 9u);
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_Q_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_Q_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_Q_UID]->get_stride(),
-              toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_K_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_K_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DQ_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DK_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DK_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DV_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DV_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_Q_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_Q_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_Q_UID]->get_stride(), toVec(K_SDPA_BWD_TENSOR_Q_STRIDES));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_K_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_K_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DQ_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DQ_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DK_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DK_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DV_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DV_DIMS));
 }
 
 // Serializes an SDPA backward graph to binary, then deserializes via the backend
 // using a handle (full finalization). Verifies the reconstructed graph matches the original.
-TEST_F(IntegrationSdpaBpropLifting, SdpaBpropDeserializeViaBackendWithHandle)
+TEST_F(IntegrationSdpaBwdLifting, SdpaBwdDeserializeViaBackendWithHandle)
 {
-    auto originalGraph = buildSdpaBpropGraph();
+    auto originalGraph = buildSdpaBwdGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -633,26 +621,26 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropDeserializeViaBackendWithHandle)
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
     EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
     EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
-    EXPECT_EQ(liftedGraph->get_name(), "LiftingSdpaBpropGraph");
+    EXPECT_EQ(liftedGraph->get_name(), "LiftingSdpaBwdGraph");
 
     // Verify 9 required tensors
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 9u);
 
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_Q_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_Q_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_K_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_K_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DQ_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DK_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DK_DIMS));
-    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DV_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DV_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_Q_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_Q_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_K_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_K_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DQ_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DQ_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DK_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DK_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DV_UID]->get_dim(), toVec(K_SDPA_BWD_TENSOR_DV_DIMS));
 
-    // Verify the node is an SdpaBpropNode with the correct operation name
+    // Verify the node is an SdpaBwdNode with the correct operation name
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
-    auto* sdpaNode = dynamic_cast<SdpaBpropNode*>(subNodes[0].get());
+    auto* sdpaNode = dynamic_cast<SdpaBwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
-    EXPECT_EQ(sdpaNode->attributes.get_name(), "sdpa_bprop_op");
-    EXPECT_EQ(sdpaNode->attributes.get_q()->get_uid(), K_SDPA_BPROP_TENSOR_Q_UID);
-    EXPECT_EQ(sdpaNode->attributes.get_dv()->get_uid(), K_SDPA_BPROP_TENSOR_DV_UID);
+    EXPECT_EQ(sdpaNode->attributes.get_name(), "sdpa_bwd_op");
+    EXPECT_EQ(sdpaNode->attributes.get_q()->get_uid(), K_SDPA_BWD_TENSOR_Q_UID);
+    EXPECT_EQ(sdpaNode->attributes.get_dv()->get_uid(), K_SDPA_BWD_TENSOR_DV_UID);
 }
 
 } // namespace

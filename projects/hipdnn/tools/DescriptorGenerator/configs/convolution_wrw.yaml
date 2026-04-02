@@ -126,7 +126,7 @@ operation:
   compute_data_type_attr: "HIPDNN_ATTR_CONVOLUTION_COMP_TYPE"
   compute_data_type_shared: true
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS_EXT"
 
   test_data:
     constants_include: "ConvWgradConstants"

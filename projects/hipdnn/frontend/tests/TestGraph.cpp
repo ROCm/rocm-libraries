@@ -6604,7 +6604,7 @@ TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
     EXPECT_FALSE(config->matchOperation("conv_fprop", {x8, w}).has_value());
 }
 
-TEST_F(TestGraph, SdpaFpropNodeCreation)
+TEST_F(TestGraph, SdpaFwdNodeCreation)
 {
     Graph graph;
     graph.set_io_data_type(DataType::FLOAT)
@@ -6633,7 +6633,7 @@ TEST_F(TestGraph, SdpaFpropNodeCreation)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
-TEST_F(TestGraph, SdpaFpropNodeCreationWithStats)
+TEST_F(TestGraph, SdpaFwdNodeCreationWithStats)
 {
     Graph graph;
     graph.set_io_data_type(DataType::FLOAT)
@@ -6665,7 +6665,7 @@ TEST_F(TestGraph, SdpaFpropNodeCreationWithStats)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
-TEST_F(TestGraph, BuildAndSerializeSdpaFpropGraph)
+TEST_F(TestGraph, BuildAndSerializeSdpaFwdGraph)
 {
     Graph graph;
     graph.set_name("SerializedSdpaGraph")
@@ -6737,7 +6737,7 @@ TEST_F(TestGraph, BuildAndSerializeSdpaFpropGraph)
     EXPECT_FALSE(deserializedSdpaAttributes->stats_tensor_uid.has_value());
 }
 
-TEST_F(TestGraph, BuildAndSerializeSdpaFpropGraphWithStats)
+TEST_F(TestGraph, BuildAndSerializeSdpaFwdGraphWithStats)
 {
     Graph graph;
     graph.set_name("SerializedSdpaStatsGraph")
