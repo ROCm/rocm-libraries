@@ -231,7 +231,7 @@ set(EXTRA_LINK_OPTIONS)
 if(HIPDNN_ENABLE_COVERAGE)
     message(VERBOSE "Enabling compile flags for coverage-mapping")
     list(PREPEND EXTRA_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping)
-    list(PREPEND EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping)
+    list(PREPEND EXTRA_LINK_OPTIONS -fprofile-instr-generate)
 endif()
 
 list(
