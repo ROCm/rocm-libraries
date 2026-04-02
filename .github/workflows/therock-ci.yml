@@ -53,6 +53,7 @@ jobs:
       test_type: ${{ steps.linux_projects.outputs.test_type }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
+      linux_projects_coverage: ${{ steps.linux_projects_coverage.outputs.linux_projects_coverage }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -113,6 +114,13 @@ jobs:
           CI_CONFIG_PATH: ci-config
         run: |
           python .github/scripts/therock_configure_ci.py
+
+      - name: Determine Linux projects for coverage (changed subtrees only)
+        id: linux_projects_coverage
+        env:
+          PLATFORM: "linux"
+        run: |
+          python .github/scripts/therock_configure_coverage.py
 
       - name: Determine Windows projects to run
         id: windows_projects
@@ -199,11 +207,12 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.linux_projects != '[]' }}
+    # Only run if there are coverage projects (changed subtrees)
+    if: ${{ needs.setup.outputs.linux_projects_coverage != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        projects: ${{ fromJSON(needs.setup.outputs.linux_projects) }}
+        projects: ${{ fromJSON(needs.setup.outputs.linux_projects_coverage) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.linux_package_targets) }}
     uses: ./.github/workflows/therock-ci-linux.yml
     secrets: inherit
