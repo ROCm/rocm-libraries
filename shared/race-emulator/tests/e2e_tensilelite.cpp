@@ -876,11 +876,22 @@ TEST(Gfx950, MatMul_TensileLite_MXFP4_TN_32x32x256) {
   constexpr int MXBlock = 32;
   constexpr int numScalesPerRow = K / MXBlock; // 8
 
-  // FP4: 2 elements per byte. Initialize all nibbles to 2 (=1.0f).
-  std::vector<uint8_t> aFp4(M * K / 2, 0x22);
-  std::vector<uint8_t> bFp4(N * K / 2, 0x22);
-  // MX scale factors: E8M0 exponent 127 = scale 1.0.
-  std::vector<uint8_t> mxScaleA(M * numScalesPerRow, 127);
+  // Random {-1, +1} data packed as FP4 nibbles (2 = +1.0, 10 = -1.0).
+  // Same {-1, +1} pattern as TensileGemmRunner::initializeDataF32.
+  std::mt19937 rng(42);
+  std::uniform_int_distribution<int> dist(0, 1);
+  auto randPm1Fp4Byte = [&]() -> uint8_t {
+    uint8_t lo = dist(rng) ? 2 : 10;
+    uint8_t hi = dist(rng) ? 2 : 10;
+    return lo | (hi << 4);
+  };
+
+  std::vector<uint8_t> aFp4(M * K / 2);
+  std::vector<uint8_t> bFp4(N * K / 2);
+  for (auto &b : aFp4) { b = randPm1Fp4Byte(); }
+  for (auto &b : bFp4) { b = randPm1Fp4Byte(); }
+
+  std::vector<uint8_t> mxScaleA(M * numScalesPerRow, 127); // scale = 1.0
   std::vector<uint8_t> mxScaleB(N * numScalesPerRow, 127);
   // F32 output and C (zeroed for beta=0).
   std::vector<float> cF32(M * N, 0.0f);
@@ -896,15 +907,15 @@ TEST(Gfx950, MatMul_TensileLite_MXFP4_TN_32x32x256) {
     put64(off, v);
   };
 
-  // Preamble.
-  put32(0, 1);        // Gemm info (gemm_count = 1)
-  put32(4, 18874369); // kernel info0 (standard GSU=1)
-  put32(8, 0);        // kernel info1
-  put32(12, 1);       // numWG
-  put32(16, M);       // SizesFree0
-  put32(20, N);       // SizesFree1
-  put32(24, Batch);   // SizesFree2
-  put32(28, K);       // SizesSum0
+  // Preamble (from --print-kernel-args output).
+  put32(0, 1);          // gemm_count
+  put32(4, 1);          // internalArgs (kernel info0)
+  put32(8, 1073807368); // internalArgs1 (kernel info1)
+  put32(12, 1);         // numWorkGroups
+  put32(16, M);         // size_0
+  put32(20, N);         // size_1
+  put32(24, Batch);     // size_2
+  put32(28, K);         // size_3
 
   // Pointers.
   putPtr(32, dF32.data());
@@ -914,19 +925,19 @@ TEST(Gfx950, MatMul_TensileLite_MXFP4_TN_32x32x256) {
   putPtr(64, bFp4.data());
   putPtr(72, mxScaleB.data());
 
-  // Strides.
-  put32(80, 1);              // strideD0
-  put32(84, M);              // strideD1
-  put32(88, 1);              // strideC0
-  put32(92, M);              // strideC1
-  put32(96, 1);              // strideA0
-  put32(100, K);             // strideA1 (TN layout)
-  put32(104, 1);             // strideMXSA0
-  put32(108, numScalesPerRow); // strideMXSA1
-  put32(112, 1);             // strideB0
-  put32(116, K);             // strideB1
-  put32(120, 1);             // strideMXSB0
-  put32(124, numScalesPerRow); // strideMXSB1
+  // Strides (no stride0 fields — offsets go directly to stride1/stride2).
+  put32(80, M);                // strideD1
+  put32(84, M * N);            // strideD2
+  put32(88, M);                // strideC1
+  put32(92, M * N);            // strideC2
+  put32(96, K);                // strideA1 (TN layout)
+  put32(100, M * K);           // strideA2
+  put32(104, numScalesPerRow); // strideMXSA1
+  put32(108, M * numScalesPerRow); // strideMXSA2
+  put32(112, K);               // strideB1
+  put32(116, N * K);           // strideB2
+  put32(120, numScalesPerRow); // strideMXSB1
+  put32(124, N * numScalesPerRow); // strideMXSB2
 
   // Scalars.
   putF(128, 1.0f); // alpha
@@ -941,23 +952,27 @@ TEST(Gfx950, MatMul_TensileLite_MXFP4_TN_32x32x256) {
   emulator.run({0, 0, 0}, {256, 1, 1},
                {.raceChecks = true, .completeEmulation = true});
 
-  // Print output for debugging.
-  std::cerr << "D output (first 8 rows):\n";
-  for (int i = 0; i < 8; ++i) {
-    std::cerr << "  row " << i << ":";
+  // CPU reference: decode FP4+scale to F32, then matmul.
+  std::vector<float> aF32(M * K), bF32(N * K);
+  mxfp4MatrixToF32<M, K>(aF32.data(), aFp4.data(), mxScaleA.data());
+  mxfp4MatrixToF32<N, K>(bF32.data(), bFp4.data(), mxScaleB.data());
+
+  std::vector<float> refD(M * N, 0.0f);
+  // D[i][j] = sum_k A[i][k] * B[j][k]  (B is stored as N rows × K cols).
+  for (int i = 0; i < M; ++i) {
     for (int j = 0; j < N; ++j) {
-      std::cerr << " " << dF32[i * N + j];
+      float sum = 0.0f;
+      for (int k = 0; k < K; ++k) {
+        sum += aF32[i * K + k] * bF32[j * K + k];
+      }
+      refD[i * N + j] = sum;
     }
-    std::cerr << "\n";
   }
-  // Count non-zero elements.
-  int nonZero = 0;
+
   for (int i = 0; i < M * N; ++i) {
-    if (dF32[i] != 0.0f) {
-      nonZero++;
-    }
+    EXPECT_NEAR(dF32[i], refD[i], std::abs(refD[i]) * 1e-4f)
+        << "D[" << i / N << "][" << i % N << "]";
   }
-  std::cerr << "Non-zero elements: " << nonZero << " / " << M * N << "\n";
 }
 
 TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_128x128x8192) {
