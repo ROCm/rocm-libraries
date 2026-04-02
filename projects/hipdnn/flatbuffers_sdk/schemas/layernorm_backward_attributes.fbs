@@ -12,6 +12,7 @@ table LayernormBackwardAttributes {
     mean_tensor_uid: long = null;
     inv_variance_tensor_uid: long = null;
     dx_tensor_uid: long;
+    dscale_tensor_uid: long = null;
+    dbias_tensor_uid: long = null;
     normalized_dim_count: long;
-    forward_phase: NormFwdPhase = NOT_SET;
 }

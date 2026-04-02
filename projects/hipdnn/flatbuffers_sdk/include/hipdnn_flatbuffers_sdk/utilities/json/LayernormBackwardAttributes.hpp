@@ -20,9 +20,10 @@ inline void to_json(nlohmann::json& layernormJson, const LayernormBackwardAttrib
     inputs["inv_variance_tensor_uid"] = ln.inv_variance_tensor_uid();
 
     outputs["dx_tensor_uid"] = ln.dx_tensor_uid();
+    outputs["dscale_tensor_uid"] = ln.dscale_tensor_uid();
+    outputs["dbias_tensor_uid"] = ln.dbias_tensor_uid();
 
     layernormJson["normalized_dim_count"] = ln.normalized_dim_count();
-    layernormJson["forward_phase"] = static_cast<int8_t>(ln.forward_phase());
 }
 
 } // namespace hipdnn_flatbuffers_sdk::data_objects
@@ -38,13 +39,6 @@ inline auto to<data_objects::LayernormBackwardAttributes>(flatbuffers::FlatBuffe
 
     const int64_t normalizedDimCount = entry.at("normalized_dim_count").get<int64_t>();
 
-    auto forwardPhase = data_objects::NormFwdPhase::NOT_SET;
-    if(entry.contains("forward_phase"))
-    {
-        forwardPhase
-            = static_cast<data_objects::NormFwdPhase>(entry.at("forward_phase").get<int8_t>());
-    }
-
     return data_objects::CreateLayernormBackwardAttributes(
         builder,
         inputs.at("dy_tensor_uid").get<int64_t>(),
@@ -53,8 +47,9 @@ inline auto to<data_objects::LayernormBackwardAttributes>(flatbuffers::FlatBuffe
         inputs.at("mean_tensor_uid").get<int64_t>(),
         inputs.at("inv_variance_tensor_uid").get<int64_t>(),
         outputs.at("dx_tensor_uid").get<int64_t>(),
-        normalizedDimCount,
-        forwardPhase);
+        outputs.at("dscale_tensor_uid").get<int64_t>(),
+        outputs.at("dbias_tensor_uid").get<int64_t>(),
+        normalizedDimCount);
 }
 
 } // namespace hipdnn_flatbuffers_sdk::json

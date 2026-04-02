@@ -33,8 +33,9 @@ struct LayernormBackwardAttributesT : public ::flatbuffers::NativeTable {
   ::flatbuffers::Optional<int64_t> mean_tensor_uid = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<int64_t> inv_variance_tensor_uid = ::flatbuffers::nullopt;
   int64_t dx_tensor_uid = 0;
+  ::flatbuffers::Optional<int64_t> dscale_tensor_uid = ::flatbuffers::nullopt;
+  ::flatbuffers::Optional<int64_t> dbias_tensor_uid = ::flatbuffers::nullopt;
   int64_t normalized_dim_count = 0;
-  hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase forward_phase = hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::NOT_SET;
 };
 
 struct LayernormBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -47,8 +48,9 @@ struct LayernormBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
     VT_MEAN_TENSOR_UID = 10,
     VT_INV_VARIANCE_TENSOR_UID = 12,
     VT_DX_TENSOR_UID = 14,
-    VT_NORMALIZED_DIM_COUNT = 16,
-    VT_FORWARD_PHASE = 18
+    VT_DSCALE_TENSOR_UID = 16,
+    VT_DBIAS_TENSOR_UID = 18,
+    VT_NORMALIZED_DIM_COUNT = 20
   };
   int64_t dy_tensor_uid() const {
     return GetField<int64_t>(VT_DY_TENSOR_UID, 0);
@@ -86,17 +88,23 @@ struct LayernormBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
   bool mutate_dx_tensor_uid(int64_t _dx_tensor_uid = 0) {
     return SetField<int64_t>(VT_DX_TENSOR_UID, _dx_tensor_uid, 0);
   }
+  ::flatbuffers::Optional<int64_t> dscale_tensor_uid() const {
+    return GetOptional<int64_t, int64_t>(VT_DSCALE_TENSOR_UID);
+  }
+  bool mutate_dscale_tensor_uid(int64_t _dscale_tensor_uid) {
+    return SetField<int64_t>(VT_DSCALE_TENSOR_UID, _dscale_tensor_uid);
+  }
+  ::flatbuffers::Optional<int64_t> dbias_tensor_uid() const {
+    return GetOptional<int64_t, int64_t>(VT_DBIAS_TENSOR_UID);
+  }
+  bool mutate_dbias_tensor_uid(int64_t _dbias_tensor_uid) {
+    return SetField<int64_t>(VT_DBIAS_TENSOR_UID, _dbias_tensor_uid);
+  }
   int64_t normalized_dim_count() const {
     return GetField<int64_t>(VT_NORMALIZED_DIM_COUNT, 0);
   }
   bool mutate_normalized_dim_count(int64_t _normalized_dim_count = 0) {
     return SetField<int64_t>(VT_NORMALIZED_DIM_COUNT, _normalized_dim_count, 0);
-  }
-  hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase forward_phase() const {
-    return static_cast<hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase>(GetField<int8_t>(VT_FORWARD_PHASE, 0));
-  }
-  bool mutate_forward_phase(hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase _forward_phase = static_cast<hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase>(0)) {
-    return SetField<int8_t>(VT_FORWARD_PHASE, static_cast<int8_t>(_forward_phase), 0);
   }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -106,8 +114,9 @@ struct LayernormBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
            VerifyField<int64_t>(verifier, VT_MEAN_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_INV_VARIANCE_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_DX_TENSOR_UID, 8) &&
+           VerifyField<int64_t>(verifier, VT_DSCALE_TENSOR_UID, 8) &&
+           VerifyField<int64_t>(verifier, VT_DBIAS_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_NORMALIZED_DIM_COUNT, 8) &&
-           VerifyField<int8_t>(verifier, VT_FORWARD_PHASE, 1) &&
            verifier.EndTable();
   }
   LayernormBackwardAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -137,11 +146,14 @@ struct LayernormBackwardAttributesBuilder {
   void add_dx_tensor_uid(int64_t dx_tensor_uid) {
     fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_DX_TENSOR_UID, dx_tensor_uid, 0);
   }
+  void add_dscale_tensor_uid(int64_t dscale_tensor_uid) {
+    fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_DSCALE_TENSOR_UID, dscale_tensor_uid);
+  }
+  void add_dbias_tensor_uid(int64_t dbias_tensor_uid) {
+    fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_DBIAS_TENSOR_UID, dbias_tensor_uid);
+  }
   void add_normalized_dim_count(int64_t normalized_dim_count) {
     fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_NORMALIZED_DIM_COUNT, normalized_dim_count, 0);
-  }
-  void add_forward_phase(hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase forward_phase) {
-    fbb_.AddElement<int8_t>(LayernormBackwardAttributes::VT_FORWARD_PHASE, static_cast<int8_t>(forward_phase), 0);
   }
   explicit LayernormBackwardAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -162,17 +174,19 @@ inline ::flatbuffers::Offset<LayernormBackwardAttributes> CreateLayernormBackwar
     ::flatbuffers::Optional<int64_t> mean_tensor_uid = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<int64_t> inv_variance_tensor_uid = ::flatbuffers::nullopt,
     int64_t dx_tensor_uid = 0,
-    int64_t normalized_dim_count = 0,
-    hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase forward_phase = hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::NOT_SET) {
+    ::flatbuffers::Optional<int64_t> dscale_tensor_uid = ::flatbuffers::nullopt,
+    ::flatbuffers::Optional<int64_t> dbias_tensor_uid = ::flatbuffers::nullopt,
+    int64_t normalized_dim_count = 0) {
   LayernormBackwardAttributesBuilder builder_(_fbb);
   builder_.add_normalized_dim_count(normalized_dim_count);
+  if(dbias_tensor_uid) { builder_.add_dbias_tensor_uid(*dbias_tensor_uid); }
+  if(dscale_tensor_uid) { builder_.add_dscale_tensor_uid(*dscale_tensor_uid); }
   builder_.add_dx_tensor_uid(dx_tensor_uid);
   if(inv_variance_tensor_uid) { builder_.add_inv_variance_tensor_uid(*inv_variance_tensor_uid); }
   if(mean_tensor_uid) { builder_.add_mean_tensor_uid(*mean_tensor_uid); }
   if(scale_tensor_uid) { builder_.add_scale_tensor_uid(*scale_tensor_uid); }
   builder_.add_x_tensor_uid(x_tensor_uid);
   builder_.add_dy_tensor_uid(dy_tensor_uid);
-  builder_.add_forward_phase(forward_phase);
   return builder_.Finish();
 }
 
@@ -187,8 +201,9 @@ inline bool operator==(const LayernormBackwardAttributesT &lhs, const LayernormB
       (lhs.mean_tensor_uid == rhs.mean_tensor_uid) &&
       (lhs.inv_variance_tensor_uid == rhs.inv_variance_tensor_uid) &&
       (lhs.dx_tensor_uid == rhs.dx_tensor_uid) &&
-      (lhs.normalized_dim_count == rhs.normalized_dim_count) &&
-      (lhs.forward_phase == rhs.forward_phase);
+      (lhs.dscale_tensor_uid == rhs.dscale_tensor_uid) &&
+      (lhs.dbias_tensor_uid == rhs.dbias_tensor_uid) &&
+      (lhs.normalized_dim_count == rhs.normalized_dim_count);
 }
 
 inline bool operator!=(const LayernormBackwardAttributesT &lhs, const LayernormBackwardAttributesT &rhs) {
@@ -211,8 +226,9 @@ inline void LayernormBackwardAttributes::UnPackTo(LayernormBackwardAttributesT *
   { auto _e = mean_tensor_uid(); _o->mean_tensor_uid = _e; }
   { auto _e = inv_variance_tensor_uid(); _o->inv_variance_tensor_uid = _e; }
   { auto _e = dx_tensor_uid(); _o->dx_tensor_uid = _e; }
+  { auto _e = dscale_tensor_uid(); _o->dscale_tensor_uid = _e; }
+  { auto _e = dbias_tensor_uid(); _o->dbias_tensor_uid = _e; }
   { auto _e = normalized_dim_count(); _o->normalized_dim_count = _e; }
-  { auto _e = forward_phase(); _o->forward_phase = _e; }
 }
 
 inline ::flatbuffers::Offset<LayernormBackwardAttributes> LayernormBackwardAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const LayernormBackwardAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -229,8 +245,9 @@ inline ::flatbuffers::Offset<LayernormBackwardAttributes> CreateLayernormBackwar
   auto _mean_tensor_uid = _o->mean_tensor_uid;
   auto _inv_variance_tensor_uid = _o->inv_variance_tensor_uid;
   auto _dx_tensor_uid = _o->dx_tensor_uid;
+  auto _dscale_tensor_uid = _o->dscale_tensor_uid;
+  auto _dbias_tensor_uid = _o->dbias_tensor_uid;
   auto _normalized_dim_count = _o->normalized_dim_count;
-  auto _forward_phase = _o->forward_phase;
   return hipdnn_flatbuffers_sdk::data_objects::CreateLayernormBackwardAttributes(
       _fbb,
       _dy_tensor_uid,
@@ -239,8 +256,9 @@ inline ::flatbuffers::Offset<LayernormBackwardAttributes> CreateLayernormBackwar
       _mean_tensor_uid,
       _inv_variance_tensor_uid,
       _dx_tensor_uid,
-      _normalized_dim_count,
-      _forward_phase);
+      _dscale_tensor_uid,
+      _dbias_tensor_uid,
+      _normalized_dim_count);
 }
 
 }  // namespace data_objects

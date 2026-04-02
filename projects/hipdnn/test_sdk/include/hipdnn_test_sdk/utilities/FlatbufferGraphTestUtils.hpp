@@ -1625,6 +1625,18 @@ inline flatbuffers::FlatBufferBuilder
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 4, "scale", inputDataType, &normalizedStrides, &normalizedDims));
 
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 5, "mean", inputDataType, &statStrides, &statDims));
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 6, "inv_variance", inputDataType, &statStrides, &statDims));
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 7, "dscale", inputDataType, &normalizedStrides, &normalizedDims));
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 8, "dbias", inputDataType, &normalizedStrides, &normalizedDims));
+
     auto layernormBackwardAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateLayernormBackwardAttributes(
             builder,
@@ -1634,6 +1646,8 @@ inline flatbuffers::FlatBufferBuilder
             5, // mean tensor uid
             6, // rstd tensor uid
             3, // dx tensor uid
+            7, // dscale tensor uid
+            8, // dbias tensor uid
             3 // normalizedDimCount
         );
 
