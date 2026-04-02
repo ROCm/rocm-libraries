@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   process:
-    if: github.repository == 'ROCm/rocm-libraries'
+    # if: github.repository == 'ROCm/rocm-libraries'  # TODO: re-enable for prod
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
