@@ -18,3 +18,4 @@ In order to build the plugin standalone, you will need to have installed hipDNN 
 1. Make a build directory, `mkdir build && cd build`.
 1. Run `cmake -DCMAKE_CXX_COMPILER=<path to amdclang>/clang++ ..` to configure the build.
 1. Run `ninja` to build the plugin.
+# merge queue clean test
