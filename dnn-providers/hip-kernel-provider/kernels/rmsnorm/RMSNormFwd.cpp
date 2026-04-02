@@ -1,5 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include "Bfloat16Dev.hpp"
 
 constexpr unsigned int LOCAL_SIZE = HIP_PLUGIN_RMSNORM_LOCAL_SIZE;
@@ -12,57 +13,90 @@ using OutputType = HIP_PLUGIN_RMSNORM_OUTPUT_TYPE;
 using ScaleType = HIP_PLUGIN_RMSNORM_SCALE_TYPE;
 using ComputeType = HIP_PLUGIN_RMSNORM_COMPUTE_TYPE;
 
-template <typename T>
-struct DataCast;
-
-template <>
-struct DataCast<float>
+// Generic cast through float
+template <typename From, typename To>
+struct DataCast
 {
-    static __device__ __forceinline__ float to(float value)
+    static __device__ __forceinline__ To run(From value)
     {
-        return value;
+        return DataCast<float, To>::run(DataCast<From, float>::run(value));
     }
-    static __device__ __forceinline__ float from(float value)
+};
+
+// No op for same type
+template <typename T>
+struct DataCast<T, T>
+{
+    static __device__ __forceinline__ T run(T value)
     {
         return value;
     }
 };
 
+// half to float
 template <>
-struct DataCast<half>
+struct DataCast<half, float>
 {
-    static __device__ __forceinline__ float to(half value)
+    static __device__ __forceinline__ float run(half value)
     {
         return __half2float(value);
     }
-    static __device__ __forceinline__ half from(float value)
+};
+
+// float to half
+template <>
+struct DataCast<float, half>
+{
+    static __device__ __forceinline__ half run(float value)
     {
         return __float2half(value);
     }
 };
 
+// ushort (bfloat16) to float
 template <>
-struct DataCast<ushort>
+struct DataCast<ushort, float>
 {
-    static __device__ __forceinline__ float to(ushort value)
+    static __device__ __forceinline__ float run(ushort value)
     {
         return bfloat16_to_float(value);
     }
-    static __device__ __forceinline__ ushort from(float value)
+};
+
+// float to ushort (bfloat16)
+template <>
+struct DataCast<float, ushort>
+{
+    static __device__ __forceinline__ ushort run(float value)
     {
         return float_to_bfloat16(value);
     }
 };
 
-template <typename T>
-__device__ __forceinline__ float to_float32(T value)
+// half to bfloat16
+template <>
+struct DataCast<half, ushort>
 {
-    return DataCast<T>::to(value);
-}
-template <typename T>
-__device__ __forceinline__ T from_float32(float value)
+    static __device__ __forceinline__ ushort run(half value)
+    {
+        return float_to_bfloat16(__half2float(value));
+    }
+};
+
+// bfloat16 to half
+template <>
+struct DataCast<ushort, half>
 {
-    return DataCast<T>::from(value);
+    static __device__ __forceinline__ half run(ushort value)
+    {
+        return __float2half(bfloat16_to_float(value));
+    }
+};
+
+template <typename From, typename To>
+__device__ __forceinline__ To Cast(From value)
+{
+    return DataCast<From, To>::run(value);
 }
 
 extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
@@ -75,14 +109,14 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
     const unsigned int gid = blockIdx.x;
     const unsigned int lid = threadIdx.x;
 
-    float pvar = 0.0f;
-    __shared__ float ltmp[LOCAL_SIZE];
+    ComputeType pvar = Cast<float, ComputeType>(0.0f);
+    __shared__ ComputeType ltmp[LOCAL_SIZE];
 
     // reduce sum
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
         size_t idx = gid * INNER_SIZE + i;
-        float tmp = to_float32<InputType>(x[idx]);
+        ComputeType tmp = Cast<InputType, ComputeType>(x[idx]);
         pvar += tmp * tmp;
     }
 
@@ -97,23 +131,26 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
         __syncthreads();
     }
 
-    pvar = ltmp[0] / INNER_SIZE;
-    float prstd = rsqrt(pvar + eps);
+    ComputeType csize_c = Cast<float, ComputeType>(static_cast<float>(C_SIZE));
+    ComputeType eps_c = Cast<float, ComputeType>(eps);
+    pvar = ltmp[0] / csize_c;
+    ComputeType prstd = Cast<float, ComputeType>(rsqrtf(Cast<ComputeType, float>(pvar + eps_c)));
 
     if(lid == 0 && rstd)
     {
-        rstd[gid] = from_float32<ComputeType>(prstd);
+        rstd[gid] = prstd;
     }
 
     // forward calculation
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
         size_t idx = gid * INNER_SIZE + i;
-        float y_val = to_float32<InputType>(x[idx]) * prstd * to_float32<ScaleType>(weight[i]);
+        ComputeType y_val = Cast<InputType, ComputeType>(x[idx]) * prstd
+                            * Cast<ScaleType, ComputeType>(weight[i]);
         if(bias != nullptr)
         {
-            y_val += to_float32<ScaleType>(bias[i]);
+            y_val += Cast<ScaleType, ComputeType>(bias[i]);
         }
-        y[idx] = from_float32<OutputType>(y_val);
+        y[idx] = Cast<ComputeType, OutputType>(y_val);
     }
 }
