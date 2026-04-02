@@ -11,7 +11,6 @@
 #include <rocRoller/Operations/Scratch_fwd.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
-#include <array>
 #include <functional>
 #include <map>
 #include <optional>

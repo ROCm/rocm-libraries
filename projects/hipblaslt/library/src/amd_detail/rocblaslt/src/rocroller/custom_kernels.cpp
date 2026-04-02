@@ -7,8 +7,6 @@
 #include <hip/hip_runtime.h>
 #include <iostream>
 
-std::filesystem::path getCoPath();
-
 std::shared_ptr<GemmKernel> createCustomGemmKernel(const std::string&           customKernelName,
                                                    const KernelType&            kernelType,
                                                    const WorkGroupTileSize&     wgt,
@@ -651,7 +649,6 @@ struct __attribute__((packed)) F4GemmKernelArgs
 
 size_t WaveKernel::workspaceRequired(const RocblasltContractionProblem& prob)
 {
-    (void)prob;
     return 0;
 }
 
@@ -740,8 +737,8 @@ rocblaslt_status AssemblyStoreRowOrderGemm::run(const RocblasltContractionProble
         return rocblaslt_status_invalid_value;
     }
 
-    F4GemmKernelArgs aiterArgs(prob);
-    void*            argsPtr  = &aiterArgs;
+    F4GemmKernelArgs args(prob);
+    void*            argsPtr  = &args;
     size_t           argsSize = sizeof(F4GemmKernelArgs);
 
     const uint32_t tileM = params->workgroupTile.m;
