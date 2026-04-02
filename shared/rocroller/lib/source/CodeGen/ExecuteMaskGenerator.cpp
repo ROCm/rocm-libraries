@@ -70,7 +70,7 @@ namespace rocRoller
                     m_context,
                     Register::Type::Scalar,
                     DataType::Bool64,
-                    2,
+                    1,
                     Register::AllocationOptions::FullyContiguous());
                 co_yield_(Instruction("s_and_saveexec_b64", {sgpr}, {vcc}, {}, ""));
             }
@@ -94,18 +94,18 @@ namespace rocRoller
                 auto EXEC = m_context->getEXEC();
                 co_yield m_context->copier()->copy(EXEC, sgpr, "restore the EXEC mask");
 
-                // s_and_not0_saveexec_b{32,64}: Calculate bitwise AND on the EXEC mask and
+                // s_andn1_saveexec_b{32,64}: Calculate bitwise AND on the EXEC mask and
                 // the negation of the scalar input,
                 // store the calculated result into the EXEC mask,
                 // set SCC iff the calculated result is nonzero and
                 // store the original value of the EXEC mask into the scalar destination register.
                 if(wavefrontSize == 64)
                 {
-                    co_yield_(Instruction("s_and_not0_saveexec_b64", {sgpr}, {vcc}, {}, ""));
+                    co_yield_(Instruction("s_andn1_saveexec_b64", {sgpr}, {vcc}, {}, ""));
                 }
                 else
                 {
-                    co_yield_(Instruction("s_and_not0_saveexec_b32", {sgpr}, {vcc}, {}, ""));
+                    co_yield_(Instruction("s_andn1_saveexec_b32", {sgpr}, {vcc}, {}, ""));
                 }
                 co_yield generateFn(elseBody);
             }
@@ -163,7 +163,7 @@ namespace rocRoller
                     m_context,
                     Register::Type::Scalar,
                     DataType::Bool64,
-                    2,
+                    1,
                     Register::AllocationOptions::FullyContiguous());
                 co_yield_(Instruction("s_and_saveexec_b64", {sgpr}, {vcc}, {}, ""));
             }
@@ -198,18 +198,18 @@ namespace rocRoller
                 auto EXEC = m_context->getEXEC();
                 co_yield m_context->copier()->copy(EXEC, sgpr, "restore the EXEC mask");
 
-                // s_and_not0_saveexec_b{32,64}: Calculate bitwise AND on the EXEC mask and
+                // s_andn1_saveexec_b{32,64}: Calculate bitwise AND on the EXEC mask and
                 // the negation of the scalar input,
                 // store the calculated result into the EXEC mask,
                 // set SCC iff the calculated result is nonzero and
                 // store the original value of the EXEC mask into the scalar destination register.
                 if(wavefrontSize == 64)
                 {
-                    co_yield_(Instruction("s_and_not0_saveexec_b64", {sgpr}, {vcc}, {}, ""));
+                    co_yield_(Instruction("s_andn1_saveexec_b64", {sgpr}, {vcc}, {}, ""));
                 }
                 else
                 {
-                    co_yield_(Instruction("s_and_not0_saveexec_b32", {sgpr}, {vcc}, {}, ""));
+                    co_yield_(Instruction("s_andn1_saveexec_b32", {sgpr}, {vcc}, {}, ""));
                 }
 
                 auto EXECZ = m_context->getEXECZ();
