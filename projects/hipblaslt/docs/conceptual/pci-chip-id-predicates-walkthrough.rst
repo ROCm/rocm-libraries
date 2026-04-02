@@ -5,14 +5,14 @@
 .. _predicate-selection-walkthrough:
 
 *********************************************
-PCI Chip ID Predicates - A Walkthrough
+PCI chip ID predicates walkthrough
 *********************************************
 
 Predicates are one of the essential integration points between the tensilelite build system, and the hipBLASLt library runtime.
-Predicates are built into master solution libraries, files that contain information about which kernels are available, 
-and their location. These files are loaded at runtime, and used in the kernel selection process.
+Predicates are built into master solution libraries, files that contain information about which kernels are available 
+and their location. These files are loaded at runtime and used in the kernel selection process.
 
-Chip ID Registry
+Chip ID registry
 -----------------------
 
 The chip ID registry is a namespace in `Tensile/AMDGPUPredicates.hpp <../../tensilelite/include/Tensile/AMDGPUPredicates.hpp>` that
@@ -26,15 +26,16 @@ contains the official mapping of supported PCI chip IDs and their fallback relat
 Hardware predicates
 -----------------------
 
-Hardware predicates are the most coarse grained predicates. They are used to qualify, or reject, a kernel based on
-attributes that can be determined at runtime through system inspection. These include the processor type (e.g. gfx1201),
-the compute-unit counter (e.g., 128), and as of https://github.com/ROCm/rocm-libraries/pull/3924, the PCI chip ID (e.g., 0x7890).
+Hardware predicates are the most coarse-grained predicates. They are used to qualify, or reject, a kernel based on
+attributes that can be determined at runtime through system inspection. These include the processor type (for example, gfx1201),
+the compute-unit counter (for example, 128), and, as of `<https://github.com/ROCm/rocm-libraries/pull/3924>`_, the PCI chip ID (for example, 0x7890).
 
-**Building of Hardware Predicates**:
+Building hardware predicates
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The source of truth for hardware predicates is in the hipblaslt library logic (LL) files (``find . -name Logic``). In particular, as of 
-`tensilelite version 5.0.0 <https://github.com/ROCm/rocm-libraries/blob/273fcdc27e2f37d81420929d2105649494c9bb9d/projects/hipblaslt/tensilelite/Tensile/__init__.py>`_,
-the standard 4-statement metadata at the top of each LL is authoritative (some LLs may have fields omitted for backwards compatibility):
+The source of truth for hardware predicates is in the hipBLASLt library logic (LL) files (``find . -name Logic``). In particular, as of 
+`TensileLite version 5.0.0 <https://github.com/ROCm/rocm-libraries/blob/273fcdc27e2f37d81420929d2105649494c9bb9d/projects/hipblaslt/tensilelite/Tensile/__init__.py>`_,
+the standard four-statement metadata at the top of each LL is authoritative (some LLs could have fields omitted for backwards compatibility):
 
 .. code-block:: yaml
 
@@ -43,10 +44,10 @@ the standard 4-statement metadata at the top of each LL is authoritative (some L
     - {Architecture: gfx950, CUCount: 64}
     - [Device 75a3, Device 75a2]
 
-In the tensilelite build system, the PCI chip ID is add as an `Or`-style predicate, to allow multiple device IDs to be supported
+In the TensileLite build system, the PCI chip ID is added as an ``Or``-style predicate, to support multiple device IDs
 for the same device.
 
-At build, when the predicates are written to the master solution libraries, chip ID predicates are added as ``Or`` style conditions
+At build time, when the predicates are written to the master solution libraries, chip ID predicates are added as ``Or``-style conditions
 to the top-level lazy lookup (``TensileLibrary_lazy_....dat/yaml``). For example, a snippet from ``TensileLibrary_lazy_gfx1201.yaml``
 could appear as:
 
@@ -68,15 +69,16 @@ could appear as:
           - {type: PciChipId, value: 30032}
           - {type: PciChipId, value: 30583}
 
-That is, groups of solutions are co-resident in a LL file and marked by a set of `Device xxxx` strings. This allows solution filtering
+That is, groups of solutions are co-resident in a LL file and marked by a set of ``Device xxxx`` strings. This allows solution filtering
 (predicate matching) to be performed at the lazy library level. Consequentially, any candidate libraries that don't at least match the
 processor and the current PCI chip ID (plus optional CU counts) will be skipped before the runtime code tries to load the library.
 
-**Using Hardware Predicates**:
+Using hardware predicates
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 How does this play out during runtime? When the lazy solution library is loaded, it is deserialized and the predicates are matched
 against the known program constraints to determine which *loadable* libraries are relevant (match), and which are not (don't match).
-By setting TENSILE_DB, we can see how the chip IDs are being matched at runtime, for example, take the output from a test lib logic
+Set ``TENSILE_DB`` to see how the chip IDs are matched at runtime. For example, take the output from a test library logic
 that has the gfx1201 chip ID (7550) and another, random one:
 
 .. code-block:: text
@@ -94,10 +96,10 @@ that has the gfx1201 chip ID (7550) and another, random one:
     Result: NO MATCH
     --------------------------------------------------------------------------------
 
-Here we can see how different chip IDs are being selected against the known device properties.
+Here you can see how different chip IDs are being selected against the known device properties.
 
 
-Build-Time Row Ordering (Fallback-Aware)
+Build-time row ordering (fallback-aware)
 ----------------------------------------
 
 When a logic file declares multiple device IDs, ``tensilelite`` treats them as a **set**
@@ -124,7 +126,7 @@ The build-time comparator for hardware rows applies chip-ID precedence as follow
    ``{75a3}`` before ``{75a3,75a0}``).
 #. **Fallback-aware rank**: for equal-size sets, compare IDs by fallback-topology rank
    (farther from fallback roots first), then by chip ID value for deterministic tie-breaks.
-#. **Then CU count**: if chip precedence does not decide order, higher ``CUCount`` sorts first.
+#. **The CU count**: if chip precedence does not decide the order, the higher ``CUCount`` sorts first.
 
 Minimal ordering example (same processor):
 
@@ -140,11 +142,11 @@ Minimal ordering example (same processor):
 Why this matters:
 
 - Device ``75a3`` can still use ``75a0`` fallback kernels at runtime.
-- But exact ``75a3`` rows are evaluated first, preventing broad/mixed rows from
+- However, exact ``75a3`` rows are evaluated first, preventing broad/mixed rows from
   accidentally shadowing more specific rows.
 
 
-Runtime Selection
+Runtime selection
 -----------------
 
 ``ExactLogicLibrary::findBestSolution`` iterates hardware predicate rows in priority order. 
@@ -152,15 +154,15 @@ For each row that matches the GPU, it calls ``HardwarePredicate::isFallbackMatch
 to classify the match:
 
 - Exact match (``isFallbackMatch`` returns false): The row's ``PciChipIdEqual`` target
-  matches the GPU's chip ID exactly (e.g., mi350 GPU matching a ``PciChipIdEqual(0x75a0)`` row),
+  matches the GPU's chip ID exactly (for example, an Instinct™ MI350 GPU matches a ``PciChipIdEqual(0x75a0)`` row),
   or the row has no chip ID predicate at all. The solution is returned immediately.
 - Fallback match (``isFallbackMatch`` returns true): The GPU matched via chip ID fallback 
-  (e.g., mi355 0x75a3 matching an mi350 0x75a0 row through ``ChipIdRegistry``). The solution is
-  saved but the loop continues searching for an exact match.
+  (for example, an Instinct MI355 GPU ``0x75a3`` matches an Instinct MI350 GPU ``0x75a0`` row through ``ChipIdRegistry``). The solution is
+  saved but the loop continues to search for an exact match.
 
 After all rows are checked, if no exact match was found, the saved fallback solution is returned.
-This ensures that device-specific solutions (mi355-targeted kernels) are always preferred over 
-fallback solutions (mi350 kernels running on mi355), regardless of row ordering.
+This ensures that device-specific solutions (Instinct MI355-targeted kernels) are always preferred over 
+fallback solutions (Instinct MI350 kernels running on an Instinct MI355 GPU), regardless of row ordering.
 An exact match anywhere in the list beats a fallback match that appeared earlier.
 
 .. important::

@@ -19,7 +19,7 @@ subtrees:
   - file: conceptual/hipblaslt-clients
     title: hipBLASLt clients
   - file: conceptual/pci-chip-id-predicates-walkthrough
-    title: hipBLASLt PCI Chip ID Predicates
+    title: hipBLASLt PCI chip ID predicates
 
 - caption: How to
   entries:
