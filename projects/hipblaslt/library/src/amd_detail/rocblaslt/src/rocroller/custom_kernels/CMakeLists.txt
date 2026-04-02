@@ -135,6 +135,8 @@ set(CUSTOM_KERNEL_ASM_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/f4gemm_bf16_per1x32Fp4_BpreShuffle_256x256_ntB.s
     # No B pre-shuffle variant
     ${CMAKE_CURRENT_SOURCE_DIR}/f4gemm_bf16_per1x32Fp4_noBpreShuffle_256x256.s
+    # Wave kernels
+    ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_256x192x256.s
 )
 
 # Build combined .co from all assembly sources

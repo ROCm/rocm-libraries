@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>

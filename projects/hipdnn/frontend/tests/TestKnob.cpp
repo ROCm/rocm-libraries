@@ -177,6 +177,182 @@ TEST(TestKnob, CreateDeprecatedKnob)
     EXPECT_TRUE(knob.isDeprecated());
 }
 
+TEST(TestKnob, TryCreateIntKnob)
+{
+    auto [error, knob]
+        = hipdnn_frontend::Knob::tryCreate("test_int_knob",
+                                           "Test integer knob",
+                                           int64_t{42},
+                                           false,
+                                           std::make_shared<IntConstraint>(0, 100, 2));
+
+    ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
+    EXPECT_EQ(knob.knobId(), "test_int_knob");
+    EXPECT_EQ(knob.description(), "Test integer knob");
+    EXPECT_EQ(knob.valueType(), KnobValueType::INT64);
+    EXPECT_FALSE(knob.isDeprecated());
+
+    auto defaultValue = std::get_if<int64_t>(&knob.defaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_EQ(*defaultValue, 42);
+
+    auto* constraint = dynamic_cast<const IntConstraint*>(knob.constraint());
+    ASSERT_NE(constraint, nullptr);
+    EXPECT_EQ(constraint->getMinValue(), 0);
+    EXPECT_EQ(constraint->getMaxValue(), 100);
+    EXPECT_EQ(constraint->getStep(), 2);
+}
+
+TEST(TestKnob, TryCreateFloatKnob)
+{
+    auto [error, knob]
+        = hipdnn_frontend::Knob::tryCreate("test_float_knob",
+                                           "Test float knob",
+                                           0.5,
+                                           true,
+                                           std::make_shared<FloatConstraint>(0.0, 1.0));
+
+    ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
+    EXPECT_EQ(knob.knobId(), "test_float_knob");
+    EXPECT_EQ(knob.description(), "Test float knob");
+    EXPECT_EQ(knob.valueType(), KnobValueType::FLOAT64);
+    EXPECT_TRUE(knob.isDeprecated());
+
+    auto defaultValue = std::get_if<double>(&knob.defaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_DOUBLE_EQ(*defaultValue, 0.5);
+
+    auto* constraint = dynamic_cast<const FloatConstraint*>(knob.constraint());
+    ASSERT_NE(constraint, nullptr);
+    EXPECT_DOUBLE_EQ(constraint->getMinValue(), 0.0);
+    EXPECT_DOUBLE_EQ(constraint->getMaxValue(), 1.0);
+}
+
+TEST(TestKnob, TryCreateStringKnob)
+{
+    auto [error, knob] = hipdnn_frontend::Knob::tryCreate(
+        "test_string_knob",
+        "Test string knob",
+        std::string("balanced"),
+        false,
+        std::make_shared<StringConstraint>(
+            16, std::unordered_set<std::string>{"fast", "balanced", "accurate"}));
+
+    ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
+    EXPECT_EQ(knob.knobId(), "test_string_knob");
+    EXPECT_EQ(knob.description(), "Test string knob");
+    EXPECT_EQ(knob.valueType(), KnobValueType::STRING);
+    EXPECT_FALSE(knob.isDeprecated());
+
+    auto defaultValue = std::get_if<std::string>(&knob.defaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_EQ(*defaultValue, "balanced");
+
+    auto* constraint = dynamic_cast<const StringConstraint*>(knob.constraint());
+    ASSERT_NE(constraint, nullptr);
+    EXPECT_EQ(constraint->getMaxLength(), 16);
+    EXPECT_EQ(constraint->getValidValues(),
+              (std::unordered_set<std::string>{"fast", "balanced", "accurate"}));
+}
+
+TEST(TestKnob, TryCreateNullConstraintUsesEmptyConstraint)
+{
+    auto [error, knob] = hipdnn_frontend::Knob::tryCreate(
+        "test_knob", "No constraint", int64_t{7}, false, nullptr);
+
+    ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
+    auto* emptyConstraint
+        = dynamic_cast<const hipdnn_frontend::EmptyConstraint*>(knob.constraint());
+    ASSERT_NE(emptyConstraint, nullptr);
+}
+
+TEST(TestKnob, TryCreateRejectsIntDefaultOutsideRange)
+{
+    auto [error, knob]
+        = hipdnn_frontend::Knob::tryCreate("test_knob",
+                                           "Out of range int",
+                                           int64_t{101},
+                                           false,
+                                           std::make_shared<IntConstraint>(0, 100, 1));
+
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("violates its constraint"), std::string::npos);
+    EXPECT_NE(error.err_msg.find("out of range"), std::string::npos);
+    (void)knob;
+}
+
+TEST(TestKnob, TryCreateRejectsIntDefaultStepViolation)
+{
+    auto [error, knob]
+        = hipdnn_frontend::Knob::tryCreate("test_knob",
+                                           "Bad step int",
+                                           int64_t{15},
+                                           false,
+                                           std::make_shared<IntConstraint>(0, 100, 10));
+
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("violates its constraint"), std::string::npos);
+    EXPECT_NE(error.err_msg.find("step constraint"), std::string::npos);
+    (void)knob;
+}
+
+TEST(TestKnob, TryCreateRejectsIntDefaultNotInValidValues)
+{
+    auto [error, knob] = hipdnn_frontend::Knob::tryCreate(
+        "test_knob",
+        "Bad valid-values int",
+        int64_t{3},
+        false,
+        std::make_shared<IntConstraint>(0, 100, 1, std::unordered_set<int64_t>{1, 2, 4, 8}));
+
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("violates its constraint"), std::string::npos);
+    EXPECT_NE(error.err_msg.find("not in the list of valid values"), std::string::npos);
+    (void)knob;
+}
+
+TEST(TestKnob, TryCreateRejectsFloatDefaultOutsideRange)
+{
+    auto [error, knob] = hipdnn_frontend::Knob::tryCreate(
+        "test_knob", "Out of range float", 1.5, false, std::make_shared<FloatConstraint>(0.0, 1.0));
+
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("violates its constraint"), std::string::npos);
+    EXPECT_NE(error.err_msg.find("out of range"), std::string::npos);
+    (void)knob;
+}
+
+TEST(TestKnob, TryCreateRejectsStringDefaultTooLong)
+{
+    auto [error, knob] = hipdnn_frontend::Knob::tryCreate(
+        "test_knob",
+        "Too long string default",
+        std::string("toolong"),
+        false,
+        std::make_shared<StringConstraint>(4, std::unordered_set<std::string>{}));
+
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("violates its constraint"), std::string::npos);
+    EXPECT_NE(error.err_msg.find("exceeds maximum length"), std::string::npos);
+    (void)knob;
+}
+
+TEST(TestKnob, TryCreateRejectsStringDefaultNotInValidValues)
+{
+    auto [error, knob] = hipdnn_frontend::Knob::tryCreate(
+        "test_knob",
+        "Bad string default",
+        std::string("turbo"),
+        false,
+        std::make_shared<StringConstraint>(
+            16, std::unordered_set<std::string>{"fast", "balanced", "accurate"}));
+
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("violates its constraint"), std::string::npos);
+    EXPECT_NE(error.err_msg.find("not in the list of valid values"), std::string::npos);
+    (void)knob;
+}
+
 // ============================================================================
 // KnobSetting Tests
 // ============================================================================
@@ -1143,4 +1319,11 @@ TEST(TestKnob, UnconstrainedKnobValidatesAnyValue)
               ErrorCode::OK);
     EXPECT_EQ(knob.validate(KnobSetting("test", static_cast<int64_t>(0))).code, ErrorCode::OK);
     EXPECT_EQ(knob.validate(KnobSetting("test", static_cast<int64_t>(999999))).code, ErrorCode::OK);
+}
+
+TEST(TestKnob, TryCreateRejectsEmptyKnobId)
+{
+    auto [error, knob] = Knob::tryCreate("", "description", static_cast<int64_t>(0), false);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("empty"), std::string::npos);
 }
