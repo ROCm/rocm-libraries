@@ -36,7 +36,8 @@ inline Error createEngineDescriptorForGraph(ScopedHipdnnBackendDescriptor& engin
 inline Error
     createEngineHeuristicDescriptorForGraph(ScopedHipdnnBackendDescriptor& engineHeuristicDesc,
                                             hipdnnBackendDescriptor_t graphDesc,
-                                            std::vector<HeuristicMode> const& modes)
+                                            const std::vector<HeuristicMode>& modes,
+                                            bool findFirst = false)
 {
     engineHeuristicDesc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
 
@@ -66,6 +67,18 @@ inline Error
                                              1,
                                              backendModes.data()),
         "Failed to set mode on the engine heuristic descriptor.");
+
+    if(findFirst)
+    {
+        bool findFirstValue = true;
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineHeuristicDesc.get(),
+                                                 HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT,
+                                                 HIPDNN_TYPE_BOOLEAN,
+                                                 1,
+                                                 &findFirstValue),
+            "Failed to set find first on the engine heuristic descriptor.");
+    }
 
     HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineHeuristicDesc.get()),
                                      "Failed to finalize engine heuristic descriptor");

@@ -235,8 +235,7 @@ void GraphDescriptor::getOperations(hipdnnBackendAttributeType_t attributeType,
     // Build into a temporary vector so _operations is only populated on full success.
     if(_graphSerializedBuffer.size() > 0 && _operations.empty())
     {
-        auto graphT
-            = hipdnn_data_sdk::data_objects::GetGraph(_graphSerializedBuffer.data())->UnPack();
+        auto graphT = hipdnn_data_sdk::data_objects::UnPackGraph(_graphSerializedBuffer.data());
         auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
         std::vector<std::shared_ptr<IBackendDescriptor>> unpacked;
         unpacked.reserve(graphT->nodes.size());

@@ -260,6 +260,44 @@ namespace GEMMTests
                 std::fill(hostC.begin(), hostC.end(), static_cast<TD>(0.0));
             }
 
+            // Pre-tile A on the host when pretileA is set (kernel expects pre-tiled layout).
+            // pretileA is only supported for transA == "T"; A is stored in memory as KxM, so we
+            // pass (K, M) and (tileK, tileM) to preSwizzle to match the client (gemm.cpp).
+            std::vector<PackedTypeA> hostAForKernel(hostA);
+            if(!gemm.pretileA.empty() && gemm.pretileA.size() == 2)
+            {
+                AssertFatal(gemm.transA == "T", "Pre-tiling A only supported for TransposeType::T");
+                auto const packing = TypeInfo<PackedTypeA>::ElementBits / TypeInfo<TA>::ElementBits;
+                std::vector<size_t> sizes       = descA.sizes();
+                std::vector<size_t> preTileSize = gemm.pretileA;
+                AssertFatal(M % preTileSize[0] == 0,
+                            "A matrix dimension M must be divisible by pretileA tile size in M.",
+                            ShowValue(M),
+                            ShowValue(preTileSize[0]));
+                AssertFatal(K % preTileSize[1] == 0,
+                            "A matrix dimension K must be divisible by pretileA tile size in K.",
+                            ShowValue(K),
+                            ShowValue(preTileSize[1]));
+                if(packing > 1)
+                {
+                    AssertFatal(sizes[1] % packing == 0,
+                                "pretileA: K dimension must be a multiple of packing factor (",
+                                packing,
+                                ") for packed type A.");
+                    AssertFatal(preTileSize[1] % packing == 0,
+                                "pretileA: tile K must be a multiple of packing factor (",
+                                packing,
+                                ") for packed type A.");
+                    sizes[1] /= packing;
+                    preTileSize[1] /= packing;
+                }
+
+                // The preSwizzle helper assumes column-major; so we swap sizes here.
+                std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
+                std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
+                hostAForKernel = DGen::preSwizzle(hostA, swappedSizes, {}, swappedPreTileSize);
+            }
+
             // Pre-tile B on the host when pretileB is set (kernel expects pre-tiled layout)
             std::vector<PackedTypeB> hostBForKernel(hostB);
             if(!gemm.pretileB.empty() && gemm.pretileB.size() == 2)
@@ -291,7 +329,7 @@ namespace GEMMTests
                 hostBForKernel = DGen::preSwizzle(hostB, sizes, {}, preTileSize);
             }
 
-            auto deviceA = make_shared_device<TA>(hostA);
+            auto deviceA = make_shared_device<TA>(hostAForKernel);
             auto deviceB = make_shared_device<TB>(hostBForKernel);
 
             std::shared_ptr<TC> deviceC = (notSetC) ? nullptr : make_shared_device(hostC);
@@ -382,11 +420,26 @@ namespace GEMMTests
                                                   ? std::vector<size_t>({(size_t)0, (size_t)1})
                                                   : std::vector<size_t>({});
 
-            auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeA, {}, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
-            auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
+            bool pretileA = !gemm.pretileA.empty();
+            if(pretileA)
+                AssertFatal(gemm.pretileA.size() == 2,
+                            "pretileA must have size 2 (MxK tile dimensions).",
+                            ShowValue(gemm.pretileA.size()));
+            auto stridesA   = pretileA ? std::vector<size_t>{}
+                                       : (gemm.transA == "N" ? oneStridesN : oneStridesT);
+            auto tagTensorA = command->addOperation(
+                rocRoller::Operations::Tensor(2, dataTypeA, {}, stridesA)); // A
+            auto loadInputA = tagTensorA;
+            if(pretileA)
+                loadInputA = command->addOperation(
+                    rocRoller::Operations::SubTileTranspose(loadInputA, gemm.pretileA, true));
+            auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadInputA));
 
-            bool pretileB   = !gemm.pretileB.empty();
+            bool pretileB = !gemm.pretileB.empty();
+            if(pretileB)
+                AssertFatal(gemm.pretileB.size() == 2,
+                            "pretileB must have size 2 (KxN tile dimensions).",
+                            ShowValue(gemm.pretileB.size()));
             auto stridesB   = pretileB ? std::vector<size_t>{}
                                        : (gemm.transB == "N" ? oneStridesN : oneStridesT);
             auto tagTensorB = command->addOperation(
@@ -751,6 +804,19 @@ namespace GEMMTests
             commandKernel.generateKernel();
 
             CommandArguments commandArgs = command->createArguments();
+
+            // When pretileA is set, use the same tensor descriptor as the client: explicit
+            // strides for the pre-tiled layout (see DataParallelGEMMSolution.hpp).
+            if(!gemm.pretileA.empty() && gemm.pretileA.size() == 2)
+            {
+                AssertFatal(gemm.transA == "T", "Pre-tiling A only supported for TransposeType::T");
+                auto const tileM = gemm.pretileA[0];
+                auto const tileK = gemm.pretileA[1];
+                descA            = TensorDescriptor(dataTypeA,
+                                         {static_cast<size_t>(M), static_cast<size_t>(K)},
+                                         {static_cast<size_t>((K / tileK) * tileM * tileK),
+                                          static_cast<size_t>(tileM * tileK)});
+            }
 
             // When pretileB is set, use the same tensor descriptor as the client: explicit
             // strides for the pre-tiled layout (see DataParallelGEMMSolution.hpp).
