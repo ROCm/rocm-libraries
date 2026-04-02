@@ -888,8 +888,12 @@ TEST(Gfx950, MatMul_TensileLite_MXFP4_TN_32x32x256) {
 
   std::vector<uint8_t> aFp4(M * K / 2);
   std::vector<uint8_t> bFp4(N * K / 2);
-  for (auto &b : aFp4) { b = randPm1Fp4Byte(); }
-  for (auto &b : bFp4) { b = randPm1Fp4Byte(); }
+  for (auto &b : aFp4) {
+    b = randPm1Fp4Byte();
+  }
+  for (auto &b : bFp4) {
+    b = randPm1Fp4Byte();
+  }
 
   std::vector<uint8_t> mxScaleA(M * numScalesPerRow, 127); // scale = 1.0
   std::vector<uint8_t> mxScaleB(N * numScalesPerRow, 127);
@@ -900,11 +904,10 @@ TEST(Gfx950, MatMul_TensileLite_MXFP4_TN_32x32x256) {
   // Build kernarg buffer (136 bytes, KernArgsVersion 2).
   std::vector<uint8_t> argBuf(136, 0);
   auto put32 = [&](int off, uint32_t v) { std::memcpy(&argBuf[off], &v, 4); };
-  auto put64 = [&](int off, uint64_t v) { std::memcpy(&argBuf[off], &v, 8); };
   auto putF = [&](int off, float v) { std::memcpy(&argBuf[off], &v, 4); };
   auto putPtr = [&](int off, const void *p) {
     uint64_t v = reinterpret_cast<uint64_t>(p);
-    put64(off, v);
+    std::memcpy(&argBuf[off], &v, 8);
   };
 
   // Preamble (from --print-kernel-args output).
@@ -926,17 +929,17 @@ TEST(Gfx950, MatMul_TensileLite_MXFP4_TN_32x32x256) {
   putPtr(72, mxScaleB.data());
 
   // Strides (no stride0 fields — offsets go directly to stride1/stride2).
-  put32(80, M);                // strideD1
-  put32(84, M * N);            // strideD2
-  put32(88, M);                // strideC1
-  put32(92, M * N);            // strideC2
-  put32(96, K);                // strideA1 (TN layout)
-  put32(100, M * K);           // strideA2
-  put32(104, numScalesPerRow); // strideMXSA1
+  put32(80, M);                    // strideD1
+  put32(84, M * N);                // strideD2
+  put32(88, M);                    // strideC1
+  put32(92, M * N);                // strideC2
+  put32(96, K);                    // strideA1 (TN layout)
+  put32(100, M * K);               // strideA2
+  put32(104, numScalesPerRow);     // strideMXSA1
   put32(108, M * numScalesPerRow); // strideMXSA2
-  put32(112, K);               // strideB1
-  put32(116, N * K);           // strideB2
-  put32(120, numScalesPerRow); // strideMXSB1
+  put32(112, K);                   // strideB1
+  put32(116, N * K);               // strideB2
+  put32(120, numScalesPerRow);     // strideMXSB1
   put32(124, N * numScalesPerRow); // strideMXSB2
 
   // Scalars.
@@ -957,13 +960,14 @@ TEST(Gfx950, MatMul_TensileLite_MXFP4_TN_32x32x256) {
   mxfp4MatrixToF32<M, K>(aF32.data(), aFp4.data(), mxScaleA.data());
   mxfp4MatrixToF32<N, K>(bF32.data(), bFp4.data(), mxScaleB.data());
 
+  // TN GEMM: D[i][j] = sum_k B[i][k] * A[j][k].
+  // A is the "transposed" operand (rows index N), B indexes M.
   std::vector<float> refD(M * N, 0.0f);
-  // D[i][j] = sum_k A[i][k] * B[j][k]  (B is stored as N rows × K cols).
   for (int i = 0; i < M; ++i) {
     for (int j = 0; j < N; ++j) {
       float sum = 0.0f;
       for (int k = 0; k < K; ++k) {
-        sum += aF32[i * K + k] * bF32[j * K + k];
+        sum += bF32[i * K + k] * aF32[j * K + k];
       }
       refD[i * N + j] = sum;
     }

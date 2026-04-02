@@ -334,8 +334,8 @@ public:
       // Write C (or literal 0) to dst.
       for (int l = 0; l < waveSize; ++l) {
         for (int i = 0; i < nOutputRegs; ++i) {
-          uint32_t val = C.isLiteral ? C.literalValue
-                                     : wave.getVgpr(C.reg.index + i, l);
+          uint32_t val =
+              C.isLiteral ? C.literalValue : wave.getVgpr(C.reg.index + i, l);
           wave.setVgpr(dst0.index + i, l, val);
         }
       }
@@ -411,8 +411,8 @@ public:
         }
         for (int l = 0; l < waveSize; ++l) {
           for (int i = 0; i < nOutputRegs; ++i) {
-            uint32_t val = C.isLiteral ? C.literalValue
-                                       : wave.getVgpr(C.reg.index + i, l);
+            uint32_t val =
+                C.isLiteral ? C.literalValue : wave.getVgpr(C.reg.index + i, l);
             wave.setVgpr(dst0.index + i, l, val);
           }
         }
@@ -450,12 +450,16 @@ public:
 
       // 3. Convert FP4 → F32. Scale=1.0 here; instruction-level scale
       //    applied after matmul.
+      // Convert FP4 nibbles to F32 without per-block scaling (scale=1.0,
+      // E8M0 exponent 127). The instruction-level scale is applied after
+      // the matmul.
+      constexpr uint8_t kUnitScale = 127; // E8M0 for 1.0
+      uint8_t unitScales[M * (K / 32)];
+      std::memset(unitScales, kUnitScale, sizeof(unitScales));
       float matA[M * K];
       float matB[N * K];
-      mxfp4MatrixToF32<M, K>(matA, flatA,
-                              std::vector<uint8_t>(M * (K / 32), 127).data());
-      mxfp4MatrixToF32<N, K>(matB, flatB,
-                              std::vector<uint8_t>(N * (K / 32), 127).data());
+      mxfp4MatrixToF32<M, K>(matA, flatA, unitScales);
+      mxfp4MatrixToF32<N, K>(matB, flatB, unitScales);
 
       // 4. Load C into output matrix.
       std::array<float, M * N> out = {};
@@ -463,8 +467,8 @@ public:
         for (int i = 0; i < nOutputRegs; ++i) {
           auto [cRow, col] = mapLaneToCoordC(l, i);
           if (!C.isLiteral) {
-            out[cRow * N + col] = std::bit_cast<float>(
-                wave.getVgpr(C.reg.index + i, l));
+            out[cRow * N + col] =
+                std::bit_cast<float>(wave.getVgpr(C.reg.index + i, l));
           } else {
             out[cRow * N + col] =
                 C.literalValue == 0
@@ -526,8 +530,7 @@ static Register<VWmmaF32_161616<bf16ToFloat>>
     v_wmma_bf16("v_wmma_f32_16x16x16_bf16");
 static Register<VWmmaF32_161616<f16ToFloat>>
     v_wmma_f16("v_wmma_f32_16x16x16_f16");
-static Register<VMfmaI32_32x32x16_I8>
-    v_mfma_i8("v_mfma_i32_32x32x16_i8");
+static Register<VMfmaI32_32x32x16_I8> v_mfma_i8("v_mfma_i32_32x32x16_i8");
 static Register<VMfmaScaleF32_16x16x128>
     v_mfma_scale("v_mfma_scale_f32_16x16x128_f8f6f4");
 
