@@ -1,36 +1,16 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2019 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
-#include "pooling_common.hpp"
+#ifndef GUARD_MIOPEN_TEST_GTEST_POOLING2D_HARNESS_GTEST_HPP
+#define GUARD_MIOPEN_TEST_GTEST_POOLING2D_HARNESS_GTEST_HPP
+
+#include "pooling_gtest_common.hpp"
 
 #define WORKAROUND_ISSUE_1670 1
 #define TEST_GET_INPUT_TENSOR 0
 
 template <class T>
-struct pooling2d_driver : pooling_driver<T>
+struct pooling2d_harness : pooling_harness<T>
 {
 private:
     using U = typename std::vector<int>;
@@ -45,17 +25,15 @@ private:
                 {1, 128, 28, 28},    {1, 3, 224, 224},    {1, 64, 112, 112}};
     }
 
-    // Dataset 1 is intended for testing of asymmetric configs.
     std::vector<U> get_2d_pooling_input_shapes_minimal() { return {{1, 4, 4, 4}}; }
 
-    // Dataset 2 is intended for testing of configs with wide window.
     std::vector<U> get_2d_pooling_input_shapes_wide()
     {
         return {{1, 3, 255, 255}, {2, 3, 227, 227}, {1, 7, 127, 127}, {1, 1, 410, 400}};
     }
 
 public:
-    pooling2d_driver() : pooling_driver<T>()
+    pooling2d_harness() : pooling_harness<T>()
     {
 #if TEST_GET_INPUT_TENSOR
         std::set<U> in_dim_set = get_inputs(this->batch_factor);
@@ -94,3 +72,5 @@ public:
         this->add(this->wsidx, "wsidx", this->generate_data({0, 1}));
     }
 };
+
+#endif // GUARD_MIOPEN_TEST_GTEST_POOLING2D_HARNESS_GTEST_HPP

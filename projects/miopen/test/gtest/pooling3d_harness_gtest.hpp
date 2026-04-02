@@ -1,10 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "pooling_common.hpp"
+#ifndef GUARD_MIOPEN_TEST_GTEST_POOLING3D_HARNESS_GTEST_HPP
+#define GUARD_MIOPEN_TEST_GTEST_POOLING3D_HARNESS_GTEST_HPP
+
+#include "pooling_gtest_common.hpp"
 
 template <class T>
-struct pooling3d_driver : pooling_driver<T>
+struct pooling3d_harness : pooling_harness<T>
 {
     std::vector<std::vector<int>> get_3d_pooling_input_shapes()
     {
@@ -26,7 +29,7 @@ struct pooling3d_driver : pooling_driver<T>
                 {1, 32, 16, 32, 32}};
     }
 
-    pooling3d_driver() : pooling_driver<T>()
+    pooling3d_harness() : pooling_harness<T>()
     {
         this->add(
             this->in_shape, "input", this->generate_data_limited(get_3d_pooling_input_shapes(), 4));
@@ -36,3 +39,5 @@ struct pooling3d_driver : pooling_driver<T>
         this->add(this->wsidx, "wsidx", this->generate_data({1}));
     }
 };
+
+#endif // GUARD_MIOPEN_TEST_GTEST_POOLING3D_HARNESS_GTEST_HPP
