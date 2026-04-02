@@ -17,9 +17,8 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
 
-// SDPA-specific runner: iterates over data types with BHSD layout only.
-// BSHD (batch, seq_len, heads, head_dim) is another common layout but is not
-// demonstrated here. Both are controlled via strides on TensorAttributes.
+// SDPA-specific runner: iterates over data types with BHSD and BSHD layouts.
+// Both layouts are controlled via strides on TensorAttributes.
 template <typename F>
 bool runSdpa(F&& f)
 {
@@ -38,7 +37,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 {
     const auto inputType = getDataTypeEnumFromType<InputType>();
 
-    std::cout << "Running SDPA forward graph " << inputType
+    std::cout << "Running SDPA forward graph " << inputType << " [" << layout << "]"
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
     // SDPA dimensions: [batch, num_heads, seq_len, head_dim]
@@ -52,9 +51,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto qAttr = createTensor({batch, numHeads, seqLen, headDim}, inputType);
-    auto kAttr = createTensor({batch, numHeads, seqLen, headDim}, inputType);
-    auto vAttr = createTensor({batch, numHeads, seqLen, headDim}, inputType);
+    auto qAttr = createTensor({batch, numHeads, seqLen, headDim}, inputType, layout);
+    auto kAttr = createTensor({batch, numHeads, seqLen, headDim}, inputType, layout);
+    auto vAttr = createTensor({batch, numHeads, seqLen, headDim}, inputType, layout);
 
     graph::SdpaAttributes sdpaAttributes;
     sdpaAttributes.set_name("sdpa_fprop_node");
@@ -66,10 +65,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
-    utilities::Tensor<InputType> qTensor(qAttr->get_dim());
-    utilities::Tensor<InputType> kTensor(kAttr->get_dim());
-    utilities::Tensor<InputType> vTensor(vAttr->get_dim());
-    utilities::Tensor<InputType> oTensor(oAttr->get_dim());
+    utilities::Tensor<InputType> qTensor(qAttr->get_dim(), layout);
+    utilities::Tensor<InputType> kTensor(kAttr->get_dim(), layout);
+    utilities::Tensor<InputType> vTensor(vAttr->get_dim(), layout);
+    utilities::Tensor<InputType> oTensor(oAttr->get_dim(), layout);
 
     qTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
     kTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
@@ -105,7 +104,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     {
         std::cout << "Running CPU reference validation...\n";
 
-        utilities::Tensor<InputType> oRefTensor(oAttr->get_dim());
+        utilities::Tensor<InputType> oRefTensor(oAttr->get_dim(), layout);
 
         auto attnScale = 1.0f / std::sqrt(static_cast<float>(headDim));
 
