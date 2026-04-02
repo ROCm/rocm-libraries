@@ -16,6 +16,8 @@ on:
         type: string
       projects_to_test:
         type: string
+      project_name:
+        type: string
       test_type:
         type: string
       run_rocjitsu_race_check:
@@ -32,6 +34,7 @@ on:
         required: false
       HIPDNN_CI_WEBHOOK_URL:
         required: false
+
 
 permissions:
   contents: read
@@ -114,20 +117,23 @@ jobs:
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
 
       - name: Configure Projects
+        if: "${{ inputs.test_type }}" != "coverage" }}
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ${{ inputs.rocm_package_version }}
           extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
-          set -euo pipefail
-          EXTRA_OPTS="-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
-          PROJECT_KEY="$(echo "${{inputs.projects_to_test  }}" | tr '[:lower:]' '[:upper:]')"
-          if [[ "${{ inputs.test_type }}" == "coverage" ]]; then
-            EXTRA_OPTS="${EXTRA_OPTS} -D${PROJECT_KEY}_ENABLE_COVERAGE=ON"
-            echo "Coverage enabled for ${PROJECT_KEY}: ${EXTRA_OPTS}"
-          fi
-          export extra_cmake_options="${EXTRA_OPTS}"
+          python3 TheRock/build_tools/github_actions/build_configure.py
+
+      - name: Configure Projects
+        if: "${{ inputs.test_type }}" == "coverage" }}
+        env:
+          amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
+          package_version: ADHOCBUILD
+          extra_cmake_options: "-D{{ inputs.project_name }}_ENABLE_COVERAGE -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          BUILD_DIR: build
+        run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
       - name: Build therock-artifacts and therock-dist

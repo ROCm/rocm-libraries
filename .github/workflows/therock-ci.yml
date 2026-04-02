@@ -207,7 +207,6 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    # Only run if there are coverage projects (changed subtrees)
     if: ${{ needs.setup.outputs.linux_projects_coverage != '[]' }}
     strategy:
       fail-fast: false
@@ -219,6 +218,7 @@ jobs:
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
+      project_name: ${{ matrix.projects.project_name }}
       test_type: coverage
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
