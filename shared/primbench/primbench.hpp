@@ -360,9 +360,8 @@ public:
                     ss << ",";
                 ss << "\"" << kv.first << "\":";
                 if(kv.second)
-                    ss << "{"
-                       << "\"min_mhz\":" << kv.second->first << ",\"max_mhz\":" << kv.second->second
-                       << "}";
+                    ss << "{" << "\"min_mhz\":" << kv.second->first
+                       << ",\"max_mhz\":" << kv.second->second << "}";
                 else
                     ss << "null";
                 first = false;
