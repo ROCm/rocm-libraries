@@ -154,11 +154,9 @@ def get_queue_members(
     Each entry: ``{"pr_number": int, "enqueued_at": str, "queues": [str]}``.
     """
     label = f"{LABEL_PREFIX}{queue}"
-    # Search for open PRs with the queue label AND either queued or active
-    query = (
-        f"repo:{repo} is:pr is:open label:{label} "
-        f"(label:{LABEL_QUEUED} OR label:{LABEL_ACTIVE})"
-    )
+    # Search for open PRs with the queue label.  Any PR carrying this label
+    # is a queue member regardless of whether it is mq:queued or mq:active.
+    query = f"repo:{repo} is:pr is:open label:\"{label}\""
     items = client.search_issues(query, sort="created", order="asc")
 
     members: list[dict] = []
