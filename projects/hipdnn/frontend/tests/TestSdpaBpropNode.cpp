@@ -86,6 +86,45 @@ TEST(TestSdpaBpropNode, PreValidateSucceedsMQA)
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
+TEST(TestSdpaBpropNode, PreValidateFailsZeroKvHeads)
+{
+    // K has 0 heads — should fail positivity check before divisibility
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 0, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    const GraphAttributes graphAttrs;
+    const SdpaBpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaBpropNode, PreValidateFailsZeroVHeads)
+{
+    // V has 0 heads — should fail positivity check
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 0, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    const GraphAttributes graphAttrs;
+    const SdpaBpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaBpropNode, PreValidateFailsInvalidGQAKHeads)
+{
+    // Q=8 heads, K=3 (8%3!=0), V=4 (8%4==0) — K invalid, V valid
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 3, 32, 64);
+    auto v = makeTensor4D(2, 4, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    const GraphAttributes graphAttrs;
+    const SdpaBpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
 TEST(TestSdpaBpropNode, PreValidateFailsMissingQ)
 {
     SdpaBackwardAttributes attrs;
@@ -287,14 +326,27 @@ TEST(TestSdpaBpropNode, PreValidateFailsSeqKvMismatch)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
-TEST(TestSdpaBpropNode, PreValidateFailsNumKvHeadsMismatchKV)
+TEST(TestSdpaBpropNode, PreValidateSucceedsGQADifferentKVHeads)
 {
-    // K num_kv_heads=2, V num_kv_heads=4 — must match
+    // K num_kv_heads=2, V num_kv_heads=4 — both divide Q num_heads=8
     auto q = makeTensor4D(2, 8, 16, 64);
     auto k = makeTensor4D(2, 2, 32, 64);
-    auto v = makeTensor4D(2, 4, 32, 64); // num_kv_heads mismatch
+    auto v = makeTensor4D(2, 4, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
+    const GraphAttributes graphAttrs;
+    const SdpaBpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaBpropNode, PreValidateFailsInvalidGQAVHeads)
+{
+    // Q=8 heads, K=2 (valid), V=3 (8%3!=0)
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 2, 32, 64);
+    auto v = makeTensor4D(2, 3, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
     const GraphAttributes graphAttrs;
     const SdpaBpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();

@@ -29,8 +29,7 @@
 #include <miopen/scalar.hpp>
 #include <miopen/invoke_params.hpp>
 #include <miopen/conv/tensors.hpp>
-#include <miopen/conv/problem_description.hpp>
-#include <miopen/conv/wrw_invoke_params.hpp>
+
 namespace miopen {
 namespace conv {
 
@@ -77,122 +76,6 @@ struct DataInvokeParams : InvokeParams
 
     std::size_t GetWorkspaceSize() const { return workSpaceSize; }
     Data_t GetWorkspace() const { return workSpace; }
-};
-
-struct TransposeConvInvokeParams : InvokeParams
-{
-    // Flat tensor descriptors (required by TransposingSolver member pointers)
-    TensorDescriptor inDesc;
-    TensorDescriptor wDesc;
-    TensorDescriptor outDesc;
-
-    // Flat data pointers (required by TransposingSolver member pointers)
-    ConstData_t in = nullptr;
-    ConstData_t w  = nullptr;
-    Data_t out     = nullptr;
-
-    // Workspace
-    Data_t workspace          = nullptr;
-    std::size_t workspaceSize = 0;
-
-    // Additional conv params
-    bool gfx90aFp16alt = false;
-    Scalar alpha{1.0};
-    Scalar beta{0.0};
-
-    // WrW-specific data pointers (used when is_wrw == true)
-    // For WrW: w (weights slot) holds dw which is the output (Data_t),
-    //          out (output slot) holds x which is an input (ConstData_t)
-    Data_t w_as_output       = nullptr; // dw buffer pointer for WrW output transpose
-    ConstData_t out_as_input = nullptr; // x buffer pointer for WrW input transpose
-    bool is_wrw              = false;
-
-    TransposeConvInvokeParams() = default;
-
-    // Constructor from DataInvokeParams only (uses tensor descs from params.tensors)
-    explicit TransposeConvInvokeParams(const DataInvokeParams& params)
-        : InvokeParams{params.type},
-          inDesc(params.tensors.inDesc),
-          wDesc(params.tensors.wDesc),
-          outDesc(params.tensors.outDesc),
-          in(params.tensors.in),
-          w(params.tensors.w),
-          out(params.tensors.out),
-          workspace(params.workSpace),
-          workspaceSize(params.workSpaceSize),
-          gfx90aFp16alt(params.gfx90aFp16alt),
-          alpha(params.alpha),
-          beta(params.beta)
-    {
-    }
-
-    // Constructor from WrWInvokeParams
-    // Maps: in/inDesc = dy, w/wDesc = dw, out/outDesc = x
-    // Also sets w_as_output and out_as_input for correct transpose I/O semantics
-    explicit TransposeConvInvokeParams(const WrWInvokeParams& params)
-        : InvokeParams{params.type},
-          inDesc(params.tensors.dyDesc),
-          wDesc(params.tensors.dwDesc),
-          outDesc(params.tensors.xDesc),
-          in(params.tensors.dy),
-          w(params.tensors.dw),
-          out(nullptr), // not used for WrW — x is accessed via out_as_input
-          workspace(params.workSpace),
-          workspaceSize(params.workSpaceSize),
-          gfx90aFp16alt(params.gfx90aFp16alt),
-          alpha(params.alpha),
-          beta(params.beta),
-          w_as_output(params.tensors.dw),
-          out_as_input(params.tensors.x),
-          is_wrw(true)
-    {
-    }
-
-    // Constructor from existing DataInvokeParams + ProblemDescription
-    TransposeConvInvokeParams(const DataInvokeParams& params, const ProblemDescription& problem)
-        : InvokeParams{params.type},
-          inDesc(problem.GetIn()),
-          wDesc(problem.GetWeights()),
-          outDesc(problem.GetOut()),
-          in(params.tensors.in),
-          w(params.tensors.w),
-          out(params.tensors.out),
-          workspace(params.workSpace),
-          workspaceSize(params.workSpaceSize),
-          gfx90aFp16alt(params.gfx90aFp16alt),
-          alpha(params.alpha),
-          beta(params.beta)
-    {
-    }
-
-    std::size_t GetWorkspaceSize() const { return workspaceSize; }
-    Data_t GetWorkspace() const { return workspace; }
-
-    /// Convert to DataInvokeParams for inner solver invocation (Fwd/Bwd).
-    DataInvokeParams ToDataInvokeParams() const
-    {
-        return DataInvokeParams{type,
-                                ConvDataTensors{inDesc, in, wDesc, w, outDesc, out},
-                                workspace,
-                                workspaceSize,
-                                gfx90aFp16alt,
-                                alpha,
-                                beta};
-    }
-
-    /// Convert to WrWInvokeParams for inner solver invocation (WrW).
-    /// Maps back: inDesc/in → dy, wDesc/w_as_output → dw, outDesc/out_as_input → x
-    WrWInvokeParams ToWrWInvokeParams() const
-    {
-        return WrWInvokeParams{
-            type,
-            ConvWrwTensors{inDesc, in, outDesc, out_as_input, wDesc, w_as_output},
-            workspace,
-            workspaceSize,
-            gfx90aFp16alt,
-            alpha,
-            beta};
-    }
 };
 
 } // namespace conv

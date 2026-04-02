@@ -49,6 +49,10 @@ TEST(TestBatchnormFwdInferenceParams, HasCorrectTensorPointersForSingleNode)
     EXPECT_NE(params.bias(), nullptr);
     EXPECT_NE(params.estMean(), nullptr);
     EXPECT_NE(params.invVariance(), nullptr);
+
+    // No activation in this graph, so these should be nullopt / nullptr
+    EXPECT_EQ(params.optActivation(), std::nullopt);
+    EXPECT_EQ(params.activationOut(), nullptr);
 }
 
 TEST(TestBatchnormFwdInferenceParams, TensorPointersMatchExpectedUids)
@@ -84,6 +88,68 @@ TEST(TestBatchnormFwdInferenceParams, IsMoveConstructible)
 
     EXPECT_NE(moved.x(), nullptr);
     EXPECT_NE(moved.y(), nullptr);
+}
+
+TEST(TestBatchnormFwdInferenceParams, ConstructGraphWithActivation)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    EXPECT_NO_THROW(BatchnormFwdInferenceParams params(attr, activAttrs, graph.getTensorMap()));
+}
+
+TEST(TestBatchnormFwdInferenceParams, HasCorrectTensorPointersForGraphWithActivation)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormFwdInferenceParams params(attr, activAttrs, graph.getTensorMap());
+
+    EXPECT_NE(params.x(), nullptr);
+    EXPECT_NE(params.y(), nullptr);
+    EXPECT_NE(params.scale(), nullptr);
+    EXPECT_NE(params.bias(), nullptr);
+    EXPECT_NE(params.estMean(), nullptr);
+    EXPECT_NE(params.invVariance(), nullptr);
+    EXPECT_NE(params.optActivation(), std::nullopt);
+    EXPECT_NE(params.activationOut(), nullptr);
+}
+
+TEST(TestBatchnormFwdInferenceParams, TensorPointersMatchExpectedUidsForGraphWithActivation)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormFwdInferenceParams params(attr, activAttrs, graph.getTensorMap());
+
+    EXPECT_EQ(params.x()->uid(), attr.x_tensor_uid());
+    EXPECT_EQ(params.y()->uid(), attr.y_tensor_uid());
+    EXPECT_EQ(params.scale()->uid(), attr.scale_tensor_uid());
+    EXPECT_EQ(params.bias()->uid(), attr.bias_tensor_uid());
+    EXPECT_EQ(params.estMean()->uid(), attr.mean_tensor_uid());
+    EXPECT_EQ(params.invVariance()->uid(), attr.inv_variance_tensor_uid());
+    EXPECT_EQ(params.activationOut()->uid(), activAttrs.out_0_tensor_uid());
 }
 
 TEST(TestBatchnormFwdInferenceParams, IsNotCopyConstructible)
