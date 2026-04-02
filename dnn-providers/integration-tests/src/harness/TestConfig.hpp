@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -20,6 +21,10 @@ enum class ToleranceMode
 };
 
 // Singleton class for storing CLI-based test configuration.
+// All arguments are independently optional:
+//   - articlePath: omit to use hipDNN's default plugin discovery
+//   - engineName: omit to let hipDNN select the engine
+//   - failOnUnsupported: when true, FAIL instead of SKIP for unsupported graphs
 class TestConfig
 {
 public:
@@ -35,10 +40,10 @@ public:
     TestConfig(TestConfig&&) = delete;
     TestConfig& operator=(TestConfig&&) = delete;
 
-    // Initialize with CLI arguments for engine-specific mode.
-    // Must be called before any get() access.
-    // Throws if called more than once or if the singleton was already accessed uninitialized.
-    static void initialize(std::filesystem::path articlePath, std::string engineName)
+    // Initialize with CLI arguments. Must be called before any get() access.
+    static void initialize(std::optional<std::filesystem::path> articlePath,
+                           std::optional<std::string> engineName,
+                           bool failOnUnsupported = false)
     {
         TestConfig& instance = get();
         if(instance._initialized)
@@ -47,92 +52,83 @@ public:
         }
         instance._articlePath = std::move(articlePath);
         instance._engineName = std::move(engineName);
+        instance._failOnUnsupported = failOnUnsupported;
         instance._initialized = true;
     }
 
-    // Initialize for Out Of The Box mode (no specific engine or plugin path).
-    // hipDNN uses default plugin discovery and selects the engine itself.
-    static void initializeOOTB()
+    bool hasArticlePath() const
     {
-        TestConfig& instance = get();
-        if(instance._initialized)
-        {
-            throw std::runtime_error("TestConfig::initialize() called more than once");
-        }
-        instance._ootbMode = true;
-        instance._initialized = true;
+        throwIfNotInitialized();
+        return _articlePath.has_value();
     }
 
-    // Returns true if running in OOTB mode (no specific engine selected).
-    bool isOOTBMode() const
+    bool hasEngineName() const
     {
-        if(!_initialized)
-        {
-            throw std::runtime_error("TestConfig not initialized");
-        }
-        return _ootbMode;
+        throwIfNotInitialized();
+        return _engineName.has_value();
     }
 
-    // Get the article (plugin .so) path. Throws in OOTB mode.
+    bool failOnUnsupported() const
+    {
+        throwIfNotInitialized();
+        return _failOnUnsupported;
+    }
+
+    // Get the article (plugin .so) path. Throws if not provided.
     const std::filesystem::path& getArticlePath() const
     {
-        if(!_initialized)
+        throwIfNotInitialized();
+        if(!_articlePath.has_value())
         {
-            throw std::runtime_error("TestConfig not initialized");
+            throw std::runtime_error("getArticlePath() called but --test-article was not provided");
         }
-        if(_ootbMode)
-        {
-            throw std::runtime_error("getArticlePath() not available in OOTB mode");
-        }
-        return _articlePath;
+        return _articlePath.value();
     }
 
-    // Get the engine name string. Throws in OOTB mode.
+    // Get the engine name string. Throws if not provided.
     std::string_view getEngineName() const
     {
-        if(!_initialized)
+        throwIfNotInitialized();
+        if(!_engineName.has_value())
         {
-            throw std::runtime_error("TestConfig not initialized");
+            throw std::runtime_error("getEngineName() called but --test-engine was not provided");
         }
-        if(_ootbMode)
-        {
-            throw std::runtime_error("getEngineName() not available in OOTB mode");
-        }
-        return _engineName;
+        return _engineName.value();
     }
 
-    // Get the engine ID from the engine name. Throws in OOTB mode.
+    // Get the engine ID from the engine name. Throws if engine not provided.
     int64_t getEngineId() const
     {
-        if(!_initialized)
+        throwIfNotInitialized();
+        if(!_engineName.has_value())
         {
-            throw std::runtime_error("TestConfig not initialized");
+            throw std::runtime_error("getEngineId() called but --test-engine was not provided");
         }
-        if(_ootbMode)
-        {
-            throw std::runtime_error("getEngineId() not available in OOTB mode");
-        }
-        return hipdnn_data_sdk::utilities::engineNameToId(_engineName);
+        return hipdnn_data_sdk::utilities::engineNameToId(_engineName.value());
     }
 
     // Get tolerance mode (always DEFAULT since only one mode exists)
     ToleranceMode getToleranceMode() const
     {
-        if(!_initialized)
-        {
-            throw std::runtime_error("TestConfig not initialized");
-        }
-
+        throwIfNotInitialized();
         return ToleranceMode::DEFAULT;
     }
 
 private:
     TestConfig() = default;
 
-    std::filesystem::path _articlePath;
-    std::string _engineName;
+    void throwIfNotInitialized() const
+    {
+        if(!_initialized)
+        {
+            throw std::runtime_error("TestConfig not initialized");
+        }
+    }
+
+    std::optional<std::filesystem::path> _articlePath;
+    std::optional<std::string> _engineName;
+    bool _failOnUnsupported = false;
     bool _initialized = false;
-    bool _ootbMode = false;
 };
 
 } // namespace hipdnn_integration_tests

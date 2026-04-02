@@ -98,24 +98,33 @@ protected:
         // build_operation_graph() was already called by buildGraph() in the test subclass.
         std::vector<int64_t> engineIds;
         auto status = graph.get_ranked_engine_ids(engineIds);
-
-        if(TestConfig::get().isOOTBMode())
-        {
-            if(status.is_bad() || engineIds.empty())
-            {
-                FAIL() << "OOTB: No engine supports this graph";
-            }
-        }
-        else
+        if(TestConfig::get().hasEngineName())
         {
             int64_t targetEngineId = TestConfig::get().getEngineId();
             if(status.is_bad()
                || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
             {
+                if(TestConfig::get().failOnUnsupported())
+                {
+                    FAIL() << "Engine " << TestConfig::get().getEngineName()
+                           << " does not support this graph";
+                }
                 GTEST_SKIP() << "Engine " << TestConfig::get().getEngineName()
                              << " does not support this graph";
             }
+            // Prererred engine must be set before create_execution_plans.
             graph.set_preferred_engine_id_ext(targetEngineId);
+        }
+        else
+        {
+            if(status.is_bad() || engineIds.empty())
+            {
+                if(TestConfig::get().failOnUnsupported())
+                {
+                    FAIL() << "No engine supports this graph";
+                }
+                GTEST_SKIP() << "No engine supports this graph";
+            }
         }
 
         // Build execution plans, engine preference set above should ensure that
