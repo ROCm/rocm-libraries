@@ -6,30 +6,62 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_frontend.hpp>
-#include <test_plugins/TestKnobExpectation.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 #include <test_plugins/TestPluginKnobRecorder.hpp>
 
+#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using hipdnn_data_sdk::data_objects::EngineConfigT;
+using hipdnn_data_sdk::data_objects::FloatValueT;
+using hipdnn_data_sdk::data_objects::IntValueT;
+using hipdnn_data_sdk::data_objects::KnobSettingT;
+using hipdnn_data_sdk::data_objects::StringValueT;
 
 namespace
 {
 
-std::string serializeExpectedKnobSettings(int64_t engineId,
-                                          const std::vector<KnobSetting>& settings)
+EngineConfigT buildExpectedEngineConfig(int64_t engineId, const std::vector<KnobSetting>& settings)
 {
-    std::vector<hipdnn_tests::knob_expectation::CanonicalKnobSetting> canonicalSettings;
-    canonicalSettings.reserve(settings.size());
+    EngineConfigT config;
+    config.engine_id = engineId;
 
     for(const auto& setting : settings)
     {
-        canonicalSettings.push_back(hipdnn_tests::knob_expectation::makeExpectedKnobSetting(
-            setting.knobId(), setting.value()));
+        auto knob = std::make_unique<KnobSettingT>();
+        knob->knob_id = setting.knobId();
+        std::visit(
+            [&knob](const auto& val) {
+                using T = std::decay_t<decltype(val)>;
+                if constexpr(std::is_same_v<T, int64_t>)
+                {
+                    IntValueT intVal;
+                    intVal.value = val;
+                    knob->value.Set(intVal);
+                }
+                else if constexpr(std::is_same_v<T, double>)
+                {
+                    FloatValueT floatVal;
+                    floatVal.value = val;
+                    knob->value.Set(floatVal);
+                }
+                else if constexpr(std::is_same_v<T, std::string>)
+                {
+                    StringValueT stringVal;
+                    stringVal.value = val;
+                    knob->value.Set(std::move(stringVal));
+                }
+            },
+            setting.value());
+        config.knobs.push_back(std::move(knob));
     }
 
-    return hipdnn_tests::knob_expectation::serializeExpectedKnobSettings(
-        engineId, std::move(canonicalSettings));
+    std::sort(config.knobs.begin(), config.knobs.end(), [](const auto& a, const auto& b) {
+        return a->knob_id < b->knob_id;
+    });
+    return config;
 }
 
 class TestableGraph : public Graph
@@ -115,7 +147,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithIntKnob)
 
     auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
-    EXPECT_EQ(_knobRecorder->last(), serializeExpectedKnobSettings(engineId, settings));
+    EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithFloatKnob)
@@ -127,7 +159,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithFloatKnob
 
     auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
-    EXPECT_EQ(_knobRecorder->last(), serializeExpectedKnobSettings(engineId, settings));
+    EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithStringKnob)
@@ -140,7 +172,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithStringKno
 
     auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
-    EXPECT_EQ(_knobRecorder->last(), serializeExpectedKnobSettings(engineId, settings));
+    EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithMultipleKnobs)
@@ -155,7 +187,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithMultipleK
 
     auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
-    EXPECT_EQ(_knobRecorder->last(), serializeExpectedKnobSettings(engineId, settings));
+    EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithSharedKnob)
@@ -168,7 +200,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithSharedKno
 
     auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
-    EXPECT_EQ(_knobRecorder->last(), serializeExpectedKnobSettings(engineId, settings));
+    EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithDeprecatedKnob)
@@ -180,7 +212,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithDeprecate
 
     auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
-    EXPECT_EQ(_knobRecorder->last(), serializeExpectedKnobSettings(engineId, settings));
+    EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithEmptyKnobs)
@@ -192,7 +224,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithEmptyKnob
 
     auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
-    EXPECT_EQ(_knobRecorder->last(), serializeExpectedKnobSettings(engineId, settings));
+    EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanFiltersUnsupportedKnob)
@@ -205,7 +237,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanFiltersUnsupp
 
     auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
-    EXPECT_EQ(_knobRecorder->last(), serializeExpectedKnobSettings(engineId, expectedSettings));
+    EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, expectedSettings));
 }
 
 } // namespace

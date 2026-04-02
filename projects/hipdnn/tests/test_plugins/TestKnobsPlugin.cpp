@@ -4,17 +4,17 @@
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
 
-#include "TestKnobExpectation.hpp"
-
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
+#include <cstdint>
 #include <vector>
 
-// Thread-local storage for all received knob settings, serialized as canonical strings.
-// Tests read these via the exported getCount/getAt/reset C functions.
+// Thread-local storage for raw flatbuffer bytes of each received EngineConfig.
+// Tests read these via the exported getCount/getDataAt/getSizeAt/reset C functions,
+// then unpack to EngineConfigT for direct comparison.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static thread_local std::vector<std::string> gReceivedKnobs;
+static thread_local std::vector<std::vector<uint8_t>> gReceivedKnobs;
 
 // NOLINTNEXTLINE
 thread_local char
@@ -334,17 +334,11 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle
                                                         const hipdnnPluginConstData_t* opGraph,
                                                         size_t* workspaceSize)
 {
-    // Record received knob settings so tests can verify lowering via
-    // the exported getCount/getAt/reset C functions.
-    if(engineConfig != nullptr && engineConfig->ptr != nullptr)
+    // Record raw flatbuffer bytes so tests can unpack and compare EngineConfigT directly.
+    if(engineConfig != nullptr && engineConfig->ptr != nullptr && engineConfig->size > 0)
     {
-        const hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
-            engineConfig->ptr, engineConfig->size);
-        if(configWrapper.isValid())
-        {
-            gReceivedKnobs.push_back(
-                hipdnn_tests::knob_expectation::serializeActualKnobSettings(configWrapper));
-        }
+        const auto* bytes = static_cast<const uint8_t*>(engineConfig->ptr);
+        gReceivedKnobs.emplace_back(bytes, bytes + engineConfig->size);
     }
 
     return TestPluginBase::enginePluginGetWorkspaceSize(
@@ -387,21 +381,30 @@ hipdnnPluginStatus_t
         handle, executionContext, workspace, deviceBuffers, numDeviceBuffers);
 }
 
-uint32_t hipdnnTestKnobsPluginGetReceivedKnobsCount()
+HIPDNN_PLUGIN_EXPORT uint32_t hipdnnTestKnobsPluginGetReceivedKnobsCount()
 {
     return static_cast<uint32_t>(gReceivedKnobs.size());
 }
 
-const char* hipdnnTestKnobsPluginGetReceivedKnobsAt(uint32_t index)
+HIPDNN_PLUGIN_EXPORT const uint8_t* hipdnnTestKnobsPluginGetReceivedKnobsDataAt(uint32_t index)
 {
     if(index >= gReceivedKnobs.size())
     {
         return nullptr;
     }
-    return gReceivedKnobs[index].c_str();
+    return gReceivedKnobs[index].data();
 }
 
-void hipdnnTestKnobsPluginResetReceivedKnobs()
+HIPDNN_PLUGIN_EXPORT uint32_t hipdnnTestKnobsPluginGetReceivedKnobsSizeAt(uint32_t index)
+{
+    if(index >= gReceivedKnobs.size())
+    {
+        return 0;
+    }
+    return static_cast<uint32_t>(gReceivedKnobs[index].size());
+}
+
+HIPDNN_PLUGIN_EXPORT void hipdnnTestKnobsPluginResetReceivedKnobs()
 {
     gReceivedKnobs.clear();
 }

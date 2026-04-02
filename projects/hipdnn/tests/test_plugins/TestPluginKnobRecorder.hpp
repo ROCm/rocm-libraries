@@ -3,11 +3,15 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -21,11 +25,15 @@
 namespace hipdnn_tests
 {
 
+using hipdnn_data_sdk::data_objects::EngineConfigT;
+using hipdnn_data_sdk::data_objects::UnPackEngineConfig;
+
 /// RAII wrapper for loading a test plugin and accessing its knob recording functions.
 ///
-/// The test plugin must export three C functions:
+/// The test plugin must export four C functions:
 ///   - hipdnnTestKnobsPluginGetReceivedKnobsCount() -> uint32_t
-///   - hipdnnTestKnobsPluginGetReceivedKnobsAt(uint32_t) -> const char*
+///   - hipdnnTestKnobsPluginGetReceivedKnobsDataAt(uint32_t) -> const uint8_t*
+///   - hipdnnTestKnobsPluginGetReceivedKnobsSizeAt(uint32_t) -> uint32_t
 ///   - hipdnnTestKnobsPluginResetReceivedKnobs() -> void
 ///
 /// The pluginPath passed to the constructor should be the exact resolved path the
@@ -61,7 +69,10 @@ public:
         try
         {
             _fnGetCount = resolveSymbol<GetCountFn>("hipdnnTestKnobsPluginGetReceivedKnobsCount");
-            _fnGetAt = resolveSymbol<GetAtFn>("hipdnnTestKnobsPluginGetReceivedKnobsAt");
+            _fnGetDataAt
+                = resolveSymbol<GetDataAtFn>("hipdnnTestKnobsPluginGetReceivedKnobsDataAt");
+            _fnGetSizeAt
+                = resolveSymbol<GetSizeAtFn>("hipdnnTestKnobsPluginGetReceivedKnobsSizeAt");
             _fnReset = resolveSymbol<ResetFn>("hipdnnTestKnobsPluginResetReceivedKnobs");
         }
         catch(...)
@@ -87,23 +98,27 @@ public:
         return _fnGetCount();
     }
 
-    /// Returns the nth recorded knob setting string.
+    /// Returns the nth recorded EngineConfig, unpacked from flatbuffer bytes.
+    /// Knobs are sorted by knob_id for deterministic comparison.
     /// Throws std::out_of_range if index >= count().
-    std::string at(uint32_t index) const
+    EngineConfigT at(uint32_t index) const
     {
-        const char* raw = _fnGetAt(index);
-        if(raw == nullptr)
+        const uint8_t* data = _fnGetDataAt(index);
+        const uint32_t size = _fnGetSizeAt(index);
+        if(data == nullptr || size == 0)
         {
             throw std::out_of_range("TestPluginKnobRecorder::at: index " + std::to_string(index)
                                     + " out of range (count=" + std::to_string(count()) + ")");
         }
-        return std::string{raw};
+        auto config = UnPackEngineConfig(data);
+        sortKnobs(*config);
+        return std::move(*config);
     }
 
-    /// Returns all recorded knob settings as a vector of strings.
-    std::vector<std::string> getAll() const
+    /// Returns all recorded EngineConfigs as a vector.
+    std::vector<EngineConfigT> getAll() const
     {
-        std::vector<std::string> result;
+        std::vector<EngineConfigT> result;
         const uint32_t n = count();
         result.reserve(n);
         for(uint32_t i = 0; i < n; ++i)
@@ -113,12 +128,15 @@ public:
         return result;
     }
 
-    /// Returns the last recorded knob setting (convenience).
-    /// Returns empty string if no knobs have been recorded.
-    std::string last() const
+    /// Returns the last recorded EngineConfig, or std::nullopt if none recorded.
+    std::optional<EngineConfigT> last() const
     {
         const uint32_t n = count();
-        return n > 0 ? at(n - 1) : std::string();
+        if(n == 0)
+        {
+            return std::nullopt;
+        }
+        return at(n - 1);
     }
 
     /// Clears all recorded knob settings in the plugin.
@@ -129,8 +147,16 @@ public:
 
 private:
     using GetCountFn = uint32_t (*)();
-    using GetAtFn = const char* (*)(uint32_t);
+    using GetDataAtFn = const uint8_t* (*)(uint32_t);
+    using GetSizeAtFn = uint32_t (*)(uint32_t);
     using ResetFn = void (*)();
+
+    static void sortKnobs(EngineConfigT& config)
+    {
+        std::sort(config.knobs.begin(), config.knobs.end(), [](const auto& a, const auto& b) {
+            return a->knob_id < b->knob_id;
+        });
+    }
 
     template <typename T>
     T resolveSymbol(const char* name)
@@ -176,7 +202,8 @@ private:
     void* _handle = nullptr;
 #endif
     GetCountFn _fnGetCount = nullptr;
-    GetAtFn _fnGetAt = nullptr;
+    GetDataAtFn _fnGetDataAt = nullptr;
+    GetSizeAtFn _fnGetSizeAt = nullptr;
     ResetFn _fnReset = nullptr;
 };
 
