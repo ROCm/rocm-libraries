@@ -62,12 +62,34 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
                 cd build
                 # Check that all tests are included.
                 ../scripts/check_included_tests.py
+                
+                # Detect pytest installation location
+                echo "Detecting pytest installation..."
+                PYTEST_PATH=""
+                if command -v pytest &>/dev/null; then
+                    echo "pytest found at: \$(which pytest)"
+                    PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                    echo "Python prefix: \$PYTEST_PREFIX"
+                    PYTEST_PATH=";\$PYTEST_PREFIX"
+                elif python3 -c "import pytest" &>/dev/null; then
+                    echo "pytest found as Python module"
+                    PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                    echo "Python prefix: \$PYTEST_PREFIX"
+                    PYTEST_PATH=";\$PYTEST_PREFIX"
+                else
+                    echo "Warning: pytest not found, searching filesystem..."
+                    echo "Running: find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5"
+                    find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5 || echo "No pytest found via system search"
+                    echo "Running: find /usr -name '*pytest*' -type d 2>/dev/null | head -5"
+                    find /usr -name '*pytest*' -type d 2>/dev/null | head -5 || echo "No pytest directories found"
+                fi
+                
                 cmake ../ \\
                     ${codeCovFlag} ${timerFlag} ${yamlBackendFlag} ${useCppCheck}\\
                     -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \\
                     -DCMAKE_BUILD_TYPE=Release \\
                     -DROCROLLER_ENABLE_FETCH=ON \\
-                    -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm"
+                    -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm\$PYTEST_PATH"
                 ccache --print-stats
                 make -j ${target}
                 ccache --print-stats
@@ -173,7 +195,27 @@ def runBuildDocsCommand(platform, project)
                     set -ex
                     cd ${project.paths.project_build_prefix}
                     ${sshBlock}
-                    cmake --preset docs -B build -S .
+                    # Detect pytest installation location
+                    echo "Detecting pytest installation..."
+                    PYTEST_PATH=""
+                    if command -v pytest &>/dev/null; then
+                        echo "pytest found at: \$(which pytest)"
+                        PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                        echo "Python prefix: \$PYTEST_PREFIX"
+                        PYTEST_PATH=";\$PYTEST_PREFIX"
+                    elif python3 -c "import pytest" &>/dev/null; then
+                        echo "pytest found as Python module"
+                        PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                        echo "Python prefix: \$PYTEST_PREFIX"
+                        PYTEST_PATH=";\$PYTEST_PREFIX"
+                    else
+                        echo "Warning: pytest not found, searching filesystem..."
+                        echo "Running: find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5"
+                        find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5 || echo "No pytest found via system search"
+                        echo "Running: find /usr -name '*pytest*' -type d 2>/dev/null | head -5"
+                        find /usr -name '*pytest*' -type d 2>/dev/null | head -5 || echo "No pytest directories found"
+                    fi
+                    cmake --preset docs -B build -S . -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm\$PYTEST_PATH"
                     cmake --build build --target docs
                     """
         platform.runCommand(this, command)
