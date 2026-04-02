@@ -2,7 +2,7 @@
   "variant": "forward",
   "trait_config": {
     "data_type": {"values": ["bf16"]},
-    "pipeline": {"values": ["compv3", "compv4"]},
+    "pipeline": {"values": ["compv3", "compv4", "compv5"]},
     "scheduler": {"values": ["intrawave"]},
     "ndim_spatial": {"values": [2]}
   }

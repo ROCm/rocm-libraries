@@ -47,6 +47,7 @@
     "block_efficiency",
     "is_compv3",
     "is_compv4",
+    "is_compv5",
     "gemm_m_output",
     "gemm_n_output",
     "gemm_k_output",

@@ -73,7 +73,7 @@ class GroupedConvFeatureEngine(FeatureEngine):
             "channels_per_group",  # C / G
             "aspect_ratio_hw",     # Hi / Wi
             "aspect_ratio_filter", # Y / X
-            # Kernel features (14)
+            # Kernel features (15)
             "block_size",
             "gemm_m_per_block",
             "gemm_n_per_block",
@@ -88,6 +88,7 @@ class GroupedConvFeatureEngine(FeatureEngine):
             "block_efficiency",    # Degree to which block is square-like
             "is_compv3",
             "is_compv4",
+            "is_compv5",
             # Interaction features (18)
             "gemm_m_output",  # Effective GEMM M: N * Ho * Wo
             "gemm_n_output",  # Effective GEMM N: K
@@ -200,6 +201,7 @@ class GroupedConvFeatureEngine(FeatureEngine):
         block_efficiency = min(gemm_m_per_block, gemm_n_per_block) / max(gemm_m_per_block, gemm_n_per_block, 1)
         is_compv3 = float(pipeline_str == "compv3")
         is_compv4 = float(pipeline_str == "compv4")
+        is_compv5 = float(pipeline_str == "compv5")
 
         # Interaction features - Map conv to GEMM dimensions
         # GEMM M: N * Ho * Wo (output spatial)
@@ -245,13 +247,13 @@ class GroupedConvFeatureEngine(FeatureEngine):
                 ai,
                 filter_area, is_1x1_conv, is_3x3_conv,
                 channels_per_group, aspect_ratio_hw, aspect_ratio_filter,
-                # Kernel features (14)
+                # Kernel features (15)
                 block_size, gemm_m_per_block, gemm_n_per_block,
                 pipeline_code,
                 num_warps, tile_volume, tile_mn,
                 lds_est, lds_ratio,
                 block_tile_ratio_m, block_tile_ratio_n, block_efficiency,
-                is_compv3, is_compv4,
+                is_compv3, is_compv4, is_compv5,
                 # Interaction features (18)
                 gemm_m, gemm_n, gemm_k,
                 num_tiles_m, num_tiles_n, num_tiles_k,
@@ -345,6 +347,7 @@ class GroupedConvFeatureEngine(FeatureEngine):
         block_efficiency = np.minimum(gemm_m_per_block, gemm_n_per_block) / np.maximum(np.maximum(gemm_m_per_block, gemm_n_per_block), 1)
         is_compv3_arr = (df["pipeline"] == "compv3").values.astype(np.float64)
         is_compv4_arr = (df["pipeline"] == "compv4").values.astype(np.float64)
+        is_compv5_arr = (df["pipeline"] == "compv5").values.astype(np.float64)
 
         # Interaction features
         gemm_m = N * Ho * Wo
@@ -423,6 +426,7 @@ class GroupedConvFeatureEngine(FeatureEngine):
         result[:, idx] = block_efficiency; idx += 1
         result[:, idx] = is_compv3_arr; idx += 1
         result[:, idx] = is_compv4_arr; idx += 1
+        result[:, idx] = is_compv5_arr; idx += 1
         result[:, idx] = gemm_m; idx += 1
         result[:, idx] = gemm_n; idx += 1
         result[:, idx] = gemm_k; idx += 1

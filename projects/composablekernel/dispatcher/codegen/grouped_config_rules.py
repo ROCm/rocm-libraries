@@ -109,7 +109,7 @@ TILE_TO_VECTOR: Dict[Tuple[int, int, int], Tuple[int, int, int]] = {
 
 # Valid pipelines per variant
 VARIANT_PIPELINES: Dict[str, List[str]] = {
-    "forward": ["compv3", "compv4"],
+    "forward": ["compv3", "compv4", "compv5"],
     "bwd_data": ["compv3", "mem"],
     "bwd_weight": ["compv3", "mem"],
 }

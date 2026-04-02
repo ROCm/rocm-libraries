@@ -82,32 +82,42 @@ class KernelSpec:
         )
 
 
-# Kernel pool: configs from training data (20 kernels total)
+# Kernel pool: configs from training data (30 kernels total)
 KERNEL_POOL = [
     # Block size 16
     KernelSpec("k16_64x64_v3", 16, 64, 64, "compv3"),
     KernelSpec("k16_64x64_v4", 16, 64, 64, "compv4"),
+    KernelSpec("k16_64x64_v5", 16, 64, 64, "compv5"),
     KernelSpec("k16_64x128_v3", 16, 64, 128, "compv3"),
     KernelSpec("k16_64x128_v4", 16, 64, 128, "compv4"),
+    KernelSpec("k16_64x128_v5", 16, 64, 128, "compv5"),
     # Block size 32
     KernelSpec("k32_64x64_v3", 32, 64, 64, "compv3"),
     KernelSpec("k32_64x64_v4", 32, 64, 64, "compv4"),
+    KernelSpec("k32_64x64_v5", 32, 64, 64, "compv5"),
     KernelSpec("k32_64x128_v3", 32, 64, 128, "compv3"),
     KernelSpec("k32_64x128_v4", 32, 64, 128, "compv4"),
+    KernelSpec("k32_64x128_v5", 32, 64, 128, "compv5"),
     KernelSpec("k32_128x64_v3", 32, 128, 64, "compv3"),
     KernelSpec("k32_128x64_v4", 32, 128, 64, "compv4"),
+    KernelSpec("k32_128x64_v5", 32, 128, 64, "compv5"),
     # Block size 64
     KernelSpec("k64_64x64_v3", 64, 64, 64, "compv3"),
     KernelSpec("k64_64x64_v4", 64, 64, 64, "compv4"),
+    KernelSpec("k64_64x64_v5", 64, 64, 64, "compv5"),
     KernelSpec("k64_64x128_v3", 64, 64, 128, "compv3"),
     KernelSpec("k64_64x128_v4", 64, 64, 128, "compv4"),
+    KernelSpec("k64_64x128_v5", 64, 64, 128, "compv5"),
     KernelSpec("k64_128x64_v3", 64, 128, 64, "compv3"),
     KernelSpec("k64_128x64_v4", 64, 128, 64, "compv4"),
+    KernelSpec("k64_128x64_v5", 64, 128, 64, "compv5"),
     # Block size 128
     KernelSpec("k128_64x128_v3", 128, 64, 128, "compv3"),
     KernelSpec("k128_64x128_v4", 128, 64, 128, "compv4"),
+    KernelSpec("k128_64x128_v5", 128, 64, 128, "compv5"),
     KernelSpec("k128_128x64_v3", 128, 128, 64, "compv3"),
     KernelSpec("k128_128x64_v4", 128, 128, 64, "compv4"),
+    KernelSpec("k128_128x64_v5", 128, 128, 64, "compv5"),
 ]
 
 
