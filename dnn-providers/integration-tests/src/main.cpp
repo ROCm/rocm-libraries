@@ -89,11 +89,11 @@ int main(int argc, char** argv) noexcept
         argparse::ArgumentParser parser(
             "hipdnn_integration_tests", "", argparse::default_arguments::help);
         parser.add_argument("--ta", "--test-article")
-            .required()
             .help("Full path to the hipdnn engine plugin .so to test");
         parser.add_argument("--te", "--test-engine")
-            .required()
             .help("Engine name to test against (e.g., MIOPEN_ENGINE)");
+        parser.add_argument("--ootb").default_value(false).implicit_value(true).help(
+            "Run in OOTB mode: hipDNN selects engine via default plugin discovery");
 
         std::vector<std::string> remainingArgs;
         try
@@ -107,34 +107,60 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        auto articlePathArg = parser.get<std::string>("--test-article");
-        auto engineNameArg = parser.get<std::string>("--test-engine");
+        auto ootbMode = parser.get<bool>("--ootb");
+        auto hasArticle = parser.is_used("--test-article");
+        auto hasEngine = parser.is_used("--test-engine");
 
-        // Validate and canonicalize article path (resolves relative paths)
-        std::filesystem::path articlePathObj;
-        try
+        // Validate argument combinations
+        if(ootbMode && (hasArticle || hasEngine))
         {
-            articlePathObj = std::filesystem::canonical(articlePathArg);
+            std::cerr << "Error: --ootb cannot be combined with --test-article or --test-engine\n";
+            return 1;
         }
-        catch(const std::filesystem::filesystem_error&)
+        if(!ootbMode && (!hasArticle || !hasEngine))
         {
-            std::cerr << "Error: Article path does not exist: " << articlePathArg << '\n';
+            std::cerr << "Error: Either --ootb or both --test-article and --test-engine "
+                         "are required\n";
+            std::cerr << parser;
             return 1;
         }
 
-        // Set engine plugin path to the plugin file (not the directory)
-        const std::string articlePathStr = articlePathObj.string();
-        const char* pluginPath = articlePathStr.c_str();
-        if(hipdnnSetEnginePluginPaths_ext(1, &pluginPath, HIPDNN_PLUGIN_LOADING_ABSOLUTE)
-           != HIPDNN_STATUS_SUCCESS)
+        if(ootbMode)
         {
-            std::cerr << "Error: Failed to set engine plugin path\n";
-            return 1;
+            std::cout << "Running in OOTB mode — hipDNN selects engine via default plugin "
+                         "discovery\n";
+            hipdnn_integration_tests::TestConfig::initializeOOTB();
         }
+        else
+        {
+            auto articlePathArg = parser.get<std::string>("--test-article");
+            auto engineNameArg = parser.get<std::string>("--test-engine");
 
-        // Initialize TestConfig with CLI arguments
-        hipdnn_integration_tests::TestConfig::initialize(std::move(articlePathObj),
-                                                         std::move(engineNameArg));
+            // Validate and canonicalize article path (resolves relative paths)
+            std::filesystem::path articlePathObj;
+            try
+            {
+                articlePathObj = std::filesystem::canonical(articlePathArg);
+            }
+            catch(const std::filesystem::filesystem_error&)
+            {
+                std::cerr << "Error: Article path does not exist: " << articlePathArg << '\n';
+                return 1;
+            }
+
+            // Set engine plugin path to the plugin file (not the directory)
+            const std::string articlePathStr = articlePathObj.string();
+            const char* pluginPath = articlePathStr.c_str();
+            if(hipdnnSetEnginePluginPaths_ext(1, &pluginPath, HIPDNN_PLUGIN_LOADING_ABSOLUTE)
+               != HIPDNN_STATUS_SUCCESS)
+            {
+                std::cerr << "Error: Failed to set engine plugin path\n";
+                return 1;
+            }
+
+            hipdnn_integration_tests::TestConfig::initialize(std::move(articlePathObj),
+                                                             std::move(engineNameArg));
+        }
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args
         std::vector<char*> gtestArgv;
@@ -176,8 +202,9 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        // Verify target engine is loaded
-        if(!engineIsLoaded(handle, hipdnn_integration_tests::TestConfig::get().getEngineName()))
+        // Verify target engine is loaded (skip in OOTB mode — engine discovery happens at test time)
+        if(!hipdnn_integration_tests::TestConfig::get().isOOTBMode()
+           && !engineIsLoaded(handle, hipdnn_integration_tests::TestConfig::get().getEngineName()))
         {
             std::cerr << "Error: Engine '"
                       << hipdnn_integration_tests::TestConfig::get().getEngineName()

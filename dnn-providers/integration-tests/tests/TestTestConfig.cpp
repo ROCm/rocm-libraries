@@ -42,6 +42,11 @@ TEST(TestConfigUninitialized, GetToleranceModeThrowsWhenUninitialized)
     EXPECT_THROW(TestConfig::get().getToleranceMode(), std::runtime_error);
 }
 
+TEST(TestConfigUninitialized, IsOOTBModeThrowsWhenUninitialized)
+{
+    EXPECT_THROW(TestConfig::get().isOOTBMode(), std::runtime_error);
+}
+
 // ---------------------------------------------------------------------------
 // Suite 2 – initialized singleton
 // ---------------------------------------------------------------------------
@@ -78,9 +83,19 @@ TEST_F(TestConfigInitialized, GetEngineIdReturnsConsistentHash)
     EXPECT_EQ(TestConfig::get().getEngineId(), expected);
 }
 
+TEST_F(TestConfigInitialized, IsOOTBModeReturnsFalse)
+{
+    EXPECT_FALSE(TestConfig::get().isOOTBMode());
+}
+
 TEST_F(TestConfigInitialized, DoubleInitializeThrows)
 {
     EXPECT_THROW(TestConfig::initialize("/other/path", "OTHER_ENGINE"), std::runtime_error);
+}
+
+TEST_F(TestConfigInitialized, OOTBInitializeAfterEngineInitializeThrows)
+{
+    EXPECT_THROW(TestConfig::initializeOOTB(), std::runtime_error);
 }
 
 // NOLINTEND(readability-identifier-naming)
