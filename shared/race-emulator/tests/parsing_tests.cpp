@@ -3,6 +3,7 @@
 
 #include "race-emulator/Arch.h"
 #include "race-emulator/Emulator.h"
+#include "race-emulator/Util.h"
 #include <cstring>
 #include <gtest/gtest.h>
 #include <string_view>
@@ -111,6 +112,131 @@ amdhsa.kernels:
 )ASM";
   EXPECT_NO_THROW(Emulator::createGfx942(gfx942_asm));
   EXPECT_THROW(Emulator::createGfx1151(gfx942_asm), std::runtime_error);
+}
+
+// --- stripComments unit tests ---
+
+TEST(StripComments, LineCommentSemicolon) {
+  bool inBlock = false;
+  EXPECT_EQ(stripComments("code ; comment", inBlock), "code ");
+  EXPECT_FALSE(inBlock);
+}
+
+TEST(StripComments, LineCommentDoubleSlash) {
+  bool inBlock = false;
+  EXPECT_EQ(stripComments("code // comment", inBlock), "code ");
+  EXPECT_FALSE(inBlock);
+}
+
+TEST(StripComments, SingleLineBlockComment) {
+  bool inBlock = false;
+  EXPECT_EQ(stripComments("a /* comment */ b", inBlock), "a  b");
+  EXPECT_FALSE(inBlock);
+}
+
+TEST(StripComments, MultipleBlockCommentsOnOneLine) {
+  bool inBlock = false;
+  EXPECT_EQ(stripComments("/* x */ a /* y */ b", inBlock), " a  b");
+  EXPECT_FALSE(inBlock);
+}
+
+TEST(StripComments, BlockCommentOpensMultiLine) {
+  bool inBlock = false;
+  EXPECT_EQ(stripComments("code /* start of block", inBlock), "code ");
+  EXPECT_TRUE(inBlock);
+}
+
+TEST(StripComments, InsideBlockComment) {
+  bool inBlock = true;
+  EXPECT_EQ(stripComments("  still in comment", inBlock), "");
+  EXPECT_TRUE(inBlock);
+}
+
+TEST(StripComments, BlockCommentCloses) {
+  bool inBlock = true;
+  EXPECT_EQ(stripComments("  end of block */ code", inBlock), " code");
+  EXPECT_FALSE(inBlock);
+}
+
+TEST(StripComments, BlockCommentClosesThenReopens) {
+  bool inBlock = true;
+  EXPECT_EQ(stripComments("in */ out /* in */ out", inBlock), " out  out");
+  EXPECT_FALSE(inBlock);
+}
+
+TEST(StripComments, BlockCommentInsideLineComment) {
+  bool inBlock = false;
+  EXPECT_EQ(stripComments("code // not /* a block", inBlock), "code ");
+  EXPECT_FALSE(inBlock);
+}
+
+TEST(StripComments, BlockCommentInsideSemicolonComment) {
+  bool inBlock = false;
+  EXPECT_EQ(stripComments("code ; not /* a block", inBlock), "code ");
+  EXPECT_FALSE(inBlock);
+}
+
+TEST(StripComments, NoComments) {
+  bool inBlock = false;
+  EXPECT_EQ(stripComments("v_mov_b32_e32 v0, 0", inBlock),
+            "v_mov_b32_e32 v0, 0");
+  EXPECT_FALSE(inBlock);
+}
+
+TEST(StripComments, EmptyLine) {
+  bool inBlock = false;
+  EXPECT_EQ(stripComments("", inBlock), "");
+  EXPECT_FALSE(inBlock);
+}
+
+// Integration test: block comments work correctly through the full
+// parser and emulator pipeline.
+TEST(Parser, BlockCommentsIgnored) {
+  static constexpr std::string_view asm_with_block_comment = R"ASM(
+.amdhsa_kernel foo
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  .amdhsa_next_free_vgpr 4
+  .amdhsa_next_free_sgpr 4
+  .amdhsa_group_segment_fixed_size 1024
+  .amdhsa_system_sgpr_workgroup_id_x 1
+.end_amdhsa_kernel
+.amdgpu_metadata
+---
+amdhsa.version:
+  - 1
+  - 1
+amdhsa.kernels:
+  - .name: foo
+    .symbol: 'foo.kd'
+    .kernarg_segment_size: 8
+    .group_segment_fixed_size: 1024
+    .wavefront_size: 64
+    .args:
+      - .name: ptr
+        .size: 8
+        .offset: 0
+        .value_kind: global_buffer
+        .address_space: generic
+...
+.end_amdgpu_metadata
+foo:
+  v_mov_b32_e32 v0, 0
+  /* This is a multi-line block comment.
+     It should be completely ignored.
+     even_if_it_looks_like_an_instruction v0, v1, v2
+  */
+  v_mov_b32_e32 v1, 1
+  // This is not /* a block comment start!
+  /* first */ v_mov_b32_e32 v2, /* second */ 2
+  s_endpgm
+)ASM";
+  Emulator emu = Emulator::createGfx942(asm_with_block_comment);
+  std::vector<int> data(2, 0);
+  int *p = data.data();
+  emu.addKernarg(0, &p);
+  emu.run({0, 0, 0}, {64, 1, 1});
+  EXPECT_EQ(emu.getWave(0).getVgpr(1, 0), 1u);
+  EXPECT_EQ(emu.getWave(0).getVgpr(2, 0), 2u);
 }
 
 TEST(Parser, ParserGfx1151Target) {

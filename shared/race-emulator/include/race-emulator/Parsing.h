@@ -21,12 +21,14 @@ enum class ParserState { Root, Amdhsa, Kernels, Args, Macro };
 /// A single line of assembly after parsing: comments stripped, symbols
 /// resolved, labels and key-value pairs identified.
 struct ParsedLine {
-  ParsedLine(std::string_view line, int lineNumber,
-             ParserState precedingParserState,
+  ParsedLine(std::string_view originalLine, std::string_view commentFreeLine,
+             int lineNumber, ParserState precedingParserState,
              const std::map<std::string, uint32_t> &symbolTable);
 
+  /// The raw source line, with comments. Used in error messages.
   std::string originalLine;
-  /// Comments removed and symbols replaced.
+  /// Comments stripped, .set symbols replaced by their numeric values.
+  /// This is the line that instruction executors see via tryExecute().
   std::string commentFreeLine;
   bool isEmptyLine{false};
   /// 0-based line number in the original assembly.

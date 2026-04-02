@@ -54,6 +54,16 @@ evaluateExpression(std::string_view inputExpr,
 std::map<std::string, std::vector<int>>
 parsePackedModifiers(std::string_view line);
 
+/// Strip all comments from an assembly line.
+///
+/// Block comments (/* ... */) are removed first — they may span multiple lines,
+/// so `inBlockComment` tracks whether the previous line left an open block.
+/// Then line comments (; and //) truncate the remainder. A /* inside a line
+/// comment is not treated as a block-comment opener.
+///
+/// Returns the comment-free portion of the line.
+std::string stripComments(const std::string &line, bool &inBlockComment);
+
 template <typename T> T getIntFromView(std::string_view nStr) {
   if (nStr.empty()) {
     return 0;

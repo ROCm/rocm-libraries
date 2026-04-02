@@ -162,78 +162,68 @@ std::string ParsedLine::str() const {
   return oss.str();
 }
 
-ParsedLine::ParsedLine(std::string_view inputLine, int n,
-                       ParserState precedingParserState,
+ParsedLine::ParsedLine(std::string_view originalLineIn,
+                       std::string_view commentFreeLineIn, int n,
+                       ParserState state,
                        const std::map<std::string, uint32_t> &symbolTable)
-    : originalLine(inputLine), lineNumber(n),
-      precedingParserState(precedingParserState) {
+    : originalLine(originalLineIn), lineNumber(n),
+      precedingParserState(state) {
 
-  // strip comments
-  std::string line = std::string(inputLine);
-  size_t comment_pos = line.find(';');
-  if (comment_pos != std::string::npos) {
-    line = line.substr(0, comment_pos);
-  }
-  comment_pos = line.find("//");
-  if (comment_pos != std::string::npos) {
-    line = line.substr(0, comment_pos);
-  }
-  comment_pos = line.find("/*");
-  if (comment_pos != std::string::npos) {
-    line = line.substr(0, comment_pos);
-  }
-
-  commentFreeLine = line;
-  if (precedingParserState == ParserState::Root ||
-      precedingParserState == ParserState::Macro) {
-    // replace symbols in the comment free line
+  // Start from the comment-free line. In Root and Macro states, also replace
+  // .set symbols (e.g. sgprKernArgAddress -> 0) so that instruction executors
+  // see numeric values. The pre-substitution version is used for structural
+  // parsing below (indent, labels, key-value) because symbol names can
+  // contain colons that would confuse key-value detection.
+  commentFreeLine = std::string(commentFreeLineIn);
+  if (state == ParserState::Root || state == ParserState::Macro) {
     commentFreeLine = getSymbolReducedLine(commentFreeLine, symbolTable);
   }
 
-  // calculate and remove indentation
-  size_t first_char = line.find_first_not_of(" \t");
-  if (first_char == std::string::npos) {
+  // Structural parsing uses the comment-free input before symbol substitution.
+  auto trimmed = trim(commentFreeLineIn);
+
+  // Calculate indentation.
+  size_t firstChar = commentFreeLineIn.find_first_not_of(" \t");
+  if (firstChar == std::string::npos) {
     isEmptyLine = true;
     return;
   }
-  indent = static_cast<int>(first_char);
+  indent = static_cast<int>(firstChar);
 
-  // check if it is a list item
-  line = trim(line);
-  if (line.find("- ", 0) == 0) {
+  // Check if it is a YAML list item (leading "- ").
+  if (trimmed.find("- ", 0) == 0) {
     isListItem = true;
-    line = line.substr(2);
-  } else {
-    isListItem = false;
+    trimmed = trimmed.substr(2);
   }
 
-  // check if it is a label
-  size_t colon_pos = line.find(':');
-  size_t space_pos = line.find_first_of(" \t\n");
-  bool isSpace = (space_pos != std::string::npos);
-  bool isColon = (colon_pos != std::string::npos);
+  // Check if it is a label (e.g. "foo:").
+  size_t colonPos = trimmed.find(':');
+  size_t spacePos = trimmed.find_first_of(" \t\n");
+  bool hasSpace = (spacePos != std::string::npos);
+  bool hasColon = (colonPos != std::string::npos);
 
-  if (indent == 0 && isColon && !isSpace) {
+  if (indent == 0 && hasColon && !hasSpace) {
     isLabel = true;
-    key = trim(line.substr(0, colon_pos));
+    key = trim(trimmed.substr(0, colonPos));
   }
 
-  // check if key-value pair
-  if (!isLabel && isColon && (!isSpace || space_pos == colon_pos + 1)) {
+  // Check if key-value pair (e.g. ".name: foo").
+  if (!isLabel && hasColon && (!hasSpace || spacePos == colonPos + 1)) {
     isKeyValue = true;
-    key = trim(line.substr(0, colon_pos));
-    value = trim(line.substr(colon_pos + 1));
+    key = trim(trimmed.substr(0, colonPos));
+    value = trim(trimmed.substr(colonPos + 1));
   }
 
-  // amdhsa specific parsing
-  if (precedingParserState == ParserState::Amdhsa) {
-    size_t sp = line.find_first_of(" \t");
+  // AMDHSA section uses space-separated key-value (e.g.
+  // ".amdhsa_next_free_vgpr 10").
+  if (state == ParserState::Amdhsa) {
+    size_t sp = trimmed.find_first_of(" \t");
     if (sp == std::string::npos) {
       return;
     }
     isKeyValue = true;
-    key = trim(line.substr(0, sp));
-    value = trim(line.substr(sp + 1));
+    key = trim(trimmed.substr(0, sp));
+    value = trim(trimmed.substr(sp + 1));
   }
 }
 
@@ -410,9 +400,23 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
   tokens.clear();
   std::map<std::string, uint32_t> symbolTable;
   symbolTable["UNDEF"] = 0xFFFFFFFF;
+  // Each source line has two representations stored in ParsedLine:
+  //
+  //   originalLine     — raw source, preserved verbatim for error messages.
+  //   commentFreeLine  — comments stripped (;  //  /* ... */) and .set symbols
+  //                      replaced by their numeric values. Used for structural
+  //                      parsing (indent, labels, key-value) and instruction
+  //                      execution (via tryExecute).
+  //
+  // Comment stripping happens in stripComments() below. Symbol substitution
+  // happens inside the ParsedLine constructor.
+
+  bool inBlockComment = false;
   for (unsigned i = 0; i < assemblyLines.size(); ++i) {
-    const auto &line = assemblyLines[i];
-    ParsedLine token(line, i, state, symbolTable);
+    const auto &originalLine = assemblyLines[i];
+    auto commentFreeLine = stripComments(originalLine, inBlockComment);
+
+    ParsedLine token(originalLine, commentFreeLine, i, state, symbolTable);
     tokens.push_back(token);
     updateParserState(token);
     process(token, symbolTable);
@@ -420,12 +424,12 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
     // Extract .amdgcn_target value (outside processInRoot since it needs
     // access to ParsedAsm fields).
     if (state == ParserState::Root) {
-      auto pos = line.find(".amdgcn_target");
+      auto pos = commentFreeLine.find(".amdgcn_target");
       if (pos != std::string::npos) {
-        auto q1 = line.find('"', pos);
-        auto q2 = line.find('"', q1 + 1);
+        auto q1 = commentFreeLine.find('"', pos);
+        auto q2 = commentFreeLine.find('"', q1 + 1);
         if (q1 != std::string::npos && q2 != std::string::npos) {
-          target = line.substr(q1 + 1, q2 - q1 - 1);
+          target = commentFreeLine.substr(q1 + 1, q2 - q1 - 1);
         }
       }
     }

@@ -340,4 +340,45 @@ parsePackedModifiers(std::string_view line) {
   return modifiers;
 }
 
+std::string stripComments(const std::string &line, bool &inBlockComment) {
+  std::string result = line;
+  if (inBlockComment) {
+    auto closePos = result.find("*/");
+    if (closePos != std::string::npos) {
+      inBlockComment = false;
+      result = result.substr(closePos + 2);
+    } else {
+      return "";
+    }
+  }
+  // Remove block comments, possibly multiple per line.
+  for (;;) {
+    auto firstLineComment = std::min(result.find("//"), result.find(';'));
+    auto openPos = result.find("/*");
+    if (openPos == std::string::npos ||
+        (firstLineComment != std::string::npos &&
+         openPos >= firstLineComment)) {
+      break;
+    }
+    auto closePos = result.find("*/", openPos + 2);
+    if (closePos != std::string::npos) {
+      result = result.substr(0, openPos) + result.substr(closePos + 2);
+    } else {
+      result = result.substr(0, openPos);
+      inBlockComment = true;
+      break;
+    }
+  }
+  // Remove line comments (; and //).
+  auto semi = result.find(';');
+  if (semi != std::string::npos) {
+    result = result.substr(0, semi);
+  }
+  auto dslash = result.find("//");
+  if (dslash != std::string::npos) {
+    result = result.substr(0, dslash);
+  }
+  return result;
+}
+
 } // namespace raceemulator
