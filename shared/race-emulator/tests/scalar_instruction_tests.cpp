@@ -607,3 +607,36 @@ TEST(Instructions, MOV_Ops_V2) {
   tryExecute(regs, "s_mov_b64 s[2:3], s[0:1]");
   EXPECT_EQ(regs.getSgpr64(2), 0xABCD1234FFFF0000);
 }
+
+TEST(Instructions, S_LSHR_B64) {
+  Workgroup wg;
+  Wave regs(1, 8, WaveSize{1}, wg);
+  regs.setSgpr64(0, 0x800000000ULL); // bit 35 set
+  regs.setSgpr(4, 35);
+  tryExecute(regs, "s_lshr_b64 s[2:3], s[0:1], s4");
+  EXPECT_EQ(regs.getSgpr64(2), 1ULL);
+  EXPECT_EQ(regs.getScc(), 1);
+
+  // Shift to zero.
+  regs.setSgpr64(0, 0xF);
+  regs.setSgpr(4, 4);
+  tryExecute(regs, "s_lshr_b64 s[2:3], s[0:1], s4");
+  EXPECT_EQ(regs.getSgpr64(2), 0ULL);
+  EXPECT_EQ(regs.getScc(), 0);
+}
+
+TEST(Instructions, S_MIN_U32) {
+  Workgroup wg;
+  Wave regs(1, 4, WaveSize{1}, wg);
+  regs.setSgpr(0, 10);
+  regs.setSgpr(1, 20);
+  tryExecute(regs, "s_min_u32 s2, s0, s1");
+  EXPECT_EQ(regs.getSgpr(2), 10u);
+  EXPECT_EQ(regs.getScc(), 1); // SCC=1 when s0 < s1
+
+  regs.setSgpr(0, 20);
+  regs.setSgpr(1, 10);
+  tryExecute(regs, "s_min_u32 s2, s0, s1");
+  EXPECT_EQ(regs.getSgpr(2), 10u);
+  EXPECT_EQ(regs.getScc(), 0); // SCC=0 when s0 >= s1
+}
