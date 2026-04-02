@@ -870,6 +870,96 @@ TEST(Gfx950, MatMul_TensileLite_F16_MFMA_TN_DTL_256x256x128) {
   }
 }
 
+// MXFP4 subtile kernel on gfx950: 32x32x256 GEMM with FP4 inputs, F32 output.
+TEST(Gfx950, MatMul_TensileLite_MXFP4_TN_32x32x256) {
+  constexpr int M = 32, N = 32, K = 256, Batch = 1;
+  constexpr int MXBlock = 32;
+  constexpr int numScalesPerRow = K / MXBlock; // 8
+
+  // FP4: 2 elements per byte. Initialize all nibbles to 2 (=1.0f).
+  std::vector<uint8_t> aFp4(M * K / 2, 0x22);
+  std::vector<uint8_t> bFp4(N * K / 2, 0x22);
+  // MX scale factors: E8M0 exponent 127 = scale 1.0.
+  std::vector<uint8_t> mxScaleA(M * numScalesPerRow, 127);
+  std::vector<uint8_t> mxScaleB(N * numScalesPerRow, 127);
+  // F32 output and C (zeroed for beta=0).
+  std::vector<float> cF32(M * N, 0.0f);
+  std::vector<float> dF32(M * N, 0.0f);
+
+  // Build kernarg buffer (136 bytes, KernArgsVersion 2).
+  std::vector<uint8_t> argBuf(136, 0);
+  auto put32 = [&](int off, uint32_t v) { std::memcpy(&argBuf[off], &v, 4); };
+  auto put64 = [&](int off, uint64_t v) { std::memcpy(&argBuf[off], &v, 8); };
+  auto putF = [&](int off, float v) { std::memcpy(&argBuf[off], &v, 4); };
+  auto putPtr = [&](int off, const void *p) {
+    uint64_t v = reinterpret_cast<uint64_t>(p);
+    put64(off, v);
+  };
+
+  // Preamble.
+  put32(0, 1);        // Gemm info (gemm_count = 1)
+  put32(4, 18874369); // kernel info0 (standard GSU=1)
+  put32(8, 0);        // kernel info1
+  put32(12, 1);       // numWG
+  put32(16, M);       // SizesFree0
+  put32(20, N);       // SizesFree1
+  put32(24, Batch);   // SizesFree2
+  put32(28, K);       // SizesSum0
+
+  // Pointers.
+  putPtr(32, dF32.data());
+  putPtr(40, cF32.data());
+  putPtr(48, aFp4.data());
+  putPtr(56, mxScaleA.data());
+  putPtr(64, bFp4.data());
+  putPtr(72, mxScaleB.data());
+
+  // Strides.
+  put32(80, 1);              // strideD0
+  put32(84, M);              // strideD1
+  put32(88, 1);              // strideC0
+  put32(92, M);              // strideC1
+  put32(96, 1);              // strideA0
+  put32(100, K);             // strideA1 (TN layout)
+  put32(104, 1);             // strideMXSA0
+  put32(108, numScalesPerRow); // strideMXSA1
+  put32(112, 1);             // strideB0
+  put32(116, K);             // strideB1
+  put32(120, 1);             // strideMXSB0
+  put32(124, numScalesPerRow); // strideMXSB1
+
+  // Scalars.
+  putF(128, 1.0f); // alpha
+  putF(132, 0.0f); // beta
+
+  std::string assembly =
+      loadKernelFile("gfx950/tensilelite_mxfp4_subtile_m32n32k256.s");
+  Emulator emulator(assembly, std::make_shared<Gfx950>());
+  emulator.addAllKernargs(argBuf.data());
+
+  // WG 32x8x1 = 256 threads, wave64 = 4 waves, 1 workgroup.
+  emulator.run({0, 0, 0}, {256, 1, 1},
+               {.raceChecks = true, .completeEmulation = true});
+
+  // Print output for debugging.
+  std::cerr << "D output (first 8 rows):\n";
+  for (int i = 0; i < 8; ++i) {
+    std::cerr << "  row " << i << ":";
+    for (int j = 0; j < N; ++j) {
+      std::cerr << " " << dF32[i * N + j];
+    }
+    std::cerr << "\n";
+  }
+  // Count non-zero elements.
+  int nonZero = 0;
+  for (int i = 0; i < M * N; ++i) {
+    if (dF32[i] != 0.0f) {
+      nonZero++;
+    }
+  }
+  std::cerr << "Non-zero elements: " << nonZero << " / " << M * N << "\n";
+}
+
 TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_128x128x8192) {
 #ifndef RELEASE_BUILD
   GTEST_SKIP() << "Large kernel test, release builds only";

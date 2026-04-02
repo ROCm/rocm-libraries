@@ -1102,6 +1102,13 @@ static auto add_co_func = [](uint32_t s0, uint32_t s1, uint32_t, int,
 };
 static RegisterVOP3b<uint32_t, uint32_t, AddOp> v_add_co("v_add_co_u32",
                                                          add_co_func);
+// CDNA v_add_i32: signed add without carry (VOP2, same bit operation as
+// v_add_u32). Note: on GCN this was VOP3B with carry to VCC, but Tensile
+// on gfx950 emits the 3-operand form.
+static RegisterVOP2_32<uint32_t> v_add_i32("v_add_i32",
+                                           [](uint32_t a, uint32_t b, Wave &) {
+                                             return a + b;
+                                           });
 
 // VOPC vector comparisons
 static auto eq_u32 = [](uint32_t a, uint32_t b) { return a == b; };
@@ -1200,6 +1207,23 @@ static RegisterVOP2_32<uint32_t> v_dual_and("v_dual_and_b32",
                                             [](uint32_t a, uint32_t b, Wave &) {
                                               return a & b;
                                             });
+
+// Lane permutation -- no data hazard, safe to treat as no-op for race checking.
+class VOP_NoOp : public Instruction {
+public:
+  std::function<int()> getExecutor(Wave &wave,
+                                   std::string_view /*line*/) const final {
+    return [&wave]() { return wave.getPc() + 1; };
+  }
+};
+
+template <typename InstT> struct RegisterInst {
+  RegisterInst(const std::string &name) {
+    InstructionRegistry::instance().add(name, std::make_unique<InstT>());
+  }
+};
+
+static RegisterInst<VOP_NoOp> v_permlane16_swap("v_permlane16_swap_b32");
 
 } // namespace
 } // namespace raceemulator

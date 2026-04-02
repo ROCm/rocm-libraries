@@ -295,6 +295,20 @@ static RegisterSOP2<uint32_t> s_lshr("s_lshr_b32",
                                        return r;
                                      });
 
+static RegisterSOP2<uint64_t> s_lshr64("s_lshr_b64",
+                                       [](uint64_t a, uint64_t b, Wave &w) {
+                                         uint64_t r = a >> (b & 0x3F);
+                                         w.setScc(r != 0);
+                                         return r;
+                                       });
+
+static RegisterSOP2<uint32_t> s_min_u("s_min_u32",
+                                      [](uint32_t a, uint32_t b, Wave &w) {
+                                        uint32_t r = std::min(a, b);
+                                        w.setScc(a < b);
+                                        return r;
+                                      });
+
 static RegisterSOP2<uint64_t> s_andn2_64("s_andn2_b64",
                                          [](uint64_t a, uint64_t b, Wave &w) {
                                            uint64_t r = a & (~b);
