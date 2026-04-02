@@ -80,8 +80,8 @@ class TraitConfigBase:
     pad_k: bool
 
     # Unsupported (pipeline, epilogue, scheduler) combinations.
-    # Only 'mem' pipeline supports interwave; all compute pipelines
-    # (compv3/v4/v5/v6/async) only support intrawave.
+    # Only 'mem' and 'basic_v1' pipelines support interwave; all compute
+    # pipelines (compv3/v4/v5/v6/async) only support intrawave.
     _UNSUPPORTED: ClassVar[FrozenSet] = frozenset(
         {
             ("compv3", "cshuffle", "interwave"),
@@ -94,6 +94,8 @@ class TraitConfigBase:
             ("compv6", "default", "interwave"),
             ("comp_async", "cshuffle", "interwave"),
             ("comp_async", "default", "interwave"),
+            ("basic_async_v1", "cshuffle", "interwave"),
+            ("basic_async_v1", "default", "interwave"),
         }
     )
 
@@ -151,10 +153,12 @@ class CommonTypeMappings:
     }
     LAYOUT_TO_DISPATCHER = GEMM_LAYOUT_TO_DISPATCHER  # backward compat alias
 
-    # GEMM pipeline mappings.
-    # For convolution pipelines, see GroupedConvTypeMappings in
-    # unified_grouped_conv_codegen.py. Conv supports: mem, compv3, compv4,
-    # compv5 (forward only). Backward ops are restricted to compv3/mem.
+    # GEMM-only pipeline mappings (used by unified_gemm_codegen.py).
+    # Convolution pipelines are in GroupedConvTypeMappings
+    # (unified_grouped_conv_codegen.py). CK Tile conv supports:
+    # BASIC_V1, Mem, CompV3, CompV4, CompV5, CompV6, ASYNC_V1, ASYNC_V4.
+    # The dispatcher currently generates: mem, compv3, compv4.
+    # preshufflev2 is GEMM-only (weight pre-shuffle for GEMM, not conv).
     PIPELINE_TO_CK = {
         "mem": "GemmPipelineAgBgCrMem",
         "compv3": "GemmPipelineAgBgCrCompV3",

@@ -114,7 +114,6 @@ int main(int argc, char* argv[])
 
     ck_tile::FillUniformDistribution<InDataType>{-0.5f, 0.5f}(input);
     ck_tile::FillUniformDistribution<WeiDataType>{-0.5f, 0.5f}(weight);
-    output_gpu.SetZero();
     output_cpu.SetZero();
 
     std::cout << "  Input:  " << input.get_element_space_size() << " elements\n";

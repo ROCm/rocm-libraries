@@ -471,5 +471,119 @@ class TestSharedImports(unittest.TestCase):
         self.assertTrue(trait.pad_k)
 
 
+# =============================================================================
+# TestTwoStageBwdWeightCodegen
+# =============================================================================
+
+
+def _make_two_stage_config():
+    """Helper: create a two-stage bwd_weight config."""
+    return GroupedConvKernelConfig(
+        tile=TileConfig(16, 64, 64, 1, 4, 1, 16, 16, 32),
+        trait=GroupedConvTraitConfig(
+            pipeline="compv3",
+            epilogue="cshuffle",
+            scheduler="intrawave",
+            pad_m=True,
+            pad_n=True,
+            pad_k=True,
+            two_stage=True,
+        ),
+        variant=GroupedConvVariant.BACKWARD_WEIGHT,
+        ndim_spatial=2,
+        arch="gfx942",
+    )
+
+
+class TestTwoStageBwdWeightCodegen(unittest.TestCase):
+    """Tests for two-stage backward weight kernel generation."""
+
+    def test_kernel_name_contains_2stage(self):
+        config = _make_two_stage_config()
+        name = config.name("fp16")
+        self.assertIn("_2stage", name)
+        self.assertIn("bwd_weight", name)
+
+    def test_single_stage_name_has_no_2stage(self):
+        config = _make_two_stage_config()
+        config.trait.two_stage = False
+        name = config.name("fp16")
+        self.assertNotIn("_2stage", name)
+
+    def test_generate_contains_elementwise_include(self):
+        config = _make_two_stage_config()
+        gen = CKTileGroupedConvKernelGenerator(
+            "fp16", GroupedConvVariant.BACKWARD_WEIGHT
+        )
+        code = gen.generate(config)
+        self.assertIn("elementwise.hpp", code)
+
+    def test_generate_contains_workspace_type(self):
+        config = _make_two_stage_config()
+        gen = CKTileGroupedConvKernelGenerator(
+            "fp16", GroupedConvVariant.BACKWARD_WEIGHT
+        )
+        code = gen.generate(config)
+        self.assertIn("WorkspaceDataType", code)
+
+    def test_generate_contains_elementwise_kernel(self):
+        config = _make_two_stage_config()
+        gen = CKTileGroupedConvKernelGenerator(
+            "fp16", GroupedConvVariant.BACKWARD_WEIGHT
+        )
+        code = gen.generate(config)
+        self.assertIn("ElementWiseKernel", code)
+
+    def test_generate_contains_launch_kernel_time_mask(self):
+        config = _make_two_stage_config()
+        gen = CKTileGroupedConvKernelGenerator(
+            "fp16", GroupedConvVariant.BACKWARD_WEIGHT
+        )
+        code = gen.generate(config)
+        self.assertIn("launch_kernel_time_mask", code)
+
+    def test_generate_forces_vector_size_c_to_1(self):
+        config = _make_two_stage_config()
+        gen = CKTileGroupedConvKernelGenerator(
+            "fp16", GroupedConvVariant.BACKWARD_WEIGHT
+        )
+        code = gen.generate(config)
+        self.assertIn("VectorSizeC_TwoStage = 1", code)
+
+    def test_generate_contains_workspace_memset(self):
+        config = _make_two_stage_config()
+        gen = CKTileGroupedConvKernelGenerator(
+            "fp16", GroupedConvVariant.BACKWARD_WEIGHT
+        )
+        code = gen.generate(config)
+        self.assertIn("hipMemsetAsync", code)
+
+    def test_single_stage_does_not_contain_workspace(self):
+        config = _make_two_stage_config()
+        config.trait.two_stage = False
+        gen = CKTileGroupedConvKernelGenerator(
+            "fp16", GroupedConvVariant.BACKWARD_WEIGHT
+        )
+        code = gen.generate(config)
+        self.assertNotIn("WorkspaceDataType", code)
+        self.assertNotIn("ElementWiseKernel", code)
+        self.assertNotIn("launch_kernel_time_mask", code)
+
+    def test_default_configs_include_two_stage(self):
+        from unified_grouped_conv_codegen import get_default_configs
+
+        configs = get_default_configs(
+            arch="gfx942",
+            variants=[GroupedConvVariant.BACKWARD_WEIGHT],
+            ndims=[2],
+        )
+        two_stage = [c for c in configs if c.trait.two_stage]
+        single_stage = [c for c in configs if not c.trait.two_stage]
+        self.assertGreater(len(two_stage), 0, "Should have two-stage configs")
+        self.assertGreater(
+            len(single_stage), 0, "Should still have single-stage configs"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

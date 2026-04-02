@@ -115,7 +115,6 @@ class TestGemmPythonExamples(unittest.TestCase):
         result = run_python_example(example)
 
         self.assertEqual(result.returncode, 0, f"Example failed:\n{result.stderr}")
-        # Should pass validation
         self.assertIn("PASS", result.stdout.upper(), "Validation should pass")
 
 

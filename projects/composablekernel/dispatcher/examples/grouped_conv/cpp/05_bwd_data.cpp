@@ -95,7 +95,6 @@ int main(int argc, char* argv[])
 
     ck_tile::FillUniformDistribution<OutDataType>{-0.5f, 0.5f}(dy);
     ck_tile::FillUniformDistribution<WeiDataType>{-0.5f, 0.5f}(weight);
-    dx_gpu.SetZero();
     dx_cpu.SetZero();
 
     // CPU reference
@@ -135,7 +134,6 @@ int main(int argc, char* argv[])
 
     dy_dev.ToDevice(dy.data());
     wei_dev.ToDevice(weight.data());
-    dx_dev.SetZero();
 
     // dispatcher.run(dY, W, dX, problem) for bwd_data
     float time_ms = dispatcher.run(dy_dev.GetDeviceBuffer(),

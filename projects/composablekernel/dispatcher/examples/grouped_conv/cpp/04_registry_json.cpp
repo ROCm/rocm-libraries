@@ -112,7 +112,6 @@ int main(int argc, char* argv[])
     ck_tile::HostTensor<OutDataType> output(out_d);
     ck_tile::FillUniformDistribution<InDataType>{-0.5f, 0.5f}(input);
     ck_tile::FillUniformDistribution<WeiDataType>{-0.5f, 0.5f}(weight);
-    output.SetZero();
 
     std::cout << "  Allocating device memory..." << std::endl;
     ck_tile::DeviceMem in_dev(input.get_element_space_size_in_bytes());
@@ -120,7 +119,6 @@ int main(int argc, char* argv[])
     ck_tile::DeviceMem out_dev(output.get_element_space_size_in_bytes());
     in_dev.ToDevice(input.data());
     wei_dev.ToDevice(weight.data());
-    out_dev.SetZero();
 
     std::cout << "  Launching kernel..." << std::endl;
     float time_ms = dispatcher.run(in_dev.GetDeviceBuffer(),

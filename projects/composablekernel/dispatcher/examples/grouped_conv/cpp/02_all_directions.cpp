@@ -159,9 +159,7 @@ int main(int argc, char* argv[])
         auto problem =
             create_grouped_conv2d_problem(N, C, K, Hi, Wi, Y, X, 1, 1, GroupedConvOp::BackwardData);
         ck_tile::HostTensor<InDataType> dx_host(in_desc);
-        dx_host.SetZero();
         ck_tile::DeviceMem dx_dev(dx_host.get_element_space_size_in_bytes());
-        dx_dev.SetZero();
         float time_ms = dispatcher.run(output_dev.GetDeviceBuffer(), // dY (from forward pass)
                                        weight_dev.GetDeviceBuffer(), // W
                                        dx_dev.GetDeviceBuffer(),     // dX (output)
@@ -188,9 +186,7 @@ int main(int argc, char* argv[])
         auto problem = create_grouped_conv2d_problem(
             N, C, K, Hi, Wi, Y, X, 1, 1, GroupedConvOp::BackwardWeight);
         ck_tile::HostTensor<WeiDataType> dw_host(wei_desc);
-        dw_host.SetZero();
         ck_tile::DeviceMem dw_dev(dw_host.get_element_space_size_in_bytes());
-        dw_dev.SetZero();
         float time_ms = dispatcher.run(input_dev.GetDeviceBuffer(),  // X
                                        output_dev.GetDeviceBuffer(), // dY
                                        dw_dev.GetDeviceBuffer(),     // dW (output)

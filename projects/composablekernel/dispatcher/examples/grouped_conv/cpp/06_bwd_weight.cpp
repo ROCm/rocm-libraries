@@ -97,7 +97,6 @@ int main(int argc, char* argv[])
 
     ck_tile::FillUniformDistribution<InDataType>{-0.5f, 0.5f}(input);
     ck_tile::FillUniformDistribution<OutDataType>{-0.5f, 0.5f}(dy);
-    dw_gpu.SetZero();
     dw_cpu.SetZero();
 
     // CPU reference
@@ -138,7 +137,8 @@ int main(int argc, char* argv[])
 
     in_dev.ToDevice(input.data());
     dy_dev.ToDevice(dy.data());
-    dw_dev.SetZero();
+    if(problem.split_k > 1)
+        dw_dev.SetZero();
 
     // dispatcher.run(X, dY, dW, problem) for bwd_weight
     float time_ms = dispatcher.run(in_dev.GetDeviceBuffer(),

@@ -141,7 +141,6 @@ int main(int argc, char* argv[])
 
     ck_tile::FillUniformDistribution<InDataType>{-0.5f, 0.5f}(input_host);
     ck_tile::FillUniformDistribution<WeiDataType>{-0.5f, 0.5f}(weight_host);
-    output_host.SetZero();
 
     ck_tile::DeviceMem input_dev(input_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem weight_dev(weight_host.get_element_space_size_in_bytes());
@@ -149,7 +148,6 @@ int main(int argc, char* argv[])
 
     input_dev.ToDevice(input_host.data());
     weight_dev.ToDevice(weight_host.data());
-    output_dev.SetZero();
 
     // Step 5: Select and run
     std::cout << "\nStep 5: Select and Run\n";

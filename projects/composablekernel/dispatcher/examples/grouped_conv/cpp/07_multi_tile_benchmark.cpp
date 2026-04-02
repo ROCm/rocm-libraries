@@ -175,15 +175,12 @@ int main(int argc, char* argv[])
             ck_tile::FillUniformDistribution<WeiDataType>{-0.5f, 0.5f}(weight);
             break;
         }
-        output.SetZero();
-
         ck_tile::DeviceMem in_dev(input.get_element_space_size_in_bytes());
         ck_tile::DeviceMem wei_dev(weight.get_element_space_size_in_bytes());
         ck_tile::DeviceMem out_dev(output.get_element_space_size_in_bytes());
 
         in_dev.ToDevice(input.data());
         wei_dev.ToDevice(weight.data());
-        out_dev.SetZero();
 
         float time_ms = 0;
         bool ok       = false;
