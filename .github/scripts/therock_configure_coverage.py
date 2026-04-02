@@ -38,10 +38,10 @@ def main():
     for proj in projects:
         pts_list = [p for p in proj.get("projects_to_test", "").split(",") if p]
 
-        #TODO: We don't want a default
+        # TODO: We don't want a default
         primary = pts_list[0] if pts_list else ""
 
-        #TODO: There's a better way than iterating and comparing to projects_to_test
+        # TODO: There's a better way than iterating and comparing to projects_to_test
         for p in pts_list:
             if p in changed_project_keys:
                 primary = p
@@ -64,4 +64,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
