@@ -323,7 +323,12 @@ def bench_star(arg):
     return bench(*arg)
 
 
-def bench(thedir: Path, problem: rrperf.problems.GEMMRun, weights: Weights) -> Result:
+def bench(
+    thedir: Path,
+    problem: rrperf.problems.GEMMRun,
+    weights: Weights,
+    single_threaded: bool = True,
+) -> Result:
     device, lock = acquire_lock()
 
     try:
@@ -338,7 +343,8 @@ def bench(thedir: Path, problem: rrperf.problems.GEMMRun, weights: Weights) -> R
 
         env = dict(os.environ)
         env["ROCROLLER_SCHEDULER_WEIGHTS"] = str(weights_path.absolute())
-        # env["OMP_NUM_THREADS"] = str(1)
+        if single_threaded:
+            env["OMP_NUM_THREADS"] = str(1)
 
         cmd = problem.command(device=device, yaml=result_path.absolute())
 
@@ -410,6 +416,7 @@ def generation(
     output_dir: Path,
     problem: rrperf.problems.GEMMRun,
     weights: list[Weights],
+    single_threaded: bool = True,
 ) -> list[Result]:
     global prev_results  # noqa: disable=F824
 
@@ -424,7 +431,12 @@ def generation(
         old_results_msg = ", ".join(w.weights.short_hash for w in old_results)
         print(f"Using previous results for {old_results_msg}")
 
-    to_run_args = zip(itertools.repeat(output_dir), itertools.repeat(problem), to_run)
+    to_run_args = zip(
+        itertools.repeat(output_dir),
+        itertools.repeat(problem),
+        to_run,
+        itertools.repeat(single_threaded),
+    )
 
     async_results = pool().imap_unordered(bench_star, to_run_args)
     new_results = []
@@ -509,6 +521,8 @@ def genetic(args):
     num_children = args.population - args.num_random
     assert num_children > 0
 
+    single_threaded = not args.multi_threaded
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -523,8 +537,9 @@ def genetic(args):
             )
 
             gen_dir = args.output_dir / f"gen_{i}"
-            results = generation(gen_dir, args.problem, inputs)
-            # sanity_check(results)
+            results = generation(gen_dir, args.problem, inputs, single_threaded)
+            if single_threaded:
+                sanity_check(results)
 
             write_generation(args.output_dir, i, results)
 
@@ -689,6 +704,15 @@ def get_args(parser: argparse.ArgumentParser):
         type=rrperf.utils.first_problem_from_suite,
         help="Benchmark suite to run. NOTE: Only the first problem from the "
         "suite will be used.",
+    )
+
+    parser.add_argument(
+        "--multi-threaded",
+        action="store_true",
+        default=False,
+        help="Allow multi-threaded host execution (do not set OMP_NUM_THREADS=1) "
+        "and skip the rnorm sanity check. Use for large-K problems where "
+        "single-threaded accumulation causes rnorm differences.",
     )
 
 
