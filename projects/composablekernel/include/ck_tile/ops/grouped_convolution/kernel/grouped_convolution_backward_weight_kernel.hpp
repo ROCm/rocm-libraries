@@ -550,7 +550,7 @@ struct GroupedConvolutionBackwardWeightKernel
         if constexpr(IsStreamK)
         {
             auto sk_grid = kargs.tile_partitioner.grid_size();
-            return dim3(sk_grid.x, kargs.GemmBatch, 1);
+            return dim3(sk_grid.x, 1, 1);
         }
         else
             return dim3(TilePartitioner::GridSize(kargs.GemmM, kargs.GemmN),
@@ -594,7 +594,7 @@ struct GroupedConvolutionBackwardWeightKernel
 
             const index_t grid = num_cu * occupancy;
             kernel_args.tile_partitioner =
-                TilePartitioner(kernel_args.GemmM, kernel_args.GemmN, kernel_args.GemmK, grid);
+                TilePartitioner(kernel_args.GemmM * kernel_args.GemmBatch, kernel_args.GemmN, kernel_args.GemmK, grid);
         }
         else
         {
@@ -1068,16 +1068,6 @@ struct GroupedConvolutionBackwardWeightKernel
 
         __shared__ char smem_ptr[GetSmemSize()];
 
-        // Group offset (blockIdx.y = group batch index)
-        const auto blockIdY       = amd_wave_read_first_lane(blockIdx.y);
-        const auto group_offset_a = amd_wave_read_first_lane(kargs.group_stride_a * blockIdY);
-        const auto group_offset_b = amd_wave_read_first_lane(kargs.group_stride_b * blockIdY);
-        const auto group_offset_c = amd_wave_read_first_lane(kargs.group_stride_c * blockIdY);
-
-        const OutDataType* a_ptr = static_cast<const OutDataType*>(kargs.out_ptr) + group_offset_a;
-        const InDataType* b_ptr  = static_cast<const InDataType*>(kargs.in_ptr) + group_offset_b;
-        WeiDataType* c_ptr       = static_cast<WeiDataType*>(kargs.wei_ptr) + group_offset_c;
-
         // Offset workspace per group so groups don't interfere.
         // Safe to mutate kargs: on GPU each workgroup operates on its own
         // register-local copy of the kernel arguments.
@@ -1094,9 +1084,20 @@ struct GroupedConvolutionBackwardWeightKernel
                 // Data-parallel workgroup: process one full tile
                 const auto tile_mn = kargs.tile_partitioner.get_output_tile_index(tile_idx);
                 const index_t i_m =
-                    amd_wave_read_first_lane(tile_mn[I0] * TilePartitioner::MPerBlock);
+                    amd_wave_read_first_lane((tile_mn[I0] / kargs.GemmBatch) * TilePartitioner::MPerBlock);
+                const index_t i_g = amd_wave_read_first_lane(tile_mn[I0] % kargs.GemmBatch);
                 const index_t i_n =
                     amd_wave_read_first_lane(tile_mn[I1] * TilePartitioner::NPerBlock);
+
+                // Group offset (blockIdx.y = group batch index)
+                const auto group_offset_a = amd_wave_read_first_lane(kargs.group_stride_a *i_g);
+                const auto group_offset_b = amd_wave_read_first_lane(kargs.group_stride_b *i_g);
+                const auto group_offset_c = amd_wave_read_first_lane(kargs.group_stride_c *i_g);
+
+                const OutDataType* a_ptr = static_cast<const OutDataType*>(kargs.out_ptr) + group_offset_a;
+                const InDataType* b_ptr  = static_cast<const InDataType*>(kargs.in_ptr) + group_offset_b;
+                WeiDataType* c_ptr       = static_cast<WeiDataType*>(kargs.wei_ptr) + group_offset_c;
+
 
                 RunGemm(a_ptr,
                         b_ptr,
