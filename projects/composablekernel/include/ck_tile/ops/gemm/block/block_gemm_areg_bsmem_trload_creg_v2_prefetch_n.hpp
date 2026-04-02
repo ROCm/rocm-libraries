@@ -70,7 +70,7 @@ struct BlockGemmARegBSmemTrLoadCRegV2PrefetchN
         constexpr auto c_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             c_block_outer_dstr_encoding, typename WG::CWarpDstrEncoding{});
 
-        // constrcut from A-block-tensor from A-Block-tensor-tmp
+        // construct from A-block-tensor from A-Block-tensor-tmp
         // FIXME: need method to check a_block_tensor and a_block_tensor_tmp have equivalent
         // distribution
         auto a_block_tensor = make_static_distributed_tensor<typename ABlockTensorTmp::DataType>(
