@@ -1854,3 +1854,32 @@ TEST(Instructions, Mfma_F32_16x16x32_F16_NonTrivial) {
   float d01 = std::bit_cast<float>(wave.getVgpr(8, /*lane=*/1));
   EXPECT_FLOAT_EQ(d01, 0.0f);
 }
+
+TEST(Instructions, V_ADD_I32) {
+  Workgroup wg;
+  Wave wave(4, 4, WaveSize{1}, wg);
+  wave.setVgpr(0, 0, 10);
+  wave.setSgpr(0, 5);
+  tryExecute(wave, "v_add_i32 v1, v0, s0");
+  EXPECT_EQ(wave.getVgpr(1, 0), 15u);
+}
+
+TEST(Instructions, V_PERMLANE16_SWAP_B32) {
+  Workgroup wg;
+  Wave wave(4, 4, WaveSize{64}, wg);
+  // Set lane i of v0 = i.
+  uint64_t savedExec = wave.getExecU64();
+  wave.setExecU64(~0ULL);
+  for (int l = 0; l < 64; ++l) {
+    wave.setVgpr(0, l, l);
+  }
+  wave.setExecU64(savedExec);
+
+  tryExecute(wave, "v_permlane16_swap_b32 v0, v0");
+
+  // After swap: lane i should hold the value from lane i^16.
+  for (int l = 0; l < 64; ++l) {
+    EXPECT_EQ(wave.getVgpr(0, l), static_cast<uint32_t>(l ^ 16))
+        << "lane " << l;
+  }
+}

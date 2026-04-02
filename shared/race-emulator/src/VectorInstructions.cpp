@@ -1208,22 +1208,40 @@ static RegisterVOP2_32<uint32_t> v_dual_and("v_dual_and_b32",
                                               return a & b;
                                             });
 
-// Lane permutation -- no data hazard, safe to treat as no-op for race checking.
-class VOP_NoOp : public Instruction {
+// v_permlane16_swap_b32: swap VGPR values between lanes 16 apart.
+// Lane i swaps with lane i^16 (0↔16, 1↔17, ..., 15↔31, 32↔48, ...).
+// Ignores exec mask (ISA Section 12.8: forces exec to all-ones).
+class VPermLane16Swap : public Instruction {
 public:
   std::function<int()> getExecutor(Wave &wave,
-                                   std::string_view /*line*/) const final {
-    return [&wave]() { return wave.getPc() + 1; };
+                                   std::string_view line) const final {
+    auto partitioned = getPartitioned(line);
+    assert(partitioned.size() >= 3);
+    auto dst = wave.getFirstRegister(partitioned[1]).index;
+    auto src = wave.getFirstRegister(partitioned[2]).index;
+    int waveSize = wave.getWaveSize();
+
+    return [&wave, dst, src, waveSize]() {
+      std::array<uint32_t, 64> vals{};
+      for (int l = 0; l < waveSize; ++l) {
+        vals[l] = wave.getVgpr(src, l);
+      }
+      uint64_t savedExec = wave.getExecU64();
+      wave.setExecU64((waveSize == 64) ? ~0ULL : ((1ULL << waveSize) - 1));
+      for (int l = 0; l < waveSize; ++l) {
+        wave.setVgpr(dst, l, vals[l ^ 16]);
+      }
+      wave.setExecU64(savedExec);
+      return wave.getPc() + 1;
+    };
   }
 };
 
-template <typename InstT> struct RegisterInst {
-  RegisterInst(const std::string &name) {
-    InstructionRegistry::instance().add(name, std::make_unique<InstT>());
-  }
-};
-
-static RegisterInst<VOP_NoOp> v_permlane16_swap("v_permlane16_swap_b32");
+static const bool v_permlane16_swap_registered = [] {
+  InstructionRegistry::instance().add("v_permlane16_swap_b32",
+                                      std::make_unique<VPermLane16Swap>());
+  return true;
+}();
 
 } // namespace
 } // namespace raceemulator
