@@ -448,11 +448,8 @@ public:
         }
       }
 
-      // 3. Convert FP4 → F32. Scale=1.0 here; instruction-level scale
-      //    applied after matmul.
-      // Convert FP4 nibbles to F32 without per-block scaling (scale=1.0,
-      // E8M0 exponent 127). The instruction-level scale is applied after
-      // the matmul.
+      // 3. Convert FP4 nibbles to F32 with unit scale (E8M0 exponent 127 =
+      //    1.0). The instruction-level scale is applied after the matmul.
       constexpr uint8_t kUnitScale = 127; // E8M0 for 1.0
       uint8_t unitScales[M * (K / 32)];
       std::memset(unitScales, kUnitScale, sizeof(unitScales));
@@ -462,20 +459,16 @@ public:
       mxfp4MatrixToF32<N, K>(matB, flatB, unitScales);
 
       // 4. Load C into output matrix.
+      float initVal =
+          std::bit_cast<float>(static_cast<uint32_t>(C.literalValue));
       std::array<float, M * N> out = {};
       for (int l = 0; l < waveSize; ++l) {
         for (int i = 0; i < nOutputRegs; ++i) {
           auto [cRow, col] = mapLaneToCoordC(l, i);
-          if (!C.isLiteral) {
-            out[cRow * N + col] =
-                std::bit_cast<float>(wave.getVgpr(C.reg.index + i, l));
-          } else {
-            out[cRow * N + col] =
-                C.literalValue == 0
-                    ? 0.0f
-                    : std::bit_cast<float>(
-                          static_cast<uint32_t>(C.literalValue));
-          }
+          out[cRow * N + col] =
+              C.isLiteral ? initVal
+                          : std::bit_cast<float>(
+                                wave.getVgpr(C.reg.index + i, l));
         }
       }
 
