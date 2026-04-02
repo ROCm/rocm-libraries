@@ -25,24 +25,27 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # build or test workflows so any related jobs can be skipped if all paths
 # modified by a commit/PR match a pattern in this list.
 SKIPPABLE_PATH_PATTERNS = [
-    "docs/*",
-    ".gitignore",
+    "*.clinerules",
+    "*.cursorrules",
+    "*.mdc",
     "*.md",
-    "*.rtf",
     "*.rst",
+    "*.rtf",
     "*/.markdownlint-ci2.yaml",
     "*/.readthedocs.yaml",
     "*/.spellcheck.local.yaml",
     "*/.wordlist.txt",
-    "projects/*/docs/*",
-    "projects/*/.gitignore",
-    "shared/*/docs/*",
-    "shared/*/.gitignore",
-    "dnn-providers/*/docs/*",
+    ".gitignore",
     "dnn-providers/*/.gitignore",
-    "*.clinerules",
-    "*.cursorrules",
-    "*.mdc",
+    "dnn-providers/*/docs/*",
+    "docs/*",
+    "projects/*/.gitignore",
+    "projects/*/docs/*",
+    # Tools are standalone scripts/utilities not part of the build or test pipeline.
+    # Changes here should not trigger CI builds.
+    "projects/hipdnn/tools/*",
+    "shared/*/.gitignore",
+    "shared/*/docs/*",
 ]
 
 
@@ -150,8 +153,8 @@ def retrieve_projects(args):
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
 
-    # by default, we select full tests
-    test_type = "full"
+    # by default, we select standard tests
+    test_type = "standard"
 
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
@@ -190,6 +193,7 @@ def retrieve_projects(args):
     # for nightly runs, run everything with full tests
     if args.get("is_nightly"):
         subtrees = list(subtree_to_project_map.keys())
+        test_type = "comprehensive"
 
     project_to_run = collect_projects_to_run(subtrees)
 

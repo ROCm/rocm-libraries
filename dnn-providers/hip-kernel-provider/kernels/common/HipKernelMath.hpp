@@ -7,7 +7,7 @@
 #include "FloatTypes.h"
 #include "VectorTypes.hpp"
 
-namespace hip_kernel_plugin
+namespace hip_kernel_provider
 {
 namespace detail
 {
@@ -640,4 +640,4 @@ __forceinline__ __device__ FpVecType fabs(FpVecType x)
     }
 }
 
-} // namespace hip_kernel_plugin
+} // namespace hip_kernel_provider

@@ -10,6 +10,13 @@
 
 using namespace rocRoller;
 
+namespace
+{
+    const int SHUFFLE_M = 16;
+    const int SHUFFLE_N = 16;
+    const int SHUFFLE_K = 32;
+} // namespace
+
 void RocRollerGemmKernel::setPredicates()
 {
     using namespace rocRoller::Expression;
@@ -166,12 +173,30 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
     std::vector<size_t> oneStridesT = std::vector<size_t>({(size_t)0, (size_t)1});
 
     auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
-        2, dataTypeA, {}, gemm->kernelType.transA ? oneStridesT : oneStridesN)); // A
-    auto tagLoadA   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
+        2, dataTypeA, {}, gemm->kernelType.transA ? oneStridesT : oneStridesN));
+
+    auto loadInputA = tagTensorA;
+
+    if(gemm->kernelType.swizzleA)
+    {
+        loadInputA = command->addOperation(Operations::SubTileTranspose(
+            loadInputA, {SHUFFLE_M, SHUFFLE_K}, gemm->kernelType.transA));
+    }
+
+    auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadInputA));
 
     auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-        2, dataTypeB, {}, gemm->kernelType.transB ? oneStridesT : oneStridesN)); // B
-    auto tagLoadB   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
+        2, dataTypeB, {}, gemm->kernelType.transB ? oneStridesT : oneStridesN));
+
+    auto loadInputB = tagTensorB;
+
+    if(gemm->kernelType.swizzleB)
+    {
+        loadInputB = command->addOperation(Operations::SubTileTranspose(
+            loadInputB, {SHUFFLE_K, SHUFFLE_N}, gemm->kernelType.transB));
+    }
+
+    auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadInputB));
 
     auto mulInputA = tagLoadA;
     auto mulInputB = tagLoadB;
@@ -193,30 +218,22 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
 
     if(gemm->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate)
     {
+        tagTensorScaleA = command->addOperation(
+            rocRoller::Operations::Tensor(2,
+                                          gemm->kernelType.scaleTypeA.type,
+                                          {},
+                                          gemm->kernelType.transA ? oneStridesT : oneStridesN));
+        Operations::OperationTag loadScaleInputA = *tagTensorScaleA;
         if(gemm->kernelType.scaleTypeA.preTile.size() == 2)
         {
-            // Create 4D tensor for pre-tiled scale A
             AssertFatal(gemm->kernelType.transA, "Can only pre-tile A if it is transposed");
-            size_t stride = gemm->kernelType.scaleTypeA.preTile[1];
-            tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                4,
-                gemm->kernelType.scaleTypeA.type,
-                std::vector<size_t>{0ull,
-                                    0ull,
-                                    gemm->kernelType.scaleTypeA.preTile[0],
-                                    gemm->kernelType.scaleTypeA.preTile[1]},
-                std::vector<size_t>{0ull, 0ull, stride, 1ull}));
-        }
-        else
-        {
-            tagTensorScaleA = command->addOperation(
-                rocRoller::Operations::Tensor(2,
-                                              gemm->kernelType.scaleTypeA.type,
-                                              {},
-                                              gemm->kernelType.transA ? oneStridesT : oneStridesN));
+            loadScaleInputA = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                loadScaleInputA,
+                gemm->kernelType.scaleTypeA.preTile,
+                gemm->kernelType.transA));
         }
         tagLoadScaleA
-            = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleA));
+            = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadScaleInputA));
 
         auto scaleInputA = tagLoadScaleA;
 
@@ -254,30 +271,22 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
 
     if(gemm->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
     {
+        tagTensorScaleB = command->addOperation(
+            rocRoller::Operations::Tensor(2,
+                                          gemm->kernelType.scaleTypeB.type,
+                                          {},
+                                          gemm->kernelType.transB ? oneStridesT : oneStridesN));
+        Operations::OperationTag loadScaleInputB = *tagTensorScaleB;
         if(gemm->kernelType.scaleTypeB.preTile.size() == 2)
         {
-            // Create 4D tensor for pre-tiled scale B
             AssertFatal(!gemm->kernelType.transB, "Can only pre-tile B if it is not transposed");
-            size_t stride = gemm->kernelType.scaleTypeB.preTile[0];
-            tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                4,
-                gemm->kernelType.scaleTypeB.type,
-                std::vector<size_t>{0ull,
-                                    0ull,
-                                    gemm->kernelType.scaleTypeB.preTile[0],
-                                    gemm->kernelType.scaleTypeB.preTile[1]},
-                std::vector<size_t>{0ull, 0ull, 1ull, stride}));
-        }
-        else
-        {
-            tagTensorScaleB = command->addOperation(
-                rocRoller::Operations::Tensor(2,
-                                              gemm->kernelType.scaleTypeB.type,
-                                              {},
-                                              gemm->kernelType.transB ? oneStridesT : oneStridesN));
+            loadScaleInputB = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                loadScaleInputB,
+                gemm->kernelType.scaleTypeB.preTile,
+                gemm->kernelType.transB));
         }
         tagLoadScaleB
-            = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
+            = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadScaleInputB));
 
         auto scaleInputB = tagLoadScaleB;
 

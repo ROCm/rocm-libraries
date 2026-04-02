@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdInferencePlan.hpp"
+#include "PlanUtils.hpp"
 
-#include "HipKernelUtils.hpp"
 #include "hip/IKernelCompiler.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -24,6 +24,23 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     , _bias(tensorMap.at(attributes.bias_tensor_uid()))
     , _estMean(tensorMap.at(attributes.mean_tensor_uid()))
     , _invVariance(tensorMap.at(attributes.inv_variance_tensor_uid()))
+    , _activationOut(nullptr)
+{
+}
+
+BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+    : _x(tensorMap.at(inferenceAttributes.x_tensor_uid()))
+    , _y(tensorMap.at(inferenceAttributes.y_tensor_uid()))
+    , _scale(tensorMap.at(inferenceAttributes.scale_tensor_uid()))
+    , _bias(tensorMap.at(inferenceAttributes.bias_tensor_uid()))
+    , _estMean(tensorMap.at(inferenceAttributes.mean_tensor_uid()))
+    , _invVariance(tensorMap.at(inferenceAttributes.inv_variance_tensor_uid()))
+    , _optActivation(hip_kernel_utils::parseActivation(pointwiseAttributes))
+    , _activationOut(tensorMap.at(pointwiseAttributes.out_0_tensor_uid()))
 {
 }
 
@@ -58,6 +75,18 @@ const hipdnn_data_sdk::data_objects::TensorAttributes*
     return _invVariance;
 }
 
+const std::optional<hip_kernel_utils::ActivationParams>&
+    BatchnormFwdInferenceParams::optActivation() const
+{
+    return _optActivation;
+}
+
+const hipdnn_data_sdk::data_objects::TensorAttributes*
+    BatchnormFwdInferenceParams::activationOut() const
+{
+    return _activationOut;
+}
+
 BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams)
     : _inferenceParams(std::move(inferenceParams))
 {
@@ -69,29 +98,6 @@ size_t BatchnormFwdInferencePlan::getWorkspaceSize(
     // No workspace needed for batchnorm inference
     return 0;
 }
-
-namespace
-{
-
-size_t computeVectorSize(bool isLayoutNhwc, int channels, unsigned int inCstride)
-{
-    if(isLayoutNhwc)
-    {
-        if(channels % 4 == 0)
-        {
-            return 4;
-        }
-        return channels % 2 == 0 ? 2 : 1;
-    }
-
-    if(inCstride % 4 == 0)
-    {
-        return 4;
-    }
-    return inCstride % 2 == 0 ? 2 : 1;
-}
-
-} // namespace
 
 void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
                                         const hipDeviceProp_t& deviceProperties)
@@ -153,11 +159,10 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     auto inCstride = static_cast<unsigned int>(h * w);
 
-    // Detect layout: NHWC has C dimension (index 1) with stride 1, NCHW has stride H*W
-    bool isLayoutNhwc = (xStrides->Get(1) == 1);
+    bool isLayoutNhwc = hip_kernel_utils::isChannelLastLayout(_inferenceParams.x());
 
     // Calculate vector size based on layout
-    auto vectorsize = computeVectorSize(isLayoutNhwc, c, inCstride);
+    auto vectorsize = batchnorm::computeVectorSize(isLayoutNhwc, c, inCstride);
 
     // Calculate block and grid dimensions
     size_t xlocalsize = 0;
@@ -207,6 +212,15 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     bool isGfx120x = (archName.find("gfx120") == 0);
     bool isGfx115x = (archName.find("gfx115") == 0);
 
+    // Get activation mode
+    int nrnOpId = 0;
+
+    if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
+    {
+        const auto& activation = *_inferenceParams.optActivation();
+        nrnOpId = static_cast<int>(activation.mode);
+    }
+
     // Prepare compilation options
     std::vector<std::string> options;
     auto rocmPath
@@ -233,7 +247,7 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX110X=") + (isGfx110x ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX120X=") + (isGfx120x ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX115X=") + (isGfx115x ? "1" : "0"));
-    options.emplace_back("-DHIP_PLUGIN_NRN_OP_ID=0");
+    options.emplace_back(std::string("-DHIP_PLUGIN_NRN_OP_ID=") + std::to_string(nrnOpId));
     options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
 
     // Compile kernel and configure launch dimensions
@@ -280,27 +294,57 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
     auto invVarianceBuffer = hip_kernel_utils::findDeviceBuffer(
         _inferenceParams.invVariance()->uid(), deviceBuffers, numDeviceBuffers);
 
-    auto yBuffer = hip_kernel_utils::findDeviceBuffer(
-        _inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
-
     float activationAlpha = 0.0f;
     float activationBeta = 0.0f;
 
-    _runnableKernel->launch(handle.getStream(),
-                            xBuffer.ptr,
-                            yBuffer.ptr,
-                            estMeanBuffer.ptr,
-                            invVarianceBuffer.ptr,
-                            scaleBuffer.ptr,
-                            biasBuffer.ptr,
-                            _channels,
-                            _inCstride,
-                            _batchCount,
-                            _cStride,
-                            _hwStride,
-                            _batchStride,
-                            activationAlpha,
-                            activationBeta);
+    // Launch kernel with appropriate output buffer
+    if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
+    {
+        auto activationOutBuffer = hip_kernel_utils::findDeviceBuffer(
+            _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
+
+        // Get activation parameters
+        const auto& activation = *_inferenceParams.optActivation();
+        activationAlpha = static_cast<float>(activation.alpha);
+        activationBeta = static_cast<float>(activation.beta);
+
+        _runnableKernel->launch(handle.getStream(),
+                                xBuffer.ptr,
+                                activationOutBuffer.ptr,
+                                estMeanBuffer.ptr,
+                                invVarianceBuffer.ptr,
+                                scaleBuffer.ptr,
+                                biasBuffer.ptr,
+                                _channels,
+                                _inCstride,
+                                _batchCount,
+                                _cStride,
+                                _hwStride,
+                                _batchStride,
+                                activationAlpha,
+                                activationBeta);
+    }
+    else
+    {
+        auto yBuffer = hip_kernel_utils::findDeviceBuffer(
+            _inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
+
+        _runnableKernel->launch(handle.getStream(),
+                                xBuffer.ptr,
+                                yBuffer.ptr,
+                                estMeanBuffer.ptr,
+                                invVarianceBuffer.ptr,
+                                scaleBuffer.ptr,
+                                biasBuffer.ptr,
+                                _channels,
+                                _inCstride,
+                                _batchCount,
+                                _cStride,
+                                _hwStride,
+                                _batchStride,
+                                activationAlpha,
+                                activationBeta);
+    }
 }
 
 }
