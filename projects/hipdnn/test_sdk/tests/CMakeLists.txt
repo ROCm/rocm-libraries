@@ -76,7 +76,6 @@ target_compile_options(hipdnn_test_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OP
 
 target_link_libraries(
     hipdnn_test_sdk_tests GTest::gtest GTest::gmock Threads::Threads hipdnn_test_sdk hipdnn_plugin_sdk
-    hip::host
 )
 
 clang_tidy_check(hipdnn_test_sdk_tests)
