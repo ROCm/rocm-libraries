@@ -37,7 +37,7 @@ Definitions:
 
 Tests:
 - name: spmm_bad_arg
-  category: pre_checkin
+  category: smoke
   function:
     - spmm_bad_arg: *real_precisions_2b
   transA: N
@@ -559,7 +559,7 @@ Tests:
   sparse_b: [true, false]
 
 - name: aux_plan_assign
-  category: pre_checkin
+  category: smoke
   function:
     aux_plan_assign: *hpa_int8_precision
   M: 128
