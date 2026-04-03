@@ -589,13 +589,20 @@ struct GroupedConvolutionBackwardWeightKernel
                 ck_tile::hip_check_error(hipGetDeviceProperties(&dev_prop, dev));
                 num_cu = dev_prop.multiProcessorCount;
             }
-            if(occupancy == 0) {
-                constexpr index_t minimum_occupancy = GemmPipeline::Scheduler == ck_tile::GemmPipelineScheduler::Intrawave ? 1 : 2;
+            if(occupancy == 0)
+            {
+                constexpr index_t minimum_occupancy =
+                    GemmPipeline::Scheduler == ck_tile::GemmPipelineScheduler::Intrawave ? 1 : 2;
                 constexpr int dynamic_smem_size = 0;
-                int max_occupancy = 0;
+                int max_occupancy               = 0;
                 hip_check_error(hipOccupancyMaxActiveBlocksPerMultiprocessor(
                     &max_occupancy,
-                    kentry<minimum_occupancy, GroupedConvolutionBackwardWeightKernel<GroupedConvTraitsType_, TilePartitioner_, GemmPipeline_, EpiloguePipeline_>, GroupedConvBwdWeightKernelArgsSpecialized>,
+                    kentry<minimum_occupancy,
+                           GroupedConvolutionBackwardWeightKernel<GroupedConvTraitsType_,
+                                                                  TilePartitioner_,
+                                                                  GemmPipeline_,
+                                                                  EpiloguePipeline_>,
+                           GroupedConvBwdWeightKernelArgsSpecialized>,
                     BlockSize().x,
                     dynamic_smem_size));
                 occupancy = std::max(minimum_occupancy, max_occupancy);
@@ -603,7 +610,10 @@ struct GroupedConvolutionBackwardWeightKernel
 
             const index_t grid = num_cu * occupancy;
             kernel_args.tile_partitioner =
-                TilePartitioner(kernel_args.GemmM * kernel_args.GemmBatch, kernel_args.GemmN, kernel_args.GemmK, grid);
+                TilePartitioner(kernel_args.GemmM * kernel_args.GemmBatch,
+                                kernel_args.GemmN,
+                                kernel_args.GemmK,
+                                grid);
         }
         else
         {
@@ -1083,21 +1093,22 @@ struct GroupedConvolutionBackwardWeightKernel
             [&](index_t tile_idx) {
                 // Data-parallel workgroup: process one full tile
                 const auto tile_mn = kargs.tile_partitioner.get_output_tile_index(tile_idx);
-                const index_t i_m =
-                    amd_wave_read_first_lane((tile_mn[I0] / kargs.GemmBatch) * TilePartitioner::MPerBlock);
-                    const index_t i_n =
+                const index_t i_m  = amd_wave_read_first_lane((tile_mn[I0] / kargs.GemmBatch) *
+                                                             TilePartitioner::MPerBlock);
+                const index_t i_n =
                     amd_wave_read_first_lane(tile_mn[I1] * TilePartitioner::NPerBlock);
-                    const index_t i_g = amd_wave_read_first_lane(tile_mn[I0] % kargs.GemmBatch);
+                const index_t i_g = amd_wave_read_first_lane(tile_mn[I0] % kargs.GemmBatch);
 
                 // Group offset (blockIdx.y = group batch index)
-                const auto group_offset_a = amd_wave_read_first_lane(kargs.group_stride_a *i_g);
-                const auto group_offset_b = amd_wave_read_first_lane(kargs.group_stride_b *i_g);
-                const auto group_offset_c = amd_wave_read_first_lane(kargs.group_stride_c *i_g);
+                const auto group_offset_a = amd_wave_read_first_lane(kargs.group_stride_a * i_g);
+                const auto group_offset_b = amd_wave_read_first_lane(kargs.group_stride_b * i_g);
+                const auto group_offset_c = amd_wave_read_first_lane(kargs.group_stride_c * i_g);
 
-                const OutDataType* a_ptr = static_cast<const OutDataType*>(kargs.out_ptr) + group_offset_a;
-                const InDataType* b_ptr  = static_cast<const InDataType*>(kargs.in_ptr) + group_offset_b;
-                WeiDataType* c_ptr       = static_cast<WeiDataType*>(kargs.wei_ptr) + group_offset_c;
-
+                const OutDataType* a_ptr =
+                    static_cast<const OutDataType*>(kargs.out_ptr) + group_offset_a;
+                const InDataType* b_ptr =
+                    static_cast<const InDataType*>(kargs.in_ptr) + group_offset_b;
+                WeiDataType* c_ptr = static_cast<WeiDataType*>(kargs.wei_ptr) + group_offset_c;
 
                 RunGemm(a_ptr,
                         b_ptr,
@@ -1111,7 +1122,12 @@ struct GroupedConvolutionBackwardWeightKernel
                         /*block_idx_k=*/0);
             },
             [&](index_t sk_cta_idx) {
-                RunStreamKLoop(kargs, sk_cta_idx, static_cast<const OutDataType*>(kargs.out_ptr), static_cast<const InDataType*>(kargs.in_ptr), static_cast<WeiDataType*>(kargs.wei_ptr), smem_ptr);
+                RunStreamKLoop(kargs,
+                               sk_cta_idx,
+                               static_cast<const OutDataType*>(kargs.out_ptr),
+                               static_cast<const InDataType*>(kargs.in_ptr),
+                               static_cast<WeiDataType*>(kargs.wei_ptr),
+                               smem_ptr);
             });
     }
 
@@ -1147,8 +1163,8 @@ struct GroupedConvolutionBackwardWeightKernel
 
             // Compute M/N tile indices from 1D tile index
             const auto c_macro_tile_idx = kargs.tile_partitioner.get_output_tile_index(tile_idx);
-            const index_t i_m =
-                amd_wave_read_first_lane((c_macro_tile_idx[I0] / kargs.GemmBatch) * TilePartitioner::MPerBlock);
+            const index_t i_m = amd_wave_read_first_lane((c_macro_tile_idx[I0] / kargs.GemmBatch) *
+                                                         TilePartitioner::MPerBlock);
             const index_t i_n =
                 amd_wave_read_first_lane(c_macro_tile_idx[I1] * TilePartitioner::NPerBlock);
             const index_t i_g = amd_wave_read_first_lane(c_macro_tile_idx[I0] % kargs.GemmBatch);
@@ -1158,17 +1174,16 @@ struct GroupedConvolutionBackwardWeightKernel
             // register-local copy of the kernel arguments.
             const auto per_group_ws_size =
                 kargs.tile_partitioner.get_workspace_size(sizeof(AccDataType));
-            kargs.workspace_ptr =
-                static_cast<char*>(kargs.workspace_ptr) + i_g * per_group_ws_size;
+            kargs.workspace_ptr = static_cast<char*>(kargs.workspace_ptr) + i_g * per_group_ws_size;
 
             // K offset = local_iter_start * KPerBlock
             const index_t i_k =
                 amd_wave_read_first_lane(local_iter_start * TilePartitioner::KPerBlock);
 
             // Group offset (blockIdx.y = group batch index)
-            const auto group_offset_a = amd_wave_read_first_lane(kargs.group_stride_a *i_g);
-            const auto group_offset_b = amd_wave_read_first_lane(kargs.group_stride_b *i_g);
-            const auto group_offset_c = amd_wave_read_first_lane(kargs.group_stride_c *i_g);
+            const auto group_offset_a = amd_wave_read_first_lane(kargs.group_stride_a * i_g);
+            const auto group_offset_b = amd_wave_read_first_lane(kargs.group_stride_b * i_g);
+            const auto group_offset_c = amd_wave_read_first_lane(kargs.group_stride_c * i_g);
 
             const OutDataType* a_ptr = static_cast<const OutDataType*>(a_ptr_base) + group_offset_a;
             const InDataType* b_ptr  = static_cast<const InDataType*>(b_ptr_base) + group_offset_b;
@@ -1303,10 +1318,12 @@ struct GroupedConvolutionBackwardWeightKernel
             if constexpr(GemmPipeline_::Async)
             {
 #if defined(__gfx950__)
-            RunStreamK(kargs);
+                RunStreamK(kargs);
 #endif
-            } else {
-            RunStreamK(kargs);
+            }
+            else
+            {
+                RunStreamK(kargs);
             }
         }
         else if constexpr(GroupedConvTraitsType_::ExplicitGemm)
@@ -1314,11 +1331,12 @@ struct GroupedConvolutionBackwardWeightKernel
             if constexpr(GemmPipeline_::Async)
             {
 #if defined(__gfx950__)
-            CallExplicitGemm(kargs);
-#endif
-            } else {
                 CallExplicitGemm(kargs);
-
+#endif
+            }
+            else
+            {
+                CallExplicitGemm(kargs);
             }
         }
         else
