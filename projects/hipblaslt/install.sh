@@ -710,7 +710,7 @@ if [[ "${install_dependencies}" == true ]]; then
 
   # The following builds googletest from source, installs into cmake default /usr/local
   build_lapack="ON"
-  if [ "${use_system_packages}" == true || "${cpu_ref_lib}" == "blis" ]; then
+  if [[ "${use_system_packages}" == true || "${cpu_ref_lib}" == "blis" ]]; then
     build_lapack="OFF"
   fi
   pushd .
