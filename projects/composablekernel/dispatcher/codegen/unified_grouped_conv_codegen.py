@@ -1090,14 +1090,16 @@ def get_default_configs(
         # Select tile configs based on variant
         if variant == GroupedConvVariant.BACKWARD_WEIGHT:
             tile_configs = bwd_weight_tiles
-            # Backward weight ONLY supports compv3 (compv4/compv5 have transpose_tile2d issues)
-            pipelines = [("compv3", "cshuffle")]
+            # Backward weight supports compv3 and mem pipelines
+            # (compv4/compv5 have transpose_tile2d issues)
+            pipelines = [("compv3", "cshuffle"), ("mem", "default")]
             # Also generate two-stage variants (fp32 workspace + elementwise convert)
             two_stage_flags = [False, True]
         elif variant == GroupedConvVariant.BACKWARD_DATA:
             tile_configs = fwd_bwd_data_tiles
-            # Backward data ONLY supports compv3 (compv4 has get_length issues in bwd_data kernel)
-            pipelines = [("compv3", "cshuffle")]
+            # Backward data supports compv3 and mem pipelines
+            # (compv4/compv5 have get_length issues in bwd_data kernel)
+            pipelines = [("compv3", "cshuffle"), ("mem", "default")]
             two_stage_flags = [False]
         else:
             tile_configs = fwd_bwd_data_tiles

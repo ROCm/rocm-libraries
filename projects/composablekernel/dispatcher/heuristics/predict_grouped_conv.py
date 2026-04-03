@@ -27,7 +27,8 @@ from feature_engine_grouped_conv import GroupedConvFeatureEngine
 
 
 # Available kernel configurations (from training data)
-AVAILABLE_KERNELS = [
+# Forward kernels: compv3, compv4, compv5
+FORWARD_KERNELS = [
     {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
     {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv4'},
     {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv5'},
@@ -60,6 +61,33 @@ AVAILABLE_KERNELS = [
     {'block_size': 128, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv5'},
 ]
 
+# Backward kernels (bwd_data, bwd_weight): compv3, mem only
+BACKWARD_KERNELS = [
+    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
+    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
+    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
+    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'mem'},
+    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
+    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
+    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
+    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'mem'},
+    {'block_size': 32, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
+    {'block_size': 32, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
+    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
+    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
+    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
+    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'mem'},
+    {'block_size': 64, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
+    {'block_size': 64, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
+    {'block_size': 128, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
+    {'block_size': 128, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'mem'},
+    {'block_size': 128, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
+    {'block_size': 128, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
+]
+
+# Legacy name for backward compatibility
+AVAILABLE_KERNELS = FORWARD_KERNELS
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -84,10 +112,17 @@ def main():
 
     # Model parameters
     parser.add_argument(
+        "--variant",
+        type=str,
+        default="forward",
+        choices=["forward", "bwd_data", "bwd_weight"],
+        help="Convolution variant (default: forward)",
+    )
+    parser.add_argument(
         "--model_dir",
         type=str,
-        default="models/grouped_conv_forward_bf16_gfx950",
-        help="Model directory (default: models/grouped_conv_forward_bf16_gfx950)",
+        default=None,
+        help="Model directory (default: auto-detect from variant)",
     )
     parser.add_argument(
         "--top_k",
@@ -97,6 +132,15 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Auto-detect model directory from variant if not specified
+    if args.model_dir is None:
+        if args.variant == "forward":
+            args.model_dir = "models/grouped_conv_forward_bf16_gfx950"
+        elif args.variant == "bwd_data":
+            args.model_dir = "models/grouped_conv_bwd_data_bf16_gfx950"
+        elif args.variant == "bwd_weight":
+            args.model_dir = "models/grouped_conv_bwd_weight_bf16_gfx950"
 
     # Build problem dictionary
     problem = {
@@ -124,11 +168,18 @@ def main():
     gemm_n = args.K
     gemm_k = (args.C // args.G) * args.Y * args.X
 
+    # Select kernel pool based on variant
+    if args.variant == "forward":
+        kernel_pool = FORWARD_KERNELS
+    else:
+        kernel_pool = BACKWARD_KERNELS
+
     print("=" * 80)
-    print("GROUPED CONVOLUTION - ML HEURISTIC KERNEL SELECTION")
+    print(f"GROUPED CONVOLUTION - ML HEURISTIC KERNEL SELECTION ({args.variant.upper()})")
     print("=" * 80)
     print()
     print(f"Problem:")
+    print(f"  Variant: {args.variant}")
     print(f"  N={args.N}, C={args.C}, K={args.K}, G={args.G}")
     print(f"  Input: {args.Hi}x{args.Wi}, Filter: {args.Y}x{args.X}")
     print(f"  Stride: {args.stride_h}x{args.stride_w}, Padding: {args.pad_h}x{args.pad_w}")
@@ -140,15 +191,21 @@ def main():
 
     # Load model
     model_dir = Path(args.model_dir)
+    if not model_dir.exists():
+        print(f"Error: Model directory not found: {model_dir}")
+        print(f"  Please train the model for {args.variant} first")
+        return 1
+
     feature_engine = GroupedConvFeatureEngine()
     predictor = Predictor(model_dir, feature_engine=feature_engine)
 
     print(f"✓ Loaded model from {model_dir}")
+    print(f"  Kernel pool: {len(kernel_pool)} candidates")
     print()
 
     # Predict for all available kernels
     predictions = []
-    for kernel in AVAILABLE_KERNELS:
+    for kernel in kernel_pool:
         pred_tflops = predictor.predict_tflops(problem, kernel)
         predictions.append({
             'tflops': pred_tflops,
