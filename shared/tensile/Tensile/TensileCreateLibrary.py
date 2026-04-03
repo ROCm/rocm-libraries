@@ -76,16 +76,29 @@ TENSILE_LIBRARY_DIR = "library"
 def libraryDir(outputPath: Union[str, Path], archs: List[str]) -> Path:
     """Return the library output directory for the given target architectures.
 
-    Single arch  → <outputPath>/library/<arch>/   (TheRock shard overlay safe)
-    Zero or multiple archs → <outputPath>/library/ (flat, multi-arch build)
+    Expects archs in dash-form (colons already replaced with dashes, e.g. "gfx90a-xnack-").
 
-    The rocblas runtime already probes library/<arch>/ before falling back to
-    library/ (tensile_host.cpp), so no runtime changes are required.
+    The routing key is the number of distinct *base* architectures (stripping xnack
+    variants), not the raw count of arch strings. xnack variants of one arch (e.g.
+    gfx90a-xnack+ and gfx90a-xnack-) are a single-family shard, not multi-arch.
+
+    Single base arch, single xnack variant → library/<arch>/      e.g. library/gfx90a-xnack-/
+    Single base arch, multiple xnack variants → library/<base>/   e.g. library/gfx90a/
+    Multiple distinct base archs → library/                        (flat, multi-arch build)
+
+    The runtime probes most-specific to least-specific (tensile_host.cpp):
+      library/<base>-<xnack>/ → library/<base>/ → library/
     """
     path = Path(outputPath)
+    if not archs:
+        return path / TENSILE_LIBRARY_DIR
+    base_archs = {a.split("-xnack")[0] for a in archs}
+    if len(base_archs) > 1:
+        return path / TENSILE_LIBRARY_DIR
+    base_arch = next(iter(base_archs))
     if len(archs) == 1:
         return path / TENSILE_LIBRARY_DIR / archs[0]
-    return path / TENSILE_LIBRARY_DIR
+    return path / TENSILE_LIBRARY_DIR / base_arch
 
 
 ProcessedKernelResult = Tuple[int, str, str, str, Optional[str]]
@@ -1410,8 +1423,8 @@ def TensileCreateLibrary():
         if globalParameters["AsmCaps"][arch]["SupportedISA"]
     ]
 
-    _, requestedArchs = splitArchs()
-    if all(a.split(":")[0] not in supportedArchs for a in requestedArchs):
+    requestedArchs, cmdlineArchs = splitArchs()
+    if all(a.split(":")[0] not in supportedArchs for a in cmdlineArchs):
         printExit(
             f"No requested architecture is supported by ROCm {globalParameters['HipClangVersion']}\n  Requested {', '.join(requestedArchs)}\n  Supported {', '.join(supportedArchs)}"
         )
