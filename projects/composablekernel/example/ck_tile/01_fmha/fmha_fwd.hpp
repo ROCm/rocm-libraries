@@ -3,13 +3,6 @@
 
 #pragma once
 
-#include "ck_tile/core/config.hpp"
-
-#if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx11__) || defined(__gfx12__))
-#undef CK_TILE_EXPERIMENTAL_USE_BUFFER_LOAD_OOB_CHECK_OFFSET_TRICK
-#define CK_TILE_EXPERIMENTAL_USE_BUFFER_LOAD_OOB_CHECK_OFFSET_TRICK 1
-#endif
-
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
