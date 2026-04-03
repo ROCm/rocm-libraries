@@ -105,9 +105,9 @@ namespace
 
     constexpr const char* hipblas_status_to_string(hipblasStatus_t status)
     {
-    #define CASE(x) \
-        case x:     \
-            return #x
+#define CASE(x) \
+    case x:     \
+        return #x
         switch(status)
         {
             CASE(HIPBLAS_STATUS_SUCCESS);
@@ -123,15 +123,16 @@ namespace
             CASE(HIPBLAS_STATUS_UNKNOWN);
             CASE(HIPBLAS_STATUS_HANDLE_IS_NULLPTR);
         }
-    #undef CASE
+#undef CASE
         return "<undefined hipblasStatus_t value>";
-    }    
+    }
     inline auto hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expect)
     {
         if(status != expect)
         {
             rocblas_cerr << "hipBLASLt status error: Expected " << hipblas_status_to_string(expect)
-                         << ", received " << hipblas_status_to_string(status) << " at " << __FILE__ << ":" << __LINE__ << std::endl;
+                         << ", received " << hipblas_status_to_string(status) << " at " << __FILE__
+                         << ":" << __LINE__ << std::endl;
             return rocblas_status_internal_error;
         }
         return rocblas_status_success;
@@ -143,7 +144,7 @@ namespace
         if(SOL_COUNT == 0)                                                                         \
         {                                                                                          \
             rocblas_cerr << "error: NO solution found! at " __FILE__ ":" << __LINE__ << std::endl; \
-            return rocblas_status_internal_error;                                                \
+            return rocblas_status_internal_error;                                                  \
         }                                                                                          \
     } while(0)
 #define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)               \
@@ -161,10 +162,15 @@ namespace
      * Variable template to map alpha and beta types to compute type    *
      ********************************************************************/
     template <typename T>
-    using hipblaslt_alpha_beta_type = std::conditional_t<std::is_same_v<T, rocblas_bfloat16>,
-                                                        float, std::conditional_t<std::is_same_v<T, rocblas_float_complex>, std::complex<float>,
-                                                        std::conditional_t<std::is_same_v<T, rocblas_double_complex>, std::complex<double>,
-                                                        std::conditional_t<std::is_same_v<T, int8_t>, int32_t, T>>>>;
+    using hipblaslt_alpha_beta_type = std::conditional_t<
+        std::is_same_v<T, rocblas_bfloat16>,
+        float,
+        std::conditional_t<
+            std::is_same_v<T, rocblas_float_complex>,
+            std::complex<float>,
+            std::conditional_t<std::is_same_v<T, rocblas_double_complex>,
+                               std::complex<double>,
+                               std::conditional_t<std::is_same_v<T, int8_t>, int32_t, T>>>>;
 
     /****************************************************************
      * Construct a HipBlasLT GEMM from a RocblasContractionProblem *
@@ -511,7 +517,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         col_dim = prob.m;
     }
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutCreate(
-        &matA, hipblaslt_datatype<Ti>, row_dim, col_dim, prob.col_stride_a), HIPBLAS_STATUS_SUCCESS);
+                              &matA, hipblaslt_datatype<Ti>, row_dim, col_dim, prob.col_stride_a),
+                          HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matA, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)),
                           HIPBLAS_STATUS_SUCCESS);
@@ -529,7 +536,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         col_dim = prob.k;
     }
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutCreate(
-        &matB, hipblaslt_datatype<Ti>, row_dim, col_dim, prob.col_stride_b), HIPBLAS_STATUS_SUCCESS);
+                              &matB, hipblaslt_datatype<Ti>, row_dim, col_dim, prob.col_stride_b),
+                          HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matB, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)),
                           HIPBLAS_STATUS_SUCCESS);
@@ -537,7 +545,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                               matB, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
                           HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutCreate(
-        &matC, hipblaslt_datatype<To>, prob.m, prob.n, prob.col_stride_c), HIPBLAS_STATUS_SUCCESS);
+                              &matC, hipblaslt_datatype<To>, prob.m, prob.n, prob.col_stride_c),
+                          HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matC, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)),
                           HIPBLAS_STATUS_SUCCESS);
@@ -545,40 +554,42 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                               matC, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
                           HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutCreate(
-        &matD, hipblaslt_datatype<To>, prob.m, prob.n, prob.col_stride_d), HIPBLAS_STATUS_SUCCESS);
+                              &matD, hipblaslt_datatype<To>, prob.m, prob.n, prob.col_stride_d),
+                          HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matD, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)),
                           HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matD, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
                           HIPBLAS_STATUS_SUCCESS);
-        EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatrixLayoutSetAttribute(matA,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &(prob.batch_stride_a),
-                                              sizeof(int64_t)),
-            HIPBLAS_STATUS_SUCCESS);
-        EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatrixLayoutSetAttribute(matB,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &(prob.batch_stride_b),
-                                              sizeof(int64_t)),
-            HIPBLAS_STATUS_SUCCESS);
-        EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatrixLayoutSetAttribute(matC,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &(prob.batch_stride_c),
-                                              sizeof(int64_t)),
-            HIPBLAS_STATUS_SUCCESS);
-        EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatrixLayoutSetAttribute(matD,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &(prob.batch_stride_d),
-                                              sizeof(int64_t)),
-            HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutSetAttribute(matA,
+                                          HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                          &(prob.batch_stride_a),
+                                          sizeof(int64_t)),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutSetAttribute(matB,
+                                          HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                          &(prob.batch_stride_b),
+                                          sizeof(int64_t)),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutSetAttribute(matC,
+                                          HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                          &(prob.batch_stride_c),
+                                          sizeof(int64_t)),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutSetAttribute(matD,
+                                          HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                          &(prob.batch_stride_d),
+                                          sizeof(int64_t)),
+        HIPBLAS_STATUS_SUCCESS);
     hipblasLtMatmulDesc_t matmulDesc;
-    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescCreate(
-        &matmulDesc, hipblaslt_compute_type<Tc>, hipblaslt_datatype<Ti>), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescCreate(&matmulDesc, hipblaslt_compute_type<Tc>, hipblaslt_datatype<Ti>),
+        HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
                               matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t)),
                           HIPBLAS_STATUS_SUCCESS);
