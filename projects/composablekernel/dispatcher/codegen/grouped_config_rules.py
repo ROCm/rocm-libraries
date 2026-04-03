@@ -133,8 +133,23 @@ COMPV4_COMPATIBLE_TILES: List[Tuple[int, int, int]] = [
 ]
 
 # Backward weight tiles (very restricted due to transpose_tile2d constraints)
+# Testing all tiles to verify which ones actually work
 BWD_WEIGHT_TILES: List[Tuple[int, int, int]] = [
-    (16, 64, 64),  # Known working config with wave=(1,4,1), warp=(16,16,32)
+    # warp_tile [16,16,16]
+    (16, 64, 64),   # Known working config
+    (32, 64, 64),   # Test
+    (64, 64, 64),   # Test
+
+    # warp_tile [32,32,16]
+    (32, 128, 64),  # Test
+    (64, 128, 64),  # Test
+    (128, 128, 64), # Test
+
+    # warp_tile [16,16,32]
+    (16, 64, 128),  # Test
+    (32, 64, 128),  # Test
+    (64, 64, 128),  # Test
+    (128, 64, 128), # Test
 ]
 
 # =============================================================================

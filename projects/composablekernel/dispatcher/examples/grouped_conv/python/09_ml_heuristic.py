@@ -13,19 +13,24 @@ picks the highest-scoring one, which is then invoked via the dispatcher.
 This replaces hand-crafted heuristics with a data-driven approach achieving
 97%+ of oracle-best TFLOPS efficiency.
 
+Supports forward, bwd_data, and bwd_weight variants.
+
 Complexity: *****
 
 Prerequisites:
-    - Trained model in dispatcher/heuristics/models/grouped_conv_forward_bf16_gfx950/
+    - Trained models in dispatcher/heuristics/models/grouped_conv_*_bf16_gfx950/
     - lightgbm, pandas, numpy, pyarrow installed
     - grouped_conv dispatcher built
 
 Usage:
-    python3 09_ml_heuristic.py
-    python3 09_ml_heuristic.py --dtype bf16 --arch gfx950
+    python3 09_ml_heuristic.py --variant forward
+    python3 09_ml_heuristic.py --variant bwd_data
+    python3 09_ml_heuristic.py --variant bwd_weight
+    python3 09_ml_heuristic.py --variant forward --dtype bf16 --arch gfx950
 """
 
 import sys
+import os
 import argparse
 import json
 import subprocess
@@ -56,10 +61,10 @@ class KernelSpec:
     gemm_n_per_block: int
     pipeline: str = "compv3"
 
-    def to_kernel_config(self, dtype: str = "bf16", arch: str = "gfx950") -> GroupedConvKernelConfig:
+    def to_kernel_config(self, dtype: str = "bf16", arch: str = "gfx950", variant: str = "forward") -> GroupedConvKernelConfig:
         """Convert to GroupedConvKernelConfig for building."""
         return GroupedConvKernelConfig(
-            variant="forward",
+            variant=variant,
             dtype=dtype,
             ndim_spatial=2,
             layout="NHWGC_KYXGC_NHWGK",
@@ -82,8 +87,10 @@ class KernelSpec:
         )
 
 
-# Kernel pool: configs from training data (30 kernels total)
-KERNEL_POOL = [
+# Kernel pools for different variants
+
+# Forward pool: compv3, compv4, compv5 (30 kernels)
+FORWARD_KERNEL_POOL = [
     # Block size 16
     KernelSpec("k16_64x64_v3", 16, 64, 64, "compv3"),
     KernelSpec("k16_64x64_v4", 16, 64, 64, "compv4"),
@@ -120,6 +127,37 @@ KERNEL_POOL = [
     KernelSpec("k128_128x64_v5", 128, 128, 64, "compv5"),
 ]
 
+# Backward pool: compv3, mem (20 kernels)
+BACKWARD_KERNEL_POOL = [
+    # Block size 16
+    KernelSpec("k16_64x64_v3", 16, 64, 64, "compv3"),
+    KernelSpec("k16_64x64_mem", 16, 64, 64, "mem"),
+    KernelSpec("k16_64x128_v3", 16, 64, 128, "compv3"),
+    KernelSpec("k16_64x128_mem", 16, 64, 128, "mem"),
+    # Block size 32
+    KernelSpec("k32_64x64_v3", 32, 64, 64, "compv3"),
+    KernelSpec("k32_64x64_mem", 32, 64, 64, "mem"),
+    KernelSpec("k32_64x128_v3", 32, 64, 128, "compv3"),
+    KernelSpec("k32_64x128_mem", 32, 64, 128, "mem"),
+    KernelSpec("k32_128x64_v3", 32, 128, 64, "compv3"),
+    KernelSpec("k32_128x64_mem", 32, 128, 64, "mem"),
+    # Block size 64
+    KernelSpec("k64_64x64_v3", 64, 64, 64, "compv3"),
+    KernelSpec("k64_64x64_mem", 64, 64, 64, "mem"),
+    KernelSpec("k64_64x128_v3", 64, 64, 128, "compv3"),
+    KernelSpec("k64_64x128_mem", 64, 64, 128, "mem"),
+    KernelSpec("k64_128x64_v3", 64, 128, 64, "compv3"),
+    KernelSpec("k64_128x64_mem", 64, 128, 64, "mem"),
+    # Block size 128
+    KernelSpec("k128_64x128_v3", 128, 64, 128, "compv3"),
+    KernelSpec("k128_64x128_mem", 128, 64, 128, "mem"),
+    KernelSpec("k128_128x64_v3", 128, 128, 64, "compv3"),
+    KernelSpec("k128_128x64_mem", 128, 128, 64, "mem"),
+]
+
+# Legacy name for backward compatibility
+KERNEL_POOL = FORWARD_KERNEL_POOL
+
 
 def spec_to_feature_dict(spec: KernelSpec, dtype: str) -> dict:
     """Convert a KernelSpec to the dict format the feature engine expects."""
@@ -133,7 +171,7 @@ def spec_to_feature_dict(spec: KernelSpec, dtype: str) -> dict:
     }
 
 
-def build_kernel(spec: KernelSpec, dtype: str, arch: str, verbose: bool = False) -> Path:
+def build_kernel(spec: KernelSpec, dtype: str, arch: str, variant: str = "forward", verbose: bool = False) -> Path:
     """Build a kernel on-demand using the dispatcher's JIT compilation.
 
     Uses the same workflow as tile_engine benchmark:
@@ -144,11 +182,11 @@ def build_kernel(spec: KernelSpec, dtype: str, arch: str, verbose: bool = False)
     Returns:
         Path to compiled .so file, or None if build failed
     """
-    kernel_config = spec.to_kernel_config(dtype=dtype, arch=arch)
+    kernel_config = spec.to_kernel_config(dtype=dtype, arch=arch, variant=variant)
 
     if verbose:
         print(f"  Building kernel: {spec.name}")
-        print(f"    Config: tile={kernel_config.tile_str}, pipeline={kernel_config.pipeline}")
+        print(f"    Config: variant={variant}, tile={kernel_config.tile_str}, pipeline={kernel_config.pipeline}")
 
     # Build kernel (returns list of paths)
     lib_paths = setup_multiple_grouped_conv_dispatchers(
@@ -216,6 +254,7 @@ def ml_select_and_run(
     pad_w: int = 0,
     dtype: str = "bf16",
     arch: str = "gfx950",
+    variant: str = "forward",
     run_on_hw: bool = True,
 ) -> dict:
     """
@@ -262,7 +301,7 @@ def ml_select_and_run(
 
     # Step 2: Build and run on hardware via dispatcher
     # Build kernel on-demand using JIT compilation
-    so_path = build_kernel(best_spec, dtype, arch, verbose=False)
+    so_path = build_kernel(best_spec, dtype, arch, variant=variant, verbose=False)
 
     if not so_path:
         result["hw_success"] = False
@@ -270,7 +309,7 @@ def ml_select_and_run(
         return result
 
     # Prepare problem dict for dispatcher
-    problem_with_direction = {**problem, "direction": "forward"}
+    problem_with_direction = {**problem, "direction": variant}
 
     # Get kernel name from .so path (e.g., libgrouped_conv_forward_bf16_2d_16x64x128_compv3.so -> grouped_conv_...)
     kernel_name = so_path.stem[3:] if so_path.stem.startswith("lib") else so_path.stem
@@ -296,26 +335,45 @@ def main():
     parser.add_argument("--dtype", default="bf16", choices=["fp16", "bf16"])
     parser.add_argument("--arch", default="gfx950")
     parser.add_argument(
+        "--variant",
+        default="forward",
+        choices=["forward", "bwd_data", "bwd_weight"],
+        help="Convolution variant (default: forward)",
+    )
+    parser.add_argument(
         "--model_dir",
-        default=str(
-            Path(__file__).parent.parent.parent.parent
-            / "heuristics"
-            / "models"
-            / "grouped_conv_forward_bf16_gfx950"
-        ),
+        default=None,
+        help="Model directory (default: auto-detect from variant)",
     )
     parser.add_argument(
         "--no_run", action="store_true", help="Only predict, don't run on hardware"
     )
     args = parser.parse_args()
 
+    # Auto-detect model directory from variant if not specified
+    if args.model_dir is None:
+        model_name = f"grouped_conv_{args.variant}_bf16_{args.arch}"
+        args.model_dir = str(
+            Path(__file__).parent.parent.parent.parent
+            / "heuristics"
+            / "models"
+            / model_name
+        )
+
+    # Select kernel pool based on variant
+    if args.variant == "forward":
+        kernel_pool = FORWARD_KERNEL_POOL
+    else:
+        kernel_pool = BACKWARD_KERNEL_POOL
+
     print("=" * 80)
-    print("  Example 09: ML-Based Kernel Selection for Grouped Convolution")
+    print(f"  Example 09: ML-Based Kernel Selection for Grouped Convolution ({args.variant.upper()})")
     print("=" * 80)
-    print(f"\n  Model:  {args.model_dir}")
-    print(f"  Dtype:  {args.dtype}")
-    print(f"  Arch:   {args.arch}")
-    print(f"  Pool:   {len(KERNEL_POOL)} kernels")
+    print(f"\n  Variant: {args.variant}")
+    print(f"  Model:   {args.model_dir}")
+    print(f"  Dtype:   {args.dtype}")
+    print(f"  Arch:    {args.arch}")
+    print(f"  Pool:    {len(kernel_pool)} kernels")
 
     # Load ML model with grouped conv feature engine
     feature_engine = GroupedConvFeatureEngine()
@@ -323,20 +381,37 @@ def main():
     print("  Model loaded successfully")
 
     # Test problems: diverse convolution shapes from MIOpen
-    # (N, C, K, G, Hi, Wi, Y, X, stride_h, stride_w)
-    test_problems = [
-        # ResNet-50 layers
-        (1, 256, 512, 1, 56, 56, 1, 1, 2, 2),  # stride-2 1x1 conv
-        (1, 128, 256, 1, 32, 32, 2, 2, 2, 2),  # stride-2 2x2 conv
-        (1, 512, 256, 1, 28, 28, 1, 1, 1, 1),  # 1x1 bottleneck
-        # 3x3 convolutions
-        (1, 128, 256, 1, 64, 64, 3, 3, 1, 1),  # standard 3x3
-        (1, 64, 128, 1, 128, 128, 3, 3, 1, 1),  # larger spatial
-        # Small spatial
-        (1, 832, 128, 1, 7, 7, 1, 1, 1, 1),  # 7x7 input
-        # Large channels
-        (1, 1024, 512, 1, 14, 14, 1, 1, 1, 1),  # large C/K
-    ]
+    # (N, C, K, G, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w)
+    if args.variant == "forward":
+        test_problems = [
+            # ResNet-50 layers
+            (1, 256, 512, 1, 56, 56, 1, 1, 2, 2, 0, 0),  # stride-2 1x1 conv
+            (1, 128, 256, 1, 32, 32, 2, 2, 2, 2, 0, 0),  # stride-2 2x2 conv
+            (1, 512, 256, 1, 28, 28, 1, 1, 1, 1, 0, 0),  # 1x1 bottleneck
+            # 3x3 convolutions
+            (1, 128, 256, 1, 64, 64, 3, 3, 1, 1, 1, 1),  # standard 3x3
+            (1, 64, 128, 1, 128, 128, 3, 3, 1, 1, 1, 1),  # larger spatial
+            # Small spatial
+            (1, 832, 128, 1, 7, 7, 1, 1, 1, 1, 0, 0),  # 7x7 input
+            # Large channels
+            (1, 1024, 512, 1, 14, 14, 1, 1, 1, 1, 0, 0),  # large C/K
+        ]
+    elif args.variant == "bwd_data":
+        test_problems = [
+            # Typical backward data problems (with padding for 3x3)
+            (32, 128, 256, 1, 28, 28, 3, 3, 1, 1, 1, 1),  # 3x3 standard
+            (16, 256, 512, 1, 14, 14, 3, 3, 1, 1, 1, 1),  # 3x3 larger channels
+            (64, 64, 128, 1, 56, 56, 1, 1, 1, 1, 0, 0),  # 1x1 conv
+            (32, 512, 256, 1, 7, 7, 3, 3, 1, 1, 1, 1),  # small spatial
+        ]
+    else:  # bwd_weight
+        test_problems = [
+            # Typical backward weight problems (with padding for 3x3)
+            (64, 256, 512, 1, 14, 14, 3, 3, 1, 1, 1, 1),  # 3x3 standard
+            (32, 128, 256, 1, 28, 28, 3, 3, 1, 1, 1, 1),  # 3x3 medium
+            (128, 64, 128, 1, 56, 56, 1, 1, 1, 1, 0, 0),  # 1x1 conv
+            (64, 512, 1024, 1, 7, 7, 3, 3, 1, 1, 1, 1),  # large channels
+        ]
 
     run_on_hw = not args.no_run
 
@@ -350,15 +425,15 @@ def main():
 
     results = []
 
-    for N, C, K, G, Hi, Wi, Y, X, sh, sw in test_problems:
+    for N, C, K, G, Hi, Wi, Y, X, sh, sw, ph, pw in test_problems:
         result = ml_select_and_run(
-            predictor, KERNEL_POOL, N, C, K, G, Hi, Wi, Y, X, sh, sw,
-            dtype=args.dtype, arch=args.arch, run_on_hw=run_on_hw
+            predictor, kernel_pool, N, C, K, G, Hi, Wi, Y, X, sh, sw, ph, pw,
+            dtype=args.dtype, arch=args.arch, variant=args.variant, run_on_hw=run_on_hw
         )
 
         # Compute output size
-        Ho = (Hi - Y) // sh + 1
-        Wo = (Wi - X) // sw + 1
+        Ho = (Hi + 2*ph - Y) // sh + 1
+        Wo = (Wi + 2*pw - X) // sw + 1
 
         prob_str = f"C{C:4d}→K{K:4d} {Hi:3d}x{Wi:3d}→{Ho:2d}x{Wo:2d} f{Y}x{X}"
 
