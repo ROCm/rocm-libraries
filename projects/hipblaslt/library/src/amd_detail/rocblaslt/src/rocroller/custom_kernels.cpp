@@ -747,8 +747,8 @@ rocblaslt_status AssemblyStoreRowOrderGemm::run(const RocblasltContractionProble
     const uint32_t blockSize = 256;
     dim3           block(blockSize, 1, 1);
 
-    uint32_t tilesM = (static_cast<uint32_t>(prob.n) + tileN - 1) / tileN;
-    uint32_t tilesN = (static_cast<uint32_t>(prob.m) + tileM - 1) / tileM;
+    uint32_t tilesM = (static_cast<uint32_t>(prob.n) + tileM - 1) / tileM;
+    uint32_t tilesN = (static_cast<uint32_t>(prob.m) + tileN - 1) / tileN;
 
     dim3 grid(tilesN * blockSize, tilesM, 1);
 

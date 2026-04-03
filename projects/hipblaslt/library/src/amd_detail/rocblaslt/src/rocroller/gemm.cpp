@@ -691,61 +691,20 @@ CommandArguments RocRollerGemmKernel::createCommandArguments(const RocblasltCont
     {
         auto const scaleBlockSize = params->kernelType.scaleTypeA.blockRowSize
                                     * params->kernelType.scaleTypeA.blockColSize;
-        TensorDescriptor descAScale;
-        if(params->kernelType.scaleTypeA.preTile.size() == 2)
-        {
-            // Create 4D tensor descriptor for pre-tiled scale A
-            auto const tileM  = params->kernelType.scaleTypeA.preTile[0];
-            auto const tileK  = params->kernelType.scaleTypeA.preTile[1];
-            auto const scaleK = K / scaleBlockSize;
-
-            descAScale = TensorDescriptor(params->kernelType.scaleTypeA.type,
-                                          {static_cast<size_t>(M / tileM),
-                                           static_cast<size_t>(scaleK / tileK),
-                                           static_cast<size_t>(tileM),
-                                           static_cast<size_t>(tileK)},
-                                          {static_cast<size_t>((scaleK / tileK) * tileM * tileK),
-                                           static_cast<size_t>(tileM * tileK),
-                                           static_cast<size_t>(tileK),
-                                           static_cast<size_t>(1)});
-        }
-        else
-        {
-            descAScale = TensorDescriptor(params->kernelType.scaleTypeA.type,
-                                          {size_t(M), size_t(K / scaleBlockSize)},
-                                          params->kernelType.transA ? "T" : "N");
-        }
+        TensorDescriptor descAScale(
+            params->kernelType.scaleTypeA.type,
+            {size_t(M), size_t(K / scaleBlockSize)},
+            params->kernelType.transA ? "T" : "N");
         setCommandTensorArg(commandArgs, tagTensorScaleA, descAScale, (float*)nullptr);
     }
     if(params->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
     {
         auto const scaleBlockSize = params->kernelType.scaleTypeB.blockRowSize
                                     * params->kernelType.scaleTypeB.blockColSize;
-        TensorDescriptor descBScale;
-        if(params->kernelType.scaleTypeB.preTile.size() == 2)
-        {
-            // Create 4D tensor descriptor for pre-tiled scale B
-            // Matches rocRoller client's tensor descriptor setup
-            auto const tileK  = params->kernelType.scaleTypeB.preTile[0];
-            auto const tileN  = params->kernelType.scaleTypeB.preTile[1];
-            auto const scaleK = K / scaleBlockSize;
-
-            descBScale = TensorDescriptor(params->kernelType.scaleTypeB.type,
-                                          {static_cast<size_t>(scaleK / tileK),
-                                           static_cast<size_t>(N / tileN),
-                                           static_cast<size_t>(tileK),
-                                           static_cast<size_t>(tileN)},
-                                          {static_cast<size_t>(tileK * tileN),
-                                           static_cast<size_t>((scaleK / tileK) * tileK * tileN),
-                                           static_cast<size_t>(1),
-                                           static_cast<size_t>(tileK)});
-        }
-        else
-        {
-            descBScale = TensorDescriptor(params->kernelType.scaleTypeB.type,
-                                          {size_t(K / scaleBlockSize), size_t(N)},
-                                          params->kernelType.transB ? "T" : "N");
-        }
+        TensorDescriptor descBScale(
+            params->kernelType.scaleTypeB.type,
+            {size_t(K / scaleBlockSize), size_t(N)},
+            params->kernelType.transB ? "T" : "N");
         setCommandTensorArg(commandArgs, tagTensorScaleB, descBScale, (float*)nullptr);
     }
 
