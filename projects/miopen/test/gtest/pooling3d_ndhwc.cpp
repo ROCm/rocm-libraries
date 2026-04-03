@@ -28,15 +28,15 @@
 #include <miopen/env.hpp>
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "pooling2d_common.hpp"
+#include "pooling_common.hpp"
 
 namespace pooling3d_ndhwc {
 
-using namespace pooling2d_gtest;
+using namespace pooling_gtest;
 
-struct GPU_Pooling3d_NDHWC_FP32 : public Pooling2dCommon<float> {};
-struct GPU_Pooling3d_NDHWC_FP16 : public Pooling2dCommon<half_float::half> {};
-struct GPU_Pooling3d_NDHWC_BFP16 : public Pooling2dCommon<bfloat16> {};
+struct GPU_Pooling3d_NDHWC_FP32 : public PoolingCommon<float, 3> {};
+struct GPU_Pooling3d_NDHWC_FP16 : public PoolingCommon<half_float::half, 3> {};
+struct GPU_Pooling3d_NDHWC_BFP16 : public PoolingCommon<bfloat16, 3> {};
 
 std::vector<PoolingTestCase> GetTestCases(miopenDataType_t prec)
 {
@@ -56,20 +56,14 @@ std::vector<PoolingTestCase> GetTestCases(miopenDataType_t prec)
     std::vector<std::vector<int>> pads_list = {{0, 0, 0}, {1, 1, 1}};
 
     std::vector<PoolingTestCase> test_cases;
+    int num_uint16_case = 0, num_uint32_case = 0, num_uint32_case_imgidx = 0;
+    int num_uint64_case = 0, num_uint64_case_imgidx = 0;
+
     for(const auto& in_shape : in_shapes)
     {
-        AddTestCasesForInput(in_shape,
-                             lens_list,
-                             strides_list,
-                             pads_list,
-                             index_types,
-                             modes,
-                             wsidx_values,
-                             test_cases,
-                             false, // skip_wide_check
-                             false, // is_wide_dataset
-                             "NDHWC",
-                             "NDHWC");
+        AddTestCasesForInput(in_shape, lens_list, strides_list, pads_list, index_types, modes, wsidx_values, test_cases,
+                             num_uint16_case, num_uint32_case, num_uint32_case_imgidx, num_uint64_case, num_uint64_case_imgidx,
+                             false, false, "NDHWC");
     }
     return test_cases;
 }
