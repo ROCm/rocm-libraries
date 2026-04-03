@@ -108,14 +108,16 @@ double Profiler::getWallTime() const {
 
 void Profiler::merge(const Profiler &other) {
   for (const auto &[name, entry] : other.entries) {
-    auto &dst = entries[name];
-    dst.totalSeconds += entry.totalSeconds;
-    dst.count += entry.count;
-    if (dst.depth < 0) {
-      dst.depth = entry.depth;
-    } else if (entry.depth >= 0) {
-      assert(dst.depth == entry.depth &&
-             "Merging profilers with different depths for the same key");
+    auto [it, inserted] = entries.try_emplace(name, entry);
+    if (!inserted) {
+      it->second.totalSeconds += entry.totalSeconds;
+      it->second.count += entry.count;
+      if (it->second.depth < 0) {
+        it->second.depth = entry.depth;
+      } else if (entry.depth >= 0) {
+        assert(it->second.depth == entry.depth &&
+               "Merging profilers with different depths for the same key");
+      }
     }
   }
 }
@@ -152,7 +154,7 @@ void Profiler::report(std::ostream &os, double minPercentage) const {
 
   double wall = getWallTime();
   double accounted = getAccountedTime();
-  double threshold = wall * minPercentage / 100.0;
+  double threshold = accounted * minPercentage / 100.0;
 
   // Count entries below threshold to build the "other" label.
   int otherEntries = 0;
@@ -165,8 +167,7 @@ void Profiler::report(std::ostream &os, double minPercentage) const {
   std::string otherLabel =
       otherEntries > 0 ? "other (" + std::to_string(otherEntries) + " entries)"
                        : "";
-  size_t maxNameLen = std::max({size_t(5),  // "Scope"
-                                size_t(11), // "Unaccounted"
+  size_t maxNameLen = std::max({size_t(9), // "Wall time" / "CPU time"
                                 otherLabel.size()});
   for (const auto &row : rows) {
     if (row.seconds >= threshold) {
@@ -195,7 +196,7 @@ void Profiler::report(std::ostream &os, double minPercentage) const {
     double avgUs = row.count > 0
                        ? (row.seconds / static_cast<double>(row.count)) * 1e6
                        : 0.0;
-    double pct = wall > 0.0 ? (row.seconds / wall) * 100.0 : 0.0;
+    double pct = accounted > 0.0 ? (row.seconds / accounted) * 100.0 : 0.0;
 
     os << std::left << std::setw(static_cast<int>(maxNameLen + 2)) << row.name
        << std::right << std::fixed << std::setprecision(6) << std::setw(12)
@@ -209,7 +210,8 @@ void Profiler::report(std::ostream &os, double minPercentage) const {
     double avgUs = otherCount > 0
                        ? (otherSeconds / static_cast<double>(otherCount)) * 1e6
                        : 0.0;
-    double pct = wall > 0.0 ? (otherSeconds / wall) * 100.0 : 0.0;
+    double pct =
+        accounted > 0.0 ? (otherSeconds / accounted) * 100.0 : 0.0;
 
     os << std::left << std::setw(static_cast<int>(maxNameLen + 2)) << otherLabel
        << std::right << std::fixed << std::setprecision(6) << std::setw(12)
@@ -218,27 +220,31 @@ void Profiler::report(std::ostream &os, double minPercentage) const {
        << pct << "%" << "\n";
   }
 
-  // Separator, accounted, unaccounted, and wall-clock total.
+  // Footer.
   os << std::string(lineWidth, '-') << "\n";
 
+  int nameW = static_cast<int>(maxNameLen + 2);
+
+  os << std::left << std::setw(nameW) << "CPU time" << std::right << std::fixed
+     << std::setprecision(6) << std::setw(12) << accounted << "\n";
+
+  os << std::left << std::setw(nameW) << "Wall time" << std::right << std::fixed
+     << std::setprecision(6) << std::setw(12) << wall << "\n";
+
   double unaccounted = wall - accounted;
-  double unaccountedPct = wall > 0.0 ? (unaccounted / wall) * 100.0 : 0.0;
+  if (unaccounted > 0.0) {
+    double unaccPct = wall > 0.0 ? (unaccounted / wall) * 100.0 : 0.0;
+    os << std::left << std::setw(nameW) << "Unaccounted" << std::right
+       << std::fixed << std::setprecision(6) << std::setw(12) << unaccounted
+       << std::setw(12) << "" << std::setw(12) << "" << std::setw(9)
+       << std::setprecision(3) << unaccPct << "% of wall\n";
+  }
 
-  os << std::left << std::setw(static_cast<int>(maxNameLen + 2)) << "Accounted"
-     << std::right << std::fixed << std::setprecision(6) << std::setw(12)
-     << accounted << std::setw(12) << "" << std::setw(12) << "" << std::setw(7)
-     << std::setprecision(1) << (wall > 0.0 ? (accounted / wall) * 100.0 : 0.0)
-     << "%" << "\n";
-
-  os << std::left << std::setw(static_cast<int>(maxNameLen + 2))
-     << "Unaccounted" << std::right << std::fixed << std::setprecision(6)
-     << std::setw(12) << unaccounted << std::setw(12) << "" << std::setw(12)
-     << "" << std::setw(7) << std::setprecision(1) << unaccountedPct << "%"
-     << "\n";
-
-  os << std::left << std::setw(static_cast<int>(maxNameLen + 2)) << "Total"
-     << std::right << std::fixed << std::setprecision(6) << std::setw(12)
-     << wall << "\n";
+  os << "\n"
+     << "Count: number of invocations. Avg: mean time per invocation.\n"
+     << "%: fraction of CPU time. Depth: nesting level (0 = top).\n"
+     << "CPU time: sum of all scoped time (across all threads).\n"
+     << "Wall time: elapsed real time from profiler construction to report.\n";
 }
 
 std::string Profiler::reportStr(double minPercentage) const {

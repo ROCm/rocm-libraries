@@ -4,6 +4,7 @@
 #include "race-emulator/Profiler.h"
 #include <chrono>
 #include <gtest/gtest.h>
+#include <thread>
 
 using namespace raceemulator;
 
@@ -88,7 +89,7 @@ TEST(ProfilerTest, ReportHeaders) {
   EXPECT_NE(report.find("Time [s]"), std::string::npos);
   EXPECT_NE(report.find("Count"), std::string::npos);
   EXPECT_NE(report.find("Avg [us]"), std::string::npos);
-  EXPECT_NE(report.find("Total"), std::string::npos);
+  EXPECT_NE(report.find("Wall time"), std::string::npos);
 }
 
 TEST(ProfilerTest, EmptyReport) {
@@ -244,6 +245,34 @@ TEST(ProfilerTest, MergePreservesMatchingDepth) {
 
   a.merge(b);
   EXPECT_EQ(a.getDepth("top_level"), 0);
+}
+
+TEST(ProfilerTest, MergeSumsTime) {
+  using namespace std::chrono_literals;
+
+  Profiler a(true);
+  {
+    auto sw = a.scopedStopwatch("shared");
+    std::this_thread::sleep_for(1ms);
+  }
+
+  Profiler b(true);
+  {
+    auto sw = b.scopedStopwatch("shared");
+    std::this_thread::sleep_for(1ms);
+  }
+  {
+    auto sw = b.scopedStopwatch("only_in_b");
+    std::this_thread::sleep_for(1ms);
+  }
+
+  a.merge(b);
+  std::string report = a.reportStr(0.0);
+  // Both keys should appear with summed counts.
+  EXPECT_NE(report.find("shared"), std::string::npos);
+  EXPECT_NE(report.find("only_in_b"), std::string::npos);
+  // "shared" count should be 2 (1 from each profiler).
+  EXPECT_NE(report.find("2"), std::string::npos);
 }
 
 TEST(ProfilerTest, MergeEmptyProfiler) {

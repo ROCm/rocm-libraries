@@ -83,7 +83,8 @@ private:
   std::unique_ptr<ParsedAsm> parsedAsm;
   std::vector<char> kernargSegment;
   std::vector<bool> kernargIsSet;
-  Profiler profiler;
+  Profiler emulatorProfiler;
+  Profiler workgroupProfiler;
 };
 
 } // namespace raceemulator

@@ -27,7 +27,14 @@ void Emulator::appendStr(std::ostream &os) const {
 }
 
 std::string Emulator::getProfileReport(double minPercentage) const {
-  return profiler.reportStr(minPercentage);
+  std::string report;
+  if (emulatorProfiler.isEnabled()) {
+    report += "=== Emulator ===\n";
+    report += emulatorProfiler.reportStr(minPercentage);
+    report += "\n=== Workgroups ===\n";
+    report += workgroupProfiler.reportStr(minPercentage);
+  }
+  return report;
 }
 
 std::string Emulator::str() const {
@@ -153,7 +160,6 @@ void Emulator::initializeWorkgroup(Workgroup &workgroup, Dim3d wgId,
 
   workgroup.setRaceChecks(config.raceChecks);
   workgroup.setCompleteEmulation(config.completeEmulation);
-  workgroup.setProfiler(&profiler);
   workgroup.setWaveSchedule(config.waveSchedule);
 
   for (int i = 0; i < nWaves; ++i) {
@@ -256,7 +262,8 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
 
   const int nWaves = totalThreads / wavefrontSize;
 
-  profiler = Profiler(config.profiling);
+  emulatorProfiler = Profiler(config.profiling);
+  workgroupProfiler = Profiler(config.profiling);
 
   // Set the hidden kernargs (group_size_x/y/z). These are the same for all
   // workgroups so we write them once before the loop.
@@ -288,11 +295,13 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
     }
   }
 
+  auto runScope = emulatorProfiler.scopedStopwatch("run");
+
   const auto &tokens = parsedAsm->tokens;
+  const int nWorkgroups = static_cast<int>(wgIds.size());
 
   // Each workgroup gets its own Profiler (not thread-safe).
-  // After all threads join, merge into the Emulator's profiler.
-  const int nWorkgroups = static_cast<int>(wgIds.size());
+  // After joining, merge into workgroupProfiler.
   std::vector<Profiler> wgProfilers(nWorkgroups, Profiler(config.profiling));
 
   std::vector<std::exception_ptr> exceptions(nWorkgroups);
@@ -328,7 +337,7 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
 
   // Merge per-workgroup profiling data.
   for (auto &p : wgProfilers) {
-    profiler.merge(p);
+    workgroupProfiler.merge(p);
   }
 
   // Count and rethrow the first exception, if any.
