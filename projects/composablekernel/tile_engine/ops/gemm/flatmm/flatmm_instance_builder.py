@@ -62,29 +62,6 @@ class FlatmmKernelBuilder(GemmKernelBuilder):
         config["target_archs"] = list(target_archs)
         return config
 
-    def _get_tile_configs(self):
-        selected = {}
-        original_gpu_target = self.gpu_target
-
-        try:
-            for gpu_target in self.gpu_targets:
-                if gpu_target not in self.SUPPORTED_GPU_TARGETS:
-                    continue
-
-                self.gpu_target = gpu_target
-                for tile_config in super()._get_tile_configs():
-                    signature = self._format_tile_config_string(tile_config)
-                    if signature not in selected:
-                        selected[signature] = self._with_target_archs(
-                            tile_config, [gpu_target]
-                        )
-                    elif gpu_target not in selected[signature]["target_archs"]:
-                        selected[signature]["target_archs"].append(gpu_target)
-        finally:
-            self.gpu_target = original_gpu_target
-
-        return list(selected.values())
-
 
 def parse_tile_config(tile_config_str):
     tile_dims, warp_dims, warp_tile_dims = tile_config_str.split("_")
@@ -170,26 +147,28 @@ def main():
 
     if args.list_kernels:
         builder._list_kernels()
-        return
-
-    if args.gen_single:
-        if not args.tile_config or not args.trait_combo:
-            parser.error("--gen_single requires --tile_config and --trait_combo")
+    elif args.gen_single:
+      # Generate a single kernel file input validation
+        if not args.kernel_name or not args.tile_config or not args.trait_combo:
+            parser.error(
+                "--gen_single requires --kernel_name, --tile_config, and --trait_combo"
+            )
 
         tile_config = parse_tile_config(args.tile_config)
         trait_combo = parse_trait_combo(args.trait_combo)
 
-        if args.kernel_name:
-            expected_name = builder._format_kernel_name(trait_combo, tile_config)
-            if args.kernel_name != expected_name:
-                raise ValueError(
-                    f"Kernel name mismatch: expected {expected_name}, got {args.kernel_name}"
-                )
-
-        builder._generate_kernel_instance(tile_config, trait_combo)
-        return
-
-    parser.error("Choose one of --list_kernels or --gen_single")
+        # Generate the kernel
+        builder._generate_kernel_instance(
+            tile_config,
+            trait_combo,
+        )
+    elif args.gen_all_individual:
+        # Generate all individual kernel files
+        builder._generate_all_individual(args.num_workers)
+    else:
+        parser.error(
+            "Must specify one of: --list_kernels, --gen_all_individual, or --gen_single"
+        )
 
 
 if __name__ == "__main__":

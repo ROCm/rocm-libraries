@@ -265,6 +265,8 @@ class GemmKernelBuilder:
             default_pipeline = "compv4"
         elif self.kernel_name_prefix == "mx_gemm":
             default_pipeline = "comp_async"
+        elif self.kernel_name_prefix == "flatmm":
+            default_pipeline = "regv1"
         elif self.kernel_name_prefix == "gemm_tensor_quant":
             default_pipeline = "compv3"
 
@@ -475,6 +477,13 @@ class GemmKernelBuilder:
                 "comp_async": "ck_tile::MXGemmPipelineAgBgCrCompAsync",
             }
             base_pipeline_map = {}
+        elif self.kernel_name_prefix == "flatmm":
+            pipeline_impl_map = {
+                "regv1": "ck_tile::FlatmmPipelineAGmemBGmemCRegV1",
+            }
+            base_pipeline_map = {
+                "regv1": "ck_tile::BaseFlatmmPipelineAGmemBGmemCRegV1",
+            }
 
         scheduler_type_map = {
             "intrawave": "ck_tile::GemmPipelineScheduler::Intrawave",
@@ -537,6 +546,11 @@ class GemmKernelBuilder:
         elif self.kernel_name_prefix == "mx_gemm":
             instance_code += """#include "ck_tile/ops/gemm_mx.hpp"
 """
+        elif self.kernel_name_prefix == "flatmm":
+            instance_code += """
+#include "ck_tile/ops/flatmm.hpp"
+"""
+
         return instance_code
 
     def populate_kernel_dtype_layout(self):
@@ -556,6 +570,7 @@ class GemmKernelBuilder:
             "gemm_preshuffle",
             "grouped_gemm",
             "mx_gemm",
+            "flatmm",
         ]:
             a_layout, b_layout, c_layout = get_abc_layouts(self.layout)
 
@@ -642,6 +657,7 @@ struct SelectedKernel {{
             "gemm_preshuffle",
             "grouped_gemm",
             "mx_gemm",
+            "flatmm",
         ]:
             instance_code += f"""
     static constexpr bool UsePersistentKernel = {"true" if persistent in [True, "true"] else "false"};
@@ -655,6 +671,12 @@ struct SelectedKernel {{
             else:
                 instance_code += """
     static constexpr bool Preshuffle = false;"""
+
+            if self.kernel_name_prefix == "flatmm":
+                instance_code += f"""
+    static constexpr int N_Repeat          = TileN / WarpTileN / WarpPerBlock_N;
+    static constexpr bool TiledMMAPermuteN = N_Repeat % 4 == 0;"""
+
         return instance_code
 
     def populate_initialization(self, base_pipeline_map, pipeline):
@@ -673,6 +695,7 @@ struct SelectedKernel {{
             "gemm_preshuffle",
             "grouped_gemm",
             "mx_gemm",
+            "flatmm",
         ]:
             instance_code = """
 
@@ -695,14 +718,29 @@ struct SelectedKernel {{
 
     // Traits
     using Traits = ck_tile::TileGemmTraits<kPadM, kPadN, kPadK, ALayout, BLayout, CLayout>;"""
-        elif self.kernel_name_prefix == "gemm_preshuffle":
+        elif self.kernel_name_prefix in ["gemm_preshuffle", "flatmm"]:
             instance_code += """
 
     // Traits
     using Traits = ck_tile::TileGemmTraits<kPadM, kPadN, kPadK, ALayout, BLayout, CLayout, NumWaveGroups>;"""
 
+        if self.kernel_name_prefix == "flatmm":
+            instance_code += """
+        using CodegenGemmTraits = ck_tile::TileGemmUniversalTraits<kPadM,
+                                                               kPadN,
+                                                               kPadK,
+                                                               DoubleSmemBuffer,
+                                                               ALayout,
+                                                               BLayout,
+                                                               CLayout,
+                                                               TransposeC,
+                                                               UseStructuredSparsity,
+                                                               UsePersistentKernel,
+                                                               NumWaveGroups,
+                                                               true>;"""
+
         # Pipeline problem
-        if self.kernel_name_prefix in ["gemm_preshuffle", "gemm_multi_d"]:
+        if self.kernel_name_prefix in ["gemm_preshuffle", "gemm_multi_d", "flatmm"]:
             instance_code += """
 
     // Pipeline problem
@@ -720,7 +758,7 @@ struct SelectedKernel {{
     // Base pipeline for hot loop detection
     using BaseGemmPipeline = {base_pipeline_map.get(pipeline, "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2")}<GemmPipelineProblem>;"""
 
-        elif self.kernel_name_prefix == "gemm_multi_d":
+        elif self.kernel_name_prefix in ["gemm_multi_d", "flatmm"]:
             instance_code += f"""
 
     // Base pipeline for hot loop detection
@@ -761,6 +799,12 @@ struct SelectedKernel {{
 
     // Launch function
     static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream) {"""
+
+        elif self.kernel_name_prefix == "flatmm":
+            instance_code = """
+    // Launch function
+    static float launch(const ck_tile::FlatmmHostArgs<>& args,
+                        const ck_tile::stream_config& stream) {"""
 
         # Scheduler initialization
         if self.kernel_name_prefix in ["gemm_preshuffle", "gemm_multi_d"]:
@@ -974,6 +1018,128 @@ struct SelectedKernel {{
             ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
 
         return ave_time;
+    }}
+}};
+"""
+        elif self.kernel_name_prefix == "flatmm":
+            instance_code += f"""
+
+    const ck_tile::index_t k_grain     = args.k_batch * TileK;
+    const ck_tile::index_t K_split     = (args.K + k_grain - 1) / k_grain * TileK;
+    const ck_tile::index_t num_loop    = TilePartitioner::GetLoopNum(K_split);
+    const bool has_hot_loop            = BaseGemmPipeline::BlockHasHotloop(num_loop);
+    const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
+    float ave_time{{0}};
+
+    const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
+        constexpr bool has_hot_loop_v = has_hot_loop_.value;
+        constexpr auto tail_number_v  = tail_number_.value;
+        constexpr auto scheduler = {scheduler_type_map.get(scheduler)};
+
+        using CodegenPipelineProblem = ck_tile::FlatmmPipelineProblem<ADataType,
+                                                                      BDataType,
+                                                                      AccDataType,
+                                                                      TileShape,
+                                                                      CodegenGemmTraits,
+                                                                      scheduler,
+                                                                      has_hot_loop_v,
+                                                                      tail_number_v>;
+
+        using CodegenFlatmmPipeline =
+            ck_tile::FlatmmPipelineAGmemBGmemCRegV1<CodegenPipelineProblem>;
+
+        using GemmEpilogue = ck_tile::CShuffleEpilogue<
+            ck_tile::CShuffleEpilogueProblem<ADataType,
+                                             BDataType,
+                                             ck_tile::tuple<>,  // DsDataType
+                                             AccDataType,
+                                             CDataType,
+                                             ck_tile::tuple<>, //DsLayout
+                                             CLayout,
+                                             ck_tile::element_wise::PassThrough,
+                                             TilePartitioner::MPerBlock,
+                                             TilePartitioner::NPerBlock,
+                                             WarpPerBlock_M,
+                                             WarpPerBlock_N,
+                                             WarpTileM,
+                                             WarpTileN,
+                                             WarpTileK,
+                                             CodegenPipelineProblem::TransposeC,
+                                             NumWaveGroups,
+                                             false,
+                                             1,
+                                             TiledMMAPermuteN>>;
+
+        using Kernel = ck_tile::FlatmmKernel<TilePartitioner, CodegenFlatmmPipeline, GemmEpilogue>;
+
+        auto kargs = Kernel::MakeKernelArgs(args);
+
+        const dim3 grids      = Kernel::GridSize(kargs);
+        constexpr dim3 blocks = Kernel::BlockSize();
+
+        if(!Kernel::IsSupportedArgument(kargs))
+        {{
+            throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!\\n");
+        }}
+
+        if(stream.log_level_ > 0)
+        {{
+            std::cout << "Launching kernel with args:" << TileShape::GetName() << '\\n'
+                      << "Shape: " << TileShape::GetName() << '\\n'
+                      << "problem: " << CodegenPipelineProblem::GetName() << '\\n'
+                      << "pipeline: " << CodegenFlatmmPipeline::GetName() << '\\n'
+                      << "grid: {{" << grids.x << ", " << grids.y << ", " << grids.z << "}}"
+                      << ", blocks: {{" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}}"
+                      << std::endl;
+        }}
+        if(stream.flush_cache_)
+        {{
+            std::cout << "Flushing cache..." << std::endl;
+            static constexpr ck_tile::index_t APackedSize =
+                std::is_same_v<BDataType, ck_tile::pk_int4_t> ? 2 : 1;
+            static constexpr ck_tile::index_t BPackedSize =
+                std::is_same_v<BDataType, ck_tile::pk_int4_t> ? 2 : 1;
+
+            ck_tile::HostTensor<ADataType> a_m(ck_tile::host_tensor_descriptor(
+                args.M, args.K, args.stride_A, is_row_major(ALayout{{}})));
+            ck_tile::HostTensor<BDataType> b_n(ck_tile::host_tensor_descriptor(
+                args.K, args.N, args.stride_B, is_row_major(BLayout{{}})));
+
+            auto size_a_buffer = a_m.get_element_space_size_in_bytes() / APackedSize;
+            auto size_b_buffer = b_n.get_element_space_size_in_bytes() / BPackedSize;
+
+            ck_tile::RotatingMemWrapper<ADataType, BDataType> rotating_mem(
+                kargs.a_ptr, kargs.b_ptr, stream.rotating_count_, size_a_buffer, size_b_buffer);
+            rotating_mem.Print();
+
+            auto run_flush_cache = [&]() {{
+                // flush icache
+                ck_tile::flush_icache();
+                // rotating mem
+                rotating_mem.Next();
+                // clear c mem
+                if(args.k_batch > 1)
+                    hipGetErrorString(hipMemsetAsync(
+                        args.e_ptr, 0, args.M * args.N * sizeof(CDataType), stream.stream_id_));
+            }};
+            constexpr int kBlockPerCu = {k_block_per_cu};
+            ave_time = ck_tile::launch_kernel_time_mask(
+                stream,
+                run_flush_cache,
+                ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
+        }}
+        else
+        {{
+            constexpr int kBlockPerCu = {k_block_per_cu};
+            ave_time = ck_tile::launch_kernel(
+                stream,
+                ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
+        }}
+        return ave_time;
+    }};
+
+    BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+    return ave_time;
     }}
 }};
 """

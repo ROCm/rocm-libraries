@@ -8,13 +8,12 @@ option(ENABLE_CCACHE_FLATMM "Enable ccache for FLATMM ops compilation" OFF)
 
 set(FLATMM_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
 
-function(create_individual_flatmm_target datatype layout trait tile_config config_json target_archs_csv)
-    if(NOT target_archs_csv)
-        message(WARNING "Skipping FLATMM target ${datatype}_${layout}_${trait}_${tile_config}: No supported GPU targets")
+function(create_individual_flatmm_target datatype layout trait tile_config config_json)
+    # Use the parent scope FLATMM_GPU_TARGETS_INDIVIDUAL variable
+    if(NOT FLATMM_GPU_TARGETS_INDIVIDUAL)
+        message(WARNING "Skipping individual FLATMM target ${datatype}_${layout}_${trait}_${tile_config}: No supported GPU targets")
         return()
     endif()
-
-    string(REPLACE "," ";" target_archs "${target_archs_csv}")
 
     set(target_name "benchmark_flatmm_${datatype}_${layout}_${trait}_${tile_config}")
     set(working_path "${CMAKE_CURRENT_BINARY_DIR}/${datatype}/${layout}")
@@ -27,7 +26,7 @@ function(create_individual_flatmm_target datatype layout trait tile_config confi
                 --datatype ${datatype}
                 --layout ${layout}
                 --config_json ${config_json}
-                --gpu_target "${target_archs_csv}"
+                --gpu_target "${FLATMM_GPU_TARGETS_INDIVIDUAL}"
                 --gen_single
                 --kernel_name "flatmm_${datatype}_${layout}_${trait}_${tile_config}"
                 --tile_config "${tile_config}"
@@ -130,15 +129,13 @@ function(build_individual_flatmm_targets datatype layout)
             list(GET parts 0 kernel_name)
             list(GET parts 1 tile_config)
             list(GET parts 2 trait_combo)
-            list(GET parts 3 target_archs_csv)
 
             create_individual_flatmm_target(
                 "${datatype}"
                 "${layout}"
                 "${trait_combo}"
                 "${tile_config}"
-                "${json_blob}"
-                "${target_archs_csv}")
+                "${json_blob}")
         endforeach()
     else()
         message(FATAL_ERROR "Kernel list file not found")
@@ -199,7 +196,7 @@ else()
         endforeach()
     endforeach()
 
-    set(FLATMM_PIPELINES "flatmmv1")
+    set(FLATMM_PIPELINES "regv1")
     set(FLATMM_EPILOGUES "cshuffle")
     set(FLATMM_SCHEDULERS "default")
 

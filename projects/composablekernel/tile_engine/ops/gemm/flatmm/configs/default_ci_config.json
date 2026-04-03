@@ -51,7 +51,7 @@
   "trait_config": {
     "pipeline": {
       "values": [
-        "flatmmv1"
+        "regv1"
       ]
     },
     "scheduler": {
