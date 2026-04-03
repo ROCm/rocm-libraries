@@ -139,7 +139,11 @@ int main() {
     auto image_d = thrust::make_unique<uint8_t[]>(nx * ny * 3);
 
     {
-        hip::thread world_constructor([=] __device__ () { new (world) hittable_list(random_scene()); });
+        // Workaround: HIP compiler bug with `new (ptr) T(func())` on device memory.
+        hip::thread world_constructor([=] __device__ () {
+            hittable_list local = random_scene();
+            new (world) hittable_list(std::move(local));
+        });
         world_constructor.join();
 
         const int k_threads = 4096;
