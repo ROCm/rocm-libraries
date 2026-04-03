@@ -226,8 +226,11 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
         install_miopen_plugin_ctest_files()
     endif()
 
-    find_package(hipdnn_integration_tests CONFIG QUIET)
-    if(hipdnn_integration_tests_FOUND)
+    if(NOT TARGET hipdnn_integration_tests)
+        find_package(hipdnn_integration_tests CONFIG QUIET)
+    endif()
+
+    if(TARGET hipdnn_integration_tests)
         add_external_integration_test_target(
             TARGET_NAME   ${PROJECT_NAME}-external-integration-check
             PLUGIN_TARGET miopen_plugin

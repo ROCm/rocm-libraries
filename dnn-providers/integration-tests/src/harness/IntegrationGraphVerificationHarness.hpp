@@ -54,8 +54,7 @@ protected:
 
     // Determine tolerance for an output tensor based on the graph and
     // configured tolerance mode for the engine.
-    float getTolerance([[maybe_unused]] int64_t engineId,
-                       const hipdnn_frontend::graph::Graph& graph,
+    float getTolerance(const hipdnn_frontend::graph::Graph& graph,
                        const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& output)
     {
         ToleranceMode mode = TestConfig::get().getToleranceMode();
@@ -95,22 +94,47 @@ protected:
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, cpuBundle;
         std::vector<int64_t> outputTensorIds;
 
-        auto result = graph.build(getSharedHandle());
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        // Check if the target engine supports this graph
+        // Check engine support and set preferred engine before building execution plans.
+        // build_operation_graph() was already called by buildGraph() in the test subclass.
         std::vector<int64_t> engineIds;
         auto status = graph.get_ranked_engine_ids(engineIds);
-        int64_t targetEngineId = TestConfig::get().getEngineId();
-
-        if(status.is_bad()
-           || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
+        if(TestConfig::get().hasEngineName())
         {
-            GTEST_SKIP() << "Engine " << TestConfig::get().getEngineName()
-                         << " does not support this graph";
+            int64_t targetEngineId = TestConfig::get().getEngineId();
+            if(status.is_bad()
+               || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
+            {
+                if(TestConfig::get().failOnUnsupported())
+                {
+                    FAIL() << "Engine " << TestConfig::get().getEngineName()
+                           << " does not support this graph";
+                }
+                GTEST_SKIP() << "Engine " << TestConfig::get().getEngineName()
+                             << " does not support this graph";
+            }
+            // Prererred engine must be set before create_execution_plans.
+            graph.set_preferred_engine_id_ext(targetEngineId);
+        }
+        else
+        {
+            if(status.is_bad() || engineIds.empty())
+            {
+                if(TestConfig::get().failOnUnsupported())
+                {
+                    FAIL() << "No engine supports this graph";
+                }
+                GTEST_SKIP() << "No engine supports this graph";
+            }
         }
 
-        graph.set_preferred_engine_id_ext(targetEngineId);
+        // Build execution plans, engine preference set above should ensure that
+        // correct engine is selected.
+        auto result = graph.create_execution_plans();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        result = graph.check_support();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        result = graph.build_plans();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
 

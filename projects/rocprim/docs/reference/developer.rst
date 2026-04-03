@@ -11,7 +11,7 @@ rocPRIM Developer guidelines
 Overview
 ========
 
-As explained in :ref:`rocprim-intro`, rocPRIM's operations are part of one of four different hierarchical scopes: *Device/Grid*, :term:`Block`, :term:`Warp`, or *Thread*. This division facilitates re-use in the codebase and provides flexibility for users. Additional developer considerations are:
+rocPRIM's operations are part of one of four different hierarchical scopes: *Device/Grid*, :term:`Block`, :term:`Warp`, or *Thread*. This division facilitates re-use in the codebase and provides flexibility for users. Additional developer considerations are:
 
 * *Device/Grid*: algorithms called from host code, executed on the entire device. The input size is variable and passed as an argument to the function.
 * :term:`Block`: algorithms that are called from device code, executed by one thread block. All threads in a thread block should participate in the function call, and the threads together perform the algorithm. They are defined as structures, to group similar overloads and provide associated types such as the ``storage_type`` defining shared memory storage requirements. The maximum input size is defined by template arguments. Optionally, an actual size can be defined by ``valid_items`` overloads.
