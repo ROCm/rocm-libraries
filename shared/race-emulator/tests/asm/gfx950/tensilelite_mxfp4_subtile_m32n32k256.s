@@ -1661,7 +1661,7 @@ s_sub_u32 s[sgprSrdMXSB+2], s[sgprSrdMXSB+2], 256
 s_sub_u32 s[sgprLoopCounterL], s[sgprLoopCounterL], 1
 s_cmp_eq_u32 s[sgprLoopCounterL], 0
 s_cbranch_scc0 label_start
-// 
+//
 /*  ===============================================================  */
 /*  =================== Start of post-loop code ===================  */
 /*  ===============================================================  */

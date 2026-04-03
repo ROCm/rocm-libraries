@@ -574,8 +574,7 @@ void Wave::getVgprs(int reg, uint32_t *out) const {
       }
     }
   }
-  std::memcpy(out, vgprs.data() + reg * waveSize,
-              waveSize * sizeof(uint32_t));
+  std::memcpy(out, vgprs.data() + reg * waveSize, waveSize * sizeof(uint32_t));
 }
 
 template <typename T> T Wave::readLds(int addr, int lane) const {

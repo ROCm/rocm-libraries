@@ -114,7 +114,7 @@ inline float fp4ToFloat(uint8_t nibble) {
   // Derived from E2M1 (bias=1) rules; boundary values confirmed by CDNA4 ISA
   // Table 30. TODO(newling) verify intermediate values against hardware.
   static constexpr float table[16] = {
-      0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f,        // positive
+      0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f,  // positive
       -0.0f, -0.5f, -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f, // negative
   };
   return table[nibble & 0xF];
@@ -136,8 +136,7 @@ inline float e8m0ToFloat(uint8_t exponent) {
 /// fp4Data: 16 bytes containing 32 nibbles (low nibble = even element).
 /// scale: E8M0 shared exponent applied to all 32 values.
 /// out: 32 floats written sequentially.
-inline void mxfp4BlockToF32(float *out, const uint8_t *fp4Data,
-                            uint8_t scale) {
+inline void mxfp4BlockToF32(float *out, const uint8_t *fp4Data, uint8_t scale) {
   float s = e8m0ToFloat(scale);
   for (int i = 0; i < 16; ++i) {
     uint8_t byte = fp4Data[i];

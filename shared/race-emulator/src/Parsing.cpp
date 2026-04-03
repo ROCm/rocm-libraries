@@ -166,8 +166,7 @@ ParsedLine::ParsedLine(std::string_view originalLineIn,
                        std::string_view commentFreeLineIn, int n,
                        ParserState state,
                        const std::map<std::string, uint32_t> &symbolTable)
-    : originalLine(originalLineIn), lineNumber(n),
-      precedingParserState(state) {
+    : originalLine(originalLineIn), lineNumber(n), precedingParserState(state) {
 
   // Start from the comment-free line. In Root and Macro states, also replace
   // .set symbols (e.g. sgprKernArgAddress -> 0) so that instruction executors

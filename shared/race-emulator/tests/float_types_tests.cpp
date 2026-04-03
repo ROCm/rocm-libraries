@@ -198,8 +198,8 @@ TEST(FloatTypes, Mxfp4BlockNibbleOrder) {
   data[0] = 0x21;
   float out[32];
   mxfp4BlockToF32(out, data, 127); // scale=1.0
-  EXPECT_EQ(out[0], 0.5f);  // low nibble
-  EXPECT_EQ(out[1], 1.0f);  // high nibble
+  EXPECT_EQ(out[0], 0.5f);         // low nibble
+  EXPECT_EQ(out[1], 1.0f);         // high nibble
 }
 
 TEST(FloatTypes, Mxfp4BlockWithScale) {
@@ -257,8 +257,8 @@ TEST(FloatTypes, Mxfp4MatrixMultipleRows) {
   // 2 rows × K=32, row 0 all 1.0, row 1 all 2.0 (nibble 4).
   constexpr int K = 32;
   std::vector<uint8_t> data(2 * K / 2);
-  std::fill(data.begin(), data.begin() + K / 2, 0x22);      // row 0: 1.0
-  std::fill(data.begin() + K / 2, data.end(), 0x44);         // row 1: 2.0
+  std::fill(data.begin(), data.begin() + K / 2, 0x22); // row 0: 1.0
+  std::fill(data.begin() + K / 2, data.end(), 0x44);   // row 1: 2.0
   std::vector<uint8_t> scales(2, 127);
   std::vector<float> out(2 * K);
   mxfp4MatrixToF32<2, K>(out.data(), data.data(), scales.data());

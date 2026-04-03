@@ -466,9 +466,9 @@ public:
         for (int i = 0; i < nOutputRegs; ++i) {
           auto [cRow, col] = mapLaneToCoordC(l, i);
           out[cRow * N + col] =
-              C.isLiteral ? initVal
-                          : std::bit_cast<float>(
-                                wave.getVgpr(C.reg.index + i, l));
+              C.isLiteral
+                  ? initVal
+                  : std::bit_cast<float>(wave.getVgpr(C.reg.index + i, l));
         }
       }
 

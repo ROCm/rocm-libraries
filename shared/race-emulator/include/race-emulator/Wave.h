@@ -41,7 +41,8 @@ private:
   std::vector<std::string> argNames;
 };
 
-/// A parsed instruction operand: either a literal value or a register reference.
+/// A parsed instruction operand: either a literal value or a register
+/// reference.
 template <typename T> struct Operand {
   bool isLiteral;
   CommonRegister reg;
@@ -65,9 +66,8 @@ class Wave {
 
 public:
   /// Full constructor with all parameters.
-  Wave(int vgprCount, int agprOffset, int sgprCount, WaveSize,
-       WaveId, Workgroup &workgroup,
-       const std::map<std::string, int> *labels,
+  Wave(int vgprCount, int agprOffset, int sgprCount, WaveSize, WaveId,
+       Workgroup &workgroup, const std::map<std::string, int> *labels,
        const std::map<std::string, Macro> *macros);
 
   /// Convenience constructor for tests (no accumulators, labels, or macros;
