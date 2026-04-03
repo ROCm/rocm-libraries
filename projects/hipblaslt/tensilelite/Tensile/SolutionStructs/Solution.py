@@ -426,24 +426,6 @@ class Solution(collections.abc.Mapping):
     if "Valid" not in state:
       state["Valid"] = True
 
-    # # MXBlock kernels: Force simple scheduling configuration to match  reference for debug
-    # # This ensures consistent kernel structure for MX feature correctness
-    # if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
-    #   # Force SIA1 (simple single-loop scheduling) instead of SIA3 (complex multi-buffer scheduling)
-    #   state["ScheduleIterAlg"] = 1
-    #   # Disable PrefetchGlobalRead to avoid double buffering complexity
-    #   state["PrefetchGlobalRead"] = 0
-    #   # Disable PrefetchLocalRead to avoid extra VGPR buffers
-    #   state["PrefetchLocalRead"] = 0
-    #   # Disable ExpandPointerSwap
-    #   state["ExpandPointerSwap"] = 0
-    #   # Disable ClusterLocalRead
-    #   state["ClusterLocalRead"] = 0
-    #   # Disable 1LDSBuffer (use standard double buffer XOR swap)
-    #   state["1LDSBuffer"] = 0
-    #   # Disable PreloadKernArgs to match mx_tony (which doesn't use kernarg preload)
-    #   state["PreloadKernArgs"] = 0
-
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
       reject(state, printRejectionReason, "General Batched GEMM only support Batched Problem")
 
@@ -844,8 +826,7 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "DirectToVgpr is for MatrixInstruction only")
       return False
 
-    tmplrvw = (state["LocalReadVectorWidth%s"%tc] // 2) if state["ProblemType"]["Sparse"] else state["LocalReadVectorWidth%s"%tc]
-    if tmplrvw < state["MIInputPerThread"]:
+    if state["LocalReadVectorWidth%s" % tc] < state["MIInputPerThread"]:
       reject(state, "LocalReadVectorWidth < MIInputPerThread %d" % state["MIInputPerThread"])
       return False
 
@@ -1801,9 +1782,6 @@ class Solution(collections.abc.Mapping):
 
     # Complex datatype restrictions.
     if state["ProblemType"]["MacDataTypeA"].isComplex():
-      if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) and (state["GlobalSplitUAlgorithm"] != "MultipleBuffer"):
-        reject(state, printRejectionReason, "Complex datatype kernel currently only supports MultiBuffer GSU.")
-        return
       if state["MIArchVgpr"] and state["StreamK"] != 0:
         reject(state, printRejectionReason, "Complex datatype kernel does not support StreamK with MIArchVgpr yet.")
         return
@@ -2623,9 +2601,9 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "VWB * DataType.numBytes() > 16")
 
       # reject - GRVW too big
-      if (state["GlobalReadVectorWidthA"] * state["ProblemType"]["DataTypeA"].numBytes()) > 24 and not state["UseF32XEmulation"]:
+      if (state["GlobalReadVectorWidthA"] * state["ProblemType"]["DataTypeA"].numBytes()) > 24:
         reject(state, printRejectionReason, "GRVWA * DataTypeA.numBytes() > 24")
-      if (state["GlobalReadVectorWidthB"] * state["ProblemType"]["DataTypeB"].numBytes()) > 24 and not state["UseF32XEmulation"]:
+      if (state["GlobalReadVectorWidthB"] * state["ProblemType"]["DataTypeB"].numBytes()) > 24:
         reject(state, printRejectionReason, "GRVWB * DataTypeB.numBytes() > 24")
 
       disableGNLC = False # Set to true to disable GNLC if needed
@@ -3666,10 +3644,6 @@ class Solution(collections.abc.Mapping):
       roundupOffsetBlk = int(2**(math.ceil(math.log(offsetBlk, 2)))) if offsetBlk > 0 else 0
 
       # Separate MX and non-MX, otherwise, will hit LDS overflow issue.
-      # TODO:
-      # Disable StoreSwapAddr to ensure LdsOffsetA_Blk is always a power of 2
-      # This is consistent with referenc implementation which doesn't have StoreSwapAddr
-      # Original logic:
       state["StoreSwapAddr"] = (state["PrefetchGlobalRead"] == 2) and \
         (state["1LDSBuffer"] == 0) and numLdsBlk == 2 and \
         (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]
@@ -4077,6 +4051,12 @@ class Solution(collections.abc.Mapping):
     if state["EnableMatrixInstruction"] and state["PrefetchLocalRead"] > 0:
       # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
       wlrMultiple = state["LocalReadVectorWidthA"]//state["MIInputPerThread"]
+      # NOTE: wlrmultiple can be 0 for new MFMA
+      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not (state["ProblemType"]["DataType"].is8bitFloat() and (state["MatrixInstK"] == 64 or state["MatrixInstK"] == 128)):
+        if wlrMultiple == 0:
+          reject(state, printRejectionReason, "LocalReadVectorWidth %u is less than MIInput" % (
+              state["LocalReadVectorWidth"]))
+          return
       # for example, if the original ds_read is b32...
       #   1. if LoopIters = 5 (b32 x 5 times), WLR-Multiple = 2 (b64), then we can fit the WLR
       #   2. if LoopIters = 2 (b32 x 2 times), WLR-Multiple = 4 (b128), this is not allowed
