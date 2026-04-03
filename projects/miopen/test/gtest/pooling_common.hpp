@@ -219,7 +219,10 @@ struct verify_forward_pooling
 
         if(ws_size > 0 && filter.GetMode() == miopenPoolingMax)
         {
-            indices = wspace.Read<std::vector<Index>>();
+            // The workspace might be larger than out.data.size() * sizeof(Index)
+            // but we only need to read the indices part.
+            indices.resize(out.data.size());
+            HIP_CHECK(hipMemcpy(indices.data(), wspace.ptr(), out.data.size() * sizeof(Index), hipMemcpyDeviceToHost));
         }
         
         out.data = handle.Read<T>(out_dev, out.data.size());
@@ -279,6 +282,7 @@ struct verify_backward_pooling
             if(filter.GetMode() == miopenPoolingMax)
             {
                 ford_out([&](auto... out_spatial_id_pack) {
+                    // Use logical coordinates to get the index from the workspace vector
                     auto mx_idx = indices.at(dout.desc.GetIndex(o, w, out_spatial_id_pack...));
                     std::array<std::size_t, SptDim + 2> idx{};
                     bool in_cmp_idx = true;
@@ -417,7 +421,8 @@ struct verify_backward_pooling
         Workspace wspace(ws_size);
         if(!indices.empty())
         {
-            wspace.Write(indices);
+            // Only write the part of the workspace that contains indices
+            HIP_CHECK(hipMemcpy(wspace.ptr(), indices.data(), indices.size() * sizeof(Index), hipMemcpyHostToDevice));
         }
 
         float alpha = 1, beta = 0;
