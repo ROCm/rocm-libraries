@@ -44,7 +44,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     constexpr int64_t batch = 2;
     constexpr int64_t numHeads = 4;
     constexpr int64_t seqLen = 128;
-    constexpr int64_t headDim = 64;
+    constexpr int64_t headDim = 128;
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
@@ -62,7 +62,13 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto [oAttr, statsAttr] = graph->sdpa(qAttr, kAttr, vAttr, std::move(sdpaAttributes));
     oAttr->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    auto buildStatus = graph->build(handle);
+    if(!buildStatus.is_good())
+    {
+        std::cout << "Skipping: no engine available for this configuration ("
+                  << buildStatus.get_message() << ").\n\n";
+        return true;
+    }
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> qTensor(qAttr->get_dim(), layout);

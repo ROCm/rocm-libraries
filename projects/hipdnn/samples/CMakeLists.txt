@@ -114,8 +114,8 @@ add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_drelu_bn_backward)
 add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_variance_activ)
 
 # Register SDPA samples as tests
-# Note: SDPA sample test is disabled until GPU kernel provider support is available
-# (Fusilli plugin or HIP kernel provider plugin). Enable when SDPA forward is supported.
+# Note: SDPA sample test is disabled until the ASM SDPA engine's isApplicable
+# check properly gates on architecture, data type, and head dimension.
 # add_hipdnn_sample_test(hipdnn_sample_sdpa_fprop)
 
 # Register serialization samples as tests
