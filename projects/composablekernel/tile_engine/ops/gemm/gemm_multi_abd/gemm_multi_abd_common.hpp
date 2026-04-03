@@ -74,7 +74,9 @@ struct DataTypeTraits<ck_tile::pk_int4_t>
 // Helper function to determine if a layout is row-major
 template <typename Layout>
 constexpr auto is_row_major(Layout)
-{ return ck_tile::bool_constant<std::is_same_v<Layout, ck_tile::tensor_layout::gemm::RowMajor>>{}; }
+{
+    return ck_tile::bool_constant<std::is_same_v<Layout, ck_tile::tensor_layout::gemm::RowMajor>>{};
+}
 
 // Structure to hold kernel traits for dispatcher
 struct KernelTraits

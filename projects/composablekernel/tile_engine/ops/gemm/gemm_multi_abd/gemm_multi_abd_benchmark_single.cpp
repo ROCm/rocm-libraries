@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <iostream>
 #include <functional>
@@ -88,27 +88,26 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
     std::vector<int> stride_bs(NumBTensors, arg_parser.get_int("stride_bs"));
     std::vector<int> stride_ds(NumDTensors, arg_parser.get_int("stride_ds"));
 
-    GemmMultiABDProblem problem{
-        arg_parser.get_int("split_k"),
-        arg_parser.get_int("m"),
-        arg_parser.get_int("n"),
-        arg_parser.get_int("k"),
-        stride_as,
-        stride_bs,
-        stride_ds,
-        arg_parser.get_int("stride_e"),
-        dtype_as,
-        dtype_bs,
-        dtype_ds,
-        std::string(DataTypeTraits<AccDataType>::name),
-        std::string(DataTypeTraits<EDataType>::name),
-        layout_as,
-        layout_bs,
-        layout_ds,
-        std::string(ELayout::name),
-        std::string(AElementWiseFn::name),
-        std::string(BElementWiseFn::name),
-        std::string(CDEElementWiseFn::name)};
+    GemmMultiABDProblem problem{arg_parser.get_int("split_k"),
+                                arg_parser.get_int("m"),
+                                arg_parser.get_int("n"),
+                                arg_parser.get_int("k"),
+                                stride_as,
+                                stride_bs,
+                                stride_ds,
+                                arg_parser.get_int("stride_e"),
+                                dtype_as,
+                                dtype_bs,
+                                dtype_ds,
+                                std::string(DataTypeTraits<AccDataType>::name),
+                                std::string(DataTypeTraits<EDataType>::name),
+                                layout_as,
+                                layout_bs,
+                                layout_ds,
+                                std::string(ELayout::name),
+                                std::string(AElementWiseFn::name),
+                                std::string(BElementWiseFn::name),
+                                std::string(CDEElementWiseFn::name)};
 
     Setting setting{arg_parser.get_int("warmup"),
                     arg_parser.get_int("repeat"),
@@ -126,12 +125,11 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
     try
     {
         // Create a lambda that wraps the kernel launch
-        auto kernel_func = [](const ck_tile::GemmMultiABDHostArgs<NumATensors,
-                                                                    NumBTensors,
-                                                                    NumDTensors>& args,
-                              const ck_tile::stream_config& stream) {
-            return SelectedKernel::launch(args, stream);
-        };
+        auto kernel_func =
+            [](const ck_tile::GemmMultiABDHostArgs<NumATensors, NumBTensors, NumDTensors>& args,
+               const ck_tile::stream_config& stream) {
+                return SelectedKernel::launch(args, stream);
+            };
 
         // Benchmark the kernel
         profiler.benchmark(problem, kernel_func);

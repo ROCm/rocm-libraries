@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -183,8 +183,7 @@ auto calculate_rtol_atol(const ck_tile::index_t K,
                          const ck_tile::index_t kbatch,
                          const float max_accumulated_value)
 {
-    using ComputeTypeAB =
-        std::conditional_t<sizeof(AType) < sizeof(BType), AType, BType>;
+    using ComputeTypeAB = std::conditional_t<sizeof(AType) < sizeof(BType), AType, BType>;
 
     using ComputeType =
         std::conditional_t<sizeof(ComputeTypeAB) < sizeof(DType), ComputeTypeAB, DType>;
@@ -195,11 +194,10 @@ auto calculate_rtol_atol(const ck_tile::index_t K,
     const auto atol = ck_tile::get_absolute_threshold<ComputeType, EType, AccType>(
         max_accumulated_value / kbatch, ck_tile::integer_divide_ceil(K, kbatch));
 
-    const auto rtol_split_k =
-        ck_tile::get_relative_threshold<EType, EType, EType>(kbatch);
+    const auto rtol_split_k = ck_tile::get_relative_threshold<EType, EType, EType>(kbatch);
 
-    const auto atol_split_k = ck_tile::get_absolute_threshold<EType, EType, EType>(
-        max_accumulated_value, kbatch);
+    const auto atol_split_k =
+        ck_tile::get_absolute_threshold<EType, EType, EType>(max_accumulated_value, kbatch);
 
     return ck_tile::make_tuple(std::max(rtol, rtol_split_k), std::max(atol, atol_split_k));
 }
@@ -250,13 +248,18 @@ void gemm_multi_abd_host_reference(
         ck_tile::HostTensor<ABaseDataType> a_m_k({M, K});
         ck_tile::HostTensor<BBaseDataType> b_k_n({K, N});
 
-        ck_tile::reference_gemm_multiple_abd<
-            AsDataType, BsDataType, DsDataType,
-            AccDataType, EDataType, 
-            AElementWiseFn, BElementWiseFn, CDEElementWiseFn,
-            ABaseDataType, BBaseDataType, DBaseDataType>(
-            as_tensors, bs_tensors, ds_tensors,
-            a_m_k, b_k_n, e_m_n_host_result);
+        ck_tile::reference_gemm_multiple_abd<AsDataType,
+                                             BsDataType,
+                                             DsDataType,
+                                             AccDataType,
+                                             EDataType,
+                                             AElementWiseFn,
+                                             BElementWiseFn,
+                                             CDEElementWiseFn,
+                                             ABaseDataType,
+                                             BBaseDataType,
+                                             DBaseDataType>(
+            as_tensors, bs_tensors, ds_tensors, a_m_k, b_k_n, e_m_n_host_result);
     }
 }
 

@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -96,7 +96,8 @@ class GemmMultiABDProfiler
             ck_tile::FillUniformDistribution<DBaseDataType>{-1.f, 1.f}(t);
 
         // Create device buffers and copy
-        std::vector<ck_tile::DeviceMem> a_dev_bufs(NumATensors), b_dev_bufs(NumBTensors), d_dev_bufs(NumDTensors);
+        std::vector<ck_tile::DeviceMem> a_dev_bufs(NumATensors), b_dev_bufs(NumBTensors),
+            d_dev_bufs(NumDTensors);
         // a_dev_bufs.reserve(NumATensors);
         // b_dev_bufs.reserve(NumBTensors);
         // d_dev_bufs.reserve(NumDTensors);
@@ -285,8 +286,7 @@ class GemmMultiABDProfiler
             {
                 if(file.tellp() == 0)
                 {
-                    file << "rocm_version,device_name,"
-                         << "split_k,m,n,k,";
+                    file << "rocm_version,device_name," << "split_k,m,n,k,";
                     for(std::size_t i = 0; i < NumATensors; i++)
                         file << "stride_a" << i << ",";
                     for(std::size_t i = 0; i < NumBTensors; i++)
@@ -307,9 +307,7 @@ class GemmMultiABDProfiler
                         file << "layout_b" << i << ",";
                     for(std::size_t i = 0; i < NumDTensors; i++)
                         file << "layout_d" << i << ",";
-                    file << "layout_e,"
-                         << "a_elementwise,b_elementwise,cde_elementwise,"
-                         << "name,"
+                    file << "layout_e," << "a_elementwise,b_elementwise,cde_elementwise," << "name,"
                          << "latency(ms),tflops(TFlops),bandwidth(GB/s),metric\n";
                 }
 
