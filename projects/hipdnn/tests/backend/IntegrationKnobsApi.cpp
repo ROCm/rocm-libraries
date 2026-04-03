@@ -3,12 +3,17 @@
 
 #include "HipdnnBackendFlatbufferData.h"
 #include "TestUtil.hpp"
+#include "descriptors/ScopedDescriptor.hpp"
 #include "hipdnn_backend.h"
+#include <array>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/KnobSettingFactory.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
+#include <unordered_set>
+#include <vector>
 
 class IntegrationKnobsApi : public ::testing::Test
 {
@@ -63,6 +68,80 @@ protected:
             hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
             HIPDNN_STATUS_SUCCESS);
         test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
+    }
+
+    /// Retrieves knob info descriptors from _engine, wrapped in RAII.
+    std::vector<hipdnn_backend::ScopedDescriptor> getKnobDescriptors(int64_t expectedCount)
+    {
+        int64_t knobCount = 0;
+        auto status = hipdnnBackendGetAttribute(_engine,
+                                                HIPDNN_ATTR_ENGINE_KNOB_INFO,
+                                                HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                0,
+                                                &knobCount,
+                                                nullptr);
+        EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(knobCount, expectedCount);
+        if(status != HIPDNN_STATUS_SUCCESS || knobCount != expectedCount)
+        {
+            return {};
+        }
+
+        std::vector<hipdnnBackendDescriptor_t> rawDescs(static_cast<size_t>(knobCount));
+        int64_t returnedCount = 0;
+        status = hipdnnBackendGetAttribute(_engine,
+                                           HIPDNN_ATTR_ENGINE_KNOB_INFO,
+                                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                           knobCount,
+                                           &returnedCount,
+                                           static_cast<void*>(rawDescs.data()));
+        EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
+        if(status != HIPDNN_STATUS_SUCCESS)
+        {
+            // Clean up any descriptors that were returned before returning empty
+            for(auto raw : rawDescs)
+            {
+                delete raw;
+            }
+            return {};
+        }
+
+        // Immediately wrap in RAII
+        std::vector<hipdnn_backend::ScopedDescriptor> result;
+        result.reserve(rawDescs.size());
+        for(auto raw : rawDescs)
+        {
+            result.emplace_back(raw);
+        }
+        return result;
+    }
+
+    /// Finds a knob descriptor by its knob ID string.
+    static hipdnnBackendDescriptor_t
+        findKnobDescriptorById(const std::vector<hipdnn_backend::ScopedDescriptor>& knobDescs,
+                               const std::string& targetId)
+    {
+        for(const auto& desc : knobDescs)
+        {
+            if(desc.get() == nullptr)
+            {
+                continue;
+            }
+
+            std::array<char, 256> knobId = {};
+            int64_t idLen = 0;
+            auto status = hipdnnBackendGetAttribute(desc.get(),
+                                                    HIPDNN_ATTR_KNOB_INFO_TYPE_EXT,
+                                                    HIPDNN_TYPE_CHAR,
+                                                    static_cast<int64_t>(knobId.size()),
+                                                    &idLen,
+                                                    knobId.data());
+            if(status == HIPDNN_STATUS_SUCCESS && std::string(knobId.data()) == targetId)
+            {
+                return desc.get();
+            }
+        }
+        return nullptr;
     }
 };
 
@@ -697,6 +776,32 @@ protected:
                                             static_cast<const void*>(&_engine)),
                   HIPDNN_STATUS_SUCCESS);
     }
+
+    /// Creates an execution plan with the fixture's handle and engine config,
+    /// then asserts finalize returns the expected status.
+    void expectExecutionPlanFinalize(hipdnnStatus_t expectedStatus)
+    {
+        hipdnn_backend::ScopedDescriptor executionPlan;
+        ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR,
+                                                executionPlan.getPtr()),
+                  HIPDNN_STATUS_SUCCESS);
+
+        ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan.get(),
+                                            HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
+                                            HIPDNN_TYPE_HANDLE,
+                                            1,
+                                            static_cast<const void*>(&_handle)),
+                  HIPDNN_STATUS_SUCCESS);
+
+        ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan.get(),
+                                            HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                            1,
+                                            static_cast<const void*>(&_engineConfig)),
+                  HIPDNN_STATUS_SUCCESS);
+
+        EXPECT_EQ(hipdnnBackendFinalize(executionPlan.get()), expectedStatus);
+    }
 };
 
 TEST_F(IntegrationConstraintValidationApi, IntValueToFloatConstraint)
@@ -715,32 +820,7 @@ TEST_F(IntegrationConstraintValidationApi, IntValueToFloatConstraint)
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
-
-    hipdnnBackendDescriptor_t executionPlan = nullptr;
-    ASSERT_EQ(
-        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
-        HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
-                                        HIPDNN_TYPE_HANDLE,
-                                        1,
-                                        static_cast<const void*>(&_handle)),
-              HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                        1,
-                                        static_cast<const void*>(&_engineConfig)),
-              HIPDNN_STATUS_SUCCESS);
-
-    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
-
-    if(executionPlan != nullptr)
-    {
-        hipdnnBackendDestroyDescriptor(executionPlan);
-    }
+    expectExecutionPlanFinalize(HIPDNN_STATUS_PLUGIN_ERROR);
 }
 
 TEST_F(IntegrationConstraintValidationApi, FloatValueToIntConstraint)
@@ -759,32 +839,7 @@ TEST_F(IntegrationConstraintValidationApi, FloatValueToIntConstraint)
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
-
-    hipdnnBackendDescriptor_t executionPlan = nullptr;
-    ASSERT_EQ(
-        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
-        HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
-                                        HIPDNN_TYPE_HANDLE,
-                                        1,
-                                        static_cast<const void*>(&_handle)),
-              HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                        1,
-                                        static_cast<const void*>(&_engineConfig)),
-              HIPDNN_STATUS_SUCCESS);
-
-    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
-
-    if(executionPlan != nullptr)
-    {
-        hipdnnBackendDestroyDescriptor(executionPlan);
-    }
+    expectExecutionPlanFinalize(HIPDNN_STATUS_PLUGIN_ERROR);
 }
 
 TEST_F(IntegrationConstraintValidationApi, StringValueToIntConstraint)
@@ -803,32 +858,7 @@ TEST_F(IntegrationConstraintValidationApi, StringValueToIntConstraint)
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
-
-    hipdnnBackendDescriptor_t executionPlan = nullptr;
-    ASSERT_EQ(
-        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
-        HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
-                                        HIPDNN_TYPE_HANDLE,
-                                        1,
-                                        static_cast<const void*>(&_handle)),
-              HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                        1,
-                                        static_cast<const void*>(&_engineConfig)),
-              HIPDNN_STATUS_SUCCESS);
-
-    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
-
-    if(executionPlan != nullptr)
-    {
-        hipdnnBackendDestroyDescriptor(executionPlan);
-    }
+    expectExecutionPlanFinalize(HIPDNN_STATUS_PLUGIN_ERROR);
 }
 
 TEST_F(IntegrationConstraintValidationApi, IntValueToStringConstraint)
@@ -847,32 +877,7 @@ TEST_F(IntegrationConstraintValidationApi, IntValueToStringConstraint)
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
-
-    hipdnnBackendDescriptor_t executionPlan = nullptr;
-    ASSERT_EQ(
-        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
-        HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
-                                        HIPDNN_TYPE_HANDLE,
-                                        1,
-                                        static_cast<const void*>(&_handle)),
-              HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                        1,
-                                        static_cast<const void*>(&_engineConfig)),
-              HIPDNN_STATUS_SUCCESS);
-
-    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
-
-    if(executionPlan != nullptr)
-    {
-        hipdnnBackendDestroyDescriptor(executionPlan);
-    }
+    expectExecutionPlanFinalize(HIPDNN_STATUS_PLUGIN_ERROR);
 }
 
 TEST_F(IntegrationConstraintValidationApi, FloatValueToStringConstraint)
@@ -891,32 +896,7 @@ TEST_F(IntegrationConstraintValidationApi, FloatValueToStringConstraint)
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
-
-    hipdnnBackendDescriptor_t executionPlan = nullptr;
-    ASSERT_EQ(
-        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
-        HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
-                                        HIPDNN_TYPE_HANDLE,
-                                        1,
-                                        static_cast<const void*>(&_handle)),
-              HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                        1,
-                                        static_cast<const void*>(&_engineConfig)),
-              HIPDNN_STATUS_SUCCESS);
-
-    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
-
-    if(executionPlan != nullptr)
-    {
-        hipdnnBackendDestroyDescriptor(executionPlan);
-    }
+    expectExecutionPlanFinalize(HIPDNN_STATUS_PLUGIN_ERROR);
 }
 
 TEST_F(IntegrationConstraintValidationApi, StringValueToFloatConstraint)
@@ -935,32 +915,7 @@ TEST_F(IntegrationConstraintValidationApi, StringValueToFloatConstraint)
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
-
-    hipdnnBackendDescriptor_t executionPlan = nullptr;
-    ASSERT_EQ(
-        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
-        HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
-                                        HIPDNN_TYPE_HANDLE,
-                                        1,
-                                        static_cast<const void*>(&_handle)),
-              HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                        1,
-                                        static_cast<const void*>(&_engineConfig)),
-              HIPDNN_STATUS_SUCCESS);
-
-    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
-
-    if(executionPlan != nullptr)
-    {
-        hipdnnBackendDestroyDescriptor(executionPlan);
-    }
+    expectExecutionPlanFinalize(HIPDNN_STATUS_PLUGIN_ERROR);
 }
 
 TEST_F(IntegrationConstraintValidationApi, CorrectTypesSucceed)
@@ -987,32 +942,7 @@ TEST_F(IntegrationConstraintValidationApi, CorrectTypesSucceed)
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
-
-    hipdnnBackendDescriptor_t executionPlan = nullptr;
-    ASSERT_EQ(
-        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
-        HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
-                                        HIPDNN_TYPE_HANDLE,
-                                        1,
-                                        static_cast<const void*>(&_handle)),
-              HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                        1,
-                                        static_cast<const void*>(&_engineConfig)),
-              HIPDNN_STATUS_SUCCESS);
-
-    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_SUCCESS);
-
-    if(executionPlan != nullptr)
-    {
-        hipdnnBackendDestroyDescriptor(executionPlan);
-    }
+    expectExecutionPlanFinalize(HIPDNN_STATUS_SUCCESS);
 }
 
 TEST_F(IntegrationConstraintValidationApi, UnknownKnobIsIgnored)
@@ -1031,32 +961,7 @@ TEST_F(IntegrationConstraintValidationApi, UnknownKnobIsIgnored)
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
-
-    hipdnnBackendDescriptor_t executionPlan = nullptr;
-    ASSERT_EQ(
-        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
-        HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
-                                        HIPDNN_TYPE_HANDLE,
-                                        1,
-                                        static_cast<const void*>(&_handle)),
-              HIPDNN_STATUS_SUCCESS);
-
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                        1,
-                                        static_cast<const void*>(&_engineConfig)),
-              HIPDNN_STATUS_SUCCESS);
-
-    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_SUCCESS);
-
-    if(executionPlan != nullptr)
-    {
-        hipdnnBackendDestroyDescriptor(executionPlan);
-    }
+    expectExecutionPlanFinalize(HIPDNN_STATUS_SUCCESS);
 }
 
 TEST_F(IntegrationConstraintValidationApi, MixedValidAndInvalidKnobs)
@@ -1080,30 +985,286 @@ TEST_F(IntegrationConstraintValidationApi, MixedValidAndInvalidKnobs)
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
+    expectExecutionPlanFinalize(HIPDNN_STATUS_PLUGIN_ERROR);
+}
 
-    hipdnnBackendDescriptor_t executionPlan = nullptr;
-    ASSERT_EQ(
-        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
-        HIPDNN_STATUS_SUCCESS);
+// =============================================================================
+// Engine Knob Info via Descriptor API (HIPDNN_ATTR_ENGINE_KNOB_INFO)
+// =============================================================================
 
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
-                                        HIPDNN_TYPE_HANDLE,
-                                        1,
-                                        static_cast<const void*>(&_handle)),
-              HIPDNN_STATUS_SUCCESS);
+TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorCount)
+{
+    createFinalizedEngine();
 
-    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+    int64_t knobCount = -1;
+    EXPECT_EQ(hipdnnBackendGetAttribute(_engine,
+                                        HIPDNN_ATTR_ENGINE_KNOB_INFO,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                        1,
-                                        static_cast<const void*>(&_engineConfig)),
+                                        0,
+                                        &knobCount,
+                                        nullptr),
               HIPDNN_STATUS_SUCCESS);
 
-    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
+    EXPECT_EQ(knobCount, 5);
+}
 
-    if(executionPlan != nullptr)
+TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateIntKnob)
+{
+    createFinalizedEngine();
+    auto knobDescs = getKnobDescriptors(5);
+    ASSERT_FALSE(knobDescs.empty());
+
+    auto* intKnob = findKnobDescriptorById(knobDescs, "test.int_knob");
+    ASSERT_NE(intKnob, nullptr) << "Integer knob 'test.int_knob' not found via descriptor API";
+
+    // Verify default value type
+    int64_t valueType = 0;
+    int64_t vtCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(intKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        &vtCount,
+                                        &valueType),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(valueType, static_cast<int64_t>(HIPDNN_TYPE_INT64));
+
+    // Verify default value
+    int64_t defaultVal = 0;
+    int64_t dvCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(intKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        &dvCount,
+                                        &defaultVal),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(defaultVal, 50);
+
+    // Verify min/max
+    int64_t minVal = 0;
+    int64_t minCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(intKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        &minCount,
+                                        &minVal),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(minVal, 0);
+
+    int64_t maxVal = 0;
+    int64_t maxCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(intKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        &maxCount,
+                                        &maxVal),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(maxVal, 100);
+
+    // Verify stride
+    int64_t stride = 0;
+    int64_t strideCount = 0;
+    EXPECT_EQ(
+        hipdnnBackendGetAttribute(
+            intKnob, HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT, HIPDNN_TYPE_INT64, 1, &strideCount, &stride),
+        HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(stride, 10);
+}
+
+TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateFloatKnob)
+{
+    createFinalizedEngine();
+    auto knobDescs = getKnobDescriptors(5);
+    ASSERT_FALSE(knobDescs.empty());
+
+    auto* floatKnob = findKnobDescriptorById(knobDescs, "test.float_knob");
+    ASSERT_NE(floatKnob, nullptr) << "Float knob 'test.float_knob' not found via descriptor API";
+
+    // Verify default value type is DOUBLE
+    int64_t valueType = 0;
+    int64_t vtCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(floatKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        &vtCount,
+                                        &valueType),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(valueType, static_cast<int64_t>(HIPDNN_TYPE_DOUBLE));
+
+    // Verify default value = 0.5
+    double defaultVal = 0.0;
+    int64_t dvCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(floatKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT,
+                                        HIPDNN_TYPE_DOUBLE,
+                                        1,
+                                        &dvCount,
+                                        &defaultVal),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_DOUBLE_EQ(defaultVal, 0.5);
+
+    // Verify min = 0.0
+    double minVal = -1.0;
+    int64_t minCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(floatKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT,
+                                        HIPDNN_TYPE_DOUBLE,
+                                        1,
+                                        &minCount,
+                                        &minVal),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_DOUBLE_EQ(minVal, 0.0);
+
+    // Verify max = 1.0
+    double maxVal = -1.0;
+    int64_t maxCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(floatKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT,
+                                        HIPDNN_TYPE_DOUBLE,
+                                        1,
+                                        &maxCount,
+                                        &maxVal),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_DOUBLE_EQ(maxVal, 1.0);
+}
+
+TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateStringKnob)
+{
+    createFinalizedEngine();
+    auto knobDescs = getKnobDescriptors(5);
+    ASSERT_FALSE(knobDescs.empty());
+
+    auto* stringKnob = findKnobDescriptorById(knobDescs, "test.string_knob");
+    ASSERT_NE(stringKnob, nullptr) << "String knob 'test.string_knob' not found via descriptor API";
+
+    // Verify default value type is CHAR
+    int64_t valueType = 0;
+    int64_t vtCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(stringKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        &vtCount,
+                                        &valueType),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(valueType, static_cast<int64_t>(HIPDNN_TYPE_CHAR));
+
+    // Verify default value = "fast"
+    std::array<char, 64> defaultVal = {};
+    int64_t dvCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(stringKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT,
+                                        HIPDNN_TYPE_CHAR,
+                                        static_cast<int64_t>(defaultVal.size()),
+                                        &dvCount,
+                                        defaultVal.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(std::string(defaultVal.data()), "fast");
+
+    // Verify valid values buffer contains the 3 choices
+    int64_t validBufLen = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(stringKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
+                                        HIPDNN_TYPE_CHAR,
+                                        0,
+                                        &validBufLen,
+                                        nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_GT(validBufLen, 0) << "Valid values buffer should be non-empty";
+
+    std::vector<char> validBuf(static_cast<size_t>(validBufLen));
+    int64_t actualLen = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(stringKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
+                                        HIPDNN_TYPE_CHAR,
+                                        validBufLen,
+                                        &actualLen,
+                                        validBuf.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(actualLen, validBufLen);
+
+    // Parse the null-separated buffer and verify the 3 choices are present
+    std::unordered_set<std::string> validValues;
+    const char* p = validBuf.data();
+    const char* end = p + actualLen;
+    while(p < end)
     {
-        hipdnnBackendDestroyDescriptor(executionPlan);
+        const std::string s(p);
+        if(!s.empty())
+        {
+            validValues.insert(s);
+        }
+        p += s.size() + 1;
     }
+    EXPECT_EQ(validValues.count("fast"), 1u);
+    EXPECT_EQ(validValues.count("accurate"), 1u);
+    EXPECT_EQ(validValues.count("balanced"), 1u);
+}
+
+TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateDeprecatedKnob)
+{
+    createFinalizedEngine();
+    auto knobDescs = getKnobDescriptors(5);
+    ASSERT_FALSE(knobDescs.empty());
+
+    auto* deprecatedKnob = findKnobDescriptorById(knobDescs, "test.deprecated_knob");
+    ASSERT_NE(deprecatedKnob, nullptr)
+        << "Deprecated knob 'test.deprecated_knob' not found via descriptor API";
+
+    // Verify deprecated flag is true
+    bool isDeprecated = false;
+    int64_t depCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(deprecatedKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &depCount,
+                                        &isDeprecated),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_TRUE(isDeprecated) << "test.deprecated_knob should have deprecated flag set to true";
+}
+
+TEST_F(IntegrationKnobsApi, GetKnobInfoDescriptorsAndValidateValidValuesIntKnob)
+{
+    // Use Engine B which has test.engine_b.block_size with valid values {8, 16, 32, 64}
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>();
+    test_util::createTestEngine(&_engine, &_graph, _handle, gidx, true);
+
+    auto knobDescs = getKnobDescriptors(3);
+    ASSERT_FALSE(knobDescs.empty());
+
+    auto* blockSizeKnob = findKnobDescriptorById(knobDescs, "test.engine_b.block_size");
+    ASSERT_NE(blockSizeKnob, nullptr)
+        << "Knob 'test.engine_b.block_size' not found via descriptor API";
+
+    // Verify valid values count = 4
+    int64_t validCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(blockSizeKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT,
+                                        HIPDNN_TYPE_INT64,
+                                        0,
+                                        &validCount,
+                                        nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(validCount, 4);
+
+    // Fetch and verify the actual valid values {8, 16, 32, 64}
+    std::vector<int64_t> validValues(static_cast<size_t>(validCount));
+    int64_t actualCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(blockSizeKnob,
+                                        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT,
+                                        HIPDNN_TYPE_INT64,
+                                        validCount,
+                                        &actualCount,
+                                        validValues.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(actualCount, 4);
+
+    const std::unordered_set<int64_t> expected = {8, 16, 32, 64};
+    const std::unordered_set<int64_t> actual(validValues.begin(), validValues.end());
+    EXPECT_EQ(actual, expected);
 }
