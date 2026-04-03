@@ -172,11 +172,6 @@ void InputFlags::Parse(int argc, char* argv[])
             std::string long_name = temp.substr(2);
             if(long_name == "help")
                 Print();
-            if(long_name == "verify")
-            {
-                if(i + 1 >= args.size() || args[i + 1].empty() || args[i + 1][0] == '-')
-                    Print();
-            }
             char short_name = FindShortName(long_name);
             StoreOptionalFlagValue(short_name, args[i + 1]);
             i++;
