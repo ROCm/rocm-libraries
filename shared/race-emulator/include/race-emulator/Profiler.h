@@ -138,6 +138,11 @@ public:
   /// Wall-clock time since profiling was enabled (or since last reset).
   double getWallTime() const;
 
+  /// Merge another profiler's entries into this one. Sums durations and
+  /// counts per key. Asserts that depths match for shared keys.
+  /// Does not merge wall-clock time — the caller manages that separately.
+  void merge(const Profiler &other);
+
   /// Clear all accumulated data and restart the wall clock.
   void reset();
 

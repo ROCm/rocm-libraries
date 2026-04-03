@@ -216,3 +216,60 @@ TEST(ProfilerTest, NoOpStopwatchMoveSemantics) {
   Profiler::ScopedStopwatch sw2 = std::move(sw1);
   // Both should be safe to destroy.
 }
+
+TEST(ProfilerTest, MergeDisjointKeys) {
+  Profiler a;
+  a.setEnabled(true);
+  { auto sw = a.scopedStopwatch("alpha"); }
+
+  Profiler b;
+  b.setEnabled(true);
+  { auto sw = b.scopedStopwatch("beta"); }
+
+  a.merge(b);
+  std::string report = a.reportStr(0.0);
+  EXPECT_NE(report.find("alpha"), std::string::npos);
+  EXPECT_NE(report.find("beta"), std::string::npos);
+}
+
+TEST(ProfilerTest, MergeOverlappingKeys) {
+  Profiler a;
+  a.setEnabled(true);
+  { auto sw = a.scopedStopwatch("shared"); }
+  { auto sw = a.scopedStopwatch("shared"); }
+
+  Profiler b;
+  b.setEnabled(true);
+  { auto sw = b.scopedStopwatch("shared"); }
+
+  a.merge(b);
+  // "shared" should appear with count 3 (2 from a + 1 from b).
+  std::string report = a.reportStr(0.0);
+  EXPECT_NE(report.find("shared"), std::string::npos);
+  EXPECT_NE(report.find("3"), std::string::npos);
+}
+
+TEST(ProfilerTest, MergePreservesMatchingDepth) {
+  Profiler a;
+  a.setEnabled(true);
+  { auto sw = a.scopedStopwatch("top_level"); } // depth 0
+
+  Profiler b;
+  b.setEnabled(true);
+  { auto sw = b.scopedStopwatch("top_level"); } // depth 0
+
+  a.merge(b);
+  EXPECT_EQ(a.getDepth("top_level"), 0);
+}
+
+TEST(ProfilerTest, MergeEmptyProfiler) {
+  Profiler a;
+  a.setEnabled(true);
+  { auto sw = a.scopedStopwatch("existing"); }
+
+  Profiler empty;
+  a.merge(empty);
+
+  std::string report = a.reportStr(0.0);
+  EXPECT_NE(report.find("existing"), std::string::npos);
+}

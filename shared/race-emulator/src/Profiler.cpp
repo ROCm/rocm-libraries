@@ -106,6 +106,20 @@ double Profiler::getWallTime() const {
   return std::chrono::duration<double>(elapsed).count();
 }
 
+void Profiler::merge(const Profiler &other) {
+  for (const auto &[name, entry] : other.entries) {
+    auto &dst = entries[name];
+    dst.totalSeconds += entry.totalSeconds;
+    dst.count += entry.count;
+    if (dst.depth < 0) {
+      dst.depth = entry.depth;
+    } else if (entry.depth >= 0) {
+      assert(dst.depth == entry.depth &&
+             "Merging profilers with different depths for the same key");
+    }
+  }
+}
+
 void Profiler::reset() {
   assert(scopeStack.empty() &&
          "Profiler::reset() called while scopes are still active. "
