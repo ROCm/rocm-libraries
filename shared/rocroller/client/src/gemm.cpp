@@ -392,42 +392,12 @@ namespace rocRoller::Client::GEMMClient
 
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
         {
-            TensorDescriptor descAScale;
-            if(not problemParams.types.scalePretileA.empty())
-            {
-                //
-                // AScale is M x (K / scaleBlockSize); just write as M
-                // x K for now.  Let T_M and T_K be the tile sizes.
-                //
-                // Pre-tiled AScale is; slow-to-fast:
-                //
-                //   tileM * ((K // T_K) * T_M * T_K) + tileK * (T_M * T_K) + m * T_K + k
-                //
-                // Note the strides.
-                //
+            TensorDescriptor descAScale = TensorDescriptor(
+                problemParams.types.scaleTypeA,
+                {static_cast<size_t>(problemParams.m),
+                 static_cast<size_t>(problemParams.k / problemParams.types.scaleBlockSize)},
+                problemParams.types.transA == TransposeType::T ? "T" : "N");
 
-                // Only works for TranspostType::T for now
-                AssertFatal(problemParams.types.transA == TransposeType::T,
-                            "Pre-tiling scale A only supported for TransposeType::T");
-
-                auto const M     = problemParams.m;
-                auto const K     = problemParams.k / problemParams.types.scaleBlockSize;
-                auto const tileM = problemParams.types.scalePretileA[0];
-                auto const tileK = problemParams.types.scalePretileA[1];
-
-                descAScale = TensorDescriptor(problemParams.types.scaleTypeA,
-                                              {M, K},
-                                              {static_cast<size_t>((K / tileK) * tileM * tileK),
-                                               static_cast<size_t>(tileM * tileK)});
-            }
-            else
-            {
-                descAScale = TensorDescriptor(
-                    problemParams.types.scaleTypeA,
-                    {static_cast<size_t>(problemParams.m),
-                     static_cast<size_t>(problemParams.k / problemParams.types.scaleBlockSize)},
-                    problemParams.types.transA == TransposeType::T ? "T" : "N");
-            }
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             setCommandTensorArg(commandArgs, aScaleTag.value(), descAScale, deviceScaleA.get());
         }
@@ -443,42 +413,12 @@ namespace rocRoller::Client::GEMMClient
 
         if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
         {
-            TensorDescriptor descBScale;
-            if(not problemParams.types.scalePretileB.empty())
-            {
-                //
-                // BScale is (K / scaleBlockSize) x N; just write as K
-                // x N for now.  Let T_K and T_N be the tile sizes.
-                //
-                // Pre-tiled BScale is; slow-to-fast:
-                //
-                //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
-                //
-                // Note the strides.
-                //
+            TensorDescriptor descBScale = TensorDescriptor(
+                problemParams.types.scaleTypeB,
+                {static_cast<size_t>(problemParams.k / problemParams.types.scaleBlockSize),
+                 static_cast<size_t>(problemParams.n)},
+                problemParams.types.transB == TransposeType::T ? "T" : "N");
 
-                // Only works for TranspostType::T for now
-                AssertFatal(problemParams.types.transB == TransposeType::N,
-                            "Pre-tiling scale B only supported for TransposeType::N");
-
-                auto const K     = problemParams.k / problemParams.types.scaleBlockSize;
-                auto const N     = problemParams.n;
-                auto const tileK = problemParams.types.scalePretileB[0];
-                auto const tileN = problemParams.types.scalePretileB[1];
-
-                descBScale = TensorDescriptor(problemParams.types.scaleTypeB,
-                                              {K, N},
-                                              {static_cast<size_t>(tileK * tileN),
-                                               static_cast<size_t>((K / tileK) * tileK * tileN)});
-            }
-            else
-            {
-                descBScale = TensorDescriptor(
-                    problemParams.types.scaleTypeB,
-                    {static_cast<size_t>(problemParams.k / problemParams.types.scaleBlockSize),
-                     static_cast<size_t>(problemParams.n)},
-                    problemParams.types.transB == TransposeType::T ? "T" : "N");
-            }
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             setCommandTensorArg(commandArgs, bScaleTag.value(), descBScale, deviceScaleB.get());
         }
