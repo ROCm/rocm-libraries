@@ -24,7 +24,6 @@ amdhsa.kernels:
     .kernarg_segment_align: 8
     .reqd_workgroup_size: [ \wg_x, 1, 1 ]
     .max_flat_workgroup_size: \wg_x
-    .uniform_work_group_size: 1
     .wavefront_size: 64
     .workgroup_processor_mode: 0
     .args:
@@ -135,7 +134,7 @@ __fp16_overflow = 0
 
 .rodata
 .p2align 6
-.if (.amdgcn.gfx_generation_number == 9 && (.amdgcn.gfx_generation_minor == 4 || .amdgcn.gfx_generation_minor == 5))
+.if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4 && .amdgcn.gfx_generation_stepping == 2)
 .amdhsa_kernel \arg_kernel_name
     .amdhsa_group_segment_fixed_size         __group_segment_fixed_size
     .amdhsa_user_sgpr_dispatch_ptr           __sgpr_dispatch_ptr // s[0:1]
@@ -187,18 +186,18 @@ METADATA_WRAPPER \arg_sc, \arg_wc, \arg_wg_x, <\arg_kernel_name>
 
 .endm
 
-.macro PROLOG_KERNEL_DESCRIPTOR_WRAPPER machine_version_major:req, machine_version_minor:req, kernel_version:req, kernel_name_postfix:req
-    PROLOG_KERNEL_DESCRIPTOR miopenSp3AsmConvRage_v\kernel_version\()_gfx\machine_version_major\()\machine_version_minor\()\kernel_name_postfix
+.macro PROLOG_KERNEL_DESCRIPTOR_WRAPPER machine_version:req, kernel_version:req, kernel_name_postfix:req
+    PROLOG_KERNEL_DESCRIPTOR miopenSp3AsmConvRage_v\kernel_version\()_gfx\machine_version\()\kernel_name_postfix
 .endm
 
-.macro EPILOG_KERNEL_DESCRIPTOR_WRAPPER sc:req, wc:req, accum_offset:req, wg_x:req, machine_version_major:req, machine_version_minor:req, kernel_version:req, kernel_name_postfix:req
-    EPILOG_KERNEL_DESCRIPTOR \sc, \wc, \accum_offset, \wg_x, miopenSp3AsmConvRage_v\kernel_version\()_gfx\machine_version_major\()\machine_version_minor\()\kernel_name_postfix
+.macro EPILOG_KERNEL_DESCRIPTOR_WRAPPER sc:req, wc:req, accum_offset:req, wg_x:req, machine_version:req, kernel_version:req, kernel_name_postfix:req
+    EPILOG_KERNEL_DESCRIPTOR \sc, \wc, \accum_offset, \wg_x, miopenSp3AsmConvRage_v\kernel_version\()_gfx\machine_version\()\kernel_name_postfix
 .endm
 
 .macro KERNEL_PROLOG kernel_version:req, kernel_name_postfix:req
-	PROLOG_KERNEL_DESCRIPTOR_WRAPPER %.amdgcn.gfx_generation_number, %.amdgcn.gfx_generation_minor, \kernel_version, \kernel_name_postfix
+	PROLOG_KERNEL_DESCRIPTOR_WRAPPER %.amdgcn.gfx_generation_number, \kernel_version, \kernel_name_postfix
 .endm
 
 .macro KERNEL_EPILOG sc:req, wc:req, accum_offset:req, wg_x:req, kernel_version:req, kernel_name_postfix:req
-	EPILOG_KERNEL_DESCRIPTOR_WRAPPER \sc, \wc, \accum_offset, \wg_x, %.amdgcn.gfx_generation_number, %.amdgcn.gfx_generation_minor, \kernel_version, \kernel_name_postfix
+	EPILOG_KERNEL_DESCRIPTOR_WRAPPER \sc, \wc, \accum_offset, \wg_x, %.amdgcn.gfx_generation_number, \kernel_version, \kernel_name_postfix
 .endm

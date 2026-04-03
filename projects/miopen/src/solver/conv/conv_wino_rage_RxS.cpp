@@ -233,7 +233,7 @@ public:
                                          KernelVersion kernel_version,
                                          const ProblemDescription& problem)
     {
-        if(StartsWith(dev_name, "gfx942") || StartsWith(dev_name, "gfx950"))
+        if(StartsWith(dev_name, "gfx942"))
         {
             return (kernel_version == KernelVersion::V4_6) ? PerfParams::GFX942_V4_6
                    : (problem.IsFp16())                    ? PerfParams::GFX942_V4_9_fp16
@@ -317,7 +317,7 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
 
     const auto devName = ctx.GetStream().GetDeviceName();
-    if(devName == "gfx942" || devName == "gfx950")
+    if(devName == "gfx942")
     {
         if(!(problem.IsFp16() || problem.IsFp32() || problem.IsBfp16()))
             return false;
@@ -417,22 +417,18 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     }
     else // V4_9
     {
-        kernelVersion = "_v4_9_1";
+        kernelVersion = "_v4_9_0";
     }
     std::string kernelName = "miopenSp3AsmConvRage" + kernelVersion;
     std::string kernelFile = "Conv_Winograd_Rage" + kernelVersion;
 
     if(devName == "gfx942")
     {
-        kernelName += "_gfx94";
-    }
-    else if(devName == "gfx950")
-    {
-        kernelName += "_gfx95";
+        kernelName += "_gfx9";
     }
     else if(StartsWith(devName, "gfx12"))
     {
-        kernelName += "_gfx120";
+        kernelName += "_gfx12";
     }
     else
     {
@@ -486,7 +482,7 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     kernelInfo.comp_options = options.GenerateFor(kbp::GcnAsm{});
     kernelInfo.comp_options += std::string(" -mcumode");
 
-    uint64_t wgSize = 768U; // value for gfx942 and gfx950
+    uint64_t wgSize = 768U; // value for gfx942
     if(StartsWith(devName, "gfx12"))
     {
         wgSize = 384U;

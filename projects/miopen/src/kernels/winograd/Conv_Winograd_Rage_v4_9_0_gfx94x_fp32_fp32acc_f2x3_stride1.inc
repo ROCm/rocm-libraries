@@ -1,11 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-.macro _s_setreg_imm32_b32 arg_reg_id:req, arg_offset:req, arg_size:req, arg_imm32:req
-    .long 0xba7f0000 + \arg_reg_id + (\arg_offset << 6) + ((\arg_size - 1) << 11)
-    .long \arg_imm32
-.endm
-
 v_lshlrev_b32 v1, 7, v0
 s_getpc_b64 [s8, s9]
 label_6:
@@ -71,11 +66,14 @@ s_and_b32 s5, s28, 131072
 s_cbranch_scc0 label_12
 s_load_dwordx4 [s76, s77, s78, s79], [s2, s3], 216
 label_12:
-_s_setreg_imm32_b32 1, 9, 1, 0
+.long 0xba7f0241
+.long 0x00000000 // encoding fixup: s_setreg_imm32_b32 hwreg(1, 9, 1), 0
 s_bitcmp1_b32 s28, 3
 s_cbranch_scc0 label_13
-_s_setreg_imm32_b32 1, 4, 4, 15
-_s_setreg_imm32_b32 1, 0, 4, 0
+.long 0xba7f1901
+.long 0x0000000f // encoding fixup: s_setreg_imm32_b32 hwreg(1, 4, 4), 15
+.long 0xba7f1801
+.long 0x00000000 // encoding fixup: s_setreg_imm32_b32 hwreg(1, 0, 4), 0
 label_13:
 s_waitcnt lgkmcnt(0)
 s_bitcmp1_b32 s28, 6
