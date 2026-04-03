@@ -26,6 +26,7 @@
 #include <random>
 #include <vector>
 
+#include "../../shared/fftw_transform.h"
 #include "../hipfft_params.h"
 
 DISABLE_WARNING_PUSH
@@ -618,10 +619,9 @@ TEST(hipfftTest, RunR2C)
         ref_in[i] = in[i];
 
     fftw_complex* ref_out;
-    fftw_plan     ref_p;
 
     ref_out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * (N / 2 + 1));
-    ref_p   = fftw_plan_dft_r2c_1d(N, ref_in, ref_out, FFTW_ESTIMATE);
+    fftw_plan_wrapper<double> ref_p(fftw_plan_dft_r2c_1d(N, ref_in, ref_out, FFTW_ESTIMATE));
     fftw_execute(ref_p);
 
     double maxv  = 0;
@@ -640,9 +640,8 @@ TEST(hipfftTest, RunR2C)
     nrmse = sqrt(nrmse);
     nrmse /= maxv;
 
-    EXPECT_LT(nrmse, type_epsilon_simple<double>());
-    fftw_destroy_plan(ref_p);
     fftw_free(ref_out);
+    EXPECT_LT(nrmse, type_epsilon_simple<double>());
 }
 
 // ask for a transform whose parameters are only valid out-of-place.
@@ -696,10 +695,9 @@ TEST(hipfftTest, OutplaceOnly)
         ref_in[i] = in[i];
 
     fftw_complex* ref_out;
-    fftw_plan     ref_p;
 
     ref_out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * N_out);
-    ref_p   = fftw_plan_dft_r2c_1d(N_in, ref_in, ref_out, FFTW_ESTIMATE);
+    fftw_plan_wrapper<double> ref_p(fftw_plan_dft_r2c_1d(N_in, ref_in, ref_out, FFTW_ESTIMATE));
     fftw_execute(ref_p);
 
     double maxv  = 0;
@@ -718,9 +716,8 @@ TEST(hipfftTest, OutplaceOnly)
     nrmse = sqrt(nrmse);
     nrmse /= maxv;
 
-    ASSERT_LT(nrmse, type_epsilon_simple<double>());
-    fftw_destroy_plan(ref_p);
     fftw_free(ref_out);
+    ASSERT_LT(nrmse, type_epsilon_simple<double>());
 }
 
 static constexpr int absurd_version_or_property = std::numeric_limits<int>::min();

@@ -21,6 +21,7 @@
 #include "../hipfftw_helper.h"
 
 #include "../../shared/environment.h"
+#include "../../shared/fftw_transform.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hostbuf.h"
 #include "../../shared/params_gen.h"
@@ -2755,10 +2756,7 @@ namespace
             execution_results_on_host.clear();
             host_io_buffer.clear();
             gpu_io_buffer.clear();
-            if constexpr(prec == fft_precision_single)
-                fftwf_destroy_plan(reference_plan);
-            else
-                fftw_destroy_plan(reference_plan);
+            reference_plan.clear();
             this->GetParam().plan_helper.release_plan();
         }
         // verification buffers (set_input and other common routines require std::vector's of size 1 for these)
@@ -2770,7 +2768,7 @@ namespace
         // possible nonhost buffers (may be current/other device or runtime-managed)
         std::map<std::pair<hipfftw_step, fft_io>, gpubuf> gpu_io_buffer;
         // reference plan
-        hipfftw_plan_t<prec> reference_plan = nullptr;
+        fftw_plan_wrapper<hipfftw_real_t<prec>> reference_plan;
 
         void functional_test() const
         {
@@ -2876,10 +2874,7 @@ namespace
                 }
 
                 std::shared_future<void> reference_cpu_dft = std::async(std::launch::async, [&]() {
-                    if constexpr(prec == fft_precision_single)
-                        fftwf_execute(reference_plan);
-                    else
-                        fftw_execute(reference_plan);
+                    fftw_execute_type<hipfftw_real_t<prec>>(reference_plan);
                 });
                 hipfftw_exception_logger exception_logger;
 

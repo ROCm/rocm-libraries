@@ -101,6 +101,53 @@ struct fftw_trait<double>
     using fftw_plan_type    = fftw_plan;
 };
 
+template <typename Tfloat>
+struct fftw_plan_wrapper
+{
+    fftw_plan_wrapper(typename fftw_trait<Tfloat>::fftw_plan_type raw_plan_ptr = nullptr)
+        : plan_ptr(raw_plan_ptr)
+    {
+    }
+    // default moves are fine
+    fftw_plan_wrapper(fftw_plan_wrapper&&) = default;
+    fftw_plan_wrapper& operator=(fftw_plan_wrapper&&) = default;
+    // disable copies
+    fftw_plan_wrapper(const fftw_plan_wrapper&) = delete;
+    fftw_plan_wrapper& operator=(const fftw_plan_wrapper& other) = delete;
+    // copy assignment from raw pointer
+    fftw_plan_wrapper& operator=(typename fftw_trait<Tfloat>::fftw_plan_type raw_plan_ptr)
+    {
+        clear();
+        plan_ptr = raw_plan_ptr;
+        return *this;
+    }
+
+    // conversion to raw pointer
+    operator typename fftw_trait<Tfloat>::fftw_plan_type() const
+    {
+        return plan_ptr;
+    }
+
+    void clear()
+    {
+        if(plan_ptr)
+        {
+            if constexpr(std::is_same_v<Tfloat, double>)
+                fftw_destroy_plan(plan_ptr);
+            else
+                fftwf_destroy_plan(plan_ptr);
+            plan_ptr = nullptr;
+        }
+    }
+    ~fftw_plan_wrapper()
+    {
+        clear();
+    }
+
+private:
+    typename fftw_trait<Tfloat>::fftw_plan_type plan_ptr;
+};
+
 // Copies the half-precision input buffer to a single-precision
 // buffer.  Note that the input buffer is already sized like it's a
 // single-precision buffer (but only half of it is filled), because
@@ -205,20 +252,6 @@ template <>
 inline void fftw_execute_type<double>(typename fftw_trait<double>::fftw_plan_type plan)
 {
     return fftw_execute(plan);
-}
-
-// Template wrappers for FFTW plan destroyers:
-template <typename Tfftw_plan>
-inline void fftw_destroy_plan_type(Tfftw_plan plan);
-template <>
-inline void fftw_destroy_plan_type<fftwf_plan>(fftwf_plan plan)
-{
-    return fftwf_destroy_plan(plan);
-}
-template <>
-inline void fftw_destroy_plan_type<fftw_plan>(fftw_plan plan)
-{
-    return fftw_destroy_plan(plan);
 }
 
 // Template wrappers for FFTW c2c planners:
