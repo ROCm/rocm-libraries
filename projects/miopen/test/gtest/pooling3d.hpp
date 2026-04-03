@@ -1,5 +1,31 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+#ifndef GUARD_MIOPEN_TEST_GTEST_POOLING3D_HPP
+#define GUARD_MIOPEN_TEST_GTEST_POOLING3D_HPP
 
 #include "pooling_common.hpp"
 
@@ -7,7 +33,7 @@ namespace {
 
 using PoolingTestCase = pooling_gtest::PoolingTestCase;
 
-std::vector<PoolingTestCase> GetNDHWCPooling3dTestCases()
+std::vector<PoolingTestCase> GetPooling3dTestCases()
 {
     static std::vector<PoolingTestCase> cached_test_cases;
     static bool cached = false;
@@ -19,7 +45,7 @@ std::vector<PoolingTestCase> GetNDHWCPooling3dTestCases()
 
     std::vector<PoolingTestCase> test_cases;
 
-    // Dataset 0: Default dataset (3D NDHWC)
+    // Dataset 0: Default dataset (various tensor sizes)
     std::vector<std::vector<int>> dataset0_inputs = {
         {16, 64, 3, 4, 4},
         {16, 32, 4, 9, 9},
@@ -42,7 +68,7 @@ std::vector<PoolingTestCase> GetNDHWCPooling3dTestCases()
     std::vector<std::vector<int>> dataset0_strides = {{2, 2, 2}, {1, 1, 1}, {1, 2, 2}};
     std::vector<std::vector<int>> dataset0_pads    = {{0, 0, 0}, {1, 1, 1}};
 
-    std::vector<miopenIndexType_t> index_types = {
+    std::vector<miopenIndexType_t> dataset0_index_types = {
         miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
     std::vector<miopenPoolingMode_t> modes = {
         miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
@@ -58,7 +84,7 @@ std::vector<PoolingTestCase> GetNDHWCPooling3dTestCases()
                                               dataset0_lens,
                                               dataset0_strides,
                                               dataset0_pads,
-                                              index_types,
+                                              dataset0_index_types,
                                               modes,
                                               wsidx_values,
                                               test_cases,
@@ -69,7 +95,7 @@ std::vector<PoolingTestCase> GetNDHWCPooling3dTestCases()
                                               num_uint64_case_imgidx,
                                               true,
                                               false,
-                                              "NDHWC");
+                                              "NCDHW");
     }
 
     cached_test_cases = test_cases;
@@ -79,35 +105,38 @@ std::vector<PoolingTestCase> GetNDHWCPooling3dTestCases()
 
 } // namespace
 
-class GPU_Pooling3d_NDHWC_FP32 : public pooling_gtest::PoolingCommon<float, 3>
+// Derived classes for Dataset 0 (standard 3D pooling)
+class GPU_Pooling3d_FP32 : public pooling_gtest::PoolingCommon<float, 3>
 {
 };
 
-class GPU_Pooling3d_NDHWC_FP16 : public pooling_gtest::PoolingCommon<half_float::half, 3>
+class GPU_Pooling3d_FP16 : public pooling_gtest::PoolingCommon<half_float::half, 3>
 {
 };
 
-class GPU_Pooling3d_NDHWC_BFP16 : public pooling_gtest::PoolingCommon<bfloat16, 3>
+class GPU_Pooling3d_BFP16 : public pooling_gtest::PoolingCommon<bfloat16, 3>
 {
 };
 
-TEST_P(GPU_Pooling3d_NDHWC_FP32, FloatTest) { RunTest(); }
+TEST_P(GPU_Pooling3d_FP32, Test) { RunTest(); }
 
-TEST_P(GPU_Pooling3d_NDHWC_FP16, HalfTest) { RunTest(); }
+TEST_P(GPU_Pooling3d_FP16, Test) { RunTest(); }
 
-TEST_P(GPU_Pooling3d_NDHWC_BFP16, BFloat16Test) { RunTest(); }
+TEST_P(GPU_Pooling3d_BFP16, Test) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Pooling3d_NDHWC_FP32,
-                         testing::ValuesIn(GetNDHWCPooling3dTestCases()),
+                         GPU_Pooling3d_FP32,
+                         testing::ValuesIn(GetPooling3dTestCases()),
                          pooling_gtest::GetPoolingTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Pooling3d_NDHWC_FP16,
-                         testing::ValuesIn(GetNDHWCPooling3dTestCases()),
+                         GPU_Pooling3d_FP16,
+                         testing::ValuesIn(GetPooling3dTestCases()),
                          pooling_gtest::GetPoolingTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Pooling3d_NDHWC_BFP16,
-                         testing::ValuesIn(GetNDHWCPooling3dTestCases()),
+                         GPU_Pooling3d_BFP16,
+                         testing::ValuesIn(GetPooling3dTestCases()),
                          pooling_gtest::GetPoolingTestCaseName);
+
+#endif // GUARD_MIOPEN_TEST_GTEST_POOLING3D_HPP
