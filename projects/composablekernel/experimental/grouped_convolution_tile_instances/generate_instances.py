@@ -303,6 +303,7 @@ def parse_native_bwd_weight_instance(args, instance_id, problem_name):
     streamk_persistent = False
     is_two_stage = get_dtype(problem_name) != "float" and scalar_per_vector[2] == 1
     if is_streamk:
+        is_two_stage = False
         reduction_int = int(args[32])
         streamk_reduction_strategy = STREAMK_REDUCTION_STRATEGY.get(
             reduction_int, str(reduction_int)
