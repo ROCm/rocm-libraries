@@ -208,17 +208,9 @@ protected:
         auto [graphObj, outputs] = buildGraph(getSharedHandle(), testCase);
 
         // Register validators
-        this->registerValidator(
-            outputs.dx, this->getTolerance(TestConfig::get().getEngineId(), graphObj, outputs.dx));
-        this->registerValidator(
-            outputs.dscale,
-            this->getTolerance(TestConfig::get().getEngineId(), graphObj, outputs.dscale));
-        this->registerValidator(
-            outputs.dbias,
-            this->getTolerance(TestConfig::get().getEngineId(), graphObj, outputs.dbias));
-
-        // Force execution on the specific engine that claimed capability
-        graphObj.set_preferred_engine_id_ext(TestConfig::get().getEngineId());
+        this->registerValidator(outputs.dx, this->getTolerance(graphObj, outputs.dx));
+        this->registerValidator(outputs.dscale, this->getTolerance(graphObj, outputs.dscale));
+        this->registerValidator(outputs.dbias, this->getTolerance(graphObj, outputs.dbias));
 
         this->verifyGraph(graphObj, bnTestCase.seed);
     }
