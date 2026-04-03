@@ -93,7 +93,9 @@ def buildAssemblyCodeObjectFiles(
     extCo = ".co"
     extCoRaw = ".co.raw"
 
-    destDir = Path(ensurePath(str(libraryPath) if libraryPath else os.path.join(outputPath, "library")))
+    destDir = Path(
+        ensurePath(str(libraryPath) if libraryPath else os.path.join(outputPath, "library"))
+    )
     asmDir = Path(writer.getAssemblyDirectory())
 
     maxLineLength = (

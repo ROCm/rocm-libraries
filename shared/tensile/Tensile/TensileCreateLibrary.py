@@ -798,7 +798,11 @@ def buildObjectFilePaths(
     # Build full paths for source and asm library files.
     # For single-arch builds, all library outputs go to library/<arch>/ so that
     # shard overlays compose additively without last-writer-wins conflicts.
-    libDir = str(libraryDir(prefixDir, requestedArchs)) if requestedArchs else os.path.join(prefixDir, "library")
+    libDir = (
+        str(libraryDir(prefixDir, requestedArchs))
+        if requestedArchs
+        else os.path.join(prefixDir, "library")
+    )
 
     libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
     if not globalParameters["SeparateArchitectures"] and not globalParameters["LazyLibraryLoading"]:

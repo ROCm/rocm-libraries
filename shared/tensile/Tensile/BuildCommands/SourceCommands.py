@@ -190,7 +190,9 @@ def _buildSourceCodeObjectFile(
 ) -> List[str]:
 
     buildPath = Path(ensurePath(os.path.join(globalParameters["WorkingPath"], "code_object_tmp")))
-    destPath = Path(ensurePath(str(libraryPath) if libraryPath else os.path.join(outputPath, "library")))
+    destPath = Path(
+        ensurePath(str(libraryPath) if libraryPath else os.path.join(outputPath, "library"))
+    )
     kernelPath = Path(kernelPath)
 
     objectFilename = kernelPath.stem + ".o"
