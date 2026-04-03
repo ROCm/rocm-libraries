@@ -197,19 +197,31 @@ struct verify_forward_pooling
     {
         auto&& handle = get_handle();
         tensor<T> out{filter.GetForwardOutputTensor(input.desc)};
-        indices.resize(out.data.size(), 0);
 
         auto in_dev  = handle.Write(input.data);
         auto out_dev = handle.Create<T>(out.data.size());
-        Workspace wspace{};
-        wspace.Write(indices);
+        
+        const std::size_t ws_size = filter.GetWorkSpaceSize(out.desc);
+        
+        // DEBUG: Print workspace size for failing case
+        if(input.desc.GetLengths() == std::vector<std::size_t>{16, 64, 3, 4, 4}) {
+            std::cout << "DEBUG: Workspace Size: " << ws_size << std::endl;
+            std::cout << "DEBUG: Index Type Size: " << sizeof(Index) << std::endl;
+            std::cout << "DEBUG: Expected Index Count: " << out.data.size() << std::endl;
+            std::cout << "DEBUG: Total Index Bytes: " << out.data.size() * sizeof(Index) << std::endl;
+        }
+
+        Workspace wspace(ws_size);
 
         float alpha = 1, beta = 0;
         filter.Forward(handle, &alpha, input.desc, in_dev.get(), &beta, out.desc, out_dev.get(),
-                       true, wspace.ptr(), wspace.size());
+                       true, ws_size > 0 ? wspace.ptr() : nullptr, ws_size);
 
-        if(wspace.size() > 0)
+        if(ws_size > 0 && filter.GetMode() == miopenPoolingMax)
+        {
             indices = wspace.Read<std::vector<Index>>();
+        }
+        
         out.data = handle.Read<T>(out_dev, out.data.size());
         return out;
     }
@@ -400,12 +412,18 @@ struct verify_backward_pooling
         auto dout_dev = handle.Write(dout.data);
         auto out_dev  = handle.Write(out.data);
         auto din_dev  = handle.Create<T>(dinput.data.size());
-        Workspace wspace{};
-        wspace.Write(indices);
+        
+        const std::size_t ws_size = filter.GetWorkSpaceSize(out.desc);
+        Workspace wspace(ws_size);
+        if(!indices.empty())
+        {
+            wspace.Write(indices);
+        }
 
         float alpha = 1, beta = 0;
         filter.Backward(handle, &alpha, out.desc, out_dev.get(), dout.desc, dout_dev.get(),
-                        input.desc, in_dev.get(), &beta, dinput.desc, din_dev.get(), wspace.ptr());
+                        input.desc, in_dev.get(), &beta, dinput.desc, din_dev.get(), 
+                        ws_size > 0 ? wspace.ptr() : nullptr);
 
         dinput.data = handle.Read<T>(din_dev, dinput.data.size());
         return dinput;
