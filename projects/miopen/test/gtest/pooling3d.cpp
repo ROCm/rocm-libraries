@@ -1,18 +1,5 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
-
-#include <cstddef>
-#include <cstdint>
-#include <limits>
-#include <numeric>
-#include <string>
-#include <vector>
-
-#include <gtest/gtest.h>
-#include <half/half.hpp>
-
-#include <miopen/logger.hpp>
-#include <miopen/tensor_layout.hpp>
+// SPDX-License-Identifier: MIT
 
 #include "pooling_common.hpp"
 
@@ -34,7 +21,22 @@ std::vector<PoolingTestCase> GetPooling3dTestCases()
 
     // Dataset 0: Default dataset (various tensor sizes)
     std::vector<std::vector<int>> dataset0_inputs = {
-        {16, 64, 3, 4, 4}, {16, 32, 4, 9, 9}, {8, 512, 3, 14, 14}, {8, 512, 4, 28, 28}};
+        {16, 64, 3, 4, 4},
+        {16, 32, 4, 9, 9},
+        {8, 512, 3, 14, 14},
+        {8, 512, 4, 28, 28},
+        {16, 64, 56, 56, 56},
+        {4, 3, 4, 227, 227},
+        {4, 4, 4, 161, 700},
+        {1, 3, 4, 4, 4},
+        {2, 8, 2, 8, 8},
+        {1, 16, 3, 5, 5},
+        {1, 32, 4, 14, 14},
+        {2, 64, 8, 8, 8},
+        {1, 16, 4, 28, 28},
+        {1, 3, 8, 56, 56},
+        {2, 64, 4, 28, 28},
+        {1, 32, 16, 32, 32}};
 
     std::vector<std::vector<int>> dataset0_lens    = {{2, 2, 2}, {3, 3, 3}, {1, 2, 2}};
     std::vector<std::vector<int>> dataset0_strides = {{2, 2, 2}, {1, 1, 1}, {1, 2, 2}};
