@@ -1439,6 +1439,26 @@ rocblas_status rocsolver_zsytrs2_batched_64(rocblas_handle handle,
 #endif
 /***************************************************/
 
+/******************** laset ********************/
+namespace rocsolver {
+
+template <typename T, typename I, typename Istride, typename UA>
+void laset(rocblas_handle handle,
+                  char const uplo_c,
+                  I const m,
+                  I const n,
+                  T const alpha,
+                  T const beta,
+
+                  UA A_,
+                  Istride const shiftA,
+                  I const lda,
+                  Istride const strideA,
+
+                  I const batch_count);
+
+} // end namespace rocsolver
+
 /******************** GEMM ********************/
 // normal and strided_batched
 inline rocblas_status rocsolver_gemm(bool STRIDED,

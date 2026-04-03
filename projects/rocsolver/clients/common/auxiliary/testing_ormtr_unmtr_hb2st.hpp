@@ -37,7 +37,7 @@
 #include "common/misc/rocsolver_timer.hpp"
 #include "common/misc/generate.hpp"
 #include "common/misc/cpu_blas.hpp"
-#include "laset.hpp"
+//#include "laset.hpp"
 
 //------------------------------------------------------------------------------
 // todo: is COMPLEX needed?

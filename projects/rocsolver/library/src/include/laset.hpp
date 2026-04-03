@@ -141,7 +141,7 @@ __global__ static void __launch_bounds__(LASET_MAX_THREADS) laset_kernel(char co
 
 // Initializes matrix on the device.
 template <typename T, typename I, typename Istride, typename UA>
-inline void laset(rocblas_handle handle,
+void laset(rocblas_handle handle,
                   char const uplo_c,
                   I const m,
                   I const n,

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "clients_utility.hpp"
+
 // Implements BLAS-like routines on CPU needed for rocSolver testers.
 
 //------------------------------------------------------------------------------
@@ -93,6 +95,8 @@ void cpu_hbadd(
     T beta,
     T* C, rocblas_int ldc )
 {
+    using foo::conjugate;  // todo: fix
+
     assert( m >= 0 );
     assert( n >= 0 );
     assert( kd >= 0 );
@@ -114,7 +118,7 @@ void cpu_hbadd(
                 if (i == j)
                     assert( imag( Aij ) == 0 );
                 C[i + j*ldc] = alpha*Aij         + beta*C[i + j*ldc];
-                C[j + i*ldc] = alpha*conj( Aij ) + beta*C[j + i*ldc];
+                C[j + i*ldc] = alpha*conjugate( Aij ) + beta*C[j + i*ldc];
             }
         }
     }
@@ -128,7 +132,7 @@ void cpu_hbadd(
                 if (i == j)
                     assert( imag( Aij ) == 0 );
                 C[i + j*ldc] = alpha*Aij         + beta*C[i + j*ldc];
-                C[j + i*ldc] = alpha*conj( Aij ) + beta*C[j + i*ldc];
+                C[j + i*ldc] = alpha*conjugate( Aij ) + beta*C[j + i*ldc];
             }
         }
     }
