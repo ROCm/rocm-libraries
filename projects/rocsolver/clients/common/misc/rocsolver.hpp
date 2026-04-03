@@ -326,6 +326,58 @@ rocblas_status rocsolver_zgemm_strided_batched(rocblas_handle handle,
                                                rocblas_stride strideC,
                                                rocblas_int batch_count);
 
+void rocsolver_slaset(
+    rocblas_handle handle,
+    char const uplo,
+    rocblas_int const m,
+    rocblas_int const n,
+    float const alpha,
+    float const beta,
+    float* A,
+    rocblas_stride const shiftA,
+    rocblas_int const lda,
+    rocblas_stride const strideA,
+    rocblas_int const batch_count);
+
+void rocsolver_dlaset(
+    rocblas_handle handle,
+    char const uplo,
+    rocblas_int const m,
+    rocblas_int const n,
+    double const alpha,
+    double const beta,
+    double* A,
+    rocblas_stride const shiftA,
+    rocblas_int const lda,
+    rocblas_stride const strideA,
+    rocblas_int const batch_count);
+
+void rocsolver_claset(
+    rocblas_handle handle,
+    char const uplo,
+    rocblas_int const m,
+    rocblas_int const n,
+    rocblas_float_complex const alpha,
+    rocblas_float_complex const beta,
+    rocblas_float_complex* A,
+    rocblas_stride const shiftA,
+    rocblas_int const lda,
+    rocblas_stride const strideA,
+    rocblas_int const batch_count);
+
+void rocsolver_zlaset(
+    rocblas_handle handle,
+    char const uplo,
+    rocblas_int const m,
+    rocblas_int const n,
+    rocblas_double_complex const alpha,
+    rocblas_double_complex const beta,
+    rocblas_double_complex* A,
+    rocblas_stride const shiftA,
+    rocblas_int const lda,
+    rocblas_stride const strideA,
+    rocblas_int const batch_count);
+
 rocblas_status rocsolver_ssb2st(rocblas_handle handle,
                                 rocblas_fill uplo,
                                 const rocblas_int n,
@@ -1441,23 +1493,92 @@ rocblas_status rocsolver_zsytrs2_batched_64(rocblas_handle handle,
 
 /******************** laset ********************/
 namespace rocsolver {
+inline namespace v33300 {  // todo: use ROCSOLVER_BEGIN_NAMESPACE macro
 
 template <typename T, typename I, typename Istride, typename UA>
-void laset(rocblas_handle handle,
-                  char const uplo_c,
-                  I const m,
-                  I const n,
-                  T const alpha,
-                  T const beta,
+void laset(
+    rocblas_handle handle,
+    char const uplo,
+    I const m,
+    I const n,
+    T const alpha,
+    T const beta,
+    UA A,
+    Istride const shiftA,
+    I const lda,
+    Istride const strideA,
+    I const batch_count);
 
-                  UA A_,
-                  Istride const shiftA,
-                  I const lda,
-                  Istride const strideA,
-
-                  I const batch_count);
-
+} // end inner namespace
 } // end namespace rocsolver
+
+inline rocblas_status rocsolver_laset(
+    rocblas_handle handle,
+    char uplo,
+    rocblas_int m,
+    rocblas_int n,
+    float alpha,
+    float beta,
+    float* A,
+    rocblas_stride shiftA,
+    rocblas_int lda,
+    rocblas_stride strideA,
+    rocblas_int batch_count )
+{
+    rocsolver_slaset( handle, uplo, m, n, alpha, beta, A, shiftA, lda, strideA, batch_count );
+    return rocblas_status_success;
+}
+
+inline rocblas_status rocsolver_laset(
+    rocblas_handle handle,
+    char uplo,
+    rocblas_int m,
+    rocblas_int n,
+    double alpha,
+    double beta,
+    double* A,
+    rocblas_stride shiftA,
+    rocblas_int lda,
+    rocblas_stride strideA,
+    rocblas_int batch_count )
+{
+    rocsolver_dlaset( handle, uplo, m, n, alpha, beta, A, shiftA, lda, strideA, batch_count );
+    return rocblas_status_success;
+}
+
+inline rocblas_status rocsolver_laset(
+    rocblas_handle handle,
+    char uplo,
+    rocblas_int m,
+    rocblas_int n,
+    rocblas_float_complex alpha,
+    rocblas_float_complex beta,
+    rocblas_float_complex* A,
+    rocblas_stride shiftA,
+    rocblas_int lda,
+    rocblas_stride strideA,
+    rocblas_int batch_count )
+{
+    rocsolver_claset( handle, uplo, m, n, alpha, beta, A, shiftA, lda, strideA, batch_count );
+    return rocblas_status_success;
+}
+
+inline rocblas_status rocsolver_laset(
+    rocblas_handle handle,
+    char uplo,
+    rocblas_int m,
+    rocblas_int n,
+    rocblas_double_complex alpha,
+    rocblas_double_complex beta,
+    rocblas_double_complex* A,
+    rocblas_stride shiftA,
+    rocblas_int lda,
+    rocblas_stride strideA,
+    rocblas_int batch_count )
+{
+    rocsolver_zlaset( handle, uplo, m, n, alpha, beta, A, shiftA, lda, strideA, batch_count );
+    return rocblas_status_success;
+}
 
 /******************** GEMM ********************/
 // normal and strided_batched

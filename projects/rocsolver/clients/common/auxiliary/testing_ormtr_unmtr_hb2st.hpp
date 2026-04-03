@@ -37,7 +37,6 @@
 #include "common/misc/rocsolver_timer.hpp"
 #include "common/misc/generate.hpp"
 #include "common/misc/cpu_blas.hpp"
-//#include "laset.hpp"
 
 //------------------------------------------------------------------------------
 // todo: is COMPLEX needed?
@@ -278,10 +277,10 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
 
     // execute computations
     // Set Q = Identity, then generate Q = Q*I or I*Q. (Works for either side.)
-    //CHECK_ROCBLAS_ERROR(
-        rocsolver::laset(
+    CHECK_ROCBLAS_ERROR(
+        rocsolver_laset(
             handle, 'g' /*rocblas_fill_full*/, nA, nA, zero, one,
-            dQ.data(), shift, ldq, stride, 1 );
+            dQ.data(), shift, ldq, stride, 1 ));
     CHECK_ROCBLAS_ERROR(
         rocsolver_ormtr_unmtr_hb2st(
             handle, side, rocblas_operation_none, m, n, kd,
@@ -289,10 +288,10 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
 
     // Check 0: || I - Q^H Q ||_1 / n
     // Set R = Identity, then generate residual R = I - Q^H Q.
-    //CHECK_ROCBLAS_ERROR(
-        rocsolver::laset(
+    CHECK_ROCBLAS_ERROR(
+        rocsolver_laset(
             handle, 'g' /*rocblas_fill_full*/, nA, nA, zero, one,
-            dR.data(), shift, ldr, stride, 1 );
+            dR.data(), shift, ldr, stride, 1 ));
     CHECK_ROCBLAS_ERROR(
         rocblas_gemm(
             false, handle,
