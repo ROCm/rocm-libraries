@@ -100,12 +100,17 @@ def main():
     print(f"{'=' * 80}")
 
     sys.path.insert(0, str(_THIS_DIR / "problems"))
-    if args.problems == "forward_training":
-        from forward_training import TRAINING_PROBLEMS_FORWARD as problems
-    elif args.problems == "forward_training_small":
-        from forward_training_small import TRAINING_PROBLEMS_FORWARD as problems
+    # Load problem sets for training and validation
+    if args.problems == "bwd_data_synthetic_extended":
+        from bwd_data_synthetic_extended import TRAINING_PROBLEMS_BWD_DATA_SYNTHETIC as problems
+    elif args.problems == "bwd_data_test_validation":
+        from bwd_data_test_validation import VALIDATION_PROBLEMS_BWD_DATA as problems
+    elif args.problems == "bwd_weight_synthetic_extended":
+        from bwd_weight_synthetic_extended import TRAINING_PROBLEMS_BWD_WEIGHT_SYNTHETIC as problems
+    elif args.problems == "bwd_weight_test_validation":
+        from bwd_weight_test_validation import VALIDATION_PROBLEMS_BWD_WEIGHT as problems
     else:
-        raise ValueError(f"Unknown problem set: {args.problems}")
+        raise ValueError(f"Unknown problem set: {args.problems}. Use: bwd_data_synthetic_extended, bwd_data_test_validation, bwd_weight_synthetic_extended, or bwd_weight_test_validation")
 
     print(f"  Problems: {len(problems)}")
     print(f"  Total measurements: {len(built_kernels)} x {len(problems)} = {len(built_kernels) * len(problems)}")

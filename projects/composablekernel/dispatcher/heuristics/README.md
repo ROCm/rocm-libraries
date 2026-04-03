@@ -269,3 +269,99 @@ Test coverage includes:
   binaries, running benchmarks, managing datasets, and troubleshooting
 - **[LEARNINGS.md](LEARNINGS.md)**: Empirical findings and design decisions (log-transform,
   IHEM results, tiny-M analysis, feature importance, N=1/K=1 edge cases)
+
+## Grouped Convolution ML Heuristics
+
+### Overview
+
+ML-based kernel selection for grouped convolution operations (forward, bwd_data, bwd_weight) on gfx950 with bf16 precision.
+
+### Results
+
+#### Forward Pass Model
+- **Training Data**: 187 MIOpen problems × 30 kernels = 5,640 measurements  
+- **Cross-validation Performance**:
+  - Mean Efficiency: **96.1%**
+  - P10 Efficiency: **87.2%**
+  - R²: **0.9559**
+
+#### BWD_DATA Model
+- **Training Data**: 1,242 synthetic problems × 20 kernels = 14,562 measurements
+- **Validation**: 10 unseen problems
+- **Performance**:
+  - Mean Efficiency: **100.0%**
+  - P10 Efficiency: **99.9%**
+  - P50 Efficiency: **100.0%**
+  - Cross-validation R²: **0.9924**
+
+#### BWD_WEIGHT Model
+- **Training Data**: 2,009 synthetic problems × 20 kernels = 18,150 measurements
+- **Validation**: 10 unseen problems
+- **Performance**:
+  - Mean Efficiency: **100.0%**
+  - P10 Efficiency: **100.0%**
+  - P50 Efficiency: **100.0%**
+  - Cross-validation R²: **0.9948**
+
+### Training Data Generation
+
+Extended synthetic problem sets for backward passes cover diverse scenarios:
+- Small spatial (7×7, 14×14) + various channels (64-1024)
+- Medium spatial (28×28, 32×32, 56×56) + various channels (32-512)
+- Large spatial (112×112) + small/medium channels (16-256)
+- Asymmetric C/K combinations
+- Small and large batch sizes (N=1 to 128)
+- Grouped convolutions (G=2, 4, 8)
+- Depthwise convolutions (G=C=K)
+- Stride-2 downsampling
+
+### Model Files
+
+Trained models stored in:
+- `models/grouped_conv_forward_bf16_gfx950/`
+- `models/grouped_conv_bwd_data_bf16_gfx950/`
+- `models/grouped_conv_bwd_weight_bf16_gfx950/`
+
+Each contains:
+- `model_tflops.lgbm` - LightGBM model (compressed with gzip)
+- `feature_spec.json` - Feature configuration
+- `cv_metrics_tflops.json` - Cross-validation metrics
+- `feature_importances_tflops.json` - Feature importance rankings
+
+Models are automatically decompressed on first use.
+
+### Usage
+
+```python
+from predict_grouped_conv import predict_best_kernel
+
+# Define problem
+problem = {
+    'N': 16, 'C': 256, 'K': 128, 'G': 1,
+    'Hi': 28, 'Wi': 28, 'Y': 3, 'X': 3,
+    'stride_h': 1, 'stride_w': 1,
+    'pad_h': 1, 'pad_w': 1,
+    'dtype': 'bf16'
+}
+
+# Get best kernel for backward data gradient
+best_kernel = predict_best_kernel(
+    problem=problem,
+    variant='bwd_data',
+    arch='gfx950'
+)
+
+print(f"Best kernel: {best_kernel['name']}")
+print(f"Predicted TFLOPS: {best_kernel['tflops']:.2f}")
+```
+
+### Validation
+
+Run validation against oracle benchmarks:
+
+```bash
+cd projects/composablekernel/tile_engine/ops/grouped_conv
+python3 validate_ml_vs_oracle.py --variant bwd_data
+python3 validate_ml_vs_oracle.py --variant bwd_weight
+```
+
