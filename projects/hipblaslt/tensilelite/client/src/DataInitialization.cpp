@@ -135,6 +135,8 @@ namespace TensileLite
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:
                 return 8;
+            case rocisa::DataType::Float4:
+                return 4;
             default:
                 throw std::runtime_error("unsupported datatype");
             }
@@ -375,6 +377,10 @@ namespace TensileLite
             case rocisa::DataType::BFloat8Float8:
                 MiK  = 32;
                 MiKv = 8;
+                break;
+            case rocisa::DataType::Float4:
+                MiK  = 16;
+                MiKv = 16;
                 break;
             default:
                 throw std::runtime_error("unsupported datatype for swizzling");
@@ -2309,8 +2315,13 @@ namespace TensileLite
                     // currently, if A then it means MiM = 16, if B then it means MiN = 16
                     size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
                     calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
-                    auto                          unrolledSize = desc.sizes()[0];
-                    auto                          tiledSize    = desc.sizes()[1];
+                    auto const& dtInfo       = DataTypeInfo::Get(desc.dataType());
+                    // sizes[0] is in logical elements. Convert to storage units
+                    // (the number of packed elements, each dtInfo.elementSize bytes).
+                    // For most types packing=1 (no change). For sub-byte types
+                    // like FP4 (packing=2), this halves the count.
+                    auto        unrolledSize = desc.sizes()[0] / dtInfo.packing;
+                    auto        tiledSize    = desc.sizes()[1];
                     ::Tensor::Manipulation::Shape paddedShape{
                         ((tiledSize / MiM_N) + !!(tiledSize % MiM_N)) * MiM_N,
                         (unrolledSize / (MiK * PackK) + !!(unrolledSize % (MiK * PackK))) * MiK
@@ -2336,7 +2347,7 @@ namespace TensileLite
                     }
                     else
                     {
-                        auto tmpTensor = Tensor({tiledSize, unrolledSize}, desc.elementBytes());
+                        auto tmpTensor = Tensor({tiledSize, unrolledSize}, dtInfo.elementSize);
 
                         memcpy(
                             tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());

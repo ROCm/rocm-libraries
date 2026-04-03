@@ -2493,7 +2493,10 @@ class Solution(collections.abc.Mapping):
         return optGRVW
 
       def calSwizzlePackK(state, tc):
-        return 16 // state[f"MIInputPerThread{tc}"] // int(state["ProblemType"][f"DataType{tc}"].numBytes())
+        # 128 bits = 16 bytes in a buffer_load_dwordx4.
+        # Using bits avoids integer truncation for sub-byte types (FP4, FP6).
+        numBits = int(state["ProblemType"][f"DataType{tc}"].numBytes() * 8)
+        return 128 // state[f"MIInputPerThread{tc}"] // numBits
 
       genGRVWA = False
       genGRVWB = False

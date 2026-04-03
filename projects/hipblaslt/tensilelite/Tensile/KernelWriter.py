@@ -7740,8 +7740,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tP["isSwizzled"] = (kernel["ProblemType"]["SwizzleTensorB"] and tP["isB"]) or (kernel["ProblemType"]["SwizzleTensorA"] and tP["isA"])
 
     if tP["isSwizzled"]:
-      # 16 means bytes of buffer_load_dwordx4
-      tP["swizzlePackK"] = 16 // kernel["MIInputPerThread%s"%cM] // int(kernel["ProblemType"]["DataType%s"%cM].numBytes())
+      # 128 bits = 16 bytes in a buffer_load_dwordx4.
+      # Using bits avoids integer truncation for sub-byte types (FP4, FP6).
+      numBits = int(kernel["ProblemType"]["DataType%s"%cM].numBytes() * 8)
+      tP["swizzlePackK"] = 128 // kernel["MIInputPerThread%s"%cM] // numBits
       tP["swizzleK"] = kernel["MatrixInstK"] * tP["swizzlePackK"]
 
   ##############################################################################
