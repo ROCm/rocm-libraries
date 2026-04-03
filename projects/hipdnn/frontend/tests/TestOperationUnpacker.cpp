@@ -11,19 +11,20 @@
 #include <hipdnn_frontend/detail/OperationUnpacker.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
-// #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
 #include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
 // #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
-// #include <hipdnn_frontend/node/CustomOpNode.hpp>
+#include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
+#include <hipdnn_frontend/node/ReductionNode.hpp>
 #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
 #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 
@@ -291,16 +292,16 @@ TEST(TestCreateNodeForType, CreatesBatchnormInferenceNode)
     EXPECT_NE(typedNode, nullptr);
 }
 
-// TEST(TestCreateNodeForType, CreatesBatchnormInferenceNodeVarianceExt)
-// {
-//     const GraphAttributes graphAttrs;
-//     auto [node, err]
-//         = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE, graphAttrs);
-//     EXPECT_EQ(err.code, ErrorCode::OK);
-//     ASSERT_NE(node, nullptr);
-//     auto typedNode = std::dynamic_pointer_cast<BatchnormInferenceNodeVarianceExt>(node);
-//     EXPECT_NE(typedNode, nullptr);
-// }
+TEST(TestCreateNodeForType, CreatesBatchnormInferenceNodeVarianceExt)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err]
+        = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<BatchnormInferenceNodeVarianceExt>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
 
 // TEST(TestCreateNodeForType, CreatesBlockScaleDequantizeNode)
 // {
@@ -366,15 +367,15 @@ TEST(TestCreateNodeForType, CreatesConvWgradNode)
     EXPECT_NE(wgradNode, nullptr);
 }
 
-// TEST(TestCreateNodeForType, CreatesCustomOpNode)
-// {
-//     const GraphAttributes graphAttrs;
-//     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_CUSTOM_OP, graphAttrs);
-//     EXPECT_EQ(err.code, ErrorCode::OK);
-//     ASSERT_NE(node, nullptr);
-//     auto typedNode = std::dynamic_pointer_cast<CustomOpNode>(node);
-//     EXPECT_NE(typedNode, nullptr);
-// }
+TEST(TestCreateNodeForType, CreatesCustomOpNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_CUSTOM_OP, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<CustomOpNode>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
 
 TEST(TestCreateNodeForType, CreatesLayerNormNode)
 {
@@ -444,6 +445,16 @@ TEST(TestCreateNodeForType, CreatesBlockScaleDequantizeNode)
     ASSERT_NE(node, nullptr);
     auto bsdNode = std::dynamic_pointer_cast<BlockScaleDequantizeNode>(node);
     EXPECT_NE(bsdNode, nullptr);
+}
+
+TEST(TestCreateNodeForType, CreatesReductionNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_REDUCTION, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<ReductionNode>(node);
+    EXPECT_NE(typedNode, nullptr);
 }
 
 TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
