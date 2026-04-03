@@ -135,6 +135,9 @@ void ProblemDescription::HeuristicUpdateLayouts()
 
     // If we have preset layouts that are valid, and they are consistent with each other, then we do
     // not need to change them.
+    // Note: For transposed solvers that modify strides (e.g., NHWC→NCHW), the cached layout string
+    // may not be updated here. This is acceptable for degenerate dimensions (N=1, C=1, etc.) where
+    // strides satisfy multiple layouts, as solvers use actual strides rather than layout strings.
     if(!in_layout.empty() && in_layout == out_layout && in_layout == weights_layout &&
        std::find(supported_layouts.begin(), supported_layouts.end(), in_layout) !=
            supported_layouts.end() &&
@@ -153,6 +156,7 @@ void ProblemDescription::HeuristicUpdateLayouts()
             if(in.IsPossibleLayout4D5D(layout, mode) && out.IsPossibleLayout4D5D(layout, mode) &&
                weights.IsPossibleLayout4D5D(layout, mode))
             {
+                // Update the cached layout strings to match the detected layout
                 in_layout      = layout;
                 weights_layout = layout;
                 out_layout     = layout;
