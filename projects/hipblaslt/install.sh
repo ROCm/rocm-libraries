@@ -229,7 +229,7 @@ install_packages( )
   fi
 
   # wget and openssl are needed for cmake
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.16.8); then
+  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.25.2); then
     if $update_cmake == true; then
       library_dependencies_ubuntu+=("wget" "libssl-dev")
       library_dependencies_centos+=("wget" "openssl-devel")
@@ -679,7 +679,7 @@ if [[ "${install_dependencies}" == true ]]; then
   install_packages
 
   CMAKE_VERSION=$(cmake --version | grep -oP '(?<=version )[^ ]*' )
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.22); then
+  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.25.2); then
       if $update_cmake == true; then
         pushd
         printf "\033[32mBuilding \033[33mcmake\033[32m from source; installing into \033[33m/usr/local\033[0m\n"
@@ -694,7 +694,7 @@ if [[ "${install_dependencies}" == true ]]; then
         sudo make install
         popd
       else
-          echo "hipBLASLt requires CMake version >= 3.22 and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version 3.25.2 will be installed to /usr/local"
+          echo "hipBLASLt requires CMake version >= 3.25.2 and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version 3.25.2 will be installed to /usr/local"
           exit 2
       fi
   fi
