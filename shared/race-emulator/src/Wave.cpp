@@ -172,7 +172,8 @@ uint8_t Wave::getVgprByte(int reg, int lane, int byteIdx) const {
       if (isToVgpr(workgroup->getEventType(eid)) &&
           (workgroup->getEventByteMask(eid) & byteMask) != 0 &&
           workgroup->isEventActiveForLane(eid, lane)) {
-        throw RaceConditionException::Vgpr(reg, waveId.value, lane, false);
+        throw RaceConditionException::Vgpr(reg, waveId.value, lane, false,
+                                         workgroup->getWorkgroupId());
       }
     }
   }
@@ -188,7 +189,8 @@ uint16_t Wave::getHalfVgpr(int reg, int lane, bool hi) const {
       if (isToVgpr(workgroup->getEventType(eid)) &&
           (workgroup->getEventByteMask(eid) & byteMask) != 0 &&
           workgroup->isEventActiveForLane(eid, lane)) {
-        throw RaceConditionException::Vgpr(reg, waveId.value, lane, false);
+        throw RaceConditionException::Vgpr(reg, waveId.value, lane, false,
+                                         workgroup->getWorkgroupId());
       }
     }
   }
@@ -552,7 +554,8 @@ uint32_t Wave::getVgpr(int reg, int lane) const {
       if (isToVgpr(workgroup->getEventType(eid)) &&
           (workgroup->getEventByteMask(eid) & 0xF) != 0 &&
           workgroup->isEventActiveForLane(eid, lane)) {
-        throw RaceConditionException::Vgpr(reg, waveId.value, lane, false);
+        throw RaceConditionException::Vgpr(reg, waveId.value, lane, false,
+                                         workgroup->getWorkgroupId());
       }
     }
   }
@@ -569,7 +572,8 @@ void Wave::getVgprs(int reg, uint32_t *out) const {
         if (isToVgpr(workgroup->getEventType(eid)) &&
             (workgroup->getEventByteMask(eid) & 0xF) != 0) {
           int lane = std::countr_zero(workgroup->getEventExecMask(eid));
-          throw RaceConditionException::Vgpr(reg, waveId.value, lane, false);
+          throw RaceConditionException::Vgpr(reg, waveId.value, lane, false,
+                                         workgroup->getWorkgroupId());
         }
       }
     }

@@ -24,8 +24,7 @@ TEST(ProfilerTest, DisabledByDefault) {
 }
 
 TEST(ProfilerTest, AccumulatesTimeAndCount) {
-  Profiler profiler;
-  profiler.setEnabled(true);
+  Profiler profiler(true);
   for (int i = 0; i < 3; ++i) {
     auto sw = profiler.scopedStopwatch("work");
     busyWait();
@@ -38,8 +37,7 @@ TEST(ProfilerTest, AccumulatesTimeAndCount) {
 }
 
 TEST(ProfilerTest, MultipleKeysTrackedIndependently) {
-  Profiler profiler;
-  profiler.setEnabled(true);
+  Profiler profiler(true);
   { auto sw = profiler.scopedStopwatch("alpha"); }
   { auto sw = profiler.scopedStopwatch("alpha"); }
   { auto sw = profiler.scopedStopwatch("beta"); }
@@ -62,8 +60,7 @@ TEST(ProfilerTest, LazyKeyNotCalledWhenDisabled) {
 }
 
 TEST(ProfilerTest, LazyKeyCalledWhenEnabled) {
-  Profiler profiler;
-  profiler.setEnabled(true);
+  Profiler profiler(true);
   bool keyCalled = false;
   {
     auto sw = profiler.scopedStopwatch([&]() -> std::string_view {
@@ -76,8 +73,7 @@ TEST(ProfilerTest, LazyKeyCalledWhenEnabled) {
 }
 
 TEST(ProfilerTest, Reset) {
-  Profiler profiler;
-  profiler.setEnabled(true);
+  Profiler profiler(true);
   { auto sw = profiler.scopedStopwatch("x"); }
   EXPECT_GE(profiler.getAccountedTime(), 0.0);
   profiler.reset();
@@ -85,8 +81,7 @@ TEST(ProfilerTest, Reset) {
 }
 
 TEST(ProfilerTest, ReportHeaders) {
-  Profiler profiler;
-  profiler.setEnabled(true);
+  Profiler profiler(true);
   { auto sw = profiler.scopedStopwatch("test_scope"); }
   std::string report = profiler.reportStr(0.0);
   EXPECT_NE(report.find("Scope"), std::string::npos);
@@ -103,8 +98,7 @@ TEST(ProfilerTest, EmptyReport) {
 }
 
 TEST(ProfilerTest, NestedScopesPartitionTime) {
-  Profiler profiler;
-  profiler.setEnabled(true);
+  Profiler profiler(true);
   {
     auto outer = profiler.scopedStopwatch("nest_outer");
     busyWait();
@@ -125,8 +119,7 @@ TEST(ProfilerTest, NonLIFODestructionWorks) {
   // destroy "first_scope" (middle), destroy "second_scope".
   // Trace: [] -> ["first_scope"] -> ["first_scope","second_scope"]
   //        -> ["second_scope"] -> []
-  Profiler profiler;
-  profiler.setEnabled(true);
+  Profiler profiler(true);
   {
     Profiler::ScopedStopwatch stashed;
     {
@@ -146,8 +139,7 @@ TEST(ProfilerTest, NonLIFODestructionWorks) {
 }
 
 TEST(ProfilerTest, DeeplyNestedScopes) {
-  Profiler profiler;
-  profiler.setEnabled(true);
+  Profiler profiler(true);
   {
     auto s1 = profiler.scopedStopwatch("deep_level1");
     {
@@ -166,8 +158,7 @@ TEST(ProfilerTest, DeeplyNestedScopes) {
 }
 
 TEST(ProfilerTest, DepthTracking) {
-  Profiler profiler;
-  profiler.setEnabled(true);
+  Profiler profiler(true);
   {
     auto s0 = profiler.scopedStopwatch("top");
     {
@@ -204,8 +195,7 @@ TEST(ProfilerTest, DepthTracking) {
 }
 
 TEST(ProfilerTest, SequentialScopesDoNotThrow) {
-  Profiler profiler;
-  profiler.setEnabled(true);
+  Profiler profiler(true);
   { auto sw = profiler.scopedStopwatch("first"); }
   { auto sw = profiler.scopedStopwatch("second"); }
   EXPECT_GE(profiler.getAccountedTime(), 0.0);
@@ -218,12 +208,10 @@ TEST(ProfilerTest, NoOpStopwatchMoveSemantics) {
 }
 
 TEST(ProfilerTest, MergeDisjointKeys) {
-  Profiler a;
-  a.setEnabled(true);
+  Profiler a(true);
   { auto sw = a.scopedStopwatch("alpha"); }
 
-  Profiler b;
-  b.setEnabled(true);
+  Profiler b(true);
   { auto sw = b.scopedStopwatch("beta"); }
 
   a.merge(b);
@@ -233,13 +221,11 @@ TEST(ProfilerTest, MergeDisjointKeys) {
 }
 
 TEST(ProfilerTest, MergeOverlappingKeys) {
-  Profiler a;
-  a.setEnabled(true);
+  Profiler a(true);
   { auto sw = a.scopedStopwatch("shared"); }
   { auto sw = a.scopedStopwatch("shared"); }
 
-  Profiler b;
-  b.setEnabled(true);
+  Profiler b(true);
   { auto sw = b.scopedStopwatch("shared"); }
 
   a.merge(b);
@@ -250,12 +236,10 @@ TEST(ProfilerTest, MergeOverlappingKeys) {
 }
 
 TEST(ProfilerTest, MergePreservesMatchingDepth) {
-  Profiler a;
-  a.setEnabled(true);
+  Profiler a(true);
   { auto sw = a.scopedStopwatch("top_level"); } // depth 0
 
-  Profiler b;
-  b.setEnabled(true);
+  Profiler b(true);
   { auto sw = b.scopedStopwatch("top_level"); } // depth 0
 
   a.merge(b);
@@ -263,8 +247,7 @@ TEST(ProfilerTest, MergePreservesMatchingDepth) {
 }
 
 TEST(ProfilerTest, MergeEmptyProfiler) {
-  Profiler a;
-  a.setEnabled(true);
+  Profiler a(true);
   { auto sw = a.scopedStopwatch("existing"); }
 
   Profiler empty;

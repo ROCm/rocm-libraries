@@ -77,6 +77,8 @@ public:
 private:
   void initializeWorkgroup(Workgroup &workgroup, Dim3d wgId, Dim3d blockDim,
                            int nWaves, const RunConfig &config);
+  std::string decorateRaceException(Workgroup &workgroup,
+                                    const RaceConditionException &e) const;
   std::shared_ptr<Architecture> arch;
   std::unique_ptr<ParsedAsm> parsedAsm;
   std::vector<char> kernargSegment;

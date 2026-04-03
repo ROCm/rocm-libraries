@@ -55,7 +55,8 @@ void Workgroup::validateRead(int addr, WaveId wave, int lane,
       continue;
     }
     if (info.ldsIntervals.overlapsRange(addr, addr + nBytes)) {
-      throw RaceConditionException::Lds(addr, wave.value, lane, false);
+      throw RaceConditionException::Lds(addr, wave.value, lane, false,
+                                        workgroupId);
     }
   }
 }
@@ -81,7 +82,8 @@ void Workgroup::validateWrite(int addr, WaveId wave, int lane,
       continue;
     }
     if (info.ldsIntervals.overlapsRange(addr, addr + nBytes)) {
-      throw RaceConditionException::Lds(addr, wave.value, lane, true);
+      throw RaceConditionException::Lds(addr, wave.value, lane, true,
+                                        workgroupId);
     }
   }
 }

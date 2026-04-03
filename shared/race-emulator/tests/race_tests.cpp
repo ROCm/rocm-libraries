@@ -201,7 +201,7 @@ TEST_F(RaceTestFixture, DsWriteToDsReadMissingBarrier) {
   // We have 1 exact character level test for each type, the others must be
   // testing the underlying logc not string details.
   auto msg0 = R"MSG(
-LDS race in byte 512 detected. Race between a pair in:
+LDS race in byte 512 detected in workgroup (0,0,0). Race between a pair in:
 
 Wave 2 Lane 0:
 11     |   ; Each thread writes its 4 bytes to LDS.
@@ -259,7 +259,7 @@ TEST_F(RaceTestFixture, GlobalLoadToLdsWriteMissingVmcnt) {
     )ASM";
 
   auto msg0 = R"MSG(
-VGPR race detected on line 12 (wave 0, lane 0). Conflicting events:
+VGPR race detected on line 12 (wave 0, lane 0) in workgroup (0,0,0). Conflicting events:
 
 7     |   s_waitcnt lgkmcnt(0)
 8 --> |   global_load_dword v1, v0, s[0:1]
@@ -1183,4 +1183,39 @@ TEST(GlobalToLds, CrossWaveSafeAfterBarrier) {
   // Now wave 1 can safely read.
   EXPECT_NO_THROW(wg.readLds<uint32_t>(0, WaveId{1}, 0));
   EXPECT_TRUE(wg.getLdsWriteEvents().empty());
+}
+
+// Multiple workgroups run in parallel. Each workgroup has an intra-WG LDS race
+// (cross-wave read without barrier). The exception should carry the correct
+// workgroupIdx.
+TEST_F(RaceTestFixture, MultiWorkgroupRaceReportsWorkgroupIndex) {
+  // 2-wave kernel: wave 0 writes LDS[0], wave 1 reads LDS[0] without barrier.
+  const std::string code = std::string("foo:\n") + R"ASM(
+  v_lshlrev_b32_e32 v0, 2, v0
+  v_mov_b32_e32 v1, 42
+  ds_write_b32 v0, v1
+  s_waitcnt lgkmcnt(0)
+  v_mov_b32_e32 v2, 0
+  ds_read_b32 v3, v2
+  s_waitcnt lgkmcnt(0)
+  s_endpgm
+  )ASM" + std::string(boiler);
+
+  auto emulator = Emulator::createGfx942(code);
+  std::vector<int> h(2, 0);
+  int *p = h.data();
+  emulator.addKernarg(0, &p);
+
+  // Run 3 workgroups in parallel — all will race.
+  try {
+    emulator.run({{0, 0, 0}, {1, 0, 0}, {2, 0, 0}}, {128, 1, 1},
+                 {.raceChecks = true});
+    FAIL() << "Expected RaceConditionException";
+  } catch (const RaceConditionException &e) {
+    std::string msg = e.what();
+    EXPECT_NE(msg.find("Races detected in 3 of 3 workgroups"), std::string::npos)
+        << msg;
+    EXPECT_NE(msg.find("LDS race in byte 0"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("workgroup ("), std::string::npos) << msg;
+  }
 }

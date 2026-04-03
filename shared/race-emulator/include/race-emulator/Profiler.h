@@ -42,8 +42,7 @@ namespace raceemulator {
 /// accounted vs unaccounted time to reveal uninstrumented gaps.
 ///
 /// Example:
-///   Profiler profiler;
-///   profiler.setEnabled(true);
+///   Profiler profiler(true);
 ///   {
 ///     auto sw = profiler.scopedStopwatch("myFunction");
 ///     // ... work ...
@@ -65,6 +64,10 @@ class Profiler {
   };
 
 public:
+  /// Construct a profiler. When disabled (default), scopedStopwatch() returns
+  /// no-op instances with near-zero overhead.
+  explicit Profiler(bool enabled = false) : enabled(enabled) {}
+
   /// RAII stopwatch. Construct via Profiler::scopedStopwatch() to time a
   /// scope, or default-construct for a no-op instance (zero overhead).
   /// Nesting is supported: creating a new stopwatch pauses the current one.
@@ -111,12 +114,6 @@ public:
     return ScopedStopwatch(this, &entries[std::string(keyFn())]);
   }
 
-  void setEnabled(bool enable) {
-    enabled = enable;
-    if (enable) {
-      wallStart = Clock::now();
-    }
-  }
   bool isEnabled() const { return enabled; }
 
   /// Print a sorted timing report.

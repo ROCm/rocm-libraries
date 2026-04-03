@@ -153,6 +153,8 @@ public:
 
   void setProfiler(Profiler *p) { profiler = p; }
   void setWaveSchedule(WaveSchedule s) { waveSchedule = s; }
+  void setWorkgroupId(Dim3d id) { workgroupId = id; }
+  Dim3d getWorkgroupId() const { return workgroupId; }
 
   // --- Event registry ---
 
@@ -263,6 +265,7 @@ private:
 
   bool raceChecks{false};
   bool completeEmulation{true};
+  Dim3d workgroupId{0, 0, 0};
 };
 
 } // namespace raceemulator
