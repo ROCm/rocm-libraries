@@ -110,44 +110,9 @@ Emulator Emulator::createGfx1151(std::string_view assembly) {
   return Emulator(assembly, std::make_shared<Gfx1151>());
 }
 
-void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves,
-                                const RunConfig &config) {
-
-  auto threadsInX = blockDim.x;
-  auto threadsInY = blockDim.y;
-  auto threadsInZ = blockDim.z;
-
-  // Set the hidden kernargs from wgId. Look for valueKind of
-  //  hidden_group_size_x
-  //  hidden_group_size_y
-  //  hidden_group_size_z
-  for (size_t i = 0; i < parsedAsm->args.size(); ++i) {
-    if (parsedAsm->args[i].valueKind == "hidden_group_size_x") {
-      addKernarg(i, &threadsInX);
-    } else if (parsedAsm->args[i].valueKind == "hidden_group_size_y") {
-      addKernarg(i, &threadsInY);
-    } else if (parsedAsm->args[i].valueKind == "hidden_group_size_z") {
-      addKernarg(i, &threadsInZ);
-    }
-  }
-
-  // If any of kernargIsSet is false, error out.
-  for (size_t i = 0; i < kernargIsSet.size(); ++i) {
-    if (!kernargIsSet[i]) {
-
-      // If 'hidden' is in the value_kind, skip the error.
-      if (parsedAsm->args[i].valueKind.find("hidden") != std::string::npos) {
-        continue;
-      } else {
-        throw std::runtime_error("Kernarg " + std::to_string(i) + " name=(" +
-                                 parsedAsm->args[i].name +
-                                 ") not set! There are " +
-                                 std::to_string(kernargIsSet.size()) +
-                                 " kernarg(s). All (non hidden) kernargs must "
-                                 "be set before running the kernel!");
-      }
-    }
-  }
+void Emulator::initializeWorkgroup(Workgroup &workgroup, Dim3d wgId,
+                                   Dim3d blockDim, int nWaves,
+                                   const RunConfig &config) {
 
   workgroup.clear();
 
@@ -267,7 +232,8 @@ void Emulator::initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves,
   }
 }
 
-void Emulator::run(Dim3d wgId, Dim3d blockDim, const RunConfig &config) {
+void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
+                   const RunConfig &config) {
 
   // Validate block dimensions are within hardware limits (10 bits per
   // dimension)
@@ -291,13 +257,39 @@ void Emulator::run(Dim3d wgId, Dim3d blockDim, const RunConfig &config) {
 
   profiler.setEnabled(config.profiling);
 
-  {
-    auto sw = profiler.scopedStopwatch("initializeForRun");
-    initializeForRun(wgId, blockDim, nWaves, config);
+  // Set the hidden kernargs (group_size_x/y/z). These are the same for all
+  // workgroups so we write them once before the loop.
+  auto threadsInX = blockDim.x;
+  auto threadsInY = blockDim.y;
+  auto threadsInZ = blockDim.z;
+  for (size_t i = 0; i < parsedAsm->args.size(); ++i) {
+    if (parsedAsm->args[i].valueKind == "hidden_group_size_x") {
+      addKernarg(i, &threadsInX);
+    } else if (parsedAsm->args[i].valueKind == "hidden_group_size_y") {
+      addKernarg(i, &threadsInY);
+    } else if (parsedAsm->args[i].valueKind == "hidden_group_size_z") {
+      addKernarg(i, &threadsInZ);
+    }
   }
 
-  auto reportRaceCondition = [&](const RaceConditionException &e,
-                                 int waveId, int pc) -> std::string {
+  // Validate that all non-hidden kernargs have been set.
+  for (size_t i = 0; i < kernargIsSet.size(); ++i) {
+    if (!kernargIsSet[i]) {
+      if (parsedAsm->args[i].valueKind.find("hidden") != std::string::npos) {
+        continue;
+      }
+      throw std::runtime_error("Kernarg " + std::to_string(i) + " name=(" +
+                               parsedAsm->args[i].name +
+                               ") not set! There are " +
+                               std::to_string(kernargIsSet.size()) +
+                               " kernarg(s). All (non hidden) kernargs must "
+                               "be set before running the kernel!");
+    }
+  }
+
+  auto reportRaceCondition = [&](Workgroup &workgroup,
+                                 const RaceConditionException &e, int waveId,
+                                 int pc) -> std::string {
     auto &regs = workgroup.getWave(waveId);
     auto getAllVgprEvents = [&](const RaceConditionException &e) {
       assert(e.space == RaceConditionException::Space::VGPR);
@@ -328,15 +320,14 @@ void Emulator::run(Dim3d wgId, Dim3d blockDim, const RunConfig &config) {
     const int nAfter = 1;
 
     auto printCodeBlock = [&](std::ostringstream &oss, int startLine,
-                              int endLine,
-                              const std::vector<int> &arrowLines) {
+                              int endLine, const std::vector<int> &arrowLines) {
       for (int i = startLine; i <= endLine; ++i) {
         if (i < 0 || i >= static_cast<int>(parsedAsm->tokens.size())) {
           continue;
         }
         const auto &t = parsedAsm->tokens[i];
-        bool isArrowLine = std::find(arrowLines.begin(), arrowLines.end(),
-                                     i) != arrowLines.end();
+        bool isArrowLine = std::find(arrowLines.begin(), arrowLines.end(), i) !=
+                           arrowLines.end();
         if (isArrowLine) {
           oss << i << " --> | " << t.originalLine << "\n";
         } else {
@@ -413,18 +404,26 @@ void Emulator::run(Dim3d wgId, Dim3d blockDim, const RunConfig &config) {
     return oss.str();
   };
 
-  try {
-    workgroup.run(parsedAsm->tokens);
-  } catch (RaceConditionException &e) {
-    int pc = workgroup.getWave(e.wave).getPc();
-    auto newMessage = reportRaceCondition(e, e.wave, pc);
-    RaceConditionException updated = RaceConditionException(
-        newMessage, e.space, e.index, e.wave, e.lane, e.isWrite);
-    std::cerr << updated.what() << std::endl;
-    throw std::move(updated);
-  } catch (const EmulatorException &e) {
-    std::cerr << "\nRuntime Error: " << e.what() << "\n\n";
-    throw;
+  for (const auto &wgId : wgIds) {
+    Workgroup workgroup;
+    {
+      auto sw = profiler.scopedStopwatch("initializeWorkgroup");
+      initializeWorkgroup(workgroup, wgId, blockDim, nWaves, config);
+    }
+
+    try {
+      workgroup.run(parsedAsm->tokens);
+    } catch (RaceConditionException &e) {
+      int pc = workgroup.getWave(e.wave).getPc();
+      auto newMessage = reportRaceCondition(workgroup, e, e.wave, pc);
+      RaceConditionException updated = RaceConditionException(
+          newMessage, e.space, e.index, e.wave, e.lane, e.isWrite);
+      std::cerr << updated.what() << std::endl;
+      throw std::move(updated);
+    } catch (const EmulatorException &e) {
+      std::cerr << "\nRuntime Error: " << e.what() << "\n\n";
+      throw;
+    }
   }
 }
 

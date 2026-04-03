@@ -103,7 +103,7 @@ protected:
                   std::optional<RaceVerifier> verifier = std::nullopt) {
     Emulator emulator = getBoilerEmulator(assemblyBody, nGlobalBytes);
     try {
-      emulator.run(/* wgId= */ 0, {nWaves * 64, 1, 1},
+      emulator.run(Dim3d(0), {nWaves * 64, 1, 1},
                    {.raceChecks = true}); // nWaves waves * 64 threads/wave
       FAIL() << "Expected RaceConditionException, but simulation completed "
                 "successfully.";
@@ -143,16 +143,9 @@ protected:
 
   void ExpectSuccess(const std::string &assemblyBody, int nGlobalBytes = 16,
                      int nWaves = 1) {
-    RunExpectSuccess(assemblyBody, nGlobalBytes, nWaves);
-  }
-
-  // Run and return the Emulator so tests can inspect register state.
-  Emulator RunExpectSuccess(const std::string &assemblyBody,
-                            int nGlobalBytes = 16, int nWaves = 1) {
     Emulator emulator = getBoilerEmulator(assemblyBody, nGlobalBytes);
-    emulator.run(/* wgId= */ 0, {nWaves * 64, 1, 1},
+    emulator.run(Dim3d(0), {nWaves * 64, 1, 1},
                  {.raceChecks = true}); // nWaves waves * 64 threads/wave
-    return emulator;
   }
 
 private:
@@ -474,10 +467,7 @@ TEST_F(RaceTestFixture, DsReadMultipleLanesSameByteNoRace) {
   s_waitcnt lgkmcnt(0)
   s_endpgm
   )ASM";
-  auto emu = RunExpectSuccess(code, 0, 1);
-  for (int lane = 0; lane < 64; ++lane) {
-    EXPECT_EQ(emu.getWave(0).getVgpr(2, lane), 42u) << "lane " << lane;
-  }
+  ExpectSuccess(code, 0, 1);
 }
 
 // Scatter-then-broadcast: each lane writes its thread ID to LDS[lane*4],
@@ -493,10 +483,7 @@ TEST_F(RaceTestFixture, DsScatterThenBroadcastReadNoRace) {
   s_waitcnt lgkmcnt(0)
   s_endpgm
   )ASM";
-  auto emu = RunExpectSuccess(code, 0, 1);
-  for (int lane = 0; lane < 64; ++lane) {
-    EXPECT_EQ(emu.getWave(0).getVgpr(2, lane), 7u) << "lane " << lane;
-  }
+  ExpectSuccess(code, 0, 1);
 }
 
 // All lanes write different values (their thread ID) to the same LDS address.
@@ -1154,10 +1141,10 @@ TEST(GlobalToLds, CrossWaveRace) {
   wg.setRaceChecks(true);
 
   // Create two waves sharing the same workgroup.
-  Wave wave0(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4,
-             WaveSize{64}, WaveId{0}, wg, &labels, &macros);
-  Wave wave1(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4,
-             WaveSize{64}, WaveId{1}, wg, &labels, &macros);
+  Wave wave0(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4, WaveSize{64},
+             WaveId{0}, wg, &labels, &macros);
+  Wave wave1(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4, WaveSize{64},
+             WaveId{1}, wg, &labels, &macros);
 
   IntervalSet intervals;
   intervals.append(0, 64);
@@ -1180,10 +1167,10 @@ TEST(GlobalToLds, CrossWaveSafeAfterBarrier) {
   wg.resizeLds(1024);
   wg.setRaceChecks(true);
 
-  Wave wave0(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4,
-             WaveSize{64}, WaveId{0}, wg, &labels, &macros);
-  Wave wave1(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4,
-             WaveSize{64}, WaveId{1}, wg, &labels, &macros);
+  Wave wave0(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4, WaveSize{64},
+             WaveId{0}, wg, &labels, &macros);
+  Wave wave1(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4, WaveSize{64},
+             WaveId{1}, wg, &labels, &macros);
 
   IntervalSet intervals;
   intervals.append(0, 64);

@@ -50,8 +50,15 @@ public:
   /// Write all kernel arguments at once from a contiguous buffer.
   void addAllKernargs(const void *args);
 
-  /// Run the kernel on a single workgroup.
-  void run(Dim3d wgId, Dim3d blockDim, const RunConfig &config = {});
+  /// Run the kernel on the given workgroups (sequentially). Each workgroup
+  /// gets its own waves, LDS, and event state — fully independent.
+  void run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
+           const RunConfig &config = {});
+
+  /// Convenience: run the kernel on a single workgroup.
+  void run(Dim3d wgId, Dim3d blockDim, const RunConfig &config = {}) {
+    run(std::vector<Dim3d>{wgId}, blockDim, config);
+  }
 
   std::string getName() const;
   int getKernargSegmentSize() const;
@@ -63,19 +70,17 @@ public:
   std::string getKernargName(int argNumber) const;
 
   const Architecture &getArch() const { return *arch; }
-  const Wave &getWave(int waveId) const { return workgroup.getWave(waveId); }
 
   void appendStr(std::ostream &) const;
   std::string str() const;
 
 private:
-  void initializeForRun(Dim3d wgId, Dim3d blockDim, int nWaves,
-                        const RunConfig &config);
+  void initializeWorkgroup(Workgroup &workgroup, Dim3d wgId, Dim3d blockDim,
+                           int nWaves, const RunConfig &config);
   std::shared_ptr<Architecture> arch;
   std::unique_ptr<ParsedAsm> parsedAsm;
   std::vector<char> kernargSegment;
   std::vector<bool> kernargIsSet;
-  Workgroup workgroup;
   Profiler profiler;
 };
 

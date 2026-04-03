@@ -130,8 +130,8 @@ TEST(Gfx942, MatMul_Kittens) {
   KittenArg argB = {h_b.data(), 0};
   emulator.addKernarg(1, &argB);
 
-  emulator.run(0, {512, 1, 1},
-              {.raceChecks = true}); // 8 waves * 64 threads/wave = 512 threads
+  emulator.run(Dim3d(0), {512, 1, 1},
+               {.raceChecks = true}); // 8 waves * 64 threads/wave = 512 threads
 
   auto endOfEmulatorRun = std::chrono::high_resolution_clock::now();
 

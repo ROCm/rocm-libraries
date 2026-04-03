@@ -19,7 +19,7 @@ namespace raceemulator {
 class Dim3d {
 public:
   Dim3d() = delete;
-  Dim3d(int x) : x(x), y(0), z(0) {}
+  explicit Dim3d(int x) : x(x), y(0), z(0) {}
   Dim3d(int x, int y) : x(x), y(y), z(0) {}
   Dim3d(int x, int y, int z) : x(x), y(y), z(z) {}
   int x = 0;

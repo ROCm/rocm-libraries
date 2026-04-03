@@ -189,9 +189,11 @@ TEST(Gfx1151, MatMul_IREE_F16xF16xF32_64x128x512) {
 
   // 8 workgroups, 128 threads each (4 waves of 32)
   Dim3d blockDim(128, 1, 1);
+  std::vector<Dim3d> wgIds;
   for (int wgX = 0; wgX < 8; ++wgX) {
-    emulator.run(Dim3d(wgX, 0, 0), blockDim, {.raceChecks = true});
+    wgIds.emplace_back(wgX, 0, 0);
   }
+  emulator.run(wgIds, blockDim, {.raceChecks = true});
 
   std::vector<float> cRef;
   cpuGemmRowMajorF32(M, N, K, aF32, bF32, cRef);

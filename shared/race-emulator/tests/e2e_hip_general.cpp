@@ -79,7 +79,7 @@ void runCopyKernel(const ArchParam &arch) {
   const int *d_in = h_in.data();
   emulator.addKernarg(0, &d_out);
   emulator.addKernarg(1, &d_in);
-  emulator.run(0, {128, 1, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(0), {128, 1, 1}, {.raceChecks = true});
 
   for (int i = 0; i < N; ++i) {
     EXPECT_EQ(h_out[i], h_in[i])
@@ -109,9 +109,11 @@ void runCopyIndexed(const ArchParam &arch) {
   emulator.addKernarg(0, &d_out);
   emulator.addKernarg(1, &d_in);
 
+  std::vector<Dim3d> wgIds;
   for (int wg = 0; wg < nWorkgroups; ++wg) {
-    emulator.run(wg, {ws, 1, 1}, {.raceChecks = true});
+    wgIds.emplace_back(wg, 0, 0);
   }
+  emulator.run(wgIds, {ws, 1, 1}, {.raceChecks = true});
 
   for (int i = 0; i < N; ++i) {
     EXPECT_EQ(h_out[i], h_in[i]) << "Mismatch at index " << i << " (workgroup "
@@ -170,7 +172,7 @@ void runMixedPrecisionAdder(const ArchParam &arch) {
   emulator.addKernarg(1, &d_in0);
   emulator.addKernarg(2, &d_out);
   emulator.addKernarg(3, &d_in1);
-  emulator.run(1, {256, 1, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(1), {256, 1, 1}, {.raceChecks = true});
   EXPECT_EQ(h_out[400], static_cast<float>(h_in0[400] + h_in1[400] + bias));
 }
 
@@ -189,7 +191,7 @@ void runBF16Adder(const ArchParam &arch) {
   emulator.addKernarg(0, &d_c);
   emulator.addKernarg(1, &toAdd);
   emulator.addKernarg(2, &N1);
-  emulator.run(1, {64, 1, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(1), {64, 1, 1}, {.raceChecks = true});
 
   for (int i = 64; i < 128; ++i) {
     float expected = i < 100 ? 17.5f + toAdd : 17.5f;
@@ -213,7 +215,7 @@ void runFloatAdder(const ArchParam &arch) {
   emulator.addKernarg(0, &d_c);
   emulator.addKernarg(1, &toAdd);
   emulator.addKernarg(2, &N1);
-  emulator.run(1, {192, 1, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(1), {192, 1, 1}, {.raceChecks = true});
 
   for (int i = 1 * 3 * 64; i < 2 * 3 * 64; ++i) {
     float actual = h_c[i];
@@ -245,7 +247,7 @@ void runDoubleEvens(const ArchParam &arch) {
 
   emulator.addKernarg(0, &d_c);
   emulator.addKernarg(1, &scale);
-  emulator.run(0, {128, 1, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(0), {128, 1, 1}, {.raceChecks = true});
 
   int start = 0;
   int nChecks = 100;
@@ -279,7 +281,7 @@ void runRaggedLoops(const ArchParam &arch) {
 
   emulator.addKernarg(0, &d_data);
   emulator.addKernarg(1, &d_limits);
-  emulator.run(0, {64, 1, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(0), {64, 1, 1}, {.raceChecks = true});
 
   std::vector<std::string> errors;
   for (int i = 0; i < N; ++i) {
@@ -329,7 +331,7 @@ void runRaggedComplex(const ArchParam &arch) {
 
   emulator.addKernarg(0, &d_data);
   emulator.addKernarg(1, &d_limits);
-  emulator.run(0, {64, 1, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(0), {64, 1, 1}, {.raceChecks = true});
 
   std::vector<std::string> errors;
   for (int i = 0; i < N; ++i) {
@@ -373,7 +375,7 @@ void runLdsReverse(const ArchParam &arch) {
   int *d_data = h_data.data();
 
   emulator.addKernarg(0, &d_data);
-  emulator.run(0, {256, 1, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(0), {256, 1, 1}, {.raceChecks = true});
 
   std::vector<std::string> errors;
   for (int i = 0; i < N; ++i) {
@@ -429,7 +431,8 @@ void runNaiveMatmul(const ArchParam &arch) {
   emulator.addKernarg(3, &M);
   emulator.addKernarg(4, &N);
   emulator.addKernarg(5, &K);
-  emulator.run(0, {16, 16, 1}, {.raceChecks = true}); // 256 threads, only MxN active
+  emulator.run(Dim3d(0), {16, 16, 1},
+               {.raceChecks = true}); // 256 threads, only MxN active
 
   // Compute expected: C[i][j] = sum_k A[i][k] * B[k][j]
   for (int i = 0; i < M; ++i) {
@@ -471,7 +474,7 @@ void runLdsTranspose(const ArchParam &arch) {
   emulator.addKernarg(3, &N);
 
   // LDS size = M * N * sizeof(int) = 10 * 12 * 4 = 480 bytes
-  emulator.run(0, {16, 16, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(0), {16, 16, 1}, {.raceChecks = true});
 
   // Verify: out is NxM row-major, out[j][i] should be in[i][j]
   for (int j = 0; j < N; ++j) {
@@ -504,7 +507,7 @@ void runF16Adder(const ArchParam &arch) {
   emulator.addKernarg(0, &d_c);
   emulator.addKernarg(1, &toAdd);
   emulator.addKernarg(2, &N1);
-  emulator.run(1, {arch.waveSize, 1, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(1), {arch.waveSize, 1, 1}, {.raceChecks = true});
 
   for (int i = arch.waveSize; i < 2 * arch.waveSize; ++i) {
     float expected = i < 100 ? 17.5f + toAdd : 17.5f;
@@ -546,7 +549,7 @@ void runF16RoundTrip(const ArchParam &arch) {
   float *d_data = h_data.data();
   emulator.addKernarg(0, &d_data);
   emulator.addKernarg(1, &N);
-  emulator.run(0, {arch.waveSize, 1, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(0), {arch.waveSize, 1, 1}, {.raceChecks = true});
 
   for (int i = 0; i < static_cast<int>(cases.size()); ++i) {
     EXPECT_EQ(h_data[i], cases[i].second)
