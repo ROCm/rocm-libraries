@@ -386,24 +386,21 @@ const auto& GetSolverNames()
 }
 
 template <class TestCase>
-const auto& GetTestCases()
+const auto GetTestCases()
 {
-    static const auto test_cases = [] {
-        std::vector<TestCase> test_cases;
-        const auto& sinfo   = GetSolversInfo<decltype(std::declval<TestCase>().info)>();
-        const auto& configs = GetSolverConfigs<decltype(std::declval<TestCase>().config)>();
-        test_cases.reserve(sinfo.size());
-        for(const auto& s : sinfo)
-        {
-            const auto& config = configs.find(s.first);
-            if(config == configs.end())
-                test_cases.emplace_back(TestCase{s.first, s.second, {}});
-            else
-                test_cases.emplace_back(TestCase{s.first, s.second, config->second});
-        }
-        return test_cases;
-    }();
-    return test_cases;
+    std::vector<TestCase> test_cases;
+    const auto& sinfo   = GetSolversInfo<decltype(std::declval<TestCase>().info)>();
+    const auto& configs = GetSolverConfigs<decltype(std::declval<TestCase>().config)>();
+    test_cases.reserve(sinfo.size());
+    for(const auto& s : sinfo)
+    {
+        const auto& config = configs.find(s.first);
+        if(config == configs.end())
+            test_cases.emplace_back(TestCase{s.first, s.second, {}});
+        else
+            test_cases.emplace_back(TestCase{s.first, s.second, config->second});
+    }
+    return std::move(test_cases);
 }
 
 #if MIOPEN_ENABLE_FIN_INTERFACE
