@@ -432,6 +432,19 @@ void RunPoolingTestWithIndexType(const PoolingTestCase& test_case)
 
     std::vector<Index> indices;
     verify_forward_pooling<SptDim> forward_verifier;
+
+    // DEBUG: Print descriptors for the failing case to compare with develop
+    if(test_case.in_shape == std::vector<int>{16, 64, 3, 4, 4} && 
+       test_case.pads == std::vector<int>{1, 1, 1} &&
+       test_case.in_layout == "NDHWC")
+    {
+        std::cout << "DEBUG: Failing Config Detected!" << std::endl;
+        std::cout << "Input Desc: " << input.desc << std::endl;
+        auto out_desc = filter.GetForwardOutputTensor(input.desc);
+        std::cout << "Output Desc: " << out_desc << std::endl;
+        std::cout << "Output Element Space: " << out_desc.GetElementSpace() << std::endl;
+    }
+
     auto forward_result = forward_verifier.cpu(input, filter, indices);
     auto forward_gpu_result = forward_verifier.gpu(input, filter, indices);
 
