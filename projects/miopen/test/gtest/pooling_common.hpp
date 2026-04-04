@@ -211,10 +211,9 @@ struct verify_forward_pooling
 
         if(ws_size > 0 && filter.GetMode() == miopenPoolingMax)
         {
-            // The workspace might be larger than out.data.size() * sizeof(Index)
-            // but we only need to read the indices part.
-            indices.resize(out.data.size());
-            HIP_CHECK(hipMemcpy(indices.data(), wspace.ptr(), out.data.size() * sizeof(Index), hipMemcpyDeviceToHost));
+            // Preserve the full workspace payload because backward may consume
+            // more than the leading index array bytes.
+            indices = wspace.Read<std::vector<Index>>();
         }
         
         out.data = handle.Read<T>(out_dev, out.data.size());
@@ -413,8 +412,10 @@ struct verify_backward_pooling
         Workspace wspace(ws_size);
         if(!indices.empty())
         {
-            // Only write the part of the workspace that contains indices
-            HIP_CHECK(hipMemcpy(wspace.ptr(), indices.data(), indices.size() * sizeof(Index), hipMemcpyHostToDevice));
+            const std::size_t bytes_to_copy =
+                std::min(ws_size, indices.size() * sizeof(Index));
+            HIP_CHECK(
+                hipMemcpy(wspace.ptr(), indices.data(), bytes_to_copy, hipMemcpyHostToDevice));
         }
 
         float alpha = 1, beta = 0;
@@ -465,7 +466,7 @@ void RunPoolingTestWithIndexType(const PoolingTestCase& test_case)
     verify_backward_pooling<SptDim> backward_verifier;
     const bool is_channel_last =
         (test_case.in_layout == "NHWC" || test_case.in_layout == "NDHWC");
-    const bool use_global_index = (test_case.wsidx != 0) && !is_channel_last;
+    const bool use_global_index = test_case.wsidx != 0;
     const bool verify_index = use_global_index && !is_channel_last;
     auto backward_result = backward_verifier.cpu(
         input, dout, forward_result, filter, indices, use_global_index, verify_index);
