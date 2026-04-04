@@ -590,6 +590,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenConvBwdWrW_LxG_P53.cl
         kernels/MIOpenGroupConvBwdWrW_LxG_P53.cl
         kernels/MIOpenConvBwdWrW1x1_PAD_read4.cl
+        kernels/MIOpenConvFwd_LxL_11.cpp
 
         kernels/MIOpenConvFFT.cpp
         kernels/MIOpenRNNHiddenStateUpdate.cpp
