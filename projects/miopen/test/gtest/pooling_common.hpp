@@ -463,9 +463,9 @@ void RunPoolingTestWithIndexType(const PoolingTestCase& test_case)
         GTEST_FAIL() << "Indices not populated for max pooling backward";
 
     verify_backward_pooling<SptDim> backward_verifier;
-    const bool use_global_index = test_case.wsidx != 0;
     const bool is_channel_last =
         (test_case.in_layout == "NHWC" || test_case.in_layout == "NDHWC");
+    const bool use_global_index = (test_case.wsidx != 0) && !is_channel_last;
     const bool verify_index = use_global_index && !is_channel_last;
     auto backward_result = backward_verifier.cpu(
         input, dout, forward_result, filter, indices, use_global_index, verify_index);
