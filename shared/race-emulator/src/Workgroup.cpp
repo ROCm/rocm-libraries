@@ -1,94 +1,55 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Workgroup implementation: wave execution loop, barrier synchronization,
-// and hybrid LDS race validation. Per-byte counts provide O(1) fast-path
-// checks. When counts are non-zero, falls back to scanning live event
-// intervals with binary search.
-
 #include "race-emulator/Workgroup.h"
 #include "race-emulator/Parsing.h"
 #include "race-emulator/Profiler.h"
 #include "race-emulator/Util.h"
 #include <algorithm>
-#include <cassert>
 #include <numeric>
 
 namespace raceemulator {
 
-void Workgroup::markEventWaveComplete(EventId eventId) {
-  assert(eventId.value >= 0 &&
-         eventId.value < static_cast<int64_t>(eventRegistry.size()));
-  assert(eventRegistry[eventId.value].status == EventStatus::ACTIVE);
-  eventRegistry[eventId.value].status = EventStatus::WAVE_COMPLETE;
-}
+namespace {
+const std::map<std::string, int> emptyLabels = {};
+const std::map<std::string, Macro> emptyMacros = {};
+} // namespace
 
-void Workgroup::retireEvent(EventId eventId) {
-  const auto &info = eventRegistry[eventId.value];
-  if (isToLds(info.type)) {
-    removeFromUnorderedList(ldsWriteEvents, eventId);
-    adjustByteCounts(info.ldsIntervals, byteWriteCounts, -1);
-  } else if (info.type == MemoryEventType::LDS_TO_VGPR) {
-    removeFromUnorderedList(ldsReadEvents, eventId);
-    adjustByteCounts(info.ldsIntervals, byteReadCounts, -1);
-  }
-}
+Workgroup::~Workgroup() = default;
+Workgroup::Workgroup(Workgroup &&) noexcept = default;
+Workgroup &Workgroup::operator=(Workgroup &&) noexcept = default;
 
-void Workgroup::validateRead(int addr, WaveId wave, int lane,
-                             int nBytes) const {
-  // Fast path: if no write events touch any byte in the range, no race.
-  bool anyWrites = false;
-  for (int i = 0; i < nBytes; ++i) {
-    if (byteWriteCounts[addr + i] > 0) {
-      anyWrites = true;
-      break;
-    }
-  }
-  if (!anyWrites) {
-    return;
+Workgroup::Workgroup(const WorkgroupConfig &config)
+    : waveSchedule(config.waveSchedule), completeEmulation(config.completeEmulation) {
+  if (config.ldsSize > 0) {
+    lds.resize(config.ldsSize);
   }
 
-  // Slow path: scan live write events for overlap.
-  for (EventId eventId : ldsWriteEvents) {
-    const auto &info = eventRegistry[eventId.value];
-    if (wave == info.waveId && info.status == EventStatus::WAVE_COMPLETE) {
-      continue;
-    }
-    if (info.ldsIntervals.overlapsRange(addr, addr + nBytes)) {
-      throw RaceConditionException::Lds(addr, wave.value, lane, false,
-                                        workgroupId);
+  if (config.raceChecks) {
+    raceDetector = std::make_unique<RaceDetector>(
+        lds.getSize(), config.nWaves, config.vgprCount);
+  }
+
+  int agprOffset =
+      config.agprOffset < 0 ? config.vgprCount : config.agprOffset;
+  const auto *labels = config.labels ? config.labels : &emptyLabels;
+  const auto *macros = config.macros ? config.macros : &emptyMacros;
+
+  for (int i = 0; i < config.nWaves; ++i) {
+    waves.push_back(Wave(config.vgprCount, agprOffset, config.sgprCount,
+                         config.waveSize, WaveId{i}, *this, labels, macros));
+    if (raceDetector) {
+      waves.back().raceState = &raceDetector->getWaveRaceState(i);
     }
   }
 }
 
-void Workgroup::validateWrite(int addr, WaveId wave, int lane,
-                              int nBytes) const {
-  // Fast path: if no read events touch any byte in the range, no race.
-  bool anyReads = false;
-  for (int i = 0; i < nBytes; ++i) {
-    if (byteReadCounts[addr + i] > 0) {
-      anyReads = true;
-      break;
-    }
-  }
-  if (!anyReads) {
-    return;
-  }
-
-  // Slow path: scan live read events for overlap.
-  for (EventId eventId : ldsReadEvents) {
-    const auto &info = eventRegistry[eventId.value];
-    if (wave == info.waveId && info.status == EventStatus::WAVE_COMPLETE) {
-      continue;
-    }
-    if (info.ldsIntervals.overlapsRange(addr, addr + nBytes)) {
-      throw RaceConditionException::Lds(addr, wave.value, lane, true,
-                                        workgroupId);
-    }
+void Workgroup::setProfiler(Profiler *p) {
+  profiler = p;
+  if (raceDetector) {
+    raceDetector->setProfiler(p);
   }
 }
-
-void Workgroup::addWave(Wave &&wave) { waves.push_back(std::move(wave)); }
 
 void Workgroup::run(const std::vector<ParsedLine> &tokens) {
   int nWaves = static_cast<int>(waves.size());
@@ -164,22 +125,6 @@ void Workgroup::run(const std::vector<ParsedLine> &tokens) {
                   preferenceOrder.end());
     }
   }
-}
-
-void Workgroup::resizeLds(int size) {
-  lds.resize(size);
-  byteWriteCounts.resize(size, 0);
-  byteReadCounts.resize(size, 0);
-}
-
-void Workgroup::clear() {
-  waves.clear();
-  lds.clear();
-  ldsWriteEvents.clear();
-  ldsReadEvents.clear();
-  byteWriteCounts.clear();
-  byteReadCounts.clear();
-  eventRegistry.clear();
 }
 
 } // namespace raceemulator

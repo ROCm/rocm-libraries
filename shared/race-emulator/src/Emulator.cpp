@@ -118,15 +118,12 @@ Emulator Emulator::createGfx1151(std::string_view assembly) {
   return Emulator(assembly, std::make_shared<Gfx1151>());
 }
 
-void Emulator::initializeWorkgroup(Workgroup &workgroup, Dim3d wgId,
-                                   Dim3d blockDim, int nWaves,
-                                   const RunConfig &config) {
-
-  workgroup.clear();
-
+WorkgroupConfig Emulator::buildWorkgroupConfig(int nWaves,
+                                               const RunConfig &config) const {
   int nextFreeVgpr{-1};
   int accumOffset{-1};
   int nextFreeSgpr{-1};
+  int ldsSize{0};
 
   if (!parsedAsm->amdhsa.empty()) {
     for (const auto &[key, val] : parsedAsm->amdhsa) {
@@ -144,30 +141,31 @@ void Emulator::initializeWorkgroup(Workgroup &workgroup, Dim3d wgId,
                                    "' (" +
                                    std::to_string(arch->getMaxLdsSize()) + ")");
         }
-        workgroup.resizeLds(arch->getMaxLdsSize());
+        ldsSize = arch->getMaxLdsSize();
       }
     }
   }
 
   assert(nextFreeVgpr >= 0 && "nextFreeVgpr must be set in AMDHSA metadata");
   assert(nextFreeSgpr >= 0 && "nextFreeSgpr must be set in AMDHSA metadata");
-  if (accumOffset < 0) {
-    accumOffset = nextFreeVgpr;
-  }
 
-  const auto &labels = parsedAsm->labels;
-  const auto &macros = parsedAsm->macros;
+  WorkgroupConfig wgConfig;
+  wgConfig.nWaves = nWaves;
+  wgConfig.vgprCount = nextFreeVgpr;
+  wgConfig.agprOffset = accumOffset; // -1 handled by Workgroup ctor
+  wgConfig.sgprCount = nextFreeSgpr;
+  wgConfig.waveSize = parsedAsm->wavefrontSize;
+  wgConfig.ldsSize = ldsSize;
+  wgConfig.raceChecks = config.raceChecks;
+  wgConfig.completeEmulation = config.completeEmulation;
+  wgConfig.waveSchedule = config.waveSchedule;
+  wgConfig.labels = &parsedAsm->labels;
+  wgConfig.macros = &parsedAsm->macros;
+  return wgConfig;
+}
 
-  workgroup.setRaceChecks(config.raceChecks);
-  workgroup.setCompleteEmulation(config.completeEmulation);
-  workgroup.setWaveSchedule(config.waveSchedule);
-
-  for (int i = 0; i < nWaves; ++i) {
-    workgroup.addWave(Wave(nextFreeVgpr, accumOffset, nextFreeSgpr,
-                           parsedAsm->wavefrontSize, WaveId{i}, workgroup,
-                           &labels, &macros));
-  }
-
+void Emulator::initializeWaveState(Workgroup &workgroup, Dim3d wgId,
+                                   Dim3d blockDim, int nWaves) {
   for (int i = 0; i < nWaves; ++i) {
     auto &r = workgroup.getWave(i);
     for (const auto &[key, mapping] :
@@ -188,38 +186,26 @@ void Emulator::initializeWorkgroup(Workgroup &workgroup, Dim3d wgId,
     }
   }
 
-  // Kernarg preload: if the kernel specifies preload_length > 0, the hardware
-  // preloads that many dwords from the kernarg segment into SGPRs starting
-  // right after the kernarg segment pointer (i.e., at s[2]).
   if (parsedAsm->kernargPreloadLength > 0) {
     auto *srcPtr = reinterpret_cast<const uint32_t *>(
         kernargSegment.data() + parsedAsm->kernargPreloadOffset);
     for (int i = 0; i < nWaves; ++i) {
       auto &r = workgroup.getWave(i);
       for (int j = 0; j < parsedAsm->kernargPreloadLength; ++j) {
-        // Preloaded SGPRs start at s[2] (right after the kernarg pointer
-        // s[0:1]).
         r.setSgpr(2 + j, srcPtr[j]);
       }
     }
   }
 
-  // Pack 3D thread IDs into VGPR0: x in bits [0:9], y in [10:19], z in [20:29].
-  // This packing is inferred from hipcc output (see tests/asm/test_3d.s), and
-  // may need verification for architectures other than gfx942.
   int threadId = {0};
   for (int i = 0; i < nWaves; ++i) {
     auto &r = workgroup.getWave(i);
     for (int lane = 0; lane < r.getWaveSize(); ++lane) {
-      // Calculate 3D coordinates from flat thread ID
       int tid_x = threadId % blockDim.x;
       int tid_y = (threadId / blockDim.x) % blockDim.y;
       int tid_z = threadId / (blockDim.x * blockDim.y);
-
-      // Pack into v0 according to AMD GPU format
       uint32_t packedThreadId =
           (tid_x & 0x3FF) | ((tid_y & 0x3FF) << 10) | ((tid_z & 0x3FF) << 20);
-
       r.setVgpr(0, lane, packedThreadId);
       threadId++;
     }
@@ -233,7 +219,6 @@ void Emulator::initializeWorkgroup(Workgroup &workgroup, Dim3d wgId,
   }
 
   int labelIndex = start->second;
-
   for (int i = 0; i < nWaves; ++i) {
     workgroup.getWave(i).setPc(labelIndex);
   }
@@ -308,13 +293,15 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
   std::vector<std::thread> threads;
   threads.reserve(nWorkgroups);
 
+  auto wgConfig = buildWorkgroupConfig(nWaves, config);
+
   for (int i = 0; i < nWorkgroups; ++i) {
     threads.emplace_back([&, i]() {
       try {
-        Workgroup workgroup;
+        Workgroup workgroup(wgConfig);
         {
-          auto sw = wgProfilers[i].scopedStopwatch("initializeWorkgroup");
-          initializeWorkgroup(workgroup, wgIds[i], blockDim, nWaves, config);
+          auto sw = wgProfilers[i].scopedStopwatch("initializeWaveState");
+          initializeWaveState(workgroup, wgIds[i], blockDim, nWaves);
         }
         workgroup.setProfiler(&wgProfilers[i]);
         workgroup.setWorkgroupId(wgIds[i]);
@@ -424,10 +411,11 @@ Emulator::decorateRaceException(Workgroup &workgroup,
         << ", lane " << e.lane << ") in workgroup (" << wgId.x << ","
         << wgId.y << "," << wgId.z << "). Conflicting events:\n\n";
 
-    auto &regs = workgroup.getWave(e.wave);
+    auto &wave = workgroup.getWave(e.wave);
+    auto *detector = workgroup.getRaceDetector();
     std::vector<int> eventPcs{pc};
-    for (EventId evtId : regs.getVgprMemoryEvents(e.index)) {
-      eventPcs.push_back(workgroup.getEventPc(evtId));
+    for (EventId evtId : wave.getVgprMemoryEvents(e.index)) {
+      eventPcs.push_back(detector->getEventPc(evtId));
     }
     std::sort(eventPcs.begin(), eventPcs.end());
 
@@ -467,16 +455,17 @@ Emulator::decorateRaceException(Workgroup &workgroup,
     };
     std::vector<PcWaveLane> entries{{pc, e.wave, e.lane}};
 
+    auto *detector = workgroup.getRaceDetector();
     auto scanEvents = [&](const std::vector<EventId> &events) {
       for (EventId eventId : events) {
-        if (workgroup.getEventIntervals(eventId).contains(e.index)) {
-          entries.push_back({workgroup.getEventPc(eventId),
-                             workgroup.getEventWaveId(eventId).value, -1});
+        if (detector->getEventIntervals(eventId).contains(e.index)) {
+          entries.push_back({detector->getEventPc(eventId),
+                             detector->getEventWaveId(eventId).value, -1});
         }
       }
     };
-    scanEvents(workgroup.getLdsWriteEvents());
-    scanEvents(workgroup.getLdsReadEvents());
+    scanEvents(detector->getLdsWriteEvents());
+    scanEvents(detector->getLdsReadEvents());
     std::sort(entries.begin(), entries.end(),
               [](const PcWaveLane &a, const PcWaveLane &b) {
                 return std::tie(a.pc, a.wave) < std::tie(b.pc, b.wave);

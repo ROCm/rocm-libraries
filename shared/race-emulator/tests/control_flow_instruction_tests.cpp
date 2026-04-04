@@ -16,8 +16,8 @@ void tryExecute(Wave &regs, const std::string &line) {
 
 TEST(Instructions, SAndSaveExecB64) {
 
-  Workgroup wg;
-  Wave regs(/*vgprCount*/ 1, /*sgprCount*/ 10, WaveSize{64}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 10, .waveSize = WaveSize{64}});
+  auto &regs = wg.getWave(0);
 
   // populate vcc first 33 bits to 1.
   // populate exec final 33 bits with 1.
@@ -56,8 +56,8 @@ TEST(Instructions, SAndSaveExecB64) {
 //      the no-op deliberately does not, because the caller's code flow
 //      assumes the subroutine runs and returns, which our no-op skips).
 TEST(Instructions, S_SwapPc_B64_NoOp) {
-  Workgroup wg;
-  Wave regs(/*vgpr*/ 4, /*sgpr*/ 16, WaveSize{32}, wg);
+  Workgroup wg({.vgprCount = 4, .sgprCount = 16, .waveSize = WaveSize{32}});
+  auto &regs = wg.getWave(0);
 
   // Set up operands as the kernel does:
   //   s_swappc_b64 s[4:5], s[12:13]
@@ -88,8 +88,8 @@ TEST(Instructions, S_SwapPc_B64_NoOp) {
 // SQUEUE, which has no emulator equivalent). Verify it executes without
 // throwing and leaves registers unchanged.
 TEST(Instructions, S_SENDMSG) {
-  Workgroup wg;
-  Wave regs(/*vgpr*/ 0, /*sgpr*/ 4, WaveSize{64}, wg);
+  Workgroup wg({.vgprCount = 0, .sgprCount = 4, .waveSize = WaveSize{64}});
+  auto &regs = wg.getWave(0);
   regs.setSgpr(2, 0xDEADBEEF);
   tryExecute(regs, "s_sendmsg sendmsg(MSG_INTERRUPT)");
   EXPECT_EQ(regs.getSgpr(2), 0xDEADBEEFu); // unchanged

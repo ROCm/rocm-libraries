@@ -20,8 +20,8 @@ using namespace raceemulator;
 //   CASES:     Initializer list of Scalar3OpCase
 #define TEST_SCALAR_BINARY_OP(TEST_NAME, ASM_OP, ...)                          \
   TEST(Instructions, TEST_NAME) {                                              \
-    Workgroup wg;                                                              \
-    Wave regs(8, 8, WaveSize{8}, wg);                                          \
+    Workgroup wg({.vgprCount = 8, .sgprCount = 8, .waveSize = WaveSize{8}});    \
+    auto &regs = wg.getWave(0);                                                \
     std::vector<Scalar3OpCase> cases = {__VA_ARGS__};                          \
                                                                                \
     for (size_t i = 0; i < cases.size(); ++i) {                                \
@@ -42,8 +42,8 @@ using namespace raceemulator;
 
 #define TEST_SCALAR_CMP(TEST_NAME, ASM_OP, ...)                                \
   TEST(Instructions, TEST_NAME) {                                              \
-    Workgroup wg;                                                              \
-    Wave regs(8, 8, WaveSize{8}, wg);                                          \
+    Workgroup wg({.vgprCount = 8, .sgprCount = 8, .waveSize = WaveSize{8}});    \
+    auto &regs = wg.getWave(0);                                                \
     struct Case {                                                              \
       uint32_t s0;                                                             \
       uint32_t s1;                                                             \
@@ -79,8 +79,8 @@ void tryExecute(Wave &regs, const std::string &line) {
 
 TEST(Instructions, SAndB32_Detailed) {
 
-  Workgroup wg;
-  Wave regs(/*vgprCount*/ 1, /*sgprCount*/ 4, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
   regs.setSgpr(0, 0b1100); // s0 = 12
   regs.setSgpr(1, 0b1010); // s1 = 10
   regs.setScc(false);
@@ -107,8 +107,8 @@ TEST(Instructions, SAndB32_Detailed) {
 
 // Test s_cmp_eq_u32 with literal operands and same-register comparison.
 TEST(Instructions, SCmpEqU32_Literals) {
-  Workgroup wg;
-  Wave regs(/*vgprCount*/ 1, /*sgprCount*/ 4, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
   regs.setSgpr(0, 42);  // s0 = 42
   regs.setSgpr(1, 100); // s1 = 100
   tryExecute(regs, "s_cmp_eq_u32 s0, s0");
@@ -125,8 +125,8 @@ TEST(Instructions, SCmpEqU32_Literals) {
 
 TEST(Instructions, SBfeU32) {
   // Setup: 1 VGPR (unused), 5 SGPRs, WaveSize 1
-  Workgroup wg;
-  Wave regs(1, 5, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 5, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
 
   // Data to extract from: 0x12345678
   // Binary: ... 0001 0010 0011 0100 0101 0110 0111 1000
@@ -175,8 +175,8 @@ TEST(Instructions, SBfeU32) {
 }
 
 TEST(Instructions, SAddI32) {
-  Workgroup wg;
-  Wave regs(1, 5, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 5, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
 
   // Case 1: Simple Addition (No Overflow)
   // 10 + 20 = 30
@@ -229,8 +229,8 @@ TEST(Instructions, SAddI32) {
 
 TEST(Instructions, SCSelectB32) {
   // 5 SGPRs.
-  Workgroup wg;
-  Wave regs(1, 5, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 5, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
 
   // Setup inputs
   // s0 = 0xAAAA (The "True" value)
@@ -263,8 +263,8 @@ TEST(Instructions, SCSelectB32) {
 
 TEST(Instructions, SXorB64) {
   // Setup: 1 VGPR, 6 SGPRs (s0-s5), WaveSize 1
-  Workgroup wg;
-  Wave regs(1, 6, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 6, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
 
   // Case 1: Simple XOR (Result is Non-Zero)
   // s[0:1] = 0x...F0F0 ^ 0x...0F0F = 0x...FFFF
@@ -298,8 +298,8 @@ TEST(Instructions, SXorB64) {
 }
 
 TEST(Instructions, SMovkI32_SignExtension) {
-  Workgroup wg;
-  Wave regs(1, 1, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 1, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
 
   // Case 1: Positive Signed Integer
   // 0x7FFF = 32767 (Max positive 16-bit integer)
@@ -327,8 +327,8 @@ TEST(Instructions, SMovkI32_SignExtension) {
 
 TEST(Instructions, SAdd) {
   // Setup: 8 VGPRs, 8 SGPRs, 8 waves per thread.
-  Workgroup wg;
-  Wave regs(8, 8, WaveSize{8}, wg);
+  Workgroup wg({.vgprCount = 8, .sgprCount = 8, .waveSize = WaveSize{8}});
+  auto &regs = wg.getWave(0);
 
   // Tests of s_add_u32 //
   ////////////////////////
@@ -426,8 +426,8 @@ TEST_SCALAR_BINARY_OP(SMulHiI32, "s_mul_hi_i32",
 )
 
 TEST(Instructions, SAddCU32) {
-  Workgroup wg;
-  Wave regs(8, 8, WaveSize{8}, wg);
+  Workgroup wg({.vgprCount = 8, .sgprCount = 8, .waveSize = WaveSize{8}});
+  auto &regs = wg.getWave(0);
 
   // 1. No Carry In
   regs.setScc(0);
@@ -476,8 +476,8 @@ TEST_SCALAR_CMP(SCmpGtI32, "s_cmp_gt_i32", {10, 5, 1}, {5, 10, 0},
 )
 TEST(Instructions, S_LSHL_B64) {
   // Needs s0-s4 (5 registers)
-  Workgroup wg;
-  Wave regs(/*vgpr*/ 0, /*sgpr*/ 6, WaveSize{64}, wg);
+  Workgroup wg({.vgprCount = 0, .sgprCount = 6, .waveSize = WaveSize{64}});
+  auto &regs = wg.getWave(0);
 
   // Setup Input: s[0:1] = 1 (64-bit integer)
   // We can now set this directly as a 64-bit value
@@ -499,8 +499,8 @@ TEST(Instructions, S_LSHL_B64) {
 
 // s_ctz_i32_b32: RDNA3+ name for s_ff1_i32_b32 (count trailing zeros).
 TEST(Instructions, S_CTZ_I32_B32) {
-  Workgroup wg;
-  Wave regs(1, 4, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
 
   // Trailing zeros of 0b...1000 = 3
   regs.setSgpr(0, 0x18); // 0b11000
@@ -525,8 +525,8 @@ TEST(Instructions, S_CTZ_I32_B32) {
 
 // s_bfm_b32: bitfield mask. D = ((1 << S0[4:0]) - 1) << S1[4:0].
 TEST(Instructions, S_BFM_B32) {
-  Workgroup wg;
-  Wave regs(1, 4, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
 
   // Width=8, Offset=0 => mask = 0xFF
   regs.setSgpr(0, 8);
@@ -562,8 +562,8 @@ TEST(Instructions, S_BFM_B32) {
 
 // s_lshl2_add_u32: D = (S0 << 2) + S1. SCC = carry out.
 TEST(Instructions, S_LSHL2_ADD_U32) {
-  Workgroup wg;
-  Wave regs(1, 4, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
 
   // Simple: (3 << 2) + 5 = 17
   regs.setSgpr(0, 3);
@@ -582,8 +582,8 @@ TEST(Instructions, S_LSHL2_ADD_U32) {
 
 // s_cmpk_lg_u32: compare SGPR != immediate, set SCC.
 TEST(Instructions, S_CMPK_LG_U32) {
-  Workgroup wg;
-  Wave regs(1, 4, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
 
   regs.setSgpr(0, 42);
   tryExecute(regs, "s_cmpk_lg_u32 s0, 0x2a"); // 0x2a = 42
@@ -594,8 +594,8 @@ TEST(Instructions, S_CMPK_LG_U32) {
 }
 
 TEST(Instructions, MOV_Ops_V2) {
-  Workgroup wg;
-  Wave regs(4, 4, WaveSize{64}, wg);
+  Workgroup wg({.vgprCount = 4, .sgprCount = 4, .waveSize = WaveSize{64}});
+  auto &regs = wg.getWave(0);
 
   // s_mov_b32 (Scalar)
   regs.setSgpr(0, 0x12345678);
@@ -609,8 +609,8 @@ TEST(Instructions, MOV_Ops_V2) {
 }
 
 TEST(Instructions, S_LSHR_B64) {
-  Workgroup wg;
-  Wave regs(1, 8, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 8, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
   regs.setSgpr64(0, 0x800000000ULL); // bit 35 set
   regs.setSgpr(4, 35);
   tryExecute(regs, "s_lshr_b64 s[2:3], s[0:1], s4");
@@ -626,8 +626,8 @@ TEST(Instructions, S_LSHR_B64) {
 }
 
 TEST(Instructions, S_MIN_U32) {
-  Workgroup wg;
-  Wave regs(1, 4, WaveSize{1}, wg);
+  Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
+  auto &regs = wg.getWave(0);
   regs.setSgpr(0, 10);
   regs.setSgpr(1, 20);
   tryExecute(regs, "s_min_u32 s2, s0, s1");

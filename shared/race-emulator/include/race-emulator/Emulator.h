@@ -75,8 +75,14 @@ public:
   std::string str() const;
 
 private:
-  void initializeWorkgroup(Workgroup &workgroup, Dim3d wgId, Dim3d blockDim,
-                           int nWaves, const RunConfig &config);
+  /// Extract structural metadata from parsed assembly into a WorkgroupConfig.
+  WorkgroupConfig buildWorkgroupConfig(int nWaves,
+                                       const RunConfig &config) const;
+
+  /// Initialize per-wave runtime state (SGPRs, kernarg preload, thread IDs,
+  /// PC) on an already-constructed Workgroup.
+  void initializeWaveState(Workgroup &workgroup, Dim3d wgId, Dim3d blockDim,
+                           int nWaves);
   std::string decorateRaceException(Workgroup &workgroup,
                                     const RaceConditionException &e) const;
   std::shared_ptr<Architecture> arch;

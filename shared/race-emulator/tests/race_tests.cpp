@@ -1134,17 +1134,11 @@ TEST_F(RaceTestFixture, ExecMask_CrossWave_MissingBarrier2) {
 // Even after vmcnt, the event is only WAVE_COMPLETE (safe for wave 0) but
 // still unsafe for wave 1 until barrier.
 TEST(GlobalToLds, CrossWaveRace) {
-  const std::map<std::string, int> labels;
-  const std::map<std::string, Macro> macros;
-  Workgroup wg;
-  wg.resizeLds(1024);
-  wg.setRaceChecks(true);
-
-  // Create two waves sharing the same workgroup.
-  Wave wave0(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4, WaveSize{64},
-             WaveId{0}, wg, &labels, &macros);
-  Wave wave1(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4, WaveSize{64},
-             WaveId{1}, wg, &labels, &macros);
+  Workgroup wg({.nWaves = 2, .vgprCount = 4, .sgprCount = 4,
+                .waveSize = WaveSize{64}, .ldsSize = 1024, .raceChecks = true});
+  auto &wave0 = wg.getWave(0);
+  auto &wave1 = wg.getWave(1);
+  (void)wave1;
 
   IntervalSet intervals;
   intervals.append(0, 64);
@@ -1161,16 +1155,11 @@ TEST(GlobalToLds, CrossWaveRace) {
 // After barrier (flushWaveCompleteMemoryEvents), the event is fully retired
 // and other waves can safely access the LDS range.
 TEST(GlobalToLds, CrossWaveSafeAfterBarrier) {
-  const std::map<std::string, int> labels;
-  const std::map<std::string, Macro> macros;
-  Workgroup wg;
-  wg.resizeLds(1024);
-  wg.setRaceChecks(true);
-
-  Wave wave0(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4, WaveSize{64},
-             WaveId{0}, wg, &labels, &macros);
-  Wave wave1(/*vgprCount=*/4, /*agprOffset=*/4, /*sgprCount=*/4, WaveSize{64},
-             WaveId{1}, wg, &labels, &macros);
+  Workgroup wg({.nWaves = 2, .vgprCount = 4, .sgprCount = 4,
+                .waveSize = WaveSize{64}, .ldsSize = 1024, .raceChecks = true});
+  auto &wave0 = wg.getWave(0);
+  auto &wave1 = wg.getWave(1);
+  (void)wave1;
 
   IntervalSet intervals;
   intervals.append(0, 64);
@@ -1182,7 +1171,7 @@ TEST(GlobalToLds, CrossWaveSafeAfterBarrier) {
 
   // Now wave 1 can safely read.
   EXPECT_NO_THROW(wg.readLds<uint32_t>(0, WaveId{1}, 0));
-  EXPECT_TRUE(wg.getLdsWriteEvents().empty());
+  EXPECT_TRUE(wg.getRaceDetector()->getLdsWriteEvents().empty());
 }
 
 // Multiple workgroups run in parallel. Each workgroup has an intra-WG LDS race

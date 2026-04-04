@@ -6,7 +6,6 @@
 #include "IntervalSet.h"
 #include "Profiler.h"
 #include "Types.h"
-#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -21,6 +20,7 @@
 namespace raceemulator {
 
 class Workgroup;
+class WaveRaceState;
 
 /// An assembly macro (.macro / .endm) with its line range and argument names.
 class Macro {
@@ -60,29 +60,20 @@ template <typename T> struct Operand {
 class Macro;
 
 /// A single SIMD wave. Manages VGPRs, SGPRs, exec mask, program counter,
-/// memory event tracking, and race checking. Delegates LDS storage and
-/// cross-wave event coordination to the Workgroup.
+/// and delegates race detection to WaveRaceState (if race checks enabled).
+/// Delegates LDS storage to the Workgroup.
 class Wave {
+  // Workgroup creates waves in its constructor and passes race state pointers.
+  friend class Workgroup;
 
 public:
-  /// Full constructor with all parameters.
-  Wave(int vgprCount, int agprOffset, int sgprCount, WaveSize, WaveId,
-       Workgroup &workgroup, const std::map<std::string, int> *labels,
-       const std::map<std::string, Macro> *macros);
-
-  /// Convenience constructor for tests (no accumulators, labels, or macros;
-  /// waveId defaults to zero).
-  Wave(int vgprCount, int sgprCount, WaveSize, Workgroup &workgroup);
+  ~Wave();
+  Wave(Wave &&other) noexcept;
+  Wave &operator=(Wave &&other) noexcept;
 
   /// Parse a register string (e.g., "s17", "s[16:17]", "v[4:7]", "vcc",
   /// "exec") and return the first register in the range.
   CommonRegister getFirstRegister(std::string_view regStr) const;
-
-  /// Number of outstanding events of a given type on a register (across all
-  /// lanes). Used by getVgprs() to skip per-lane checks when zero.
-  int getRegEventCount(MemoryEventType type, int reg) const {
-    return regEventCount[static_cast<int>(type)][reg];
-  }
 
   /// Return the value in the given VGPR. Throws RaceConditionException if
   /// race checks are enabled and an outstanding load targets this register.
@@ -189,18 +180,15 @@ public:
   /// Retire LDS events until at most lgkmcnt remain outstanding.
   void sWaitCntLgkmcnt(int lgkmcnt);
 
-  std::vector<EventId> &getVgprMemoryEvents(int reg) {
-    assert(reg < static_cast<int>(vgprMemoryEvents.size()));
-    return vgprMemoryEvents[reg];
-  }
+  /// Number of outstanding events of a given type on a register (across all
+  /// lanes). Used by getVgprs() to skip per-lane checks when zero.
+  int getRegEventCount(MemoryEventType type, int reg) const;
 
-  const std::vector<EventId> &getWaveMemoryEvents() const {
-    return waveMemoryEvents;
-  }
+  std::vector<EventId> &getVgprMemoryEvents(int reg);
 
-  const std::vector<EventId> &getWaveCompleteMemoryEvents() const {
-    return waveCompleteMemoryEvents;
-  }
+  const std::vector<EventId> &getWaveMemoryEvents() const;
+
+  const std::vector<EventId> &getWaveCompleteMemoryEvents() const;
 
   WaveId getWaveId() const { return waveId; }
 
@@ -232,9 +220,7 @@ public:
   bool isWaiting() const { return waiting; }
 
 private:
-  // When a macro is called, its arguments are stored here. E.g., for
-  // `.macro FOO arg0:req, arg1:req` called as `FOO 14, 17`, the map
-  // holds {"arg0": 14, "arg1": 17}.
+  // When a macro is called, its arguments are stored here.
   std::map<std::string, uint32_t> macroArguments;
 
   // When inside a macro, this is the program counter (PC) to return to.
@@ -249,36 +235,6 @@ private:
   // scalar general purpose registers.
   std::vector<uint32_t> sgprs;
 
-  // Per register: outstanding event IDs involving that VGPR.
-  // Indexed as [reg]. Each event's exec mask (in the workgroup registry)
-  // records which lanes it applies to. Race checks test the lane bit
-  // when needed. This avoids 32x per-lane push/pop during event
-  // registration and retirement.
-  std::vector<std::vector<EventId>> vgprMemoryEvents;
-
-  // Per-register event counts, partitioned by event type, summed across lanes.
-  // regEventCount[eventType][reg] == 0 means no lane of that register has
-  // any outstanding events of that type. Enables O(1) per-register checks:
-  // getVgprs() only inspects lanes when GLOBAL_TO_VGPR or LDS_TO_VGPR
-  // counts are nonzero.
-  static constexpr int kNumEventTypes = static_cast<int>(MemoryEventType::N);
-  std::array<std::vector<int>, kNumEventTypes> regEventCount;
-
-  void regEventCountInc(MemoryEventType type, int reg) {
-    regEventCount[static_cast<int>(type)][reg]++;
-  }
-  void regEventCountDec(MemoryEventType type, int reg) {
-    regEventCount[static_cast<int>(type)][reg]--;
-  }
-
-  // All the outstanding event IDs for this wave.
-  std::vector<EventId> waveMemoryEvents;
-
-  // Event IDs that have completed (due to s_waitcnt) for this wave, but are
-  // not complete for the entire workgroup because s_barrier has not yet
-  // occurred.
-  std::vector<EventId> waveCompleteMemoryEvents;
-
   int agprOffset;
   int sgprCount;
   WaveSize waveSize;
@@ -290,7 +246,6 @@ private:
   bool waiting{false};
 
   /// D16 LDS reads: whether to preserve the non-targeted half of the VGPR.
-  /// RDNA (wave-32) preserves, CDNA (wave-64) does not (hardware-verified).
   bool dsPreserve;
 
   // The id of this wave within the workgroup.
@@ -307,10 +262,13 @@ private:
 
   std::vector<std::function<int()>> instructionCache;
 
-  void retireEventRegisters(EventId);
+  // Per-wave race detection state. Null when race checks are disabled.
+  // Owned by RaceDetector (via Workgroup), not by Wave.
+  WaveRaceState *raceState = nullptr;
 
-  void resolveWaitCnt(int limit,
-                      std::function<bool(MemoryEventType)> isTargetType);
+  Wave(int vgprCount, int agprOffset, int sgprCount, WaveSize, WaveId,
+       Workgroup &workgroup, const std::map<std::string, int> *labels,
+       const std::map<std::string, Macro> *macros);
 
   std::function<int()> compileLine(const std::string &line,
                                    const std::map<std::string, Macro> &macros);

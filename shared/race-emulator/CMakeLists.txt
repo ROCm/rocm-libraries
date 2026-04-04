@@ -54,10 +54,12 @@ target_sources(race-emulator PRIVATE
     src/MfmaInstructions.cpp
     src/Parsing.cpp
     src/Profiler.cpp
+    src/RaceDetector.cpp
     src/ScalarInstructions.cpp
     src/Util.cpp
     src/VectorInstructions.cpp
     src/Wave.cpp
+    src/WaveRaceState.cpp
     src/Workgroup.cpp
 )
 
