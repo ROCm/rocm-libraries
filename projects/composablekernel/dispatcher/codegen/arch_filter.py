@@ -154,6 +154,7 @@ except ImportError:
         "gfx90a": "cdna2",
         "gfx942": "cdna3",
         "gfx950": "cdna4",
+        "gfx1200": "rdna4",
         "gfx1201": "rdna4",
     }
 
@@ -202,7 +203,7 @@ except ImportError:
             "int8_int8_int32": [[16, 16, 32], [32, 32, 16]],
         },
         # RDNA4 (gfx1200/gfx1201): wave32, only 16x16x16 tiles for all data types
-        # Matches arch_specs.json warp_tile_combos
+        # Matches arch_specs.json warp_tile_combos; shared — gfx1200/1201 are identical
         "gfx1200": {
             "fp16_fp16_fp32": [[16, 16, 16]],
             "bf16_bf16_fp32": [[16, 16, 16]],
@@ -211,17 +212,10 @@ except ImportError:
             "fp8_bf8_fp32": [[16, 16, 16]],
             "bf8_fp8_fp32": [[16, 16, 16]],
             "int8_int8_int32": [[16, 16, 16]],
-        },
-        "gfx1201": {
-            "fp16_fp16_fp32": [[16, 16, 16]],
-            "bf16_bf16_fp32": [[16, 16, 16]],
-            "fp8_fp8_fp32": [[16, 16, 16]],
-            "bf8_bf8_fp32": [[16, 16, 16]],
-            "fp8_bf8_fp32": [[16, 16, 16]],
-            "bf8_fp8_fp32": [[16, 16, 16]],
-            "int8_int8_int32": [[16, 16, 16]],
+            "int4_int4_int32": [[16, 16, 16]],
         },
     }
+    WARP_TILE_SUPPORTED_COMBINATIONS["gfx1201"] = WARP_TILE_SUPPORTED_COMBINATIONS["gfx1200"]
 
     # Preshuffle-specific warp tile combinations (no [4, 64, 16])
     PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS = {

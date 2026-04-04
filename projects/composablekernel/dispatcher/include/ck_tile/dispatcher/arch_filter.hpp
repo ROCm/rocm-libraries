@@ -120,6 +120,11 @@ inline std::vector<WarpTileConfig> get_supported_warp_tiles(GpuArch arch,
         if(arch == GpuArch::GFX_942)
             return int8_configs;
     }
+    if(dtype_a == DataType::INT4 && dtype_b == DataType::INT4)
+    {
+        if(is_rdna4(arch))
+            return rdna4_tiles;
+    }
 
     return {}; // Unknown combination
 }

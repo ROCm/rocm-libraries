@@ -1668,18 +1668,43 @@ class FmhaKernelSpec:
     tile_k0: int = 32
 
 
+_arch_specs_cache: Optional[dict] = None
+
+
+def _load_arch_specs() -> Optional[dict]:
+    """Load arch_specs.json (single source of truth for GPU capabilities).
+
+    Returns None if the file is not found (e.g. installed package without codegen dir).
+    Results are cached at module level.
+    """
+    global _arch_specs_cache
+    if _arch_specs_cache is not None:
+        return _arch_specs_cache
+    specs_path = get_dispatcher_root() / "codegen" / "arch_specs.json"
+    try:
+        with open(specs_path) as f:
+            _arch_specs_cache = json.load(f)
+    except FileNotFoundError:
+        _arch_specs_cache = {}
+    return _arch_specs_cache
+
+
+def _get_arch_spec(arch: str) -> Optional[dict]:
+    """Get architecture specification from arch_specs.json.
+
+    Returns None if the arch is not found or arch_specs.json is missing.
+    """
+    specs = _load_arch_specs()
+    if not specs:
+        return None
+    return specs.get("architectures", {}).get(arch)
+
+
 def spec_to_config(
     spec: FmhaKernelSpec, dtype: str = "fp16", arch: str = "gfx950"
 ) -> FmhaKernelConfig:
     """Convert a high-level FmhaKernelSpec to a full FmhaKernelConfig."""
     hdim = spec.hdim
-
-    # gfx12 (RDNA4) uses 16x16x16 WMMA tiles with wave32
-    # gfx9 (CDNA) uses 32x32x16 warp tiles with wave64; gfx11 (RDNA3) uses wave32
-    is_gfx12 = arch.startswith("gfx12")
-    warp_m = 16 if is_gfx12 else 32
-    warp_n = 16 if is_gfx12 else 32
-    warp_k = 16
 
     config_kwargs = dict(
         data_type=dtype,
@@ -1695,19 +1720,27 @@ def spec_to_config(
         gfx_arch=arch,
     )
 
-    if is_gfx12:
-        # wave config = warp distribution across block; warp/warp_tile = WMMA tile dims
-        # gfx12 valid wave configs: [2,4,1], [4,2,1], [1,8,1], [8,1,1]
-        # Default (4,1,1) from FmhaKernelConfig is invalid for gfx12
-        wave_m_cfg, wave_n_cfg, wave_k_cfg = 2, 4, 1
-        config_kwargs.update(
-            wave_m0=wave_m_cfg, wave_n0=wave_n_cfg, wave_k0=wave_k_cfg,
-            wave_m1=wave_m_cfg, wave_n1=wave_n_cfg, wave_k1=wave_k_cfg,
-            wave_m2=wave_m_cfg, wave_n2=wave_n_cfg, wave_k2=wave_k_cfg,
-            warp_m0=warp_m, warp_n0=warp_n, warp_k0=warp_k,
-            warp_m1=warp_m, warp_n1=warp_n, warp_k1=warp_k,
-            warp_m2=warp_m, warp_n2=warp_n, warp_k2=warp_k,
-        )
+    # Override warp tiles and wave config for non-CDNA architectures using
+    # arch_specs.json (e.g. RDNA4 uses 16x16x16 WMMA with wave32, not the
+    # CDNA-default 32x32x16 / wave (4,1,1) baked into FmhaKernelConfig)
+    arch_spec = _get_arch_spec(arch)
+    if arch_spec and arch_spec.get("warp_size") != 64:
+        fp16_tiles = arch_spec.get("warp_tile_combos", {}).get("fp16_fp16_fp32")
+        wave_configs = arch_spec.get("warp_configs")
+        if fp16_tiles:
+            warp_m, warp_n, warp_k = fp16_tiles[0]
+            config_kwargs.update(
+                warp_m0=warp_m, warp_n0=warp_n, warp_k0=warp_k,
+                warp_m1=warp_m, warp_n1=warp_n, warp_k1=warp_k,
+                warp_m2=warp_m, warp_n2=warp_n, warp_k2=warp_k,
+            )
+        if wave_configs:
+            wave_m_cfg, wave_n_cfg, wave_k_cfg = wave_configs[0]
+            config_kwargs.update(
+                wave_m0=wave_m_cfg, wave_n0=wave_n_cfg, wave_k0=wave_k_cfg,
+                wave_m1=wave_m_cfg, wave_n1=wave_n_cfg, wave_k1=wave_k_cfg,
+                wave_m2=wave_m_cfg, wave_n2=wave_n_cfg, wave_k2=wave_k_cfg,
+            )
 
     return FmhaKernelConfig(**config_kwargs)
 

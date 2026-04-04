@@ -633,8 +633,8 @@ def parse_gemm_declarations(content: str, arch: str = "gfx942") -> List[Dict]:
                 kernel["pad_k"] = m.group(3).lower() == "true"
 
             # Architecture target (third argument to .add())
-            # Matches: , "gfx1201") or similar at end of .add() body
-            if m := re.search(r',\s*"(gfx\w+)"\s*\)', add_body):
+            # Matches: , "gfx1201" at end of .add() body (add_body excludes closing paren)
+            if m := re.search(r',\s*"(gfx\w+)"\s*$', add_body):
                 kernel["arch"] = m.group(1)
 
             # Shorthand format: .add("dtype", "layout", M, N, K)
@@ -679,7 +679,7 @@ def expand_gemm_wildcards(kernel: Dict, arch: str = "gfx942") -> List[Dict]:
     valid configurations for the target architecture.
 
     Note: Block size constraint filters invalid combos:
-    - (tile_m/warp_tile_m) * (tile_n/warp_tile_n) * warp_size <= 1024
+    - warp_m * warp_n * warp_k * warp_size <= 1024
     """
     valid_wave_configs, valid_warp_configs, warp_size = _get_arch_configs(arch)
 

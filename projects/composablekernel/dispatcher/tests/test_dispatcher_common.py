@@ -150,53 +150,19 @@ class TestRDNA4WarpTileSupport(unittest.TestCase):
     """
 
     RDNA4_ARCHS = ["gfx1200", "gfx1201"]
-    # All data types that RDNA4 supports via WMMA
-    RDNA4_DTYPES = ["fp16", "bf16", "fp8", "bf8", "int8"]
+    # All data types that RDNA4 supports via WMMA (int4 per RDNA4 ISA page 411)
+    RDNA4_DTYPES = ["fp16", "bf16", "fp8", "bf8", "int8", "int4"]
     EXPECTED_TILE = [16, 16, 16]
 
-    def test_rdna4_fp16_warp_tile(self):
+    def test_rdna4_all_dtypes_warp_tile(self):
+        """Validate 16x16x16 warp tiles for all RDNA4 WMMA data types."""
         for arch in self.RDNA4_ARCHS:
-            with self.subTest(arch=arch):
-                is_valid, msg = validate_warp_tile_config(
-                    self.EXPECTED_TILE, arch, "fp16"
-                )
-                self.assertTrue(is_valid, f"{arch} fp16: {msg}")
-
-    def test_rdna4_bf16_warp_tile(self):
-        """BF16 was previously blocked on gfx1201 (returned empty tiles)."""
-        for arch in self.RDNA4_ARCHS:
-            with self.subTest(arch=arch):
-                is_valid, msg = validate_warp_tile_config(
-                    self.EXPECTED_TILE, arch, "bf16"
-                )
-                self.assertTrue(is_valid, f"{arch} bf16: {msg}")
-
-    def test_rdna4_fp8_warp_tile(self):
-        """FP8 was previously blocked on gfx1201 (no gfx12 case)."""
-        for arch in self.RDNA4_ARCHS:
-            with self.subTest(arch=arch):
-                is_valid, msg = validate_warp_tile_config(
-                    self.EXPECTED_TILE, arch, "fp8"
-                )
-                self.assertTrue(is_valid, f"{arch} fp8: {msg}")
-
-    def test_rdna4_bf8_warp_tile(self):
-        """BF8 was previously blocked on gfx1201."""
-        for arch in self.RDNA4_ARCHS:
-            with self.subTest(arch=arch):
-                is_valid, msg = validate_warp_tile_config(
-                    self.EXPECTED_TILE, arch, "bf8"
-                )
-                self.assertTrue(is_valid, f"{arch} bf8: {msg}")
-
-    def test_rdna4_int8_warp_tile(self):
-        """INT8 was previously blocked on gfx1201."""
-        for arch in self.RDNA4_ARCHS:
-            with self.subTest(arch=arch):
-                is_valid, msg = validate_warp_tile_config(
-                    self.EXPECTED_TILE, arch, "int8"
-                )
-                self.assertTrue(is_valid, f"{arch} int8: {msg}")
+            for dtype in self.RDNA4_DTYPES:
+                with self.subTest(arch=arch, dtype=dtype):
+                    is_valid, msg = validate_warp_tile_config(
+                        self.EXPECTED_TILE, arch, dtype
+                    )
+                    self.assertTrue(is_valid, f"{arch} {dtype}: {msg}")
 
     def test_rdna4_only_16x16x16(self):
         """RDNA4 WMMA only supports 16x16x16 tiles (not 32x32x16)."""
@@ -218,13 +184,13 @@ class TestRDNA4WarpTileSupport(unittest.TestCase):
                               f"{arch} missing from warp_tile_combos")
 
     def test_rdna4_all_dtype_combos_present(self):
-        """Verify all 7 dtype combos are defined for RDNA4."""
+        """Verify all 8 dtype combos are defined for RDNA4 (including int4)."""
         data = get_arch_filter_data()
         expected_keys = {
             "fp16_fp16_fp32", "bf16_bf16_fp32",
             "fp8_fp8_fp32", "bf8_bf8_fp32",
             "fp8_bf8_fp32", "bf8_fp8_fp32",
-            "int8_int8_int32",
+            "int8_int8_int32", "int4_int4_int32",
         }
         for arch in self.RDNA4_ARCHS:
             with self.subTest(arch=arch):
@@ -260,31 +226,52 @@ class TestFmhaGfx12Config(unittest.TestCase):
         )
         return self.__class__.spec_to_config(spec, "fp16", arch)
 
-    def test_gfx1201_warp_tiles_16x16x16(self):
+    def test_gfx12_warp_tiles_16x16x16(self):
         """gfx12 must use 16x16x16 WMMA tiles, not 32x32x16."""
-        config = self._make_config("gfx1201")
-        self.assertEqual((config.warp_m0, config.warp_n0, config.warp_k0), (16, 16, 16))
-        self.assertEqual((config.warp_m1, config.warp_n1, config.warp_k1), (16, 16, 16))
+        for arch in ("gfx1200", "gfx1201"):
+            with self.subTest(arch=arch):
+                config = self._make_config(arch)
+                self.assertEqual((config.warp_m0, config.warp_n0, config.warp_k0), (16, 16, 16))
+                self.assertEqual((config.warp_m1, config.warp_n1, config.warp_k1), (16, 16, 16))
 
-    def test_gfx1201_wave_config_valid(self):
+    def test_gfx12_wave_config_valid(self):
         """gfx12 wave config must be from {[2,4,1],[4,2,1],[1,8,1],[8,1,1]}."""
-        config = self._make_config("gfx1201")
-        valid = {(2,4,1), (4,2,1), (1,8,1), (8,1,1)}
-        wave = (config.wave_m0, config.wave_n0, config.wave_k0)
-        self.assertIn(wave, valid, f"gfx12 wave config {wave} not in valid set")
+        for arch in ("gfx1200", "gfx1201"):
+            with self.subTest(arch=arch):
+                config = self._make_config(arch)
+                valid = {(2,4,1), (4,2,1), (1,8,1), (8,1,1)}
+                wave = (config.wave_m0, config.wave_n0, config.wave_k0)
+                self.assertIn(wave, valid, f"{arch} wave config {wave} not in valid set")
 
-    def test_gfx1201_wave_config_not_gfx942_default(self):
+    def test_gfx12_wave_config_not_gfx942_default(self):
         """gfx12 must NOT use the gfx942 default wave config (4,1,1)."""
-        config = self._make_config("gfx1201")
-        self.assertNotEqual(
-            (config.wave_m0, config.wave_n0, config.wave_k0), (4, 1, 1),
-            "gfx12 should not use gfx942 default wave config (4,1,1)")
+        for arch in ("gfx1200", "gfx1201"):
+            with self.subTest(arch=arch):
+                config = self._make_config(arch)
+                self.assertNotEqual(
+                    (config.wave_m0, config.wave_n0, config.wave_k0), (4, 1, 1),
+                    f"{arch} should not use gfx942 default wave config (4,1,1)")
 
     def test_gfx942_defaults_unchanged(self):
         """gfx942 should still use 32x32x16 warp tiles and (4,1,1) wave."""
         config = self._make_config("gfx942")
         self.assertEqual((config.warp_m0, config.warp_n0, config.warp_k0), (32, 32, 16))
         self.assertEqual((config.wave_m0, config.wave_n0, config.wave_k0), (4, 1, 1))
+
+    def test_gfx1100_rdna3_uses_arch_specs(self):
+        """gfx1100 (RDNA3, wave32) must also get overrides from arch_specs.json."""
+        config = self._make_config("gfx1100")
+        self.assertEqual((config.warp_m0, config.warp_n0, config.warp_k0), (16, 16, 16))
+        self.assertEqual((config.wave_m0, config.wave_n0, config.wave_k0), (2, 4, 1))
+
+    def test_missing_arch_specs_falls_back_to_defaults(self):
+        """When arch_specs.json is missing, spec_to_config uses FmhaKernelConfig defaults."""
+        # Patch _get_arch_spec to return None (simulates missing arch_specs.json)
+        with patch("fmha_utils._get_arch_spec", return_value=None):
+            config = self._make_config("gfx1201")
+            # Should get FmhaKernelConfig defaults (CDNA: 32x32x16, wave 4,1,1)
+            self.assertEqual((config.warp_m0, config.warp_n0, config.warp_k0), (32, 32, 16))
+            self.assertEqual((config.wave_m0, config.wave_n0, config.wave_k0), (4, 1, 1))
 
 
 class TestValidateTraitCombo(unittest.TestCase):
