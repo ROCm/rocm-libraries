@@ -348,10 +348,6 @@ BenchmarkProblems:
   ########################################
   # PGR=2: pre-shuffled B with scheduler path
   # Subset of MIWT configs with double-buffered LDS.
-  # WG 4x1 and 1x4 are excluded: the PGR=2 scheduler assigns
-  # all B subtiles to each wave, but the GR vaddr only covers
-  # this wave's subtile — both loads read from the same HBM
-  # address. Needs scheduler fix to respect loadRatioGR != 1.0.
   ########################################
   -
     - OperationType: GEMM
@@ -375,9 +371,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]
           - [16, 16, 128, 1, 1, 4, 4, 2, 2]
           - [16, 16, 128, 1, 1, 8, 8, 2, 2]
-          # WG 4x1 / 1x4 disabled — see comment above
-          # - [16, 16, 128, 1, 1, 2, 2, 4, 1]
-          # - [16, 16, 128, 1, 1, 2, 2, 1, 4]
+          - [16, 16, 128, 1, 1, 2, 2, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 1, 4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
@@ -394,7 +389,6 @@ BenchmarkProblems:
 
   ########################################
   # PGR=2: pre-shuffled A+B with scheduler path
-  # WG 4x1 / 1x4 excluded — same scheduler issue as above.
   ########################################
   -
     - OperationType: GEMM
@@ -419,9 +413,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]
           - [16, 16, 128, 1, 1, 4, 4, 2, 2]
           - [16, 16, 128, 1, 1, 8, 8, 2, 2]
-          # WG 4x1 / 1x4 disabled — see comment above
-          # - [16, 16, 128, 1, 1, 2, 2, 4, 1]
-          # - [16, 16, 128, 1, 1, 2, 2, 1, 4]
+          - [16, 16, 128, 1, 1, 2, 2, 4, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 1, 4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
