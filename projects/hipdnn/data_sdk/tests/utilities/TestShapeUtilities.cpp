@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -67,6 +68,34 @@ TEST(TestShapeUtils, GenerateStridesNcdhwValid)
     auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{120, 60, 20, 5, 1}));
+}
+
+TEST(TestShapeUtils, GenerateStridesBhsdValid)
+{
+    // BHSD: dims [B=2, H=4, S=128, D=64], row-major (same stride order as NCHW)
+    const std::vector<int64_t> dim = {2, 4, 128, 64};
+    auto strides = generateStrides(dim, TensorLayout::BHSD.strideOrder);
+
+    // D contiguous, then S, then H, then B
+    EXPECT_EQ(strides, (std::vector<int64_t>{32768, 8192, 64, 1}));
+
+    // BHSD should produce the same strides as NCHW
+    auto nchwStrides = generateStrides(dim, TensorLayout::NCHW.strideOrder);
+    EXPECT_EQ(strides, nchwStrides);
+}
+
+TEST(TestShapeUtils, GenerateStridesBshdValid)
+{
+    // BSHD: dims [B=2, H=4, S=128, D=64], sequence-major
+    const std::vector<int64_t> dim = {2, 4, 128, 64};
+    auto strides = generateStrides(dim, TensorLayout::BSHD.strideOrder);
+
+    // D contiguous, then H, then S, then B
+    EXPECT_EQ(strides, (std::vector<int64_t>{32768, 64, 256, 1}));
+
+    // BSHD should NOT produce the same strides as NHWC
+    auto nhwcStrides = generateStrides(dim, TensorLayout::NHWC.strideOrder);
+    EXPECT_NE(strides, nhwcStrides);
 }
 
 TEST(TestShapeUtils, GenerateStridesSingleDimension)
