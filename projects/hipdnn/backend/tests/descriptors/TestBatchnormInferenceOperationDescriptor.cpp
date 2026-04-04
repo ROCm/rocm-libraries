@@ -66,7 +66,10 @@ public:
         auto desc = getDescriptor();
         for(const auto& [attributeName, tensorDesc] : tensorMap)
         {
-            desc->setAttribute(attributeName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &tensorDesc);
+            desc->setAttribute(attributeName,
+                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                               1,
+                               static_cast<const void*>(&tensorDesc));
         }
     }
 
@@ -405,8 +408,8 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &rawX));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
+                                       static_cast<void*>(&rawX)));
+    const std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedX, nullptr);
@@ -626,7 +629,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("BatchnormInferenceOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=70"), std::string::npos);
     ASSERT_NE(str.find("mean_uid=71"), std::string::npos);
@@ -717,7 +720,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, TryAsInterfaceReturnsValidGrap
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -729,6 +732,6 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, TryAsInterfaceReturnsValidGrap
 TEST_F(TestBatchnormInferenceOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _xDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }

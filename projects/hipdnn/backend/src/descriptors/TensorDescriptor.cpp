@@ -97,6 +97,18 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_TENSOR_VALUE_EXT:
         getTensorValue(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT:
+    {
+        const bool isByValue = _data.value.type != hipdnn_data_sdk::data_objects::TensorValue::NONE;
+        getScalar(isByValue,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "TensorDescriptor::getAttribute()");
+        break;
+    }
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "TensorDescriptor::getAttribute: attributeName not supported");
@@ -250,16 +262,15 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
         _data.value.Set(Int32Value(val));
         break;
     }
+    case DataType::INT64:
+    {
+        int64_t val;
+        std::memcpy(&val, bytes, sizeof(int64_t));
+        _data.value.Set(Int64Value(val));
+        break;
+    }
     case DataType::UINT8:
-    {
-        _data.value.Set(Float8Value(bytes[0]));
-        break;
-    }
     case DataType::INT8:
-    {
-        _data.value.Set(Float8Value(bytes[0]));
-        break;
-    }
     case DataType::FP8_E4M3:
     case DataType::FP8_E5M2:
     {
@@ -362,6 +373,16 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
         std::memcpy(output, &nativeVal, sizeof(int32_t));
         break;
     }
+    case DataType::INT64:
+    {
+        const auto* val = _data.value.AsInt64Value();
+        THROW_IF_TRUE(val == nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        auto nativeVal = val->value();
+        std::memcpy(output, &nativeVal, sizeof(int64_t));
+        break;
+    }
     case DataType::UINT8:
     case DataType::INT8:
     {
@@ -454,6 +475,9 @@ std::string TensorDescriptor::toString() const
             break;
         case TensorValue::Int32Value:
             str += std::to_string(_data.value.AsInt32Value()->value());
+            break;
+        case TensorValue::Int64Value:
+            str += std::to_string(_data.value.AsInt64Value()->value());
             break;
         case TensorValue::Float8Value:
             str += std::to_string(_data.value.AsFloat8Value()->value());

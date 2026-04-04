@@ -91,6 +91,14 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
     if(_executionSettings.workspaceSizeLimit().has_value())
     {
         _workspaceSize = _executionSettings.workspaceSizeLimit().value();
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Convolution Fwd: Using knob settings workspace size: " << _workspaceSize);
+    }
+    else if(_executionSettings.defaultWorkspaceSize().has_value())
+    {
+        _workspaceSize = _executionSettings.defaultWorkspaceSize().value();
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Convolution Fwd: Using default max workspace size: " << _workspaceSize);
     }
     else
     {
@@ -101,6 +109,7 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
                                                      _params.conv().convDescriptor(),
                                                      _params.y().tensorDescriptor(),
                                                      &_workspaceSize));
+        HIPDNN_PLUGIN_LOG_WARN("Convolution Fwd: Using queried workspace size: " << _workspaceSize);
     }
 }
 

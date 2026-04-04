@@ -31,7 +31,7 @@
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/Tensile.hpp>
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <cstddef>
 
@@ -39,8 +39,6 @@ namespace Tensile
 {
     namespace Client
     {
-
-        namespace po = boost::program_options;
 
         class ClientProblemFactory
         {

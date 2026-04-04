@@ -238,11 +238,17 @@ void nodeAttrsCheckTensors(
 
     if(biasAttr != nullptr)
     {
+        auto biasIn1Uid = biasAttr->in_1_tensor_uid();
+        if(!biasIn1Uid.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Bias node must have a second input tensor (in_1)");
+        }
+
         // Bias: input tensor from convolution must be virtual, other input must be non-virtual, output must be virtual
         const auto& biasIn0Attr
             = miopen_utils::findTensorAttributes(tensorMap, biasAttr->in_0_tensor_uid());
-        const auto& biasIn1Attr
-            = miopen_utils::findTensorAttributes(tensorMap, biasAttr->in_1_tensor_uid().value());
+        const auto& biasIn1Attr = miopen_utils::findTensorAttributes(tensorMap, *biasIn1Uid);
         const auto& biasOutAttr
             = miopen_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid());
 
@@ -353,9 +359,15 @@ void checkComputeTypes(
 
     if(biasAttr != nullptr)
     {
+        auto biasIn1Uid = biasAttr->in_1_tensor_uid();
+        if(!biasIn1Uid.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Bias node must have a second input tensor (in_1)");
+        }
         int64_t biasIdx = convAttr.y_tensor_uid() != biasAttr->in_0_tensor_uid()
                               ? biasAttr->in_0_tensor_uid()
-                              : biasAttr->in_1_tensor_uid().value();
+                              : *biasIn1Uid;
 
         if(tensorMap.at(biasIdx)->data_type() != graph.getNode(biasAttrIdx).compute_data_type())
         {

@@ -6,6 +6,7 @@
 #include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/GraphDescriptor.hpp"
+#include "descriptors/NodeFactory.hpp"
 #include "descriptors/SdpaFpropOperationDescriptor.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
@@ -63,105 +64,134 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                HipdnnBackendDescriptor* rngDumpDesc,
                                HipdnnBackendDescriptor* amaxSDesc,
                                HipdnnBackendDescriptor* amaxODesc,
-                               hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
+                               hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
+                               const std::string& name = "")
 {
     auto wrapper = createDescriptor<SdpaFpropOperationDescriptor>();
     auto desc = wrapper->asDescriptor<SdpaFpropOperationDescriptor>();
 
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &qDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &kDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &vDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &oDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&qDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&kDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&vDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&oDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &attnMaskDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &scaleDesc);
+                       static_cast<const void*>(&attnMaskDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&scaleDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_Q_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &seqLenQDesc);
+                       static_cast<const void*>(&seqLenQDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_KV_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &seqLenKvDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &seedDesc);
+                       static_cast<const void*>(&seqLenKvDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&seedDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_OFFSET_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &offsetDesc);
+                       static_cast<const void*>(&offsetDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_MASK_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &dropoutMaskDesc);
+                       static_cast<const void*>(&dropoutMaskDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_SCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &dropoutScaleDesc);
+                       static_cast<const void*>(&dropoutScaleDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_K_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &pageTableKDesc);
+                       static_cast<const void*>(&pageTableKDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_V_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &pageTableVDesc);
+                       static_cast<const void*>(&pageTableVDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_BLOCK_MASK_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &blockMaskDesc);
+                       static_cast<const void*>(&blockMaskDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SINK_TOKEN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &sinkTokenDesc);
+                       static_cast<const void*>(&sinkTokenDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_Q_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &descaleQDesc);
+                       static_cast<const void*>(&descaleQDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_K_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &descaleKDesc);
+                       static_cast<const void*>(&descaleKDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_V_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &descaleVDesc);
+                       static_cast<const void*>(&descaleVDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_S_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &descaleSDesc);
+                       static_cast<const void*>(&descaleSDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_S_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &scaleSDesc);
+                       static_cast<const void*>(&scaleSDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_O_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &scaleODesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &statsDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &maxDesc);
+                       static_cast<const void*>(&scaleODesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&statsDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&maxDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SUM_EXP_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &sumExpDesc);
+                       static_cast<const void*>(&sumExpDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_RNG_DUMP_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &rngDumpDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &amaxSDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &amaxODesc);
+                       static_cast<const void*>(&rngDumpDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&amaxSDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&amaxODesc));
     desc->setAttribute(
         HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+
+    if(!name.empty())
+    {
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                           HIPDNN_TYPE_CHAR,
+                           static_cast<int64_t>(name.size()),
+                           name.c_str());
+    }
 
     desc->finalize();
     return wrapper;
@@ -172,21 +202,38 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                            HipdnnBackendDescriptor* kDesc,
                                            HipdnnBackendDescriptor* vDesc,
                                            HipdnnBackendDescriptor* oDesc,
-                                           hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
+                                           hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
+                                           const std::string& name = "")
 {
     auto wrapper = createDescriptor<SdpaFpropOperationDescriptor>();
     auto desc = wrapper->asDescriptor<SdpaFpropOperationDescriptor>();
 
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &qDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &kDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &vDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &oDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&qDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&kDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&vDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&oDesc));
     desc->setAttribute(
         HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+
+    if(!name.empty())
+    {
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                           HIPDNN_TYPE_CHAR,
+                           static_cast<int64_t>(name.size()),
+                           name.c_str());
+    }
 
     desc->finalize();
     return wrapper;
@@ -231,7 +278,10 @@ public:
     {
         auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
-        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                           HIPDNN_TYPE_HANDLE,
+                           1,
+                           static_cast<const void*>(&handle));
     }
 
 protected:
@@ -316,8 +366,10 @@ TEST_F(TestGraphDescriptorSdpaFprop, BuildFromSingleOperation)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
@@ -418,8 +470,10 @@ TEST_F(TestGraphDescriptorSdpaFprop, ComputeDataTypePreserved)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
@@ -447,8 +501,10 @@ TEST_F(TestGraphDescriptorSdpaFprop, BuildFromRequiredTensorsOnly)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     auto serialized = desc->getSerializedGraph();
@@ -516,6 +572,82 @@ TEST_F(TestGraphDescriptorSdpaFprop, BuildFromRequiredTensorsOnly)
     EXPECT_EQ(attrs->causal_mask_bottom_right, false);
 
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::FLOAT);
+}
+
+TEST_F(TestGraphDescriptorSdpaFprop, OperationNamePreservedInSerialization)
+{
+    auto qDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
+    auto kDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_K_UID, toVec(K_SDPA_TENSOR_K_DIMS), toVec(K_SDPA_TENSOR_K_STRIDES));
+    auto vDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
+    auto oDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
+
+    auto opDesc = createFinalizedSdpaFpropOpRequiredOnly(
+        qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get(), HIPDNN_DATA_FLOAT, "my_sdpa_op");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1);
+    EXPECT_EQ(graphT->nodes[0]->name, "my_sdpa_op");
+}
+
+TEST_F(TestGraphDescriptorSdpaFprop, OperationNameRoundTripThroughLifting)
+{
+    auto qDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
+    auto kDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_K_UID, toVec(K_SDPA_TENSOR_K_DIMS), toVec(K_SDPA_TENSOR_K_STRIDES));
+    auto vDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
+    auto oDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
+
+    auto opDesc = createFinalizedSdpaFpropOpRequiredOnly(
+        qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get(), HIPDNN_DATA_FLOAT, "round_trip_name");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    // Serialize and deserialize via FlatBuffer
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized.ptr);
+
+    // Rebuild from the deserialized graph using NodeFactory
+    auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
+    ASSERT_EQ(graphT->nodes.size(), 1);
+
+    auto rebuilt = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
+    ASSERT_NE(rebuilt, nullptr);
+
+    auto* graphOp = rebuilt->asGraphOperation();
+    ASSERT_NE(graphOp, nullptr);
+
+    // Verify the name survived the round-trip by building a node from the rebuilt operation
+    auto rebuiltNode = graphOp->buildNode();
+    ASSERT_NE(rebuiltNode, nullptr);
+    EXPECT_EQ(rebuiltNode->name, "round_trip_name");
+    ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaAttributes);
 }
 
 } // namespace

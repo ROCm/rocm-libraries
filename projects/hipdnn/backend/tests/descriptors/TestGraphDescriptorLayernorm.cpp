@@ -48,29 +48,39 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<LayernormOperationDescriptor>();
     auto desc = wrapper->asDescriptor<LayernormOperationDescriptor>();
 
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_SCALE_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &scaleDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BIAS_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &biasDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&xDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_SCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&scaleDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BIAS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&biasDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_EPSILON_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &epsilonDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_Y_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &yDesc);
+                       static_cast<const void*>(&epsilonDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_Y_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&yDesc));
     if(meanDesc != nullptr)
     {
-        desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &meanDesc);
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT,
+                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                           1,
+                           static_cast<const void*>(&meanDesc));
     }
     if(invVarianceDesc != nullptr)
     {
         desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_INV_VARIANCE_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
-                           &invVarianceDesc);
+                           static_cast<const void*>(&invVarianceDesc));
     }
     desc->setAttribute(HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
@@ -78,6 +88,11 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        HIPDNN_TYPE_NORM_FWD_PHASE,
                        1,
                        &forwardPhase);
+    int64_t normalizedDimCount = 3;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &normalizedDimCount);
 
     desc->finalize();
     return wrapper;
@@ -95,7 +110,10 @@ public:
     {
         auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
-        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                           HIPDNN_TYPE_HANDLE,
+                           1,
+                           static_cast<const void*>(&handle));
     }
 
 protected:
@@ -148,8 +166,10 @@ TEST_F(TestGraphDescriptorLayernorm, BuildFromSingleOperation)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
@@ -186,6 +206,7 @@ TEST_F(TestGraphDescriptorLayernorm, BuildFromSingleOperation)
     EXPECT_TRUE(attrs->inv_variance_tensor_uid.has_value());
     EXPECT_EQ(attrs->inv_variance_tensor_uid.value(), K_LAYERNORM_TENSOR_INV_VARIANCE_UID);
     EXPECT_EQ(attrs->forward_phase, NormFwdPhase::TRAINING);
+    EXPECT_EQ(attrs->normalized_dim_count, 3);
 }
 
 TEST_F(TestGraphDescriptorLayernorm, ComputeDataTypePreserved)
@@ -224,8 +245,10 @@ TEST_F(TestGraphDescriptorLayernorm, ComputeDataTypePreserved)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
@@ -277,8 +300,10 @@ TEST_F(TestGraphDescriptorLayernorm, BuildFromOperationWithoutOptionalTensors)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     auto serialized = desc->getSerializedGraph();

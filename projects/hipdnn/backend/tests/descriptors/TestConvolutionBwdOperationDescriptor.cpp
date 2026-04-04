@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/ConvDgradConstants.hpp>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
@@ -22,6 +23,7 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
+using hipdnn_tests::toVec;
 
 class TestConvolutionBwdOperationDescriptor : public ::testing::Test
 {
@@ -94,9 +96,15 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<ConvolutionBwdOperationDescriptor>();
-        _dyDesc = createFinalizedTensor(10, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _wDesc = createFinalizedTensor(11, {64, 3, 3, 3}, {27, 9, 3, 1});
-        _dxDesc = createFinalizedTensor(12, {1, 3, 32, 32}, {3072, 1024, 32, 1});
+        namespace dgrad = hipdnn_tests::constants::dgrad;
+        _dyDesc = createFinalizedTensor(dgrad::K_TENSOR_DY_UID,
+                                        toVec(dgrad::K_TENSOR_DY_DIMS),
+                                        toVec(dgrad::K_TENSOR_DY_STRIDES));
+        _wDesc = createFinalizedTensor(
+            dgrad::K_TENSOR_W_UID, toVec(dgrad::K_TENSOR_W_DIMS), toVec(dgrad::K_TENSOR_W_STRIDES));
+        _dxDesc = createFinalizedTensor(dgrad::K_TENSOR_DX_UID,
+                                        toVec(dgrad::K_TENSOR_DX_DIMS),
+                                        toVec(dgrad::K_TENSOR_DX_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
@@ -485,8 +493,8 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &rawDy));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedDy(rawDy);
+                                       static_cast<void*>(&rawDy)));
+    const std::unique_ptr<HipdnnBackendDescriptor> retrievedDy(rawDy);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedDy, nullptr);
@@ -769,7 +777,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("ConvolutionBwdOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("dy_uid=10"), std::string::npos);
     ASSERT_NE(str.find("w_uid=11"), std::string::npos);
@@ -849,7 +857,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -861,6 +869,6 @@ TEST_F(TestConvolutionBwdOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 TEST_F(TestConvolutionBwdOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _dyDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _dyDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }

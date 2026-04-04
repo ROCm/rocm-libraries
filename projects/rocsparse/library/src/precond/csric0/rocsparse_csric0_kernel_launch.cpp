@@ -41,7 +41,7 @@ rocsparse_status rocsparse::csric0_kernel_launch(rocsparse_handle      handle,
 
     rocsparse::csric0_kernel_launch_t launch{};
 
-    if(sleep || (trm_info->get_max_nnz() > 1024))
+    if(sleep || (trm_info->get_max_nnz() > 512))
     {
         launch = rocsparse::find_csric0_kernel_binsearch_launch(handle, csric0_info, A);
     }

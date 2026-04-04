@@ -19,7 +19,7 @@ public:
                 (const, override));
     MOCK_METHOD(std::vector<int64_t>,
                 getApplicableEngineIds,
-                (const hipdnn_backend::GraphDescriptor* graphDesc),
+                (const hipdnn_backend::GraphDescriptor* graphDesc, bool findFirst),
                 (const, override));
     MOCK_METHOD(void,
                 getEngineDetails,

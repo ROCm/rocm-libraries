@@ -44,8 +44,8 @@ TEST(TestSdpaFpropNode, PreValidateSucceedsMinimal)
     auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
@@ -58,8 +58,8 @@ TEST(TestSdpaFpropNode, PreValidateSucceedsGQA)
     auto v = makeTensor4D(2, 2, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
@@ -72,10 +72,75 @@ TEST(TestSdpaFpropNode, PreValidateSucceedsMQA)
     auto v = makeTensor4D(2, 1, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFpropNode, PreValidateSucceedsGQADifferentKVHeads)
+{
+    // Q=32 heads, K=8, V=4 — independent GQA broadcast
+    auto q = makeTensor4D(2, 32, 128, 64);
+    auto k = makeTensor4D(2, 8, 128, 64);
+    auto v = makeTensor4D(2, 4, 128, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFpropNode, PreValidateFailsInvalidGQAVHeads)
+{
+    // Q=8 heads, K=2 (valid), V=3 (8%3!=0)
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 2, 32, 64);
+    auto v = makeTensor4D(2, 3, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFpropNode, PreValidateFailsZeroKvHeads)
+{
+    // K has 0 heads — should fail positivity check before divisibility
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 0, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFpropNode, PreValidateFailsZeroVHeads)
+{
+    // V has 0 heads — should fail positivity check
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 0, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFpropNode, PreValidateFailsInvalidGQAKHeads)
+{
+    // Q=8 heads, K=3 (8%3!=0), V=4 (8%4==0) — K invalid, V valid
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 3, 32, 64);
+    auto v = makeTensor4D(2, 4, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFpropNode, PreValidateFailsMissingQ)
@@ -85,8 +150,8 @@ TEST(TestSdpaFpropNode, PreValidateFailsMissingQ)
     attrs.set_v(makeTensor4D(2, 8, 32, 64));
     attrs.set_o(std::make_shared<TensorAttributes>());
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
@@ -98,8 +163,8 @@ TEST(TestSdpaFpropNode, PreValidateFailsMissingK)
     attrs.set_v(makeTensor4D(2, 8, 32, 64));
     attrs.set_o(std::make_shared<TensorAttributes>());
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
@@ -111,8 +176,8 @@ TEST(TestSdpaFpropNode, PreValidateFailsMissingV)
     attrs.set_k(makeTensor4D(2, 8, 32, 64));
     attrs.set_o(std::make_shared<TensorAttributes>());
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
@@ -126,8 +191,8 @@ TEST(TestSdpaFpropNode, PreValidateFailsRankLessThan4)
     auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -141,8 +206,8 @@ TEST(TestSdpaFpropNode, PreValidateFailsRankGreaterThan4)
     auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -155,8 +220,8 @@ TEST(TestSdpaFpropNode, PreValidateSucceedsDifferentHeadDimV)
     auto v = makeTensor4D(2, 8, 32, 32);
     auto attrs = makeMinimalAttrs(q, k, v);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
@@ -169,8 +234,8 @@ TEST(TestSdpaFpropNode, PreValidateFailsHeadDimMismatch)
     auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -189,8 +254,8 @@ TEST(TestSdpaFpropNode, PreValidateFailsOutputShapeMismatch)
     auto o = makeTensor4D(2, 8, 16, 99); // wrong head_dim
     attrs.set_o(o);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -209,8 +274,8 @@ TEST(TestSdpaFpropNode, PreValidateSucceedsCorrectOutputShape)
     auto o = makeTensor4D(2, 8, 16, 32); // correct: matches headDimV
     attrs.set_o(o);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
@@ -223,8 +288,8 @@ TEST(TestSdpaFpropNode, PreValidateFailsSeqKvMismatch)
     auto v = makeTensor4D(2, 8, 16, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -237,8 +302,8 @@ TEST(TestSdpaFpropNode, PreValidateFailsInvalidGQA)
     auto v = makeTensor4D(2, 3, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -255,8 +320,8 @@ TEST(TestSdpaFpropNode, PreValidateSucceedsWithAttnMask)
     mask->set_dim({2, 8, 16, 32});
     attrs.set_bias(mask);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
@@ -273,8 +338,8 @@ TEST(TestSdpaFpropNode, PreValidateSucceedsWithBroadcastAttnMask)
     mask->set_dim({1, 1});
     attrs.set_bias(mask);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
@@ -291,8 +356,8 @@ TEST(TestSdpaFpropNode, PreValidateFailsAttnMaskRankTooLarge)
     mask->set_dim({1, 2, 8, 16, 32});
     attrs.set_bias(mask);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -306,7 +371,7 @@ TEST(TestSdpaFpropNode, InferPropertiesSetsOutputShape)
     auto attrs = makeMinimalAttrs(q, k, v);
     auto o = attrs.get_o();
 
-    GraphAttributes graphAttrs;
+    const GraphAttributes graphAttrs;
     SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -328,7 +393,7 @@ TEST(TestSdpaFpropNode, InferPropertiesSetsOutputShapeDifferentHeadDimV)
     auto attrs = makeMinimalAttrs(q, k, v);
     auto o = attrs.get_o();
 
-    GraphAttributes graphAttrs;
+    const GraphAttributes graphAttrs;
     SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -351,7 +416,7 @@ TEST(TestSdpaFpropNode, InferPropertiesSetsStatsShape)
     auto stats = std::make_shared<TensorAttributes>();
     attrs.set_stats(stats);
 
-    GraphAttributes graphAttrs;
+    const GraphAttributes graphAttrs;
     SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -376,7 +441,7 @@ TEST(TestSdpaFpropNode, InferPropertiesSetsOutputStrides)
     auto attrs = makeMinimalAttrs(q, k, v);
     auto o = attrs.get_o();
 
-    GraphAttributes graphAttrs;
+    const GraphAttributes graphAttrs;
     SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -407,7 +472,7 @@ TEST(TestSdpaFpropNode, InferPropertiesPreservesExplicitOutputShape)
     o->set_stride({8192, 1024, 64, 1});
     attrs.set_o(o);
 
-    GraphAttributes graphAttrs;
+    const GraphAttributes graphAttrs;
     SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -426,8 +491,8 @@ TEST(TestSdpaFpropNode, PreValidateFailsBatchMismatchQK)
     auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -440,8 +505,15 @@ TEST(TestSdpaFpropNode, PreValidateFailsBatchMismatchQV)
     auto v = makeTensor4D(4, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFpropNode, GetNodeTypeReturnsSdpaFprop)
+{
+    const GraphAttributes graphAttrs;
+    const SdpaFpropNode node(SdpaAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::SDPA_FPROP);
 }

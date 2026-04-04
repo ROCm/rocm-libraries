@@ -19,15 +19,15 @@
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
-using hipdnn_tests::toVec;
-
 namespace
 {
 
@@ -42,7 +42,8 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                        HipdnnBackendDescriptor* meanDesc,
                                        HipdnnBackendDescriptor* invVarianceDesc,
                                        hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
-                                       std::vector<HipdnnBackendDescriptor*> peerStatsDescs = {})
+                                       std::vector<HipdnnBackendDescriptor*> peerStatsDescs = {},
+                                       const std::string& name = "")
 {
     auto wrapper = createDescriptor<BatchnormBackwardOperationDescriptor>();
     auto desc = wrapper->asDescriptor<BatchnormBackwardOperationDescriptor>();
@@ -50,33 +51,35 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DY_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &dyDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xDesc);
+                       static_cast<const void*>(&dyDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_X_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&xDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_SCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &scaleDesc);
+                       static_cast<const void*>(&scaleDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DX_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &dxDesc);
+                       static_cast<const void*>(&dxDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DSCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &dscaleDesc);
+                       static_cast<const void*>(&dscaleDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DBIAS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &dbiasDesc);
+                       static_cast<const void*>(&dbiasDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_MEAN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &meanDesc);
+                       static_cast<const void*>(&meanDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_INV_VARIANCE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &invVarianceDesc);
+                       static_cast<const void*>(&invVarianceDesc));
     desc->setAttribute(
         HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
@@ -85,7 +88,15 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
         desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            static_cast<int64_t>(peerStatsDescs.size()),
-                           peerStatsDescs.data());
+                           static_cast<const void*>(peerStatsDescs.data()));
+    }
+
+    if(!name.empty())
+    {
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                           HIPDNN_TYPE_CHAR,
+                           static_cast<int64_t>(name.size()),
+                           name.c_str());
     }
 
     desc->finalize();
@@ -104,7 +115,10 @@ public:
     {
         auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
-        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                           HIPDNN_TYPE_HANDLE,
+                           1,
+                           static_cast<const void*>(&handle));
     }
 
 protected:
@@ -145,8 +159,10 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildFromSingleOperation)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
@@ -206,8 +222,10 @@ TEST_F(TestGraphDescriptorBatchnormBackward, ComputeDataTypePreserved)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
@@ -230,7 +248,7 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildWithPeerStatsTensorArray)
     auto peerStatsDesc0 = createFinalizedTensor(110);
     auto peerStatsDesc1 = createFinalizedTensor(111);
 
-    std::vector<HipdnnBackendDescriptor*> peerStatsDescs
+    const std::vector<HipdnnBackendDescriptor*> peerStatsDescs
         = {peerStatsDesc0.get(), peerStatsDesc1.get()};
     auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
                                                      xDesc.get(),
@@ -247,8 +265,10 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildWithPeerStatsTensorArray)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     auto serialized = desc->getSerializedGraph();
@@ -263,6 +283,118 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildWithPeerStatsTensorArray)
     ASSERT_EQ(attrs->peer_stats_tensor_uid.size(), 2u);
     EXPECT_EQ(attrs->peer_stats_tensor_uid[0], 110);
     EXPECT_EQ(attrs->peer_stats_tensor_uid[1], 111);
+}
+
+TEST_F(TestGraphDescriptorBatchnormBackward, OperationNamePreservedInSerialization)
+{
+    auto dyDesc = createFinalizedTensor(60, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+    auto xDesc = createFinalizedTensor(61, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+    auto scaleDesc = createFinalizedTensor(62, {1, 64, 1, 1}, {64, 1, 1, 1});
+    auto dxDesc = createFinalizedTensor(63, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+    auto dscaleDesc = createFinalizedTensor(64, {1, 64, 1, 1}, {64, 1, 1, 1});
+    auto dbiasDesc = createFinalizedTensor(65, {1, 64, 1, 1}, {64, 1, 1, 1});
+    auto meanDesc = createFinalizedTensor(7);
+    auto invVarianceDesc = createFinalizedTensor(8);
+    auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
+                                                     xDesc.get(),
+                                                     scaleDesc.get(),
+                                                     dxDesc.get(),
+                                                     dscaleDesc.get(),
+                                                     dbiasDesc.get(),
+                                                     meanDesc.get(),
+                                                     invVarianceDesc.get(),
+                                                     HIPDNN_DATA_FLOAT,
+                                                     {},
+                                                     "bn_bwd_train");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1u);
+    EXPECT_EQ(graphT->nodes[0]->name, "bn_bwd_train");
+}
+
+TEST_F(TestGraphDescriptorBatchnormBackward, OperationNameRoundTripThroughLifting)
+{
+    auto dyDesc = createFinalizedTensor(60, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+    auto xDesc = createFinalizedTensor(61, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+    auto scaleDesc = createFinalizedTensor(62, {1, 64, 1, 1}, {64, 1, 1, 1});
+    auto dxDesc = createFinalizedTensor(63, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+    auto dscaleDesc = createFinalizedTensor(64, {1, 64, 1, 1}, {64, 1, 1, 1});
+    auto dbiasDesc = createFinalizedTensor(65, {1, 64, 1, 1}, {64, 1, 1, 1});
+    auto meanDesc = createFinalizedTensor(7);
+    auto invVarianceDesc = createFinalizedTensor(8);
+    auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
+                                                     xDesc.get(),
+                                                     scaleDesc.get(),
+                                                     dxDesc.get(),
+                                                     dscaleDesc.get(),
+                                                     dbiasDesc.get(),
+                                                     meanDesc.get(),
+                                                     invVarianceDesc.get(),
+                                                     HIPDNN_DATA_FLOAT,
+                                                     {},
+                                                     "bn_bwd_train");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    // Serialize the graph
+    auto serialized = desc->getSerializedGraph();
+    std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
+                               static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
+
+    // Deserialize into a new GraphDescriptor (lifting path)
+    auto liftedWrapper = createDescriptor<GraphDescriptor>();
+    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
+    liftedDesc->deserializeGraph(bytes.data(), bytes.size());
+
+    hipdnnHandle_t handle = &_mockHandle;
+    liftedDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                             HIPDNN_TYPE_HANDLE,
+                             1,
+                             static_cast<const void*>(&handle));
+    liftedDesc->finalize();
+
+    // Re-serialize and verify name survived the round-trip
+    auto reSerialized = liftedDesc->getSerializedGraph();
+    auto graphT = UnPackGraph(reSerialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1u);
+    EXPECT_EQ(graphT->nodes[0]->name, "bn_bwd_train");
+
+    // Verify all tensor UIDs survived
+    auto* attrs = graphT->nodes[0]->attributes.AsBatchnormBackwardAttributes();
+    ASSERT_NE(attrs, nullptr);
+    EXPECT_EQ(attrs->dy_tensor_uid, 60);
+    EXPECT_EQ(attrs->x_tensor_uid, 61);
+    EXPECT_EQ(attrs->scale_tensor_uid, 62);
+    EXPECT_EQ(attrs->dx_tensor_uid, 63);
+    EXPECT_EQ(attrs->dscale_tensor_uid, 64);
+    EXPECT_EQ(attrs->dbias_tensor_uid, 65);
+
+    // Verify optional tensor UIDs survived
+    ASSERT_TRUE(attrs->mean_tensor_uid.has_value());
+    EXPECT_EQ(attrs->mean_tensor_uid.value(), 7);
+    ASSERT_TRUE(attrs->inv_variance_tensor_uid.has_value());
+    EXPECT_EQ(attrs->inv_variance_tensor_uid.value(), 8);
 }
 
 } // namespace

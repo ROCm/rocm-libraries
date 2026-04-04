@@ -11,7 +11,6 @@
 #include <iostream>
 #include <numeric>
 #include <random>
-#include <typeindex>
 #include <variant>
 #include <vector>
 
@@ -40,16 +39,22 @@ struct TensorLayout
     std::string name; ///< Human-readable layout name (e.g., "NCHW", "NHWC")
     std::vector<int64_t> strideOrder; ///< Stride priority per dimension (lower = tighter packing)
 
+    static const TensorLayout NCL; ///< 3D channel-first layout
+    static const TensorLayout NLC; ///< 3D channel-last layout
     static const TensorLayout NCHW; ///< 4D channel-first layout
     static const TensorLayout NHWC; ///< 4D channel-last layout
     static const TensorLayout NCDHW; ///< 5D channel-first layout
     static const TensorLayout NDHWC; ///< 5D channel-last layout
 };
 
+// NOLINTBEGIN(bugprone-throwing-static-initialization) fixed-size layout constants
+inline const TensorLayout TensorLayout::NCL{"NCL", {2, 1, 0}};
+inline const TensorLayout TensorLayout::NLC{"NLC", strideOrderNhwc(3)};
 inline const TensorLayout TensorLayout::NCHW{"NCHW", {3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NHWC{"NHWC", strideOrderNhwc(4)};
 inline const TensorLayout TensorLayout::NCDHW{"NCDHW", {4, 3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NDHWC{"NDHWC", strideOrderNhwc(5)};
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 inline std::ostream& operator<<(std::ostream& os, const TensorLayout& layout)
 {
@@ -317,6 +322,7 @@ public:
     virtual void
         fillTensorWithRandomValues(float min, float max, unsigned int seed = std::random_device{}())
         = 0;
+    virtual void fillWithSentinelValue() = 0;
     virtual size_t fillWithData(const void* data, size_t bytesCopied) = 0;
 
     template <typename... Args>
@@ -325,16 +331,13 @@ public:
         static_assert(AllOfTypes<std::is_integral, Args...>::value,
                       "Indices must be an integral type!");
 
-        std::vector<int64_t> indexVector = {static_cast<int64_t>(indices)...};
+        const std::vector<int64_t> indexVector = {static_cast<int64_t>(indices)...};
 
         return getIndex(indexVector);
     }
 
-    template <typename IndexType>
-    int64_t getIndex(const std::vector<IndexType>& indices) const
+    int64_t getIndex(const std::vector<int64_t>& indices) const
     {
-        static_assert(std::is_integral_v<IndexType>, "Index type must be integral!");
-
         if(indices.size() > strides().size())
         {
             throw std::invalid_argument("Number of indices (" + std::to_string(indices.size())
@@ -408,6 +411,18 @@ public:
         fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
     }
 
+    void fillWithSentinelValue() override
+    {
+        if constexpr(std::numeric_limits<T>::has_quiet_NaN)
+        {
+            fillWithValue(std::numeric_limits<T>::quiet_NaN());
+        }
+        else
+        {
+            fillWithValue(std::numeric_limits<T>::max());
+        }
+    }
+
     virtual MigratableMemoryBase<T>& memory() = 0;
     virtual const MigratableMemoryBase<T>& memory() const = 0;
 
@@ -417,8 +432,7 @@ public:
         return (*this)(indices...);
     }
 
-    template <typename IndexType>
-    T getHostValue(const std::vector<IndexType>& indices) const
+    T getHostValue(const std::vector<int64_t>& indices) const
     {
         return (*this)(indices);
     }
@@ -429,8 +443,7 @@ public:
         (*this)(indices...) = value;
     }
 
-    template <typename IndexType>
-    void setHostValue(T value, const std::vector<IndexType>& indices)
+    void setHostValue(T value, const std::vector<int64_t>& indices)
     {
         (*this)(indices) = value;
     }
@@ -438,7 +451,7 @@ public:
     template <typename... Args>
     T& operator()(Args... indices)
     {
-        int64_t index = getIndex(indices...);
+        const int64_t index = getIndex(indices...);
         auto* data = memory().hostData();
         return data[index];
     }
@@ -446,23 +459,21 @@ public:
     template <typename... Args>
     const T& operator()(Args... indices) const
     {
-        int64_t index = getIndex(indices...);
+        const int64_t index = getIndex(indices...);
         const auto* data = memory().hostData();
         return data[index];
     }
 
-    template <typename IndexType>
-    T& operator()(const std::vector<IndexType>& indices)
+    T& operator()(const std::vector<int64_t>& indices)
     {
-        int64_t index = getIndex(indices);
+        const int64_t index = getIndex(indices);
         auto* data = memory().hostData();
         return data[index];
     }
 
-    template <typename IndexType>
-    const T& operator()(const std::vector<IndexType>& indices) const
+    const T& operator()(const std::vector<int64_t>& indices) const
     {
-        int64_t index = getIndex(indices);
+        const int64_t index = getIndex(indices);
         const auto* data = memory().hostData();
         return data[index];
     }
@@ -607,7 +618,7 @@ public:
 
     size_t fillWithData(const void* data, size_t maxBytesCopied) override
     {
-        size_t bytesCopied = std::min(maxBytesCopied, _memory.count() * sizeof(T));
+        const size_t bytesCopied = std::min(maxBytesCopied, _memory.count() * sizeof(T));
         _memory.markHostModified();
         std::memcpy(_memory.hostData(), data, bytesCopied);
         return bytesCopied;

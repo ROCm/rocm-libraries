@@ -104,7 +104,7 @@ public:
     size_t get_buffer_size() const;
 
     // blas handle
-    rocsparse::blas_handle blas_handle;
+    rocsparse::blas_handle blas_handle{};
 
     // Temporary storage for spmv descriptor during csrmv calls
     // This allows template functions to access pre-extracted arrays

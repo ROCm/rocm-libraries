@@ -460,3 +460,66 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
 
     EXPECT_FALSE(applicable);
 }
+
+// ============================================================================
+// 3D Tests
+// ============================================================================
+
+TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsTrueFor3dNclSingleNode)
+{
+    std::vector<int64_t> dims3D = {2, 3, 14};
+    std::vector<int64_t> strides3D = {42, 14, 1};
+
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
+       IsApplicableReturnsTrueFor3dNlcFusedTwoNodeGraph)
+{
+    std::vector<int64_t> dims3D = {2, 3, 14};
+    std::vector<int64_t> strides3D = {42, 1, 3};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true, false, hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, BuildPlanSetsPlanFor3dNclSingleNode)
+{
+    std::vector<int64_t> dims3D = {2, 3, 14};
+    std::vector<int64_t> strides3D = {42, 14, 1};
+
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+    MockEngineConfig mockEngineConfig;
+    HipdnnMiopenContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
+TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, BuildPlanSetsPlanFor3dNlcFusedTwoNodeGraph)
+{
+    std::vector<int64_t> dims3D = {2, 3, 14};
+    std::vector<int64_t> strides3D = {42, 1, 3};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true, false, hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+    MockEngineConfig mockEngineConfig;
+    HipdnnMiopenContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
