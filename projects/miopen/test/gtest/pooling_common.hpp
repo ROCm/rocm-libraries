@@ -202,14 +202,6 @@ struct verify_forward_pooling
         auto out_dev = handle.Create<T>(out.data.size());
         
         const std::size_t ws_size = filter.GetWorkSpaceSize(out.desc);
-        
-        // DEBUG: Print workspace size for failing case
-        if(input.desc.GetLengths() == std::vector<std::size_t>{16, 64, 3, 4, 4}) {
-            std::cout << "DEBUG: Workspace Size: " << ws_size << std::endl;
-            std::cout << "DEBUG: Index Type Size: " << sizeof(Index) << std::endl;
-            std::cout << "DEBUG: Expected Index Count: " << out.data.size() << std::endl;
-            std::cout << "DEBUG: Total Index Bytes: " << out.data.size() * sizeof(Index) << std::endl;
-        }
 
         Workspace wspace(ws_size);
 
@@ -456,18 +448,6 @@ void RunPoolingTestWithIndexType(const PoolingTestCase& test_case)
     std::vector<Index> indices;
     verify_forward_pooling<SptDim> forward_verifier;
 
-    // DEBUG: Print descriptors for the failing case to compare with develop
-    if(test_case.in_shape == std::vector<int>{16, 64, 3, 4, 4} && 
-       test_case.pads == std::vector<int>{1, 1, 1} &&
-       test_case.in_layout == "NDHWC")
-    {
-        std::cout << "DEBUG: Failing Config Detected!" << std::endl;
-        std::cout << "Input Desc: " << input.desc << std::endl;
-        auto out_desc = filter.GetForwardOutputTensor(input.desc);
-        std::cout << "Output Desc: " << out_desc << std::endl;
-        std::cout << "Output Element Space: " << out_desc.GetElementSpace() << std::endl;
-    }
-
     auto forward_result = forward_verifier.cpu(input, filter, indices);
     auto forward_gpu_result = forward_verifier.gpu(input, filter, indices);
 
@@ -483,8 +463,12 @@ void RunPoolingTestWithIndexType(const PoolingTestCase& test_case)
         GTEST_FAIL() << "Indices not populated for max pooling backward";
 
     verify_backward_pooling<SptDim> backward_verifier;
-    auto backward_result = backward_verifier.cpu(input, dout, forward_result, filter, indices, test_case.wsidx != 0, false);
-    auto backward_gpu_result = backward_verifier.gpu(input, dout, forward_result, filter, indices, test_case.wsidx != 0, false);
+    const bool use_global_index = test_case.wsidx != 0;
+    const bool verify_index     = use_global_index;
+    auto backward_result = backward_verifier.cpu(
+        input, dout, forward_result, filter, indices, use_global_index, verify_index);
+    auto backward_gpu_result = backward_verifier.gpu(
+        input, dout, forward_result, filter, indices, use_global_index, verify_index);
 
     EXPECT_EQ(miopen::range_distance(backward_result), miopen::range_distance(backward_gpu_result));
     const double backward_rms_error = miopen::rms_range(backward_result.data, backward_gpu_result.data);
