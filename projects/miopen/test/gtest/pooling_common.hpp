@@ -197,25 +197,18 @@ struct verify_forward_pooling
     {
         auto&& handle = get_handle();
         tensor<T> out{filter.GetForwardOutputTensor(input.desc)};
+        indices.resize(out.data.size(), 0);
 
         auto in_dev  = handle.Write(input.data);
         auto out_dev = handle.Create<T>(out.data.size());
-        
-        const std::size_t ws_size = filter.GetWorkSpaceSize(out.desc);
-
-        Workspace wspace(ws_size);
+        Workspace wspace{};
+        wspace.Write(indices);
 
         float alpha = 1, beta = 0;
         filter.Forward(handle, &alpha, input.desc, in_dev.get(), &beta, out.desc, out_dev.get(),
-                       true, ws_size > 0 ? wspace.ptr() : nullptr, ws_size);
+                       true, wspace.ptr(), wspace.size());
 
-        if(ws_size > 0 && filter.GetMode() == miopenPoolingMax)
-        {
-            // Preserve the full workspace payload because backward may consume
-            // more than the leading index array bytes.
-            indices = wspace.Read<std::vector<Index>>();
-        }
-        
+        indices  = wspace.Read<std::vector<Index>>();
         out.data = handle.Read<T>(out_dev, out.data.size());
         return out;
     }
@@ -235,6 +228,7 @@ struct verify_backward_pooling
     {
         auto dinput = input;
         std::vector<double> din_vec(input.desc.GetElementSpace(), 0.0);
+        CHECK(dout.desc == out.desc);
 
         const auto in_strides         = input.desc.GetStrides();
         const std::size_t in_n_stride = in_strides[0];
@@ -248,9 +242,9 @@ struct verify_backward_pooling
         std::array<std::size_t, SptDim> out_spatial_strides{};
         std::copy_n(out_strides.begin() + 2, SptDim, out_spatial_strides.begin());
 
+        const T* input_ptr = input.data.data();
         const T* dout_ptr  = dout.data.data();
         const T* out_ptr   = out.data.data();
-        const T* input_ptr = input.data.data();
 
         std::array<int, SptDim + 2> in_dim{};
         std::copy_n(input.desc.GetLengths().begin(), SptDim + 2, in_dim.begin());
@@ -262,6 +256,7 @@ struct verify_backward_pooling
         std::copy_n(filter.GetPads().begin(), SptDim, pads.begin());
         std::array<int, SptDim> kers{};
         std::copy_n(filter.GetLengths().begin(), SptDim, kers.begin());
+        auto ford_ker = miopen::unpacker(miopen::ford)(kers);
 
         int out_n = out.desc.GetLengths()[0];
         int out_c = out.desc.GetLengths()[1];
@@ -273,7 +268,6 @@ struct verify_backward_pooling
             if(filter.GetMode() == miopenPoolingMax)
             {
                 ford_out([&](auto... out_spatial_id_pack) {
-                    // Use logical coordinates to get the index from the workspace vector
                     auto mx_idx = indices.at(dout.desc.GetIndex(o, w, out_spatial_id_pack...));
                     std::array<std::size_t, SptDim + 2> idx{};
                     bool in_cmp_idx = true;
@@ -281,7 +275,20 @@ struct verify_backward_pooling
                     {
                         auto total_spatial = std::accumulate(
                             in_dim.begin() + 2, in_dim.end(), 1ULL, std::multiplies<std::size_t>());
-                        in_cmp_idx = (static_cast<std::size_t>(mx_idx) < total_spatial);
+                        in_cmp_idx = (mx_idx < total_spatial);
+
+                        // Match legacy ctest behavior: if pooling window is fully outside
+                        // input for this output coordinate, ignore this workspace index.
+                        auto out_spatial_id = make_array(out_spatial_id_pack...);
+                        for(int i = 0; i < SptDim && in_cmp_idx; i++)
+                        {
+                            int win_start = out_spatial_id[i] * strides[i] - pads[i];
+                            int win_end   = win_start + kers[i] - 1;
+                            if(win_end < 0 || win_start >= in_dim[i + 2])
+                            {
+                                in_cmp_idx = false;
+                            }
+                        }
 
                         for(int i = 0; i < SptDim; i++)
                         {
@@ -351,12 +358,14 @@ struct verify_backward_pooling
                         win_sz[i]    = end_idx - std::max(start_idx[i], 0);
                         win_sz[i]    = std::max(win_sz[i], 0);
                     }
-                    int pool_size = filter.GetMode() == miopenPoolingAverageInclusive
-                                        ? std::accumulate(kers.begin(), kers.end(), 1, std::multiplies<int>())
-                                        : std::accumulate(win_sz.begin(), win_sz.end(), 1, std::multiplies<int>());
-                    pool_size = std::max(pool_size, 1);
+                    int pool_size =
+                        filter.GetMode() == miopenPoolingAverageInclusive
+                            ? std::accumulate(kers.begin(), kers.end(), 1, std::multiplies<int>())
+                            : std::accumulate(
+                                  win_sz.begin(), win_sz.end(), 1, std::multiplies<int>());
+                    pool_size = std::max(pool_size, 1); // Avoid division by zero
 
-                    miopen::unpacker(miopen::ford)(kers)([&](auto... ker_id_pack) {
+                    ford_ker([&](auto... ker_id_pack) {
                         auto ker_id = make_array(ker_id_pack...);
                         bool in_cmp_idx = true;
                         std::array<int, SptDim + 2> in_idx{};
@@ -371,10 +380,16 @@ struct verify_backward_pooling
                         {
                             std::size_t din_idx = 0;
                             for(int i = 0; i < SptDim + 2; i++)
+                            {
                                 din_idx += in_idx[i] * in_str[i];
+                            }
+
+                            // Compute dout linear index
                             std::size_t dout_linear_idx = o * out_n_stride + w * out_c_stride;
                             for(int i = 0; i < SptDim; ++i)
+                            {
                                 dout_linear_idx += out_spatial_id[i] * out_spatial_strides[i];
+                            }
                             din_vec.at(din_idx) += static_cast<double>(dout_ptr[dout_linear_idx]) / pool_size;
                         }
                     });
@@ -407,21 +422,13 @@ struct verify_backward_pooling
         auto dout_dev = handle.Write(dout.data);
         auto out_dev  = handle.Write(out.data);
         auto din_dev  = handle.Create<T>(dinput.data.size());
-        
-        const std::size_t ws_size = filter.GetWorkSpaceSize(out.desc);
-        Workspace wspace(ws_size);
-        if(!indices.empty())
-        {
-            const std::size_t bytes_to_copy =
-                std::min(ws_size, indices.size() * sizeof(Index));
-            HIP_CHECK(
-                hipMemcpy(wspace.ptr(), indices.data(), bytes_to_copy, hipMemcpyHostToDevice));
-        }
+        Workspace wspace{};
+        wspace.Write(indices);
 
         float alpha = 1, beta = 0;
         filter.Backward(handle, &alpha, out.desc, out_dev.get(), dout.desc, dout_dev.get(),
                         input.desc, in_dev.get(), &beta, dinput.desc, din_dev.get(), 
-                        ws_size > 0 ? wspace.ptr() : nullptr);
+                        wspace.ptr());
 
         dinput.data = handle.Read<T>(din_dev, dinput.data.size());
         return dinput;
@@ -464,10 +471,8 @@ void RunPoolingTestWithIndexType(const PoolingTestCase& test_case)
         GTEST_FAIL() << "Indices not populated for max pooling backward";
 
     verify_backward_pooling<SptDim> backward_verifier;
-    const bool is_channel_last =
-        (test_case.in_layout == "NHWC" || test_case.in_layout == "NDHWC");
     const bool use_global_index = test_case.wsidx != 0;
-    const bool verify_index = use_global_index && !is_channel_last;
+    const bool verify_index = use_global_index;
     auto backward_result = backward_verifier.cpu(
         input, dout, forward_result, filter, indices, use_global_index, verify_index);
     auto backward_gpu_result = backward_verifier.gpu(
