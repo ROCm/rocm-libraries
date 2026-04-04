@@ -27,7 +27,28 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetNumPrefetchV()
     {
-        return 2;
+        constexpr index_t n0_loops = Problem::BlockFmhaShape::kN0 / Problem::BlockFmhaShape::kK0;
+        constexpr index_t k1_loops = Problem::BlockFmhaShape::kN0 / Problem::BlockFmhaShape::kK1;
+
+        if constexpr(Problem::kUseTrLoad)
+        {
+            // kM0 is 64, kN0 is 128, prefetch all k_tiles
+            if constexpr(IsPreloadWholeNextIterationK<Problem>())
+            {
+                if constexpr(n0_loops >= 4 && k1_loops >= 6)
+                    return 2;
+                return 2;
+            }
+            else // kM0 is 128, kN0 is 64, prefetch one k_tile
+            {
+                // kN0 == 64, try to prefetch more v_tiles
+                return 2;
+            };
+        }
+        else
+        {
+            return 2;
+        };
     };
 
     template <typename Problem>
@@ -737,7 +758,6 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSizeDropout()
     {
-        static_assert(!Problem::kHasDropout, "This pipeline does not support dropout!");
         return 0;
     };
 
