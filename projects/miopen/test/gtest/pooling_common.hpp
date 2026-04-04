@@ -205,8 +205,16 @@ struct verify_forward_pooling
         wspace.Write(indices);
 
         float alpha = 1, beta = 0;
-        filter.Forward(handle, &alpha, input.desc, in_dev.get(), &beta, out.desc, out_dev.get(),
-                       true, wspace.ptr(), wspace.size());
+        filter.Forward(handle,
+                       &alpha,
+                       input.desc,
+                       in_dev.get(),
+                       &beta,
+                       out.desc,
+                       out_dev.get(),
+                       true,
+                       wspace.ptr(),
+                       wspace.size());
 
         indices  = wspace.Read<std::vector<Index>>();
         out.data = handle.Read<T>(out_dev, out.data.size());
@@ -322,22 +330,23 @@ struct verify_backward_pooling
                         idx[1] = w;
                         if(verify_index)
                         {
-                            std::size_t in_verify_idx = o * in_n_stride + w * in_c_stride;
+                            std::size_t in_verify_idx  = o * in_n_stride + w * in_c_stride;
                             std::size_t out_verify_idx = o * out_n_stride + w * out_c_stride;
-                            auto out_spatial_id = make_array(out_spatial_id_pack...);
+                            auto out_spatial_id        = make_array(out_spatial_id_pack...);
                             for(int i = 0; i < SptDim; ++i)
                             {
                                 in_verify_idx += idx[i + 2] * in_spatial_strides[i];
                                 out_verify_idx += out_spatial_id[i] * out_spatial_strides[i];
                             }
-                            CHECK(miopen::float_equal(input_ptr[in_verify_idx], out_ptr[out_verify_idx]));
+                            CHECK(miopen::float_equal(input_ptr[in_verify_idx],
+                                                      out_ptr[out_verify_idx]));
                         }
                         std::size_t din_idx = 0;
                         for(int i = 0; i < SptDim + 2; i++)
                             din_idx += idx[i] * in_str[i];
-                        
+
                         std::size_t dout_linear_idx = o * out_n_stride + w * out_c_stride;
-                        auto out_spatial_id = make_array(out_spatial_id_pack...);
+                        auto out_spatial_id         = make_array(out_spatial_id_pack...);
                         for(int i = 0; i < SptDim; ++i)
                             dout_linear_idx += out_spatial_id[i] * out_spatial_strides[i];
                         din_vec.at(din_idx) += dout_ptr[dout_linear_idx];
@@ -366,7 +375,7 @@ struct verify_backward_pooling
                     pool_size = std::max(pool_size, 1); // Avoid division by zero
 
                     ford_ker([&](auto... ker_id_pack) {
-                        auto ker_id = make_array(ker_id_pack...);
+                        auto ker_id     = make_array(ker_id_pack...);
                         bool in_cmp_idx = true;
                         std::array<int, SptDim + 2> in_idx{};
                         in_idx[0] = o;
@@ -390,7 +399,8 @@ struct verify_backward_pooling
                             {
                                 dout_linear_idx += out_spatial_id[i] * out_spatial_strides[i];
                             }
-                            din_vec.at(din_idx) += static_cast<double>(dout_ptr[dout_linear_idx]) / pool_size;
+                            din_vec.at(din_idx) +=
+                                static_cast<double>(dout_ptr[dout_linear_idx]) / pool_size;
                         }
                     });
                 });
@@ -426,8 +436,17 @@ struct verify_backward_pooling
         wspace.Write(indices);
 
         float alpha = 1, beta = 0;
-        filter.Backward(handle, &alpha, out.desc, out_dev.get(), dout.desc, dout_dev.get(),
-                        input.desc, in_dev.get(), &beta, dinput.desc, din_dev.get(), 
+        filter.Backward(handle,
+                        &alpha,
+                        out.desc,
+                        out_dev.get(),
+                        dout.desc,
+                        dout_dev.get(),
+                        input.desc,
+                        in_dev.get(),
+                        &beta,
+                        dinput.desc,
+                        din_dev.get(),
                         wspace.ptr());
 
         dinput.data = handle.Read<T>(din_dev, dinput.data.size());
@@ -443,25 +462,30 @@ void RunPoolingTestWithIndexType(const PoolingTestCase& test_case)
     {
         const std::vector<std::size_t> dim_lens = input.desc.GetLengths();
         std::vector<std::size_t> dim_strides;
-        miopen::tensor_layout_to_strides(dim_lens, miopen::tensor_layout_get_default(input.desc.GetNumDims()),
-                                         test_case.in_layout, dim_strides);
+        miopen::tensor_layout_to_strides(dim_lens,
+                                         miopen::tensor_layout_get_default(input.desc.GetNumDims()),
+                                         test_case.in_layout,
+                                         dim_strides);
         input.desc = miopen::TensorDescriptor(miopen_type<T>{}, dim_lens, dim_strides);
     }
-    input.generate(tensor_elem_gen_integer{(miopen_type<T>{} == miopenHalf || miopen_type<T>{} == miopenBFloat16) ? 5 : 17});
+    input.generate(tensor_elem_gen_integer{
+        (miopen_type<T>{} == miopenHalf || miopen_type<T>{} == miopenBFloat16) ? 5 : 17});
 
-    miopen::PoolingDescriptor filter{test_case.mode, miopenPaddingDefault, test_case.lens, test_case.strides, test_case.pads};
+    miopen::PoolingDescriptor filter{
+        test_case.mode, miopenPaddingDefault, test_case.lens, test_case.strides, test_case.pads};
     filter.SetIndexType(test_case.index_type);
     filter.SetWorkspaceIndexMode(miopenPoolingWorkspaceIndexMode_t(test_case.wsidx));
 
     std::vector<Index> indices;
     verify_forward_pooling<SptDim> forward_verifier;
 
-    auto forward_result = forward_verifier.cpu(input, filter, indices);
+    auto forward_result     = forward_verifier.cpu(input, filter, indices);
     auto forward_gpu_result = forward_verifier.gpu(input, filter, indices);
 
     EXPECT_EQ(miopen::range_distance(forward_result), miopen::range_distance(forward_gpu_result));
     const double threshold = std::numeric_limits<T>::epsilon() * 80.0;
-    const double forward_rms_error = miopen::rms_range(forward_result.data, forward_gpu_result.data);
+    const double forward_rms_error =
+        miopen::rms_range(forward_result.data, forward_gpu_result.data);
     EXPECT_LE(forward_rms_error, threshold);
 
     auto dout = forward_result;
@@ -472,33 +496,40 @@ void RunPoolingTestWithIndexType(const PoolingTestCase& test_case)
 
     verify_backward_pooling<SptDim> backward_verifier;
     const bool use_global_index = test_case.wsidx != 0;
-    const bool verify_index = use_global_index;
-    auto backward_result = backward_verifier.cpu(
+    const bool verify_index     = use_global_index;
+    auto backward_result        = backward_verifier.cpu(
         input, dout, forward_result, filter, indices, use_global_index, verify_index);
     auto backward_gpu_result = backward_verifier.gpu(
         input, dout, forward_result, filter, indices, use_global_index, verify_index);
 
     EXPECT_EQ(miopen::range_distance(backward_result), miopen::range_distance(backward_gpu_result));
-    const double backward_rms_error = miopen::rms_range(backward_result.data, backward_gpu_result.data);
+    const double backward_rms_error =
+        miopen::rms_range(backward_result.data, backward_gpu_result.data);
     EXPECT_LE(backward_rms_error, threshold);
 }
 
 template <typename T, int SptDim = 2>
 void RunPoolingTest(const PoolingTestCase& test_case)
 {
-    try {
-        switch(test_case.index_type) {
-            case miopenIndexUint8:  RunPoolingTestWithIndexType<T, uint8_t, SptDim>(test_case); break;
-            case miopenIndexUint16: RunPoolingTestWithIndexType<T, uint16_t, SptDim>(test_case); break;
-            case miopenIndexUint32: RunPoolingTestWithIndexType<T, uint32_t, SptDim>(test_case); break;
-            case miopenIndexUint64: RunPoolingTestWithIndexType<T, uint64_t, SptDim>(test_case); break;
-            default: GTEST_FAIL() << "Unsupported index type";
+    try
+    {
+        switch(test_case.index_type)
+        {
+        case miopenIndexUint8: RunPoolingTestWithIndexType<T, uint8_t, SptDim>(test_case); break;
+        case miopenIndexUint16: RunPoolingTestWithIndexType<T, uint16_t, SptDim>(test_case); break;
+        case miopenIndexUint32: RunPoolingTestWithIndexType<T, uint32_t, SptDim>(test_case); break;
+        case miopenIndexUint64: RunPoolingTestWithIndexType<T, uint64_t, SptDim>(test_case); break;
+        default: GTEST_FAIL() << "Unsupported index type";
         }
-    } catch(const std::exception& e) {
+    }
+    catch(const std::exception& e)
+    {
         std::string msg = e.what();
-        if(msg.find("No solver found") != std::string::npos || msg.find("exceeds the device limit") != std::string::npos)
+        if(msg.find("No solver found") != std::string::npos ||
+           msg.find("exceeds the device limit") != std::string::npos)
             GTEST_SKIP() << msg;
-        else GTEST_FAIL() << msg;
+        else
+            GTEST_FAIL() << msg;
     }
 }
 
@@ -510,41 +541,77 @@ struct PoolingCommon : public testing::TestWithParam<PoolingTestCase>
 };
 
 inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
-                                  int& num_uint16_case, int& num_uint32_case, int& num_uint32_case_imgidx,
-                                  int& num_uint64_case, int& num_uint64_case_imgidx,
-                                  bool skip_many_configs = true, bool is_wide_dataset = false)
+                                  int& num_uint16_case,
+                                  int& num_uint32_case,
+                                  int& num_uint32_case_imgidx,
+                                  int& num_uint64_case,
+                                  int& num_uint64_case_imgidx,
+                                  bool skip_many_configs = true,
+                                  bool is_wide_dataset   = false)
 {
     int spt_dim = static_cast<int>(test_case.in_shape.size()) - 2;
-    if(test_case.wsidx == 0 && spt_dim == 3 && test_case.mode == miopenPoolingMax) return false;
-    if(test_case.wsidx == 0 && spt_dim == 2 && test_case.mode == miopenPoolingMax && is_wide_dataset) return false;
-    if(test_case.wsidx == 0 && (test_case.mode == miopenPoolingAverage || test_case.mode == miopenPoolingAverageInclusive)) return false;
-    if(spt_dim == 3 && test_case.mode == miopenPoolingMax && (test_case.index_type == miopenIndexUint8 || test_case.index_type == miopenIndexUint16)) return false;
+    if(test_case.wsidx == 0 && spt_dim == 3 && test_case.mode == miopenPoolingMax)
+        return false;
+    if(test_case.wsidx == 0 && spt_dim == 2 && test_case.mode == miopenPoolingMax &&
+       is_wide_dataset)
+        return false;
+    if(test_case.wsidx == 0 &&
+       (test_case.mode == miopenPoolingAverage || test_case.mode == miopenPoolingAverageInclusive))
+        return false;
+    if(spt_dim == 3 && test_case.mode == miopenPoolingMax &&
+       (test_case.index_type == miopenIndexUint8 || test_case.index_type == miopenIndexUint16))
+        return false;
 
-    switch(test_case.index_type) {
-        case miopenIndexUint8:
-            if((spt_dim == 3 || (spt_dim == 2 && test_case.wsidx == 1)) && test_case.mode == miopenPoolingMax) return false;
-            break;
-        case miopenIndexUint16:
-            if((spt_dim == 3 || (spt_dim == 2 && test_case.wsidx == 1)) && test_case.mode == miopenPoolingMax) return false;
-            if(skip_many_configs && ++num_uint16_case > 5) return false;
-            break;
-        case miopenIndexUint32:
-            if(skip_many_configs) {
-                if(test_case.wsidx == 0) { if(++num_uint32_case > 5) return false; }
-                else { if(++num_uint32_case_imgidx > 5) return false; }
+    switch(test_case.index_type)
+    {
+    case miopenIndexUint8:
+        if((spt_dim == 3 || (spt_dim == 2 && test_case.wsidx == 1)) &&
+           test_case.mode == miopenPoolingMax)
+            return false;
+        break;
+    case miopenIndexUint16:
+        if((spt_dim == 3 || (spt_dim == 2 && test_case.wsidx == 1)) &&
+           test_case.mode == miopenPoolingMax)
+            return false;
+        if(skip_many_configs && ++num_uint16_case > 5)
+            return false;
+        break;
+    case miopenIndexUint32:
+        if(skip_many_configs)
+        {
+            if(test_case.wsidx == 0)
+            {
+                if(++num_uint32_case > 5)
+                    return false;
             }
-            break;
-        case miopenIndexUint64:
-            if(skip_many_configs) {
-                if(test_case.wsidx == 0) { if(++num_uint64_case > 5) return false; }
-                else { if(++num_uint64_case_imgidx > 5 && spt_dim == 2) return false; }
+            else
+            {
+                if(++num_uint32_case_imgidx > 5)
+                    return false;
             }
-            break;
+        }
+        break;
+    case miopenIndexUint64:
+        if(skip_many_configs)
+        {
+            if(test_case.wsidx == 0)
+            {
+                if(++num_uint64_case > 5)
+                    return false;
+            }
+            else
+            {
+                if(++num_uint64_case_imgidx > 5 && spt_dim == 2)
+                    return false;
+            }
+        }
+        break;
     }
 
     miopen::TensorDescriptor input_desc(miopenFloat, test_case.in_shape);
     for(int i = 0; i < spt_dim; i++)
-        if(test_case.lens[i] > (input_desc.GetLengths()[i + 2] + 2 * test_case.pads[i])) return false;
+        if(test_case.lens[i] > (input_desc.GetLengths()[i + 2] + 2 * test_case.pads[i]))
+            return false;
 
     return true;
 }
@@ -557,9 +624,13 @@ inline void AddTestCasesForInput(const std::vector<int>& in_shape,
                                  const std::vector<miopenPoolingMode_t>& modes,
                                  const std::vector<int>& wsidx_values,
                                  std::vector<PoolingTestCase>& test_cases,
-                                 int& num_uint16_case, int& num_uint32_case, int& num_uint32_case_imgidx,
-                                 int& num_uint64_case, int& num_uint64_case_imgidx,
-                                 bool skip_many_configs = true, bool is_wide_dataset = false,
+                                 int& num_uint16_case,
+                                 int& num_uint32_case,
+                                 int& num_uint32_case_imgidx,
+                                 int& num_uint64_case,
+                                 int& num_uint64_case_imgidx,
+                                 bool skip_many_configs    = true,
+                                 bool is_wide_dataset      = false,
                                  const std::string& layout = "NCHW")
 {
     for(auto index_type : index_types)
@@ -567,21 +638,47 @@ inline void AddTestCasesForInput(const std::vector<int>& in_shape,
             for(const auto& lens : lens_list)
                 for(const auto& strides : strides_list)
                     for(const auto& pads : pads_list)
-                        for(int wsidx : wsidx_values) {
-                            PoolingTestCase tc = {in_shape, lens, pads, strides, index_type, mode, wsidx, layout, layout};
-                            if(ShouldIncludeTestCase(tc, num_uint16_case, num_uint32_case, num_uint32_case_imgidx, num_uint64_case, num_uint64_case_imgidx, skip_many_configs, is_wide_dataset))
+                        for(int wsidx : wsidx_values)
+                        {
+                            PoolingTestCase tc = {in_shape,
+                                                  lens,
+                                                  pads,
+                                                  strides,
+                                                  index_type,
+                                                  mode,
+                                                  wsidx,
+                                                  layout,
+                                                  layout};
+                            if(ShouldIncludeTestCase(tc,
+                                                     num_uint16_case,
+                                                     num_uint32_case,
+                                                     num_uint32_case_imgidx,
+                                                     num_uint64_case,
+                                                     num_uint64_case_imgidx,
+                                                     skip_many_configs,
+                                                     is_wide_dataset))
                                 test_cases.push_back(tc);
                         }
 }
 
 inline std::string GetPoolingTestCaseName(const testing::TestParamInfo<PoolingTestCase>& info)
 {
-    std::ostringstream os; os << info.param;
-    std::string s = os.str(), name;
+    std::ostringstream os;
+    os << info.param;
+    std::string s        = os.str(), name;
     bool last_underscore = false;
-    for(char c : s) {
-        if(isalnum(c)) { name += c; last_underscore = false; }
-        else if(!last_underscore) { name += '_'; last_underscore = true; }
+    for(char c : s)
+    {
+        if(isalnum(c))
+        {
+            name += c;
+            last_underscore = false;
+        }
+        else if(!last_underscore)
+        {
+            name += '_';
+            last_underscore = true;
+        }
     }
     return name;
 }
