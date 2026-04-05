@@ -1,15 +1,29 @@
 #!/usr/bin/env python3
+"""
+Training problem set for forward grouped convolution.
 
-# Training problem set for forward grouped convolution
-# 200 diverse MIOpen production shapes
-# Real-world workloads from MIOpen benchmark suite
+Combines:
+1. MIOpen real-world shapes (300 problems)
+2. Synthetic shapes with diverse G and N (2165 problems)
+
+Total: 2465 training problems
+
+Distribution:
+- Balanced G coverage (G=1,2,4,8,16,32)
+- Balanced N coverage (N=1,2,4,8,16,32,64)
+- Diverse spatial sizes (7x7 to 112x112)
+- Various filter sizes (1x1, 3x3, stride 1 and 2)
+"""
 
 from grouped_conv_utils import GroupedConvProblem
 
-# Import all 300 MIOpen shapes
+# Import MIOpen real-world shapes
 from forward_training_miopen import TRAINING_PROBLEMS_FORWARD_MIOPEN
 
-# Use first 200 shapes for training
-TRAINING_PROBLEMS_FORWARD = TRAINING_PROBLEMS_FORWARD_MIOPEN[:200]
+# Import synthetic shapes with diverse G and N
+from forward_synthetic_extended import TRAINING_PROBLEMS_FORWARD_SYNTHETIC
 
-assert len(TRAINING_PROBLEMS_FORWARD) == 200, f"Expected 200 problems, got {len(TRAINING_PROBLEMS_FORWARD)}"
+# Combine both datasets
+TRAINING_PROBLEMS_FORWARD = TRAINING_PROBLEMS_FORWARD_MIOPEN + TRAINING_PROBLEMS_FORWARD_SYNTHETIC
+
+assert len(TRAINING_PROBLEMS_FORWARD) == 2465, f"Expected 2465 problems, got {len(TRAINING_PROBLEMS_FORWARD)}"
