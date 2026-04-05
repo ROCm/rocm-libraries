@@ -1,28 +1,5 @@
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /*********************************************************
  * The implementation of the rocblaslt<->rocRoller interface layer. *
@@ -405,13 +382,15 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
 {
     KernelType kernelType;
 
-    kernelType.typeA   = hipDataType_to_rocRoller_type(prob.a_type);
-    kernelType.typeB   = hipDataType_to_rocRoller_type(prob.b_type);
-    kernelType.typeC   = hipDataType_to_rocRoller_type(prob.c_type);
-    kernelType.typeD   = hipDataType_to_rocRoller_type(prob.d_type);
-    kernelType.typeAcc = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
-    kernelType.transA  = prob.trans_a == HIPBLAS_OP_T;
-    kernelType.transB  = prob.trans_b == HIPBLAS_OP_T;
+    kernelType.typeA    = hipDataType_to_rocRoller_type(prob.a_type);
+    kernelType.typeB    = hipDataType_to_rocRoller_type(prob.b_type);
+    kernelType.typeC    = hipDataType_to_rocRoller_type(prob.c_type);
+    kernelType.typeD    = hipDataType_to_rocRoller_type(prob.d_type);
+    kernelType.typeAcc  = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
+    kernelType.transA   = prob.trans_a == HIPBLAS_OP_T;
+    kernelType.transB   = prob.trans_b == HIPBLAS_OP_T;
+    kernelType.swizzleA = prob.swizzleA;
+    kernelType.swizzleB = prob.swizzleB;
 
     if(isBlockScaling(prob.scaleAType))
     {
@@ -548,9 +527,9 @@ rocblaslt_status
                 continue;  // Skip this solution entirely
             }
         }
-        
-        auto existingSolution
-            = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameter);
+
+        auto existingSolution = rocroller_handle->cache.getKernel(
+            kernelType, solutionIndexParameter, ProblemDims{prob.m, prob.n, prob.k});
         std::shared_ptr<GemmKernel> kernel;
         // If kernel doesn't already exist, generate it
         if(!existingSolution)
@@ -647,7 +626,8 @@ rocblaslt_status getKernelFromAlgo(rocblaslt_handle                   handle,
     auto             kernelType       = genKernelType(prob);
 
     auto solutionIndexParameters = indexToParameters(*solutionIndex);
-    auto existingKernel = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameters);
+    auto existingKernel          = rocroller_handle->cache.getKernel(
+        kernelType, solutionIndexParameters, ProblemDims{prob.m, prob.n, prob.k});
     if(existingKernel)
     {
         kernel = *existingKernel;

@@ -7,7 +7,8 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "engines/plans/MiopenConvWrwPlan.hpp"
 
 using namespace miopen_plugin;
@@ -18,18 +19,9 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
-        ASSERT_EQ(miopenCreate(&_handle.miopenHandle), miopenStatusSuccess);
     }
 
-    void TearDown() override
-    {
-        if(_handle.miopenHandle != nullptr)
-        {
-            EXPECT_EQ(miopenDestroy(_handle.miopenHandle), miopenStatusSuccess);
-        }
-    }
-
-    HipdnnEnginePluginHandle _handle;
+    HipdnnMiopenHandle _handle;
 };
 
 TEST(TestConvWrwParams, InitializesAllTensorsFromValidGraph)
@@ -246,7 +238,50 @@ TEST_F(TestGpuConvWrwPlan, CreatesPlanWithValidGraph)
     ConvWrwParams params(*attrs, graph.getTensorMap());
 
     // Create plan
-    ConvWrwPlan(_handle, std::move(params));
+    HipdnnMiopenSettings executionSettings;
+    ConvWrwPlan(_handle, std::move(params), executionSettings);
+}
+
+TEST_F(TestGpuConvWrwPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionWrwAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    ConvWrwParams params(*attrs, graph.getTensorMap());
+
+    const size_t defaultSize = 4096;
+    HipdnnMiopenSettings settings;
+    settings.setDefaultWorkspaceSize(defaultSize);
+
+    ConvWrwPlan plan(_handle, std::move(params), settings);
+    EXPECT_EQ(plan.getWorkspaceSize(_handle), defaultSize);
+}
+
+TEST_F(TestGpuConvWrwPlan, PlanUsesKnobLimitOverDefault)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionWrwAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    ConvWrwParams params(*attrs, graph.getTensorMap());
+
+    const size_t defaultSize = 4096;
+    const size_t knobLimit = 2048;
+    HipdnnMiopenSettings settings;
+    settings.setDefaultWorkspaceSize(defaultSize);
+    settings.setWorkspaceSizeLimit(knobLimit);
+
+    ConvWrwPlan plan(_handle, std::move(params), settings);
+    EXPECT_EQ(plan.getWorkspaceSize(_handle), knobLimit);
 }
 
 TEST_F(TestGpuConvWrwPlan, ThrowsOnInvalidDims)
@@ -284,5 +319,7 @@ TEST_F(TestGpuConvWrwPlan, ThrowsOnInvalidDims)
     ConvWrwParams params(*attrs, graph.getTensorMap());
 
     // Create plan and expect exception
-    EXPECT_THROW(ConvWrwPlan(_handle, std::move(params)), hipdnn_plugin_sdk::HipdnnPluginException);
+    HipdnnMiopenSettings executionSettings;
+    EXPECT_THROW(ConvWrwPlan(_handle, std::move(params), executionSettings),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }

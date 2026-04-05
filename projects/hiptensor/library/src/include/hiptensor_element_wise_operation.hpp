@@ -36,6 +36,12 @@
 #include <ck/tensor_operation/gpu/element/binary_element_wise_operation.hpp>
 #include <hiptensor/hiptensor_types.h>
 
+#if HIPTENSOR_INLINE_UNARY_OPS
+#define HIPTENSOR_UNARY_INLINE
+#else
+#define HIPTENSOR_UNARY_INLINE __attribute__((noinline))
+#endif
+
 namespace ck
 {
     namespace tensor_operation
@@ -179,7 +185,7 @@ namespace ck
                     = default;
 
                 template <typename T>
-                __host__ __device__ void switch_op(T& y, T const& x) const
+                __host__ __device__ HIPTENSOR_UNARY_INLINE void switch_op(T& y, T const& x) const
                 {
                     switch(op_type)
                     {
@@ -285,6 +291,19 @@ namespace ck
                     float tempY;
                     switch_op(tempY, tempX);
                     y = ck::type_convert<bhalf_t, float>(tempY);
+                }
+
+                // Generic overload for CK contraction kernels where ComputeDataType differs from DataType (e.g. BF16 data and F32 compute).
+                // CK calls a_element_op(ComputeType& y, const DataType& x) during the global->LDS transfer. 
+                // Without this, bhalf_t (unsigned short) silently integer-promotes to float for op(float& y, const bhalf_t& x), causing incorrect results.
+                // As template is less preferred than the explicit same-type overloads, (float,float), (double,double), etc. still be used firstly.
+                template <typename Y, typename X>
+                __host__ __device__ void operator()(Y& y, const X& x) const
+                {
+                    float tempX = ck::type_convert<float>(x);
+                    float tempY;
+                    switch_op(tempY, tempX);
+                    y = ck::type_convert<Y>(tempY);
                 }
 
             public:

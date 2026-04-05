@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/Instruction.hpp>
@@ -587,28 +564,28 @@ namespace rocRollerTest
         auto inst1 = Instruction("s_load_dwordx2", {dst1}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst1);
         EXPECT_EQ(peeked.waitCount, WaitCount());
-        expectedWaitLengths[GPUWaitQueueType::SMemQueue] = 1;
+        expectedWaitLengths[static_cast<size_t>(GPUWaitQueueType::SMemQueue)] = 1;
         EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst1);
 
         auto inst2 = Instruction("s_load_dwordx2", {dst2}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst2);
         EXPECT_EQ(peeked.waitCount, WaitCount());
-        expectedWaitLengths[GPUWaitQueueType::SMemQueue] = 2;
+        expectedWaitLengths[static_cast<size_t>(GPUWaitQueueType::SMemQueue)] = 2;
         EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst2);
 
         auto inst3 = Instruction("buffer_load_dwordx2", {dst3}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst3);
         EXPECT_EQ(peeked.waitCount, WaitCount());
-        expectedWaitLengths[GPUWaitQueueType::LoadQueue] = 1;
+        expectedWaitLengths[static_cast<size_t>(GPUWaitQueueType::LoadQueue)] = 1;
         EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst3);
 
         auto inst4 = Instruction("buffer_load_dwordx2", {dst4}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst4);
         EXPECT_EQ(peeked.waitCount, WaitCount());
-        expectedWaitLengths[GPUWaitQueueType::LoadQueue] = 2;
+        expectedWaitLengths[static_cast<size_t>(GPUWaitQueueType::LoadQueue)] = 2;
         EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst4);
 
@@ -616,9 +593,9 @@ namespace rocRollerTest
         peeked     = m_context->observer()->peek(inst5);
         EXPECT_EQ(peeked.waitCount, WaitCount::KMCnt(arch, 0));
 
-        auto inst5Expected                         = expectedWaitLengths;
-        inst5Expected[GPUWaitQueueType::SMemQueue] = 0;
-        inst5Expected[GPUWaitQueueType::LoadQueue] = 3;
+        auto inst5Expected                                              = expectedWaitLengths;
+        inst5Expected[static_cast<size_t>(GPUWaitQueueType::SMemQueue)] = 0;
+        inst5Expected[static_cast<size_t>(GPUWaitQueueType::LoadQueue)] = 3;
         EXPECT_EQ(inst5Expected, peeked.waitLengths);
 
         // Peek at an unrelated instruction, no wait should be needed
@@ -679,7 +656,8 @@ namespace rocRollerTest
         auto inst6 = Instruction("buffer_load_dword", {dst3}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst6);
         EXPECT_EQ(peeked.waitCount, WaitCount::LoadCnt(arch, 2));
-        expectedWaitLengths[GPUWaitQueueType::LoadQueue] = 3; // We wait for 1 but then add 1.
+        expectedWaitLengths[static_cast<size_t>(GPUWaitQueueType::LoadQueue)]
+            = 3; // We wait for 1 but then add 1.
         EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst6);
 

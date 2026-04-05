@@ -24,7 +24,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
-from Tensile.Components.CMSValidator import isValid
+from Tensile.Components.CMSValidator import isValid, SchedulePosition, ValidatorPass
 from Tensile.Common import IsaVersion
 
 # Helper to create a mock data type
@@ -53,7 +53,7 @@ def create_base_kernel():
             "TransposeB": False,
         },
         "MacroTile0": 0, "MacroTile1": 0, "DepthU": 64,
-        "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": True,
+        "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": 1,  "DtlPlusLdsBuf": False,
         "GlobalReadVectorWidthA": 0, "GlobalReadVectorWidthB": 0,
         "LocalReadVectorWidth": 0,
         "WaveSeparateGlobalReadA": 0,
@@ -73,6 +73,13 @@ def create_base_kernel():
     return kernel
 
 class TestCustomScheduleBF16:
+    @staticmethod
+    def get_num_mfma(kernel):
+        numMfma = (kernel["MIWaveTileA"] * kernel["MIWaveTileB"] *
+                   kernel["DepthU"] / kernel["MatrixInstruction"][2]   # two sub-iterations due to DepthU=64
+        )
+        return numMfma
+
     def test_no_custom_schedule(self):
         """Test that a kernel that doesn't match any condition returns False."""
         kernel = create_base_kernel()
@@ -153,21 +160,32 @@ class TestCustomScheduleBF16:
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 
-    def test_schedule_256x96x64_16bit_TN(self):
-        """Tests the 256x96x64 16-bit TN schedule."""
+    @pytest.mark.parametrize(
+        # fmt: off
+        "transA, transB, lds_tr_inst, tr_lds, dtl_plus_lds_buf", [
+        (  True,  False,        True,      1,             None),
+        ( False,   True,        True,      0,                1),
+        # fmt: on
+        ])
+    def test_schedule_256x96x64_16bit(self, transA, transB, lds_tr_inst, tr_lds, dtl_plus_lds_buf):
+        """Tests the 256x96x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
         kernel["ProblemType"].update({
             "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": True, "TransposeB": False
+            "TransposeA": transA, "TransposeB": transB,
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 96, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
-            "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 3,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds,
+            "MIWaveTileA": 8, "MIWaveTileB": 3,
         })
+
+        if dtl_plus_lds_buf is not None:
+            kernel.update({"DtlPlusLdsBuf": dtl_plus_lds_buf })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
@@ -183,7 +201,8 @@ class TestCustomScheduleBF16:
         # TN case supports both LDSTrInst=True and LDSTrInst=False
         (  True,  False,       False,       1),
         (  True,  False,        True,       1),
-        ( False,   True,        True,       0)
+        ( False,   True,        True,       0),
+        ( False,  False,       False,       1)
         # fmt: on
         ])
     def test_schedule_96x256x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
@@ -206,7 +225,6 @@ class TestCustomScheduleBF16:
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
-        assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 48
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
@@ -379,35 +397,12 @@ class TestCustomScheduleBF16:
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 
-    def test_schedule_192x128x64_16bit_TN(self):
-        """Tests the 192x128x64 16-bit TN schedule."""
-        kernel = create_base_kernel()
-        dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": True, "TransposeB": False
-        })
-        kernel.update({
-            "MacroTile0": 192, "MacroTile1": 128, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
-            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
-            "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 6, "MIWaveTileB": 4,
-        })
-
-        has_schedule, schedule_info = hasCustomSchedule(kernel)
-        assert has_schedule
-        assert isinstance(schedule_info, ScheduleInfo)
-        assert schedule_info.numCodePaths == 2
-        assert schedule_info.numMfma == 48
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
-        assert valid, message
-
     @pytest.mark.parametrize(
         # fmt: off
         "transA, transB, lds_tr_inst,  tr_lds", [
         (  True,  False,       False,       1),
-        ( False,   True,        True,       0)
+        ( False,   True,        True,       0),
+        ( False,  False,        True,       1)
         # fmt: on
         ])   
     def test_schedule_224x256x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
@@ -468,14 +463,21 @@ class TestCustomScheduleBF16:
 
     @pytest.mark.parametrize(
         # fmt: off
-        "transA, transB, lds_tr_inst,  tr_lds", [
-        (  True,  False,       False,       1),  # TN
-        ( False,   True,        True,       0),  # NT
-        ( False,  False,        True,       1),  # NN
-        # fmt: on
-        ])
-    def test_schedule_224x128x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
-        """Tests the 224x128x64 16-bit schedules (TN/NT/NN)."""
+    "transA, transB, lds_tr_inst,  tr_lds, mt0, mt1", [
+        ( True,  False,        False,       1, 224, 128),  # TN
+        ( False,  True,        True,        0, 224, 128),  # NT
+        ( False,  False,       True,        1, 224, 128),  # NN
+        ( False,  True,        True,        0, 128, 224),  # NT
+    ])
+    def test_schedule_224x128x64_128x224x64_16bit(self, transA, transB, lds_tr_inst, tr_lds, mt0, mt1):
+        """
+        Tests the 224x128x64 16-bit schedules (TN/NT/NN).
+        Tests the 128x224x64 16-bit schedule  (NT).
+        """
+        du = 64
+        mi = [16,16,32,1]
+        mi_wave_group = [2, 2]
+        mi_wave_tile = (mt0 // (mi[0] * mi_wave_group[0]), mt1 // (mi[1] * mi_wave_group[1]))
         NT = (not transA and transB)
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
@@ -484,11 +486,11 @@ class TestCustomScheduleBF16:
             "TransposeA": transA, "TransposeB": transB
         })
         kernel.update({
-            "MacroTile0": 224, "MacroTile1": 128, "DepthU": 64,
+            "MacroTile0": mt0, "MacroTile1": mt1, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
-            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
-            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 7, "MIWaveTileB": 4,
+            "MatrixInstruction": mi, "MIWaveGroup": mi_wave_group,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
         })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
@@ -504,6 +506,7 @@ class TestCustomScheduleBF16:
     # fmt: off
     "transA, transB, lds_tr_inst,  tr_lds", [
     (  True,  False,       False,       1),
+    ( False,  False,        True,       1),
     ( False,   True,        True,       0),
     # fmt: on
     ])
@@ -663,6 +666,42 @@ class TestCustomScheduleBF16:
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 
+    @pytest.mark.parametrize(
+        # fmt: off
+        "transA, transB, lds_tr_inst,  tr_lds, mt0, mt1, code_paths", [
+        (  True,  False,       False,       1, 128, 192,          1),
+        (  True,  False,       False,       1, 192, 128,          2),
+        # fmt: on
+        ])
+    def test_schedule_128x192x64_192x128x64_16bit(self, transA, transB, lds_tr_inst, tr_lds, mt0, mt1, code_paths):
+        """Tests the 128x192x64 and 192x128x64 BF16 tiles."""
+
+        dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
+        du = 64
+        mi = [16,16,32,1]
+        mi_wave_group = [2, 2]
+        mi_wave_tile = (mt0 // (mi[0] * mi_wave_group[0]), mt1 // (mi[1] * mi_wave_group[1]))
+
+        kernel = create_base_kernel()
+        kernel["ProblemType"].update({
+            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+            "TransposeA": True, "TransposeB": False
+        })
+        kernel.update({
+            "MacroTile0": mt0, "MacroTile1": mt1, "DepthU": du,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "MatrixInstruction": mi, "MIWaveGroup": mi_wave_group,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
+        })
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+        assert has_schedule
+        assert isinstance(schedule_info, ScheduleInfo)
+        assert schedule_info.numCodePaths == code_paths
+        assert schedule_info.numMfma == TestCustomScheduleBF16.get_num_mfma(kernel)
+        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        assert valid, message
+
     def test_schedule_128x256x64_16bit(self):
         """Tests the 128x256x64  NN schedule."""
         kernel = create_base_kernel()
@@ -689,6 +728,65 @@ class TestCustomScheduleBF16:
         valid, message = isValid(schedule_info, {"kernel": kernel})
         assert valid, message
 
+    @pytest.mark.parametrize(
+        # fmt: off
+        "transA, transB, lds_tr_inst,  tr_lds", [
+        (  True,  False,       True,       1),
+        # fmt: on
+        ])
+    def test_schedule_352x192x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
+        """Tests the 352x192x64 16-bit TN schedule."""
+        kernel = create_base_kernel()
+        dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
+        kernel["ProblemType"].update({
+            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+            "TransposeA": transA, "TransposeB": transB
+        })
+        kernel.update({
+            "MacroTile0": 352, "MacroTile1": 192, "DepthU": 64,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 11, "MIWaveTileB": 6,
+        })
+
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+        assert has_schedule
+        assert isinstance(schedule_info, ScheduleInfo)
+        assert schedule_info.numCodePaths == 2
+        assert schedule_info.numMfma == TestCustomScheduleBF16.get_num_mfma(kernel)
+        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        assert valid, message
+
+    @pytest.mark.parametrize(
+        # fmt: off
+        "transA, transB, lds_tr_inst,  tr_lds", [
+        (  True,  False,       True,       1),
+        # fmt: on
+        ])
+    def test_schedule_224x320x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
+        """Tests the 224x320x64 16-bit TN schedule."""
+        kernel = create_base_kernel()
+        dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
+        kernel["ProblemType"].update({
+            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+            "TransposeA": transA, "TransposeB": transB
+        })
+        kernel.update({
+            "MacroTile0": 224, "MacroTile1": 320, "DepthU": 64,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 7, "MIWaveTileB": 10,
+        })
+
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+        assert has_schedule
+        assert isinstance(schedule_info, ScheduleInfo)
+        assert schedule_info.numCodePaths == 2
+        assert schedule_info.numMfma == 140
+        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        assert valid, message
 
 class TestCustomScheduleTF32:
     @staticmethod
@@ -699,8 +797,11 @@ class TestCustomScheduleTF32:
         )
         return numMfma
     
-    @pytest.mark.parametrize("transA, transB", [(True, False), (False, False)])
-    def test_schedule_192x256x32_TF32(self, transA, transB):
+    @pytest.mark.parametrize("transA, transB, vwa", [
+        (True, False, 1), 
+        (False, False, 1),
+        ])
+    def test_schedule_192x256x32_TF32(self, transA, transB, vwa):
         """Tests the 192x256x32 TF32 schedule."""        
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
@@ -710,12 +811,14 @@ class TestCustomScheduleTF32:
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 192, "MacroTile1": 256, "DepthU": 32,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
             "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 6, "MIWaveTileB": 8,
         })
+        if vwa is not None:
+            kernel.update({"VectorWidthA": vwa})
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
@@ -736,7 +839,7 @@ class TestCustomScheduleTF32:
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 128, "MacroTile1": 192, "DepthU": 32,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
@@ -762,7 +865,7 @@ class TestCustomScheduleTF32:
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 192, "MacroTile1": 128, "DepthU": 32,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
@@ -778,22 +881,34 @@ class TestCustomScheduleTF32:
         valid, message = isValid(schedule_info, {"kernel": kernel})
         assert valid, message
 
-    def test_schedule_256x256x32_TF32(self):
+    @pytest.mark.parametrize(
+    # fmt: off
+    "transA, transB, lds_tr_inst,  tr_lds,  vwa, vwb", [
+    (  True,  False,       False,       1,  None, None),
+    ( False,   True,       False,       0,  4,    4),
+    # fmt: on
+    ])
+    def test_schedule_256x256x32_TF32(self,transA, transB, lds_tr_inst, tr_lds, vwa, vwb):
         """Tests the 256x256x32 TF32 TN schedule."""
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
-            "TransposeA": True, "TransposeB": False
+            "TransposeA": transA, "TransposeB": transB
         })
         kernel.update({
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 256, "MacroTile1": 256, "DepthU": 32,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
-            "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 8,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 8, "MIWaveTileB": 8,
         })
+
+        if vwa is not None:
+            kernel.update({"VectorWidthA": vwa})
+        if vwb is not None:
+            kernel.update({"VectorWidthB": vwb})
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
@@ -806,12 +921,12 @@ class TestCustomScheduleTF32:
 
     @pytest.mark.parametrize(
         # fmt: off
-        "transA, transB", [
-        (  True,  False),
-        ( False,   False),
+        "transA, transB, vwa", [
+        (  True,  False, 1),
+        ( False,  False, 1),
         # fmt: on
         ])
-    def test_schedule_256x192x32_TF32(self, transA, transB):
+    def test_schedule_256x192x32_TF32(self, transA, transB, vwa):
         """Tests the 256x192x32 TF32 TN schedule."""
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
@@ -821,12 +936,14 @@ class TestCustomScheduleTF32:
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 256, "MacroTile1": 192, "DepthU": 32,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
             "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 6,
         })
+        if vwa is not None:
+            kernel.update({"VectorWidthA": vwa})
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
@@ -849,7 +966,7 @@ class TestCustomScheduleTF32:
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 128, "MacroTile1": 256, "DepthU": 32,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
@@ -867,14 +984,15 @@ class TestCustomScheduleTF32:
 
     @pytest.mark.parametrize(
         # fmt: off
-        "transA, transB, lds_tr_inst,  tr_lds,  plr,  mi", [
-        (  True,  False,       False,       1,  0,    [16,16,32,1]),
-        (  True,  False,       False,       1,  1,    [32,32,16,1]),
-        (  False, False,       False,       1,  1,    [32,32,16,1]),
-        (  False, False,        True,       1,  1,    [32,32,16,1]),
+        "transA, transB, lds_tr_inst,  tr_lds,  plr,  vwa,  vwb,      mi    , ncp", [
+        (  True,  False,       False,       1,  1,   None, None, [16,16,32,1],   1),
+        (  True,  False,       False,       1,  1,   None, None, [32,32,16,1],   1),
+        (  False, False,       False,       1,  1,      2, None, [32,32,16,1],   2),
+        (  False, False,        True,       1,  1,      2, None, [32,32,16,1],   2),
+        (  False, True,         True,       0,  1,      2,    2, [32,32,16,1],   2),
         # fmt: on
         ])
-    def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds, plr, mi):
+    def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds, plr, vwa, vwb, mi, ncp):
         """Tests the 128x128x32 TF32 schedule."""
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
@@ -893,15 +1011,19 @@ class TestCustomScheduleTF32:
             "MatrixInstruction": mi, "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
         })
+        if vwa is not None:
+            kernel.update({"VectorWidthA": vwa})
+        if vwb is not None:
+            kernel.update({"VectorWidthB": vwb})
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
-        assert schedule_info.numCodePaths == 1
+        assert schedule_info.numCodePaths == ncp
         schedule_info.pretty_print()
         numMfma = (mi_wave_tile[0] * mi_wave_tile[1] *
                    3 *                      # tf32 emulated with 3 bf16
-                   (1 if plr == 0 else 2)   # two sub-iterations with PLR=1
+                   (1 if mi[0] == 16 else 2)   # two sub-iterations with mi32
         )
         assert schedule_info.numMfma == numMfma
         valid, message = isValid(schedule_info, {"kernel" : kernel})
@@ -909,11 +1031,13 @@ class TestCustomScheduleTF32:
 
     @pytest.mark.parametrize(
         # fmt: off
-        "transA, transB, lds_tr_inst,  tr_lds", [
-        (  True,  False,       False,       1),
+        "transA, transB, lds_tr_inst,  tr_lds,  vwa", [
+        (  True,  False,       False,       1, None),
+        ( False,  False,        True,       1,    4), # NN doesn't depend on lds_tr_inst, so check for both values 
+        ( False,  False,       False,       1,    4),
         # fmt: on
         ])
-    def test_schedule_128x128x64(self, transA, transB, lds_tr_inst, tr_lds):
+    def test_schedule_128x128x64(self, transA, transB, lds_tr_inst, tr_lds, vwa):
         """Tests the 128x128x64 TF32 TN schedule."""
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
@@ -927,6 +1051,8 @@ class TestCustomScheduleTF32:
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 4, "MIWaveTileB": 4,
         })
+        if vwa is not None:
+            kernel.update({"VectorWidthA": vwa})
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
@@ -942,10 +1068,11 @@ class TestCustomScheduleTF32:
         assert valid, message
 
     @pytest.mark.parametrize(
+        # fmt: off
         "transA, transB, lds_tr_inst,  tr_lds, mt0, mt1", [
         (  True,  False,       False,       1, 128, 160),
         ( False,  False,        True,       1, 160, 128),
-        (  True,  False,       False,       1, 160,  128),
+        (  True,  False,       False,       1, 160, 128),
         # fmt: on
         ])
     def test_schedule_128x160x64_160x128x64(self, transA, transB, lds_tr_inst, tr_lds, mt0, mt1):
@@ -1018,26 +1145,145 @@ class TestCustomScheduleTF32:
         assert valid, message
 
 class TestCustomScheduleValidation:
-    def test_schedule_validation_disable(self):
-        """
-        Test of the flag that custom mainloop schedule (CMS) developers can use to override the
-        validation checks.
-        """
+    def test_disable_single_pass(self):
+        """Disabling a single pass allows an otherwise-invalid schedule to pass that check."""
         kernel = create_base_kernel()
         invalid_schedule = {"P": [[3, 2, 1]]}
 
-        # No verification message means that the schedule info is considered valid.
-        scheduleInfo = ScheduleInfo(
-            1, None, invalid_schedule, None, None, None, None
-        )
-        scheduleInfo.disableValidation()
-        status, message = isValid(scheduleInfo, {"kernel" : {"DepthU": 42}})
-        assert status == True
-        assert message == "CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = ?x?x42 NN"
-
-        # A non-empty verification message means that the schedule info is considered invalid.
-        status, message = isValid(
-            ScheduleInfo(1, None, invalid_schedule, None, None, None, None), {}
-        )
+        # Without disabling, the non-ascending schedule fails on ascending order.
+        si = ScheduleInfo(1, None, invalid_schedule, None, None, None, None)
+        status, message = isValid(si, {"kernel": kernel})
         assert status == False
+        assert "Non-descending-order" in message
 
+        # Disabling VERIFY_ASCENDING_ORDER skips that check.
+        # Remaining structural and timeline passes are also disabled because this
+        # minimal schedule lacks the keys/data they require.
+        si = ScheduleInfo(1, 0, invalid_schedule, None, None, None, None)
+        for p in ValidatorPass:
+            if p != ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS:
+                si.disableValidationPass(p, reason="Not relevant to this test")
+        status, message = isValid(si, {"kernel": kernel})
+        # The ascending-order error is gone; the schedule passes the remaining enabled check.
+        assert "Non-descending-order" not in message
+        assert status == True
+
+    def test_disable_validation_pass_reason_required(self):
+        """disableValidationPass requires a non-empty reason string and a valid ValidatorPass enum member."""
+        si = ScheduleInfo(1, None, {}, None, None, None, None)
+
+        with pytest.raises(ValueError):
+            si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="")
+
+        with pytest.raises(ValueError):
+            si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="   ")
+
+        with pytest.raises(TypeError):
+            si.disableValidationPass("not_an_enum", reason="some reason")
+
+        with pytest.raises(TypeError):
+            si.disableValidationPass(42, reason="some reason")
+
+    def test_disable_multiple_validation_passes(self):
+        """Multiple validation passes can be disabled independently."""
+        invalid_schedule = {"P": [[3, 2, 1]]}
+        si = ScheduleInfo(1, None, invalid_schedule, None, None, None, None)
+        si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="Reason A")
+        si.disableValidationPass(ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS, reason="Reason B")
+
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER) == "Reason A"
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS) == "Reason B"
+        # Passes not disabled return None.
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_SCC_OVERLAP) is None
+
+    def test_reason_for_disabling_validation_pass(self):
+        """reasonForDisablingValidationPass returns the reason for disabled passes, None for enabled ones,
+        and raises TypeError for non-enum arguments."""
+        si = ScheduleInfo(1, None, {}, None, None, None, None)
+
+        # Nothing disabled yet.
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER) is None
+
+        si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="test reason")
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER) == "test reason"
+
+        # Non-enum argument raises TypeError.
+        with pytest.raises(TypeError):
+            si.reasonForDisablingValidationPass("not_an_enum")
+
+        with pytest.raises(TypeError):
+            si.reasonForDisablingValidationPass(42)
+
+    def test_disable_validation_all_passes(self):
+        """disableValidation disables all passes with the given reason."""
+        si = ScheduleInfo(1, None, {}, None, None, None, None)
+        si.disableValidation("entire schedule unsupported")
+
+        for p in ValidatorPass:
+            assert si.reasonForDisablingValidationPass(p) == "entire schedule unsupported"
+
+    def test_disable_validation_isvalid_early_return(self):
+        """isValid returns (True, '') with a single warning when all passes are disabled."""
+        kernel = create_base_kernel()
+        si = ScheduleInfo(1, 0, {}, None, None, None, None)
+        si.disableValidation("not supported yet")
+        status, message = isValid(si, {"kernel": kernel})
+        assert status == True
+        assert message == ""
+
+class TestSchedulePositionOrdering:
+    """Test that SchedulePosition comparison handles vmfma_index=-1 correctly.
+
+    vmfma_index=-1 is a wrap-around position: it represents instructions
+    scheduled between iterations (after the last VMFMA of the previous
+    iteration, before the first VMFMA of the current iteration). With
+    explicit loop_index tracking, -1 naturally sorts before 0 within the
+    same loop via integer comparison.
+    """
+
+    def test_neg1_after_last_vmfma_same_loop(self):
+        """vmfma=-1 in loop 0 must be < vmfma=0 in loop 0."""
+        a = SchedulePosition(loop_index=0, vmfma_index=-1, sub_index=0)
+        b = SchedulePosition(loop_index=0, vmfma_index=0, sub_index=0)
+        assert a < b
+        assert b > a
+
+    def test_neg1_loop1_after_last_vmfma_loop0(self):
+        """vmfma=-1 in loop 1 must be > vmfma=num_vmfma-1 in loop 0."""
+        a = SchedulePosition(loop_index=1, vmfma_index=-1, sub_index=0)
+        b = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=0)
+        assert a > b
+        assert b < a
+
+    def test_neg1_before_next_loop_vmfma0(self):
+        """vmfma=-1 in loop 0 must be < vmfma=0 in loop 1."""
+        a = SchedulePosition(loop_index=0, vmfma_index=-1, sub_index=0)
+        b = SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0)
+        assert a < b
+        assert b > a
+
+    def test_equal_positions(self):
+        """Identical positions must be equal."""
+        a = SchedulePosition(loop_index=0, vmfma_index=3, sub_index=1)
+        b = SchedulePosition(loop_index=0, vmfma_index=3, sub_index=1)
+        assert a == b
+        assert not (a != b)
+        assert not (a < b)
+        assert not (a > b)
+        assert a <= b
+        assert a >= b
+
+    def test_not_equal_different_sub_index(self):
+        """Same (loop, vmfma) but different sub_index must not be equal."""
+        a = SchedulePosition(loop_index=0, vmfma_index=3, sub_index=0)
+        b = SchedulePosition(loop_index=0, vmfma_index=3, sub_index=1)
+        assert a != b
+        assert a < b
+
+    def test_sub_index_ordering(self):
+        """Within same (loop, vmfma), sub_index determines order."""
+        a = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=0)
+        b = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=5)
+        c = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=10)
+        assert a < b < c
+        assert c > b > a

@@ -13,6 +13,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -153,10 +154,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         auto outValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool outValid = outValidator.allClose(yRefTensor, yTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  output: " << (outValid ? "successful" : "failed") << "\n";
+        bool outValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+            std::cout, "output", outValidator, yRefTensor, yTensor, tolerance, tolerance);
 
         validationPassed = outValid;
     }
@@ -170,14 +170,10 @@ int main(int argc, char* argv[])
 {
     auto config = parseCommandLineArgs(argc, argv);
 
-    initializeFrontendLogging();
+    auto [handle, handleError] = createHipdnnHandle();
+    HIPDNN_FE_CHECK(handleError);
 
-    hipdnnHandle_t handle;
-    HIPDNN_CHECK(hipdnnCreate(&handle));
-
-    bool allPassed = run(SampleRunner{handle, config});
-
-    HIPDNN_CHECK(hipdnnDestroy(handle));
+    bool allPassed = run(SampleRunner{*handle, config});
 
     if(allPassed)
     {

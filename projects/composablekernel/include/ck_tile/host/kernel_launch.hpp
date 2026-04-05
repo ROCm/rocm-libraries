@@ -10,8 +10,13 @@
 #include "ck_tile/host/hip_check_error.hpp"
 #include "ck_tile/host/stream_config.hpp"
 #include "ck_tile/host/timer.hpp"
+#include "ck_tile/host/flush_icache.hpp"
+#include "ck_tile/host/rotating_buffers.hpp"
 #include <cstddef>
 #include <hip/hip_runtime.h>
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
 
@@ -82,8 +87,11 @@ template <int MinBlockPerCu = CK_TILE_MIN_BLOCK_PER_CU,
           typename Attr     = void,
           typename KernelImpl,
           typename... Args>
-CK_TILE_HOST auto
-make_kernel(KernelImpl /*f*/, dim3 grid_dim, dim3 block_dim, std::size_t lds_byte, Args... args)
+CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
+                              dim3 grid_dim,
+                              dim3 block_dim,
+                              std::size_t lds_byte,
+                              [[clang::lifetimebound]] Args... args)
 {
     const auto kernel = []() {
         if constexpr(std::is_void_v<Attr>)
@@ -125,6 +133,47 @@ preprocess_profiling_impl(TimerType timer, const stream_config& s, PreprocessFun
 }
 
 template <typename TimerType, typename CallablesFunc, typename PreprocessFunc = std::nullptr_t>
+CK_TILE_HOST double timing_loop_flush_cache_impl(TimerType timer,
+                                                 const stream_config& s,
+                                                 CallablesFunc&& callables_func,
+                                                 PreprocessFunc preprocess = nullptr)
+{
+    auto run_flush_cache = [&]() { ck_tile::flush_icache(); };
+    // Warm up
+    for(int i = 0; i < s.cold_niters_; i++)
+    {
+        if constexpr(!std::is_same_v<PreprocessFunc, std::nullptr_t>)
+        {
+            preprocess();
+        }
+        callables_func();
+    }
+    // Main timing loop
+    int i = 0;
+    timer.start(s.stream_id_);
+    while(i < s.nrepeat_)
+    {
+        run_flush_cache();
+        if constexpr(!std::is_same_v<PreprocessFunc, std::nullptr_t>)
+        {
+            preprocess();
+        }
+
+        callables_func();
+        i++;
+    }
+    timer.stop(s.stream_id_);
+    // Flush cache timing loop
+    auto flush_cache_time = preprocess_profiling_impl(gpu_timer{}, s, run_flush_cache);
+    if(i == 0)
+    {
+        return 0.;
+    }
+    // Exclude flush cache from result
+    return (timer.duration() / s.nrepeat_) - flush_cache_time;
+}
+
+template <typename TimerType, typename CallablesFunc, typename PreprocessFunc = std::nullptr_t>
 CK_TILE_HOST double timing_loop_impl(TimerType timer,
                                      const stream_config& s,
                                      CallablesFunc&& callables_func,
@@ -137,12 +186,6 @@ CK_TILE_HOST double timing_loop_impl(TimerType timer,
             preprocess();
         }
         callables_func();
-    }
-    // Only profile preprocess if it's provided
-    auto preprocess_time = 0.0;
-    if constexpr(!std::is_same_v<PreprocessFunc, std::nullptr_t>)
-    {
-        preprocess_time = preprocess_profiling_impl(gpu_timer{}, s, preprocess);
     }
 
     int i = 0;
@@ -159,9 +202,9 @@ CK_TILE_HOST double timing_loop_impl(TimerType timer,
     }
     timer.stop(s.stream_id_);
 
-    if(!i)
+    if(i == 0)
         return 0.;
-    return (timer.duration() / s.nrepeat_) - preprocess_time;
+    return timer.duration() / s.nrepeat_;
 }
 
 // clang-format off
@@ -238,4 +281,33 @@ launch_kernel_time_mask(const stream_config& s, PreprocessFunc preprocess, Calla
         return timing_loop_impl(cpu_timer{}, s, callables_func, preprocess);
     }
 }
+
+template <typename PreprocessFunc, typename... Callables>
+CK_TILE_HOST float launch_kernel_time_mask_flush_cache(const stream_config& s,
+                                                       PreprocessFunc preprocess,
+                                                       Callables&&... callables)
+{
+    static_assert(sizeof...(callables) > 0, "At least one callable is required!");
+
+    if(!s.time_kernel_)
+    {
+        preprocess();
+        launch_and_check(s, std::forward<Callables>(callables)...);
+        return 0;
+    }
+
+    auto callables_func = [&]() { launch_and_check(s, std::forward<Callables>(callables)...); };
+
+    if(s.is_gpu_timer_)
+    {
+        return timing_loop_flush_cache_impl(gpu_timer{}, s, callables_func, preprocess);
+    }
+    else
+    {
+        return timing_loop_flush_cache_impl(cpu_timer{}, s, callables_func, preprocess);
+    }
+}
+
 } // namespace ck_tile
+
+#pragma clang diagnostic pop

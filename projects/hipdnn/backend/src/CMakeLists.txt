@@ -3,6 +3,12 @@
 
 include(CMakePackageConfigHelpers)
 
+# Version handling
+hipdnn_setup_version(hipdnn_backend)
+
+# Set project with version
+project(hipdnn_backend VERSION ${HIPDNN_BACKEND_VERSION} LANGUAGES CXX)
+
 find_package(hip REQUIRED)
 
 set(HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR "${PROJECT_BINARY_DIR}/backend/include/")
@@ -11,16 +17,40 @@ set(HIP_DNN_BACKEND_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(
     hipdnn_backend_private
+    descriptors/BatchnormBackwardOperationDescriptor.cpp
+    descriptors/BatchnormInferenceOperationDescriptor.cpp
+    descriptors/BatchnormOperationDescriptor.cpp
+    descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/BackendDescriptor.cpp
+    descriptors/BlockScaleDequantizeOperationDescriptor.cpp
+    descriptors/BlockScaleQuantizeOperationDescriptor.cpp
+    descriptors/CustomOpOperationDescriptor.cpp
+    descriptors/ConvolutionBwdOperationDescriptor.cpp
+    descriptors/ConvolutionFwdOperationDescriptor.cpp
+    descriptors/ConvolutionWrwOperationDescriptor.cpp
+    descriptors/DataTypeConversion.cpp
+    descriptors/DescriptorAttributeUtils.cpp
+    descriptors/DescriptorFactory.cpp
     descriptors/EngineConfigDescriptor.cpp
     descriptors/EngineDescriptor.cpp
     descriptors/EngineHeuristicDescriptor.cpp
     descriptors/ExecutionPlanDescriptor.cpp
     descriptors/GraphDescriptor.cpp
+    descriptors/KnobDescriptor.cpp
+    descriptors/KnobSettingDescriptor.cpp
+    descriptors/LayernormOperationDescriptor.cpp
+    descriptors/MatmulOperationDescriptor.cpp
+    descriptors/PointwiseOperationDescriptor.cpp
+    descriptors/ReductionOperationDescriptor.cpp
+    descriptors/RMSNormOperationDescriptor.cpp
+    descriptors/SdpaBpropOperationDescriptor.cpp
+    descriptors/SdpaFpropOperationDescriptor.cpp
+    descriptors/TensorDescriptor.cpp
+    descriptors/NodeFactory.cpp
     descriptors/VariantDescriptor.cpp
-    descriptors/DescriptorFactory.cpp
     handle/HandleFactory.cpp
     handle/Handle.cpp
+    logging/GraphLogger.cpp
     logging/Logging.cpp
     FlatbufferUtilities.cpp
     plugin/EnginePlugin.cpp
@@ -35,10 +65,10 @@ add_library(
 
 target_include_directories(
     hipdnn_backend_private PUBLIC ${HIP_DNN_BACKEND_INCLUDE_DIR} ${HIP_DNN_BACKEND_SRC_DIR}
-                                  ${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR}
+                                  ${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/include/
 )
 
-target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk)
 target_link_libraries(hipdnn_backend_private PRIVATE ${CMAKE_DL_LIBS})
 target_compile_definitions(hipdnn_backend_private PRIVATE HIPDNN_BACKEND_COMPILATION)
@@ -51,6 +81,8 @@ clang_tidy_check(hipdnn_backend_private)
 
 add_library(hipdnn_backend SHARED HipdnnBackend.cpp)
 
+hipdnn_generate_version_header(hipdnn_backend)
+
 target_include_directories(
     hipdnn_backend
     PUBLIC $<BUILD_INTERFACE:${HIP_DNN_BACKEND_INCLUDE_DIR}>
@@ -62,7 +94,7 @@ target_include_directories(
 # Use PUBLIC to ensure it's exported to consumers
 target_compile_definitions(hipdnn_backend PUBLIC __HIP_PLATFORM_AMD__)
 
-target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 # This definition is used to enable logging in the backend.  It is #ifdef'ed in the backend code.
 # This is to stop the frontend/plugin from having lazy log initialization which will end up with the
 # same logger name. Frontend/plugin code will need to init the logger themselves so they have a
@@ -72,7 +104,9 @@ target_link_libraries(hipdnn_backend PRIVATE hipdnn_backend_private)
 # Export dependencies for consumers because backend public API needs HIP runtime dep
 target_link_libraries(hipdnn_backend INTERFACE hip::host)
 # HIDE symbols from linked static libs
-target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL")
+if(NOT WIN32)
+    target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL")
+endif()
 set_target_properties(hipdnn_backend PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
 clang_tidy_check(hipdnn_backend)
@@ -118,6 +152,15 @@ configure_package_config_file(
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend
 )
 
-install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfig.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend COMPONENT Development
+# Generate package version file for find_package version checking
+write_basic_package_version_file(
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfigVersion.cmake"
+    VERSION ${HIPDNN_BACKEND_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfig.cmake"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend COMPONENT Development
 )

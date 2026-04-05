@@ -28,23 +28,45 @@ if(ENABLE_CLANG_FORMAT)
             -o
         )
         set(CLANG_FORMAT_REGEX ".*\\.\\(cpp\\|hpp\\|c\\|h\\)")
+
+        # Use prefixed target names in superbuild to avoid collisions
+        if(ROCM_LIBS_SUPERBUILD)
+            set(_CHECK_FORMAT_TARGET ${PROJECT_NAME}_check_format)
+            set(_FORMAT_TARGET ${PROJECT_NAME}_format)
+        else()
+            set(_CHECK_FORMAT_TARGET check_format)
+            set(_FORMAT_TARGET format)
+        endif()
+
         add_custom_target(
-            check_format
+            ${_CHECK_FORMAT_TARGET}
             COMMAND find ${CMAKE_CURRENT_SOURCE_DIR} ${CLANG_FORMAT_PRUNE} -regex
                     "${CLANG_FORMAT_REGEX}" -exec ${CLANG_FORMAT_BINARY}
                     -style=file --dry-run --Werror {} +
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-            COMMENT "Checking code style with clang-format"
+            COMMENT "Checking code style with clang-format (${PROJECT_NAME})"
             VERBATIM
         )
         add_custom_target(
-            format
+            ${_FORMAT_TARGET}
             COMMAND find ${CMAKE_CURRENT_SOURCE_DIR} ${CLANG_FORMAT_PRUNE} -regex
                     "${CLANG_FORMAT_REGEX}" -exec ${CLANG_FORMAT_BINARY}
                     -style=file -i {} +
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-            COMMENT "Applying clang-format to hipblaslt-provider sources"
+            COMMENT "Applying clang-format to ${PROJECT_NAME} sources"
             VERBATIM
+        )
+
+        # Alias targets with consistent hyphenated naming
+        add_custom_target(
+            ${PROJECT_NAME}-check-format
+            DEPENDS ${_CHECK_FORMAT_TARGET}
+            COMMENT "Alias for ${_CHECK_FORMAT_TARGET}"
+        )
+        add_custom_target(
+            ${PROJECT_NAME}-format
+            DEPENDS ${_FORMAT_TARGET}
+            COMMENT "Alias for ${_FORMAT_TARGET}"
         )
     else()
         message(

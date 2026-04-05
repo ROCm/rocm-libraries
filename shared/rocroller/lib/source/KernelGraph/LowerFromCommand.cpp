@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /*
  * Command to KernelGraph translator
@@ -31,11 +8,14 @@
 #include <variant>
 #include <vector>
 
+#include <optional>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Operations/Operations.hpp>
 
 namespace rocRoller
 {
@@ -232,9 +212,19 @@ namespace rocRoller
              */
             void operator()(Operations::T_Load_Tiled const& tload)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Load_Tiled");
+                Log::debug("KernelGraph::TranslateVisitor::T_Load_Tiled");
 
-                auto tensor = m_command->getOperation<Operations::Tensor>(tload.getSrcTag());
+                auto srcTag = tload.getSrcTag();
+
+                std::optional<Operations::SubTileTranspose> subTile;
+                if(std::holds_alternative<Operations::SubTileTranspose>(
+                       *m_command->findTag(srcTag)))
+                {
+                    subTile = m_command->getOperation<Operations::SubTileTranspose>(srcTag);
+                    srcTag  = subTile->input();
+                }
+
+                auto tensor = m_command->getOperation<Operations::Tensor>(srcTag);
 
                 auto const sizes          = tensor.sizes();
                 auto const literalSizes   = tensor.literalSizes();
@@ -272,8 +262,27 @@ namespace rocRoller
                     dims.push_back(dim);
                 }
 
-                auto tiled
-                    = m_graph.coordinates.addElement(MacroTile(tload.getTag(), sizes.size()));
+                if(subTile)
+                {
+                    auto tileSizes = subTile->tileDimensions();
+                    auto tileStrides
+                        = std::vector<uint32_t>{1, static_cast<uint32_t>(tileSizes[0])};
+                    if(subTile->isTranspose())
+                    {
+                        tileStrides = {static_cast<uint32_t>(tileSizes[1]), 1};
+                    }
+
+                    dims.push_back(m_graph.coordinates.addElement(
+                        SubDimension(dims.size(),
+                                     Expression::literal(tileSizes[0]),
+                                     Expression::literal(tileStrides[0]))));
+                    dims.push_back(m_graph.coordinates.addElement(
+                        SubDimension(dims.size(),
+                                     Expression::literal(tileSizes[1]),
+                                     Expression::literal(tileStrides[1]))));
+                }
+
+                auto tiled = m_graph.coordinates.addElement(MacroTile(tload.getTag(), dims.size()));
 
                 m_graph.coordinates.addElement(Split(), std::vector<int>{user}, dims);
                 m_graph.coordinates.addElement(ConstructMacroTile(), dims, std::vector<int>{tiled});

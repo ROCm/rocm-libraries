@@ -46,6 +46,7 @@
 
 #  include <algorithm>
 #  include <execution>
+#  include <type_traits>
 #  include <utility>
 
 #  include "hipstd.hpp"
@@ -96,7 +97,27 @@ inline void generate(execution::parallel_unsequenced_policy, I f, I l, G g)
 {
   ::hipstd::__maybe_bind_globals();
 
-  return ::thrust::generate(::thrust::device, f, l, ::std::move(g));
+  using g_t = ::std::decay_t<G>;
+
+  if constexpr (::std::is_trivially_destructible_v<g_t>)
+  {
+    ::thrust::generate(::thrust::device, f, l, ::std::move(g));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<g_t> guard(::std::move(g));
+    try
+    {
+      ::thrust::generate(::thrust::device, f, l, ::hipstd::detail::callable_proxy<g_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar generate: failed to synchronize");
+    guard.destroy_and_free();
+  }
 }
 
 template <typename I,
@@ -126,7 +147,27 @@ inline void generate_n(execution::parallel_unsequenced_policy, I f, N n, G g)
 {
   ::hipstd::__maybe_bind_globals();
 
-  return ::thrust::generate_n(::thrust::device, f, n, ::std::move(g));
+  using g_t = ::std::decay_t<G>;
+
+  if constexpr (::std::is_trivially_destructible_v<g_t>)
+  {
+    ::thrust::generate_n(::thrust::device, f, n, ::std::move(g));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<g_t> guard(::std::move(g));
+    try
+    {
+      ::thrust::generate_n(::thrust::device, f, n, ::hipstd::detail::callable_proxy<g_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar generate_n: failed to synchronize");
+    guard.destroy_and_free();
+  }
 }
 
 template <typename I,

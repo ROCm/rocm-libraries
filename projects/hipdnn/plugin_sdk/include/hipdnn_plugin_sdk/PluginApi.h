@@ -64,6 +64,21 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnPluginGetVersion(const char** version);
 
 /**
+ * @brief Returns the API version that the plugin supports
+ *
+ * @param[out] version A pointer to a pointer where the address of the plugin api version will be stored.
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation
+ *
+ * @note The version returned by this function must be a version for which all plugin API functions have been
+ * implemented for your class of plugin:
+ * - Engine plugins need to implement PluginApi.h and EnginePluginApi.h
+ * - Heuristic plugins need to implement PluginApi.h and HeuristicsPluginApi.h (once it exists)
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnPluginGetApiVersion(const char** version);
+
+/**
  * @brief Retrieves the type of the plugin.
  *
  * @param[out] type A pointer to a `hipdnnPluginType_t` where the plugin type will be stored.
@@ -105,6 +120,22 @@ HIPDNN_PLUGIN_EXPORT void hipdnnPluginGetLastErrorString(const char** error_str)
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback);
+
+/**
+ * @brief Sets the log level for the plugin.
+ *
+ * This function synchronizes the plugin's log level with the backend's global log level.
+ * The backend calls this function when the global log level changes or when a plugin is loaded.
+ *
+ * @param[in] level The log level to set.
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
+ *
+ * @note This function is optional. Plugins that do not implement it will continue to work
+ *       but will not receive log level updates from the backend.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnPluginSetLogLevel(hipdnnSeverity_t level);
 
 /** @} */ // End of PluginFunctions group
 

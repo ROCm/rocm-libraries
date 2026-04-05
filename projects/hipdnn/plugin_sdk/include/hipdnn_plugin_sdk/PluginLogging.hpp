@@ -14,6 +14,7 @@
  * The component name is stored at runtime when initializeCallbackLogging() is called.
  */
 
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
 #include <shared_mutex>
@@ -49,13 +50,13 @@ HIPDNN_HIDDEN inline std::shared_mutex& getComponentNameMutex()
 
 inline void setComponentName(const std::string& name)
 {
-    std::unique_lock<std::shared_mutex> lock(getComponentNameMutex());
+    const std::unique_lock<std::shared_mutex> lock(getComponentNameMutex());
     getStoredComponentName() = name;
 }
 
 inline std::string getComponentName()
 {
-    std::shared_lock<std::shared_mutex> lock(getComponentNameMutex());
+    const std::shared_lock<std::shared_mutex> lock(getComponentNameMutex());
     return getStoredComponentName();
 }
 
@@ -141,4 +142,37 @@ inline void initializeCallbackLogging(const std::string& componentName,
     hipdnn_data_sdk::logging::registerLoggingCallback(callbackFunction);
 }
 
+/**
+ * @brief Set the log level for the plugin
+ *
+ * Updates the plugin's local log level cache so that subsequent log level
+ * checks filter messages at the new level.
+ */
+inline void setLogLevel(hipdnnSeverity_t level)
+{
+    hipdnn_data_sdk::logging::setLogLevel(level);
+}
+
 } // namespace hipdnn_plugin_sdk::logging
+
+// ============================================================================
+// Log Level Check Macros (HIPDNN_PLUGIN_LOG_IS_*_ENABLED)
+// ============================================================================
+// These macros provide a convenient way to check if a log level is enabled.
+// Useful for conditional logic that should only execute at certain log levels.
+// Usage: if(HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED()) { /* verbose logic */ }
+
+#define HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED() \
+    ::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO)
+
+#define HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED() \
+    ::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO)
+
+#define HIPDNN_PLUGIN_LOG_IS_WARN_ENABLED() \
+    ::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN)
+
+#define HIPDNN_PLUGIN_LOG_IS_ERROR_ENABLED() \
+    ::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_ERROR)
+
+#define HIPDNN_PLUGIN_LOG_IS_FATAL_ENABLED() \
+    ::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_FATAL)

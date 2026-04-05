@@ -9,6 +9,7 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
+#include <unordered_set>
 #include <cstring>
 
 namespace origami
@@ -99,7 +100,7 @@ namespace origami
 
             auto bpeIn  = bpeCompute;
             auto bpeOut = bpeD;
-            
+
             // Read write requests for VW=4 dwordx2 Half output
             if (bpeIn == 4 && bpeOut == 2 && ((int)M % 4) == 0)
             {
@@ -178,11 +179,11 @@ namespace origami
             return 0 + (GlobalSplitU * std::max(std::max(GSU_L1_clk/cu_freq, GSU_L2_clk/cu_freq), cost_overhead));
         }
 
-        double getLocalSplitKOverhead(double MT0, double MT1, double lsu, uint32_t svw, 
+        double getLocalSplitKOverhead(double MT0, double MT1, double lsu, uint32_t svw,
                              uint32_t numThreads, uint32_t bpeCompute, double math_frequency)
         {
             if (lsu == 1) return 0.0;
-            
+
             double lsu_overall = 0.0;
             auto   bpeIn       = bpeCompute;
 
@@ -380,11 +381,20 @@ namespace origami
         L2CacheHitRate computeL2CacheHitRate(uint32_t M, uint32_t N, uint32_t K,
                                              uint32_t MT0, uint32_t MT1, uint32_t depthU,
                                              uint32_t L2CacheCapacity, uint32_t NumCUs, uint32_t NumXCDs,
-                                             uint32_t gsu, int32_t wgm, uint32_t batches,
-                                             uint32_t bpeA, uint32_t bpeB, int32_t NTA, int32_t NTB,
-                                             bool isGSUWGMRR)
+                                             int XCC, int XCCG, uint32_t gsu, int32_t wgm,
+                                             uint32_t batches, uint32_t bpeA, uint32_t bpeB, int32_t NTA,
+                                             int32_t NTB, bool isGSUWGMRR)
         {
-            L2CacheHitRate hitRate;
+            L2CacheHitRate hitRate{0.0, 0.0, 0.0};
+
+            bool isL2BypassA = (NTA & 0x6) > 0;
+            bool isL2BypassB = (NTB & 0x6) > 0;
+
+            // isL2BypassA = true; // calc B only
+            // isL2BypassB = true; // calc A only
+
+            if(isL2BypassA && isL2BypassB)
+                return hitRate;
 
             uint32_t wg0 = safe_ceil_div(M, MT0);
             uint32_t wg1 = safe_ceil_div(N, MT1);
@@ -398,7 +408,7 @@ namespace origami
 
             // other info
             uint32_t L2CacheLineSize = 128; //Bytes
-            uint32_t L2Capacity      = L2CacheCapacity; //MBs
+            uint32_t L2Capacity      = L2CacheCapacity; // Bytes
             uint32_t gsuMulBatch     = gsu * batches;
 
             std::vector<uint32_t> arrA(gsuMulBatch * wg0, 0);
@@ -406,213 +416,216 @@ namespace origami
             std::vector<uint32_t> arrA_2(gsuMulBatch * wg0, 0);
             std::vector<uint32_t> arrB_2(gsuMulBatch * wg1, 0);
 
-            uint32_t WGMXCC  = NumXCDs;
-            uint32_t WGMXCCG = NumCUs;
-            assert((WGMXCCG % WGMXCC) == 0);
+            int WGMXCC  = (XCC > 0) ? XCC : 1;
+            int WGMXCCG = (XCCG > 0)? XCCG : NumCUs;
+            if(WGMXCC > 0)
+                assert((WGMXCCG % WGMXCC) == 0);
 
             uint32_t totalWGNum  = gsuMulBatch * wg0 * wg1;
-
-            double aRatio = float(MT0) / float(MT0 + MT1);
-            double bRatio = float(MT1) / float(MT0 + MT1);
 
             uint64_t aHitElements  = 0;
             uint64_t aMissElements = 0;
             uint64_t bHitElements  = 0;
             uint64_t bMissElements = 0;
 
-            bool isL2BypassA = (NTA & 0x6) > 0;
-            bool isL2BypassB = (NTB & 0x6) > 0;
-
-            uint32_t hitA  = 0;
-            uint32_t hitB  = 0;
-            uint32_t missA = 0;
-            uint32_t missB = 0;
+            // // put wg into all xcds (xcc-mapped wg)
+            std::vector<std::vector<uint32_t>> xcd_wgs(NumXCDs);
+            std::vector<std::unordered_set<uint32_t>> xcd_cachedWG_A(NumXCDs);
+            std::vector<std::unordered_set<uint32_t>> xcd_cachedWG_B(NumXCDs);
+            // TODO- This should be a better way, but currently the prediction results are not better.
+            //   Remain this part here, and do more tests as TODO
+            // std::vector<uint32_t> xcd_cachedSizes(NumXCDs, 0); // Use this when cache-size-estimation is better
+            uint32_t xccIdx = 0;
 
             for(uint32_t wg = 0; wg < std::min(totalWGNum, 10 * NumCUs); wg++)
             {
-                if((wg % WGMXCCG) == 0)
+                uint32_t xccMappedWGId;
+
+                // ----------------------------------------------------------
+                //  XCD0     XCD1   XCD2     ...    XCDN-1  (NumXCD = N)
+                //  _____   _____   _____   _____   _____
+                // | wg0 | | wgX | |wg2X | |     | |     |  When we enable XCC and XCCG,
+                // | wg1 | |     | |     | |     | |     |  this is the result of "XCC/XCCG-remapped" wgIds
+                // |     | |     | |     | |     | |     |  (XCCG % XCC) must == 0,
+                // |     | |     | |     | |     | |     |  and each XCD has XCCG/XCC (=X) wgs.
+                // |wgX-1| |     | |     | |     | |     |
+                // |_____|_|_____|_|_____|_|_____|_|_____|  <---- Up to here, there are #-XCCG wgs. Note that X*N = XCCG
+                // | wgY | |     | |     | |     | |     |  <---- Note that wgY = wg(XCCG-1)+1
+                // |     | |     | |     | |     | |     |
+                //
+                // ----------------------------------------------------------
+
+                // Sorted-out Formula
+                if(WGMXCCG == 0)
                 {
-                    std::memset(arrA_2.data(), 0, arrA_2.size() * sizeof(uint32_t));
-                    std::memset(arrB_2.data(), 0, arrB_2.size() * sizeof(uint32_t));
+                    xccMappedWGId = (wg / WGMXCC) + (wg % WGMXCC) * (totalWGNum / WGMXCC) + std::min((totalWGNum % WGMXCC), (wg % WGMXCC));
                 }
-
-                // go xccgroup
-                uint32_t xccgIdx  = wg / WGMXCCG;
-                uint32_t realWGId = xccgIdx * WGMXCCG;
-
-                // get xccgroup wgNum
-                uint32_t xccgWgNum = std::min(WGMXCCG, totalWGNum - realWGId);
-                // how many wg per xcc in this xccgroup
-                uint32_t xccunit = xccgWgNum / WGMXCC;
-                uint32_t xccres  = xccgWgNum % WGMXCC;
-                // starting wgId
-                uint32_t resWGId = (wg - realWGId) % xccgWgNum;
-
-                // go xcc
-                uint32_t xccIdx = resWGId % WGMXCC;
-                // skip previous xcc
-                uint32_t skip = 0;
-                for(int i = 0; i < xccIdx; i++)
+                else
                 {
-                    // skip i
-                    skip += xccunit;
-                    if(i < xccres)
+                    xccMappedWGId = (wg / WGMXCCG) * WGMXCCG + ((wg % WGMXCCG) / WGMXCC);
+                    if(wg > (totalWGNum / WGMXCCG) * WGMXCCG)
+                        xccMappedWGId += (wg % WGMXCC) * ((totalWGNum % WGMXCCG) / WGMXCC) + std::min((totalWGNum % WGMXCC), (wg % WGMXCC));
+                    else
+                        xccMappedWGId += (wg % WGMXCC) * (WGMXCCG / WGMXCC);
+                }
+                xcd_wgs[xccIdx++].emplace_back(xccMappedWGId);
+                xccIdx %= NumXCDs;
+            }
+
+            size_t wgPerXCDIter = NumCUs / NumXCDs;
+
+            // std::vector<uint32_t> curXCDWGs;
+            for(uint32_t xccIdx = 0; xccIdx < NumXCDs; xccIdx++)
+            {
+                auto& curXCDWGVec = xcd_wgs[xccIdx];
+
+                // WorkGroupMapping and Calculate L2 Hit
+                for(size_t counter = 0; counter < curXCDWGVec.size(); counter++)
+                // for(uint32_t xccMappedWGId : curXCDWGs)
+                {
+                    // xccMappedWGId = idxWG012 = 1D serial ID
+                    uint32_t xccMappedWGId      = curXCDWGVec[counter];
+                    int32_t  sgprWGM            = wgm;
+                    uint32_t sgprNumWorkGroups0 = wg0;
+                    uint32_t sgprNumWorkGroups1 = wg1;
+                    uint32_t wg2     = xccMappedWGId / (sgprNumWorkGroups0 * sgprNumWorkGroups1 * gsu); //batch
+                    uint32_t idxWG01 = xccMappedWGId - (wg2 * sgprNumWorkGroups0 * sgprNumWorkGroups1 * gsu);
+                    uint32_t sgprWorkGroup1 = idxWG01 / wg0;
+                    uint32_t sgprWorkGroup0 = idxWG01 - (sgprWorkGroup1 * wg0);
+
+                    //go GSUWGMRR
+                    uint32_t gsuSumIdx = 0;
+                    if(isGSUWGMRR)
                     {
-                        // this xcc has extra 1 wg
-                        skip += 1;
+                        gsuSumIdx      = sgprWorkGroup1 / sgprNumWorkGroups1;
+                        sgprWorkGroup1 = sgprWorkGroup1 % sgprNumWorkGroups1;
                     }
-                }
-                realWGId += skip;
-
-                // go inner xccid
-                // in XCCN, we get the idx of the wg in XCCN.
-                uint32_t innerXccId = resWGId / WGMXCC;
-                realWGId += innerXccId;
-
-                int32_t  sgprWGM            = wgm;
-                uint32_t sgprNumWorkGroups0 = wg0;
-                uint32_t sgprNumWorkGroups1 = wg1;
-                uint32_t wg2     = realWGId / (sgprNumWorkGroups0 * sgprNumWorkGroups1 * gsu); //batch
-                uint32_t idxWG01 = realWGId - (wg2 * sgprNumWorkGroups0 * sgprNumWorkGroups1 * gsu);
-                uint32_t sgprWorkGroup1 = idxWG01 / wg0;
-                uint32_t sgprWorkGroup0 = idxWG01 - (sgprWorkGroup1 * wg0);
-
-                //go GSUWGMRR
-                uint32_t gsuSumIdx = 0;
-                if(isGSUWGMRR)
-                {
-                    gsuSumIdx      = sgprWorkGroup1 / sgprNumWorkGroups1;
-                    sgprWorkGroup1 = sgprWorkGroup1 % sgprNumWorkGroups1;
-                }
-                else
-                {
-                    gsuSumIdx      = sgprWorkGroup1 % gsu;
-                    sgprWorkGroup1 = sgprWorkGroup1 / gsu;
-                }
-                uint32_t finalwg1, finalwg0;
-                if(wgm > 0)
-                {
-                    uint32_t v6  = sgprWorkGroup1 / sgprWGM;
-                    uint32_t s84 = v6 * sgprWGM;
-                    s84          = sgprWorkGroup1 - s84;
-                    s84 *= sgprNumWorkGroups0;
-                    s84 += sgprWorkGroup0;
-                    uint32_t s81 = v6;
-
-                    v6           = sgprNumWorkGroups1 / sgprWGM;
-                    uint32_t s82 = v6;
-                    uint32_t s83 = sgprWGM * s82;
-                    s83          = sgprNumWorkGroups1 - s83;
-                    if(s83 == 0)
-                        s83 = sgprWGM;
-                    if(s81 >= s82)
-                        s82 = s83;
                     else
-                        s82 = sgprWGM;
+                    {
+                        gsuSumIdx      = sgprWorkGroup1 % gsu;
+                        sgprWorkGroup1 = sgprWorkGroup1 / gsu;
+                    }
+                    // remapped wgid[0,1]:
+                    //  wgm > 1: WGMPositive
+                    //  wgm < 0: WGMNegtive
+                    //  wgm == 1 or 0: no remapping (default)
+                    uint32_t finalwg0 = sgprWorkGroup0;
+                    uint32_t finalwg1 = sgprWorkGroup1;
+                    if(wgm > 1)
+                    {
+                        uint32_t v6  = sgprWorkGroup1 / sgprWGM;
+                        uint32_t s84 = v6 * sgprWGM;
+                        s84          = sgprWorkGroup1 - s84;
+                        s84 *= sgprNumWorkGroups0;
+                        s84 += sgprWorkGroup0;
+                        uint32_t s81 = v6;
+                        v6           = sgprNumWorkGroups1 / sgprWGM;
+                        uint32_t s82 = v6;
+                        uint32_t s83 = sgprWGM * s82;
+                        s83          = sgprNumWorkGroups1 - s83;
+                        if(s83 == 0)
+                            s83 = sgprWGM;
+                        if(s81 >= s82)
+                            s82 = s83;
+                        else
+                            s82 = sgprWGM;
+                        v6             = s84 / s82;
+                        uint32_t v7    = v6 * s82;
+                        v7             = s84 - v7;
+                        sgprWorkGroup0 = v6;
+                        sgprWorkGroup1 = v7;
+                        sgprWorkGroup1 = sgprWorkGroup0 * s82;
+                        sgprWorkGroup1 = s84 - sgprWorkGroup1;
+                        s81 *= sgprWGM;
+                        sgprWorkGroup1 += s81;
+                        finalwg1 = sgprWorkGroup1;
+                        finalwg0 = sgprWorkGroup0;
+                    }
+                    else if(wgm < 0)
+                    {
+                        sgprWGM = 0 - sgprWGM;
+                        uint32_t v12 = sgprWorkGroup0 / sgprWGM;
+                        uint32_t s85 = v12;
+                        uint32_t s88 = s85 * sgprWGM;
+                        s88          = sgprWorkGroup0 - s88;
+                        s88 *= sgprNumWorkGroups1;
+                        s88 += sgprWorkGroup1;
+                        v12          = sgprNumWorkGroups0 / sgprWGM;
+                        uint32_t s86 = v12;
+                        uint32_t s87 = sgprWGM * s86;
+                        s87          = sgprNumWorkGroups0 - s87;
+                        if(s87 == 0)
+                            s87 = sgprWGM;
+                        if(s85 >= s86)
+                            s86 = s87;
+                        else
+                            s86 = sgprWGM;
+                        v12          = s88 / s86;
+                        uint32_t v13 = v12 * s86;
+                        v13          = s88 - v13;
+                        sgprWorkGroup1 = v12;
+                        sgprWorkGroup0 = v13;
+                        sgprWorkGroup0 = sgprWorkGroup1 * s86;
+                        sgprWorkGroup0 = s88 - sgprWorkGroup0;
+                        s85 *= sgprWGM;
+                        sgprWorkGroup0 += s85;
+                        finalwg0 = sgprWorkGroup0;
+                        finalwg1 = sgprWorkGroup1;
+                    }
+                    uint32_t MT_Size0 = (finalwg0 == (wg0 - 1)) ? MT0_Edge : MT0; // Edge?
+                    uint32_t MT_Size1 = (finalwg1 == (wg1 - 1)) ? MT1_Edge : MT1; // Edge?
+                    uint32_t idxA = (wg2 * gsu + gsuSumIdx) * wg0 + finalwg0;
+                    uint32_t idxB = (wg2 * gsu + gsuSumIdx) * wg1 + finalwg1;
 
-                    v6             = s84 / s82;
-                    uint32_t v7    = v6 * s82;
-                    v7             = s84 - v7;
-                    sgprWorkGroup0 = v6;
-                    sgprWorkGroup1 = v7;
-                    sgprWorkGroup1 = sgprWorkGroup0 * s82;
-                    sgprWorkGroup1 = s84 - sgprWorkGroup1;
-                    s81 *= sgprWGM;
-                    sgprWorkGroup1 += s81;
 
-                    finalwg1 = sgprWorkGroup1;
-                    finalwg0 = sgprWorkGroup0;
-                }
-                else
-                {
-                    sgprWGM = 0 - sgprWGM;
+                    // clean cache for each WGMXCCG
+                    if((counter % wgPerXCDIter) == 0)
+                    {
+                        // xcd_cachedSizes[xccIdx] = 0;
+                        xcd_cachedWG_A[xccIdx].clear();
+                        xcd_cachedWG_B[xccIdx].clear();
+                    }
 
-                    uint32_t v12 = sgprWorkGroup0 / sgprWGM;
-                    uint32_t s85 = v12;
-
-                    uint32_t s88 = s85 * sgprWGM;
-                    s88          = sgprWorkGroup0 - s88;
-                    s88 *= sgprNumWorkGroups1;
-                    s88 += sgprWorkGroup1;
-
-                    v12          = sgprNumWorkGroups0 / sgprWGM;
-                    uint32_t s86 = v12;
-                    uint32_t s87 = sgprWGM * s86;
-                    s87          = sgprNumWorkGroups0 - s87;
-                    if(s87 == 0)
-                        s87 = sgprWGM;
-                    if(s85 >= s86)
-                        s86 = s87;
-                    else
-                        s86 = sgprWGM;
-
-                    v12          = s88 / s86;
-                    uint32_t v13 = v12 * s86;
-                    v13          = s88 - v13;
-
-                    sgprWorkGroup1 = v12;
-                    sgprWorkGroup0 = v13;
-                    sgprWorkGroup0 = sgprWorkGroup1 * s86;
-                    sgprWorkGroup0 = s88 - sgprWorkGroup0;
-                    s85 *= sgprWGM;
-                    sgprWorkGroup0 += s85;
-
-                    finalwg0 = sgprWorkGroup0;
-                    finalwg1 = sgprWorkGroup1;
-                }
-                uint32_t idxA = (wg2 * gsu + gsuSumIdx) * wg0 + finalwg0;
-                if(isL2BypassA)
-                {
-                    missA++;
-                    if(finalwg0 == wg0 - 1) //Edge
-                        aMissElements += (MT0_Edge * depthU);
-                    else
-                        aMissElements += (MT0 * depthU);
-                }
-                else if((arrA[idxA] & (1 << xccIdx)) || (arrA_2[idxA] & (1 << xccIdx)))
-                {
-                    hitA++;
-                    if(finalwg0 == (wg0 - 1)) //Edge
-                        aHitElements += (MT0_Edge * depthU);
-                    else
-                        aHitElements += (MT0 * depthU);
-                    arrA[idxA] |= (1 << xccIdx);
-                }
-                else
-                {
-                    missA++;
-                    if(finalwg0 == wg0 - 1) //Edge
-                        aMissElements += (MT0_Edge * depthU);
-                    else
-                        aMissElements += (MT0 * depthU);
-                    arrA[idxA] |= (1 << xccIdx);
-                }
-                uint32_t idxB = (wg2 * gsu + gsuSumIdx) * wg1 + finalwg1;
-                if(isL2BypassB)
-                {
-                    missB++;
-                    if(finalwg1 == (wg1 - 1)) //Edge
-                        bMissElements += (MT1_Edge * depthU);
-                    else
-                        bMissElements += (MT1 * depthU);
-                }
-                else if((arrB[idxB] & (1 << xccIdx)) || (arrB_2[idxB] & (1 << xccIdx)))
-                {
-                    hitB++;
-                    if(finalwg1 == (wg1 - 1)) //Edge
-                        bHitElements += (MT1_Edge * depthU);
-                    else
-                        bHitElements += (MT1 * depthU);
-                    arrB[idxB] |= (1 << xccIdx);
-                }
-                else
-                {
-                    missB++;
-                    if(finalwg1 == (wg1 - 1)) //Edge
-                        bMissElements += (MT1_Edge * depthU);
-                    else
-                        bMissElements += (MT1 * depthU);
-                    arrB[idxB] |= (1 << xccIdx);
+                    // A
+                    if(!isL2BypassA)
+                    {
+                        if(xcd_cachedWG_A[xccIdx].count(idxA) != 0)
+                        {
+                            aHitElements += (MT_Size0 * (K / gsu));
+                            xcd_cachedWG_A[xccIdx].insert(idxA);
+                        }
+                        else
+                        {
+                            aMissElements += (MT_Size0 * (K / gsu));
+                            xcd_cachedWG_A[xccIdx].insert(idxA);
+                            // xcd_cachedSizes[xccIdx] += (MT_Size0 * (K / gsu)) * bpeA;
+                        }
+                    }
+                    // B
+                    if(!isL2BypassB)
+                    {
+                        if(xcd_cachedWG_B[xccIdx].count(idxB) != 0)
+                        {
+                            bHitElements += (MT_Size1 * (K / gsu));
+                            xcd_cachedWG_B[xccIdx].insert(idxB);
+                        }
+                        else
+                        {
+                            bMissElements += (MT_Size1 * (K / gsu));
+                            xcd_cachedWG_B[xccIdx].insert(idxB);
+                            // xcd_cachedSizes[xccIdx] += (MT_Size1 * (K / gsu)) * bpeB;
+                        }
+                    }
+                    // // TODO: clean cache when full
+                    // //   This should be a better way, but currently the prediction results are not better.
+                    // //   Remain this part here as TODO
+                    // if(xcd_cachedSizes[xccIdx] > L2CacheCapacity)
+                    // {
+                    //     // std::cout << "clean cache when: xccId = " << xccIdx << ", with remapped-wgID = " << xccMappedWGId << std::endl;
+                    //     xcd_cachedSizes[xccIdx] = 0;
+                    //     xcd_cachedWG_A[xccIdx].clear();
+                    //     xcd_cachedWG_B[xccIdx].clear();
+                    // }
                 }
             }
 
@@ -636,7 +649,7 @@ namespace origami
         }
 
         // Store request calculation functions
-        double calculateStoreL3Request(double M, double N, double MT0, double MT1, 
+        double calculateStoreL3Request(double M, double N, double MT0, double MT1,
                                        double& non_edge_req, double& edge_req)
         {
             double result = 0.0;
@@ -788,32 +801,61 @@ namespace origami
         }
 
 
-        int getGlobalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall)
+        int getGlobalReadQueueFullStallCycles(int currentCycle, std::deque<int>& fifo, int bpRead, int numWaves, bool isStall, bool isSgprOffset)
         {
-            int finalCycle = currentCycle;
-            int grStallLatencyBuffer;
-
-            if (!isStall) {
-                grStallLatencyBuffer = 1; //no stall
-            } else if (bpRead == 16) {
-                grStallLatencyBuffer = 160;
-            } else if (bpRead == 8) {
-                grStallLatencyBuffer = 80;
-            } else {
-                grStallLatencyBuffer = 40;
+            int extraIssueCycles = 0;
+            if (isSgprOffset) {
+                extraIssueCycles = 1;
             }
-
-            if (fifo.size() < (16 / numWaves)) {
-                fifo.push(currentCycle);
+            if (!isStall) {
+                return currentCycle + extraIssueCycles;
+            }
+            int finalCycle = currentCycle;
+            // GR FIFO length is 16, stall cycles is 16 cycles.
+            const int grFIFOLength = 16;
+            int grStallCycles = 4;
+            if (bpRead <= 4) {
+                grStallCycles = 1;
+            }
+            // Theoretically, the maximum number of entries that can be retained is max of readStalledLength.
+            const int maxRetainedEntries = (grFIFOLength - 4) * numWaves;
+            while (fifo.size() > maxRetainedEntries) {
+                fifo.pop_front();
+            }
+            // pop finished GRs
+            if (fifo.size() < grFIFOLength) {
+                // if FIFO is not empty, set finalCycle to the last cycle + 1. Only 1 GR can be issued in each cycle.
+                if (fifo.size() > 0) {
+                    finalCycle = std::max(finalCycle + extraIssueCycles, fifo.back() + extraIssueCycles + 1);
+                }
+                // push all GRs of all waves
+                for(auto wave = 0; wave < numWaves; wave += 1) {
+                    fifo.push_back(finalCycle + wave * (1 + extraIssueCycles));
+                }
             } else {
-                int oldCycle = fifo.front();
-                if ((currentCycle - oldCycle) >= grStallLatencyBuffer) {
-                    fifo.pop();
-                    fifo.push(currentCycle);
-                } else {
-                    finalCycle = oldCycle + grStallLatencyBuffer;
-                    fifo.pop();
-                    fifo.push(finalCycle);
+                // FIFO is full
+                // the index of GR which stall happens is relative with the interval of each GRs.
+                int intervalOfGRs = (currentCycle - fifo[fifo.size() - numWaves]);
+                int readStalledLength = grFIFOLength;
+                if (intervalOfGRs > 4)
+                {
+                    readStalledLength += (intervalOfGRs - 4) * numWaves;
+                }
+                if(fifo.size() < readStalledLength)
+                {
+                    // stall is delayed
+                    finalCycle = std::max(finalCycle + extraIssueCycles, fifo.back() + extraIssueCycles + 1);
+                    // push all GRs of all waves
+                    for(auto wave = 0; wave < numWaves; wave += 1) {
+                        fifo.push_back(finalCycle + wave * (1 + extraIssueCycles));
+                    }
+                }
+                else{
+                    // push all GRs of all waves
+                    finalCycle = std::max(finalCycle + extraIssueCycles, fifo.back() + grStallCycles);
+                    for(auto wave = 0; wave < numWaves; wave++) {
+                        fifo.push_back(finalCycle + wave * grStallCycles);
+                    }
                 }
             }
             return finalCycle;
@@ -845,25 +887,27 @@ namespace origami
 
         int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer)
         {
-            int finalCycle = currentCycle;
-
-            if (fifo.size() < (16 / numWaves)) {
-                fifo.push(currentCycle);
+            int lengthOfQueuePerWave = 16 / numWaves;
+            int finalCycle = currentCycle + lrStallLatencyBuffer;
+            if (fifo.size() < lengthOfQueuePerWave) {
+                fifo.push(finalCycle);
+                return currentCycle;
             } else {
                 int oldCycle = fifo.front();
-                if ((currentCycle - oldCycle) >= lrStallLatencyBuffer) {
-                    fifo.pop();
-                    fifo.push(currentCycle);
-                } else {
-                    // stall happens
-                    int wavesPerFifo = 16 / numWaves;
-                    int stallCycles = safe_ceil_div(lrStallLatencyBuffer + 1, wavesPerFifo);
-                    finalCycle = std::max(currentCycle, fifo.back() + stallCycles);
+                if (currentCycle >= oldCycle) {
                     fifo.pop();
                     fifo.push(finalCycle);
+                    return currentCycle;
+                } else {
+                    // stall happens
+                    int stallCycles = safe_ceil_div(lrStallLatencyBuffer, lengthOfQueuePerWave);
+                    currentCycle = std::max(currentCycle + stallCycles, oldCycle);
+                    finalCycle = currentCycle + lrStallLatencyBuffer;
+                    fifo.pop();
+                    fifo.push(finalCycle);
+                    return currentCycle;
                 }
             }
-            return finalCycle;
         }
 
         /**
@@ -879,26 +923,17 @@ namespace origami
             return baseLatency + conflictPenalty;
         }
 
-        void pushLocalRead(int currentCycle, std::queue<int>& fifo, int bpr, bool isGfx950)
+        /**
+         * @brief Calculate local write latency based on base latency, conflict multiplier, and bank conflicts
+         * @param baseLatency Base latency for local write operation (from HardwareConstants: LocalWriteBaseLatencyB128/B64/B32)
+         * @param conflictMultiplier Multiplier applied to bank conflict penalty (from HardwareConstants: LocalWriteConflictMultiplierB128/B64/B32)
+         * @param bankConflict Bank conflict factor (typically 1.0 for no conflict, >1.0 for conflicts)
+         * @return Calculated latency in cycles (baseLatency + conflict penalty based on bank conflicts)
+         */
+        int getLocalWriteLatency(int baseLatency, int conflictMultiplier, double bankConflict)
         {
-            std::vector<int> latency(5);
-            if (isGfx950)
-            {
-                latency = {11,11,11,11,21};
-            }
-            else
-            {
-                latency = {12,12,12,21,27};
-            }
-            int lrMemLatency;
-            if (bpr == 16) {
-                lrMemLatency = latency[4];
-            } else if (bpr == 8) {
-                lrMemLatency = latency[3];
-            } else {
-                lrMemLatency = latency[2];
-            }
-            fifo.push(currentCycle + lrMemLatency);
+            int conflictPenalty = bankConflict * conflictMultiplier;
+            return baseLatency + conflictPenalty;
         }
 
         double analyzeBankConflictsFromVGPR(
@@ -910,10 +945,10 @@ namespace origami
             int LocalReadBytesA)
         {
             double ratioA = 1.0;
-            
+
             // Track bank usage for conflict analysis
             std::unordered_map<int, int> bankUsageA;
-            
+
             if(!vgprLocalReadAddrA.empty())
             {
                 for(int tid = 0; tid < NUM_THREADS_TO_SIMULATE; tid++)
@@ -923,13 +958,13 @@ namespace origami
                         int64_t addrA = vgprState[tid].at(vgprLocalReadAddrA);
                         int64_t startAddr = addrA;
                         int64_t endAddr = addrA + LocalReadBytesA - 1;
-                        
+
                         // Calculate which banks are accessed by the read range [startAddr, endAddr]
                         int startBankA = (startAddr / BANK_WIDTH) % NUM_BANKS;
-                        
+
                         // Number of BANK_WIDTH-sized chunks this read spans
                         int numBanksAccessed = (endAddr / BANK_WIDTH) - (startAddr / BANK_WIDTH) + 1;
-                        
+
                         // Account for all banks accessed by this LocalReadBytesA read
                         for(int i = 0; i < numBanksAccessed; i++)
                         {
@@ -938,7 +973,7 @@ namespace origami
                         }
                     }
                 }
-                
+
                 // Analyze bank conflicts
                 if(!bankUsageA.empty())
                 {
@@ -953,7 +988,7 @@ namespace origami
                     ratioA = (avgUsageA > 0) ? (double)maxUsageA / avgUsageA : 1.0;
                 }
             }
-            
+
             return ratioA;
         }
     } // namespace simulator

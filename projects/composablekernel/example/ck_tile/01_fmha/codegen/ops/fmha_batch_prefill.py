@@ -635,6 +635,7 @@ class KernelComponentFactory:
         elif dtype in ["fp8bf16"]:
             return {
                 128 : [FmhaFwdTileSize(128, 128, 32, 128, 32,  128,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1)],
+                256 : [FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1)],
             }  # fmt: skip
         else:
             return None
@@ -845,5 +846,5 @@ def list_blobs(
     with file_path.open("a") as f:
         _, kernels = get_fwd_blobs(kernel_filter, receipt, optdim_list, mask_impl)
         for kernel in kernels:
-            f.write(str(file_path.parent / GEN_DIR / kernel.filename) + "\n")
-        f.write(str(file_path.parent / GEN_DIR / FMHA_FWD_API_FILENAME) + "\n")
+            f.write((file_path.parent / GEN_DIR / kernel.filename).as_posix() + "\n")
+        f.write((file_path.parent / GEN_DIR / FMHA_FWD_API_FILENAME).as_posix() + "\n")

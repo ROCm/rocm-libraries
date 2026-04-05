@@ -45,6 +45,7 @@
 
 #  include <algorithm>
 #  include <execution>
+#  include <type_traits>
 #  include <utility>
 
 #  include "hipstd.hpp"
@@ -59,7 +60,27 @@ inline void for_each(execution::parallel_unsequenced_policy, I f, I l, F fn)
 {
   ::hipstd::__maybe_bind_globals();
 
-  ::thrust::for_each(::thrust::device, f, l, ::std::move(fn));
+  using fn_t = ::std::decay_t<F>;
+
+  if constexpr (::std::is_trivially_destructible_v<fn_t>)
+  {
+    ::thrust::for_each(::thrust::device, f, l, ::std::move(fn));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+    try
+    {
+      ::thrust::for_each(::thrust::device, f, l, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar for_each: failed to synchronize");
+    guard.destroy_and_free();
+  }
 }
 
 template <typename I,
@@ -89,7 +110,29 @@ inline I for_each_n(execution::parallel_unsequenced_policy, I f, N n, F fn)
 {
   ::hipstd::__maybe_bind_globals();
 
-  return ::thrust::for_each_n(::thrust::device, f, n, ::std::move(fn));
+  using fn_t = ::std::decay_t<F>;
+
+  if constexpr (::std::is_trivially_destructible_v<fn_t>)
+  {
+    return ::thrust::for_each_n(::thrust::device, f, n, ::std::move(fn));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+    I result;
+    try
+    {
+      result = ::thrust::for_each_n(::thrust::device, f, n, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar for_each_n: failed to synchronize");
+    guard.destroy_and_free();
+    return result;
+  }
 }
 
 template <typename I,

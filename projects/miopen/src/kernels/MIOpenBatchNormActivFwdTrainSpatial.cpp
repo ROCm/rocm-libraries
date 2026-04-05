@@ -99,30 +99,11 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccum
 
         __syncthreads();
 
-        constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            static_cast<FpAccumType>(INHW),
+            lid);
 
         variance           = fma(-mean, mean, variance);
         invVariance        = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));
@@ -293,30 +274,11 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
         __syncthreads();
 
         // REDUCE MEAN AND VARIANCE -----------------------
-        constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            static_cast<FpAccumType>(INHW),
+            lid);
 
         // REDUCTION COMPLETE ---------------------------
         variance    = fma(-mean, mean, variance);
@@ -360,6 +322,22 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
                     index          = nidx * mio_bn_config::chw + chwid + hwidx;
                     xhat[j]        = (cast<FpPrecType>(in[index]) - mean) * invVariance;
                 }
+
+                // Synchronization is not required for correctness but enhances performance.
+                //
+                // Loop is memory bound as it iterates across all the batches in the tensor,
+                // and has memory access strides of CHW size once all the elements in a single
+                // sample have been processed, which may be large.
+                //
+                // `__syncthreads()` helps to coalesce memory accesses as each work-item accesses
+                // adjacent elements to its neighbours on the same loop iteration, leading to
+                // contiguous memory access across all the waves in a workgroup. By keeping all the
+                // waves on the same loop iteration it prevents waves on different loop iterations
+                // from stalling as they wait for memory.
+                //
+                // This can be seen by profiling the kernel with rocprofv3 and comparing the
+                // `TCP_PENDING_STALL_CYCLES_sum` counter and also looking at a thread trace in
+                // compute viewer and seeing the impact on occupancy.
                 __syncthreads();
                 for(unsigned int j = 0; j < max_read; j++)
                 {
@@ -473,32 +451,11 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccum
         __syncthreads();
 
         // REDUCE MEAN AND VARIANCE -----------------------
-        constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-
-        __syncthreads();
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            static_cast<FpAccumType>(INHW),
+            lid);
 
         variance    = fma(-mean, mean, variance);
         invVariance = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));

@@ -6,14 +6,13 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
-#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
-
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenHandle.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 
-#include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
+#include "mocks/MockHipdnnMiopenContext.hpp"
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
@@ -23,7 +22,7 @@ class TestMiopenBatchnormFwdTrainingActivPlanBuilder : public ::testing::Test
 {
 protected:
     MiopenBatchnormFwdTrainingPlanBuilder _planBuilder;
-    HipdnnEnginePluginHandle _dummyHandle;
+    HipdnnMiopenHandle _dummyHandle;
 };
 
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
@@ -91,7 +90,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, GetWorkspaceSizeReturnsZe
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    size_t workspaceSize = _planBuilder.getWorkspaceSize(_dummyHandle, graph);
+    HipdnnMiopenSettings settings;
+    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings);
 
     EXPECT_EQ(workspaceSize, 0u);
 }
@@ -101,8 +101,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, BuildPlanSetsPlanForValid
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
     MockEngineConfig mockEngineConfig;
+    HipdnnMiopenContext ctx;
 
     EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
@@ -156,8 +156,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
 
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
     MockEngineConfig mockEngineConfig;
+    HipdnnMiopenContext ctx;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
                  std::invalid_argument);
@@ -259,8 +259,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
 
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
     MockEngineConfig mockEngineConfig;
+    HipdnnMiopenContext ctx;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
                  std::invalid_argument);
@@ -459,4 +459,67 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
+}
+
+// ============================================================================
+// 3D Tests
+// ============================================================================
+
+TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsTrueFor3dNclSingleNode)
+{
+    std::vector<int64_t> dims3D = {2, 3, 14};
+    std::vector<int64_t> strides3D = {42, 14, 1};
+
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
+       IsApplicableReturnsTrueFor3dNlcFusedTwoNodeGraph)
+{
+    std::vector<int64_t> dims3D = {2, 3, 14};
+    std::vector<int64_t> strides3D = {42, 1, 3};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true, false, hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, BuildPlanSetsPlanFor3dNclSingleNode)
+{
+    std::vector<int64_t> dims3D = {2, 3, 14};
+    std::vector<int64_t> strides3D = {42, 14, 1};
+
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+    MockEngineConfig mockEngineConfig;
+    HipdnnMiopenContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
+TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, BuildPlanSetsPlanFor3dNlcFusedTwoNodeGraph)
+{
+    std::vector<int64_t> dims3D = {2, 3, 14};
+    std::vector<int64_t> strides3D = {42, 1, 3};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true, false, hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD, strides3D, dims3D);
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+    MockEngineConfig mockEngineConfig;
+    HipdnnMiopenContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
 }

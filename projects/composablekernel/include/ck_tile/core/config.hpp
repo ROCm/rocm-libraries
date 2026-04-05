@@ -15,14 +15,17 @@
 #define __gfx101__
 #endif
 #if defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__) || \
-    defined(__gfx1034__) || defined(__gfx1035__) || defined(__gfx1036__) || \
-    defined(__gfx10_3_generic__)
+    defined(__gfx1033__) || defined(__gfx1034__) || defined(__gfx1035__) || \
+    defined(__gfx1036__) || defined(__gfx10_3_generic__)
 #define __gfx103__
 #endif
 #if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || \
     defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || \
     defined(__gfx1152__) || defined(__gfx1153__) || defined(__gfx11_generic__)
 #define __gfx11__
+#endif
+#if defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)
+#define __gfx115__
 #endif
 #if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__)
 #define __gfx12__
@@ -73,7 +76,7 @@
 #define CK_TILE_FLOAT_TO_BFLOAT16_RTA_ASM 4
 
 #ifndef CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT
-#define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT CK_TILE_FLOAT_TO_BFLOAT16_TRUNCATE
+#define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT CK_TILE_FLOAT_TO_BFLOAT16_STANDARD
 #endif
 
 #define CK_TILE_FLOAT_TO_FP8_STANDARD 0
@@ -402,6 +405,12 @@ struct amdgcn_compiler_target_state
     static constexpr bool CK_TILE_ARCH_GFX1032 = false;
 #endif // __gfx1032__
 
+#if defined(__gfx1033__)
+    static constexpr bool CK_TILE_ARCH_GFX1033 = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX1033 = false;
+#endif // __gfx1033__
+
 #if defined(__gfx1034__)
     static constexpr bool CK_TILE_ARCH_GFX1034 = true;
 #else
@@ -534,6 +543,7 @@ CK_TILE_HOST_DEVICE static constexpr uint32_t count_values_of(T search, Ts... se
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1030,         \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1031,         \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1032,         \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1033,         \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1034,         \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1035,         \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1036,         \

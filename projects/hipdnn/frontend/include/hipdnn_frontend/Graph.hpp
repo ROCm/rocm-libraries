@@ -1,6 +1,71 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file Graph.hpp
+ * @brief Main Graph class for building and executing deep learning operations
+ *
+ * This header defines the Graph class — hipDNN's top-level API for describing,
+ * compiling, and running DNN operations on AMD GPUs. It is included
+ * automatically via `#include <hipdnn_frontend.hpp>`.
+ *
+ * @section graph_overview Overview
+ *
+ * The Graph class provides a fluent API for:
+ * - Creating tensor descriptors (shape + dtype, no data yet)
+ * - Adding operations (convolution forward/dgrad/wgrad, batchnorm
+ *   forward/backward/inference, layernorm, rmsnorm, pointwise, matmul,
+ *   scaled dot-product attention, block-scale quantize/dequantize)
+ * - Building (compiling) an execution plan for the GPU
+ * - Executing the plan with real device pointers
+ *
+ * @section graph_workflow Typical Workflow
+ *
+ * @code{.cpp}
+ * using namespace hipdnn_frontend;
+ * using namespace hipdnn_frontend::graph;
+ *
+ * // 1. Create and configure the graph
+ * Graph graph;
+ * graph.set_io_data_type(DataType::HALF)
+ *      .set_compute_data_type(DataType::FLOAT)
+ *      .set_name("my_conv_graph");
+ *
+ * // 2. Create input tensors
+ * auto x = Graph::tensor(TensorAttributes()
+ *              .set_dim({N, C, H, W})
+ *              .set_stride({C*H*W, H*W, W, 1})
+ *              .set_uid(0));
+ * auto w = Graph::tensor(TensorAttributes()
+ *              .set_dim({K, C, R, S})
+ *              .set_uid(1));
+ *
+ * // 3. Add operations
+ * auto y = graph.conv_fprop(x, w, ConvFpropAttributes()
+ *              .set_padding({1, 1})
+ *              .set_stride({1, 1}));
+ * y->set_output(true).set_uid(2);
+ *
+ * // 4. Build and execute
+ * hipdnnHandle_t handle;
+ * hipdnnCreate(&handle);
+ * graph.build(handle);
+ *
+ * int64_t workspaceSize;
+ * graph.get_workspace_size(workspaceSize);
+ * void* workspace;
+ * hipMalloc(&workspace, workspaceSize);
+ *
+ * std::unordered_map<int64_t, void*> variantPack = {
+ *     {0, d_input}, {1, d_weights}, {2, d_output}
+ * };
+ * graph.execute(handle, variantPack, workspace);
+ * @endcode
+ */
+
 #pragma once
+
+#include <array>
 
 #include <HipdnnBackendFlatbufferData.h>
 #include <hipdnn_backend.h>
@@ -9,27 +74,50 @@
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
+#include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
+#include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
+#include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
+#include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
+#include <hipdnn_frontend/detail/ConvolutionFpropUnpacker.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
+#include <hipdnn_frontend/detail/EngineOverrideUtils.hpp>
 #include <hipdnn_frontend/detail/GraphDetail.hpp>
+#include <hipdnn_frontend/detail/GraphPacker.hpp>
+#include <hipdnn_frontend/detail/GraphUnpacker.hpp>
+#include <hipdnn_frontend/detail/KnobPacker.hpp>
+#include <hipdnn_frontend/detail/KnobUnpacker.hpp>
+#include <hipdnn_frontend/detail/OperationUnpacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_frontend/node/CustomOpNode.hpp>
+#include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/RMSNormNode.hpp>
+#include <hipdnn_frontend/node/ReductionNode.hpp>
+#include <hipdnn_frontend/node/SdpaBpropNode.hpp>
+#include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
@@ -39,6 +127,33 @@
 namespace hipdnn_frontend::graph
 {
 
+/**
+ * @class Graph
+ * @brief The main class for building and executing hipDNN computational graphs
+ *
+ * You describe **what** operations to run (convolution, batchnorm,
+ * pointwise, matmul, layernorm, rmsnorm) and the library figures out
+ * **how** to execute them efficiently on AMD GPUs.
+ *
+ * **Typical workflow:**
+ * | Step | What you do | hipDNN call |
+ * |------|-------------|-------------|
+ * | 1. Describe tensor shapes | Define dims, strides, dtype | `Graph::tensor(attrs)` |
+ * | 2. Add operations | Wire inputs to outputs | `graph.conv_fprop(x, w, ...)` |
+ * | 3. Compile for GPU | Select engine, build plan | `graph.build(handle)` |
+ * | 4. Execute | Pass device pointers | `graph.execute(handle, ptrs, ws)` |
+ *
+ * The Graph uses a **fluent API** — setter methods return `*this` so
+ * you can chain calls:
+ * @code{.cpp}
+ * graph.set_io_data_type(DataType::HALF)
+ *      .set_compute_data_type(DataType::FLOAT)
+ *      .set_name("my_graph");
+ * @endcode
+ *
+ * @see hipdnn_frontend::graph::TensorAttributes, hipdnn_frontend::graph::ConvFpropAttributes,
+ *      hipdnn_frontend::graph::BatchnormAttributes, hipdnn_frontend::graph::PointwiseAttributes
+ */
 class Graph : public INode
 {
 private:
@@ -46,7 +161,130 @@ private:
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _engineConfigDesc;
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _executionPlanDesc;
 
-    std::optional<int64_t> _preferredEngineId = std::nullopt;
+    std::optional<int64_t> _preferredEngineId;
+
+    static std::optional<int64_t> getDefaultEngineId()
+    {
+        static const std::optional<int64_t> s_defaultId = []() -> std::optional<int64_t> {
+            auto envStr = hipdnn_data_sdk::utilities::trim(
+                hipdnn_data_sdk::utilities::getEnv("HIPDNN_DEFAULT_ENGINE"));
+            if(envStr.empty())
+            {
+                return std::nullopt;
+            }
+            auto engineId = hipdnn_data_sdk::utilities::engineNameToId(envStr);
+            HIPDNN_FE_LOG_INFO("HIPDNN_DEFAULT_ENGINE='" << envStr
+                                                         << "' mapped to engine ID: " << engineId);
+            return engineId;
+        }();
+        return s_defaultId;
+    }
+
+    // TODO: Remove this feature flag once all operation types support descriptor-based
+    // lowering/lifting and the flatbuffer path is no longer needed.
+    static bool useDescriptorApi()
+    {
+        static const bool s_useDescriptorApi
+            = hipdnn_data_sdk::utilities::getEnv("HIPDNN_USE_DESCRIPTOR_API") == "1";
+        return s_useDescriptorApi;
+    }
+
+    /// Apply validated knob settings to the engine config descriptor using
+    /// the FlatBuffer serialization path.
+    Error applyKnobSettingsToEngineConfig(const std::vector<KnobSetting>& validatedSettings)
+    {
+        if(validatedSettings.empty())
+        {
+            return {ErrorCode::OK, ""};
+        }
+
+        // FlatBuffer serialization path (existing default)
+        std::vector<flatbuffers::DetachedBuffer> knobBuffers;
+        knobBuffers.reserve(validatedSettings.size());
+
+        for(const auto& setting : validatedSettings)
+        {
+            flatbuffers::FlatBufferBuilder builder;
+            auto knobSettingOffset = setting.packKnobSetting(builder);
+            builder.Finish(knobSettingOffset);
+            knobBuffers.push_back(builder.Release());
+        }
+
+        std::vector<hipdnnBackendFlatbufferData_t> flatbufferDataArray;
+        flatbufferDataArray.reserve(knobBuffers.size());
+
+        for(const auto& buffer : knobBuffers)
+        {
+            hipdnnBackendFlatbufferData_t fbData;
+            fbData.ptr = buffer.data();
+            fbData.size = buffer.size();
+            flatbufferDataArray.push_back(fbData);
+        }
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
+                                             _engineConfigDesc->get(),
+                                             HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                             HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                             static_cast<int64_t>(flatbufferDataArray.size()),
+                                             flatbufferDataArray.data()),
+                                         "Failed to set knob settings on engine config.");
+
+        return {ErrorCode::OK, ""};
+    }
+
+    Error validateAndFilterKnobSettings(const std::vector<KnobSetting>& settings,
+                                        const std::unordered_map<KnobType_t, Knob>& existingKnobs,
+                                        std::vector<KnobSetting>& validatedSettings)
+    {
+        validatedSettings.clear();
+        validatedSettings.reserve(settings.size());
+
+        for(const auto& setting : settings)
+        {
+            auto knobIt = existingKnobs.find(setting.knobId());
+            if(knobIt == existingKnobs.end())
+            {
+                HIPDNN_FE_LOG_WARN("Ignoring knob " << setting.knobId()
+                                                    << " when creating execution plan for graph "
+                                                    << graph_attributes.get_name()
+                                                    << ".  Engine doesn't support chosen knob.");
+                continue;
+            }
+
+            const auto& knob = knobIt->second;
+
+            if(knob.isDeprecated())
+            {
+                HIPDNN_FE_LOG_WARN("Knob " << knob.knobId() << " has been marked as deprecated.");
+            }
+
+            HIPDNN_CHECK_ERROR(knob.validate(setting));
+
+            validatedSettings.emplace_back(setting);
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    Error finalizeExecutionPlanDescriptor()
+    {
+        // Finalize engine config after knobs have been set
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendFinalize(_engineConfigDesc->get()),
+            "Failed to finalize engine config descriptor");
+
+        // Create execution plan descriptor
+        _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+            HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+
+        if(!_executionPlanDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Failed to create backend execution descriptor."};
+        }
+
+        return {ErrorCode::OK, ""};
+    }
 
     void assignUnsetTensorUids()
     {
@@ -67,11 +305,32 @@ private:
     {
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
         std::vector<int64_t> engineIds;
+        auto defaultEngineId = getDefaultEngineId();
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getEngineConfigs(
-            engineConfigs, engineIds, engineHeuristicDesc, _preferredEngineId.has_value()));
+            engineConfigs,
+            engineIds,
+            engineHeuristicDesc,
+            _preferredEngineId.has_value() || defaultEngineId.has_value()));
 
         // Select engine config based on preferred ID or use first available
         size_t selectedIndex = 0;
+        if(defaultEngineId)
+        {
+            auto defaultId = defaultEngineId.value();
+            auto it = std::find(engineIds.begin(), engineIds.end(), defaultId);
+            if(it != engineIds.end())
+            {
+                selectedIndex = static_cast<size_t>(std::distance(engineIds.begin(), it));
+                HIPDNN_FE_LOG_INFO("Default engine id " << defaultId
+                                                        << " found, using it for execution plan.");
+            }
+            else
+            {
+                HIPDNN_FE_LOG_INFO("Default engine id "
+                                   << defaultId << " not found, using top engine config instead.");
+            }
+        }
+
         if(_preferredEngineId.has_value())
         {
             bool found = false;
@@ -116,13 +375,13 @@ private:
         auto engineConfigDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
 
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            detail::hipdnnBackend()->backendSetAttribute(engineConfigDesc->get(),
-                                                         HIPDNN_ATTR_ENGINECFG_ENGINE,
-                                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                         1,
-                                                         &engineDesc.get()),
-            "Failed to set engine on the engine config descriptor.");
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
+                                             engineConfigDesc->get(),
+                                             HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                             1,
+                                             static_cast<const void*>(&engineDesc.get())),
+                                         "Failed to set engine on the engine config descriptor.");
 
         _engineConfigDesc = std::move(engineConfigDesc);
         return {ErrorCode::OK, ""};
@@ -132,7 +391,7 @@ private:
         const std::unordered_map<std::shared_ptr<TensorAttributes>, size_t>& tensorToOriginNode)
         const
     {
-        size_t nodeCount = _sub_nodes.size();
+        const size_t nodeCount = _sub_nodes.size();
         detail::GraphStructure structure;
         structure.adjacencyList.resize(nodeCount);
 
@@ -144,7 +403,7 @@ private:
                 auto it = tensorToOriginNode.find(input);
                 if(it != tensorToOriginNode.end())
                 {
-                    size_t outputNodeIndex = it->second;
+                    const size_t outputNodeIndex = it->second;
                     structure.adjacencyList[outputNodeIndex].push_back(inputNodeIndex);
                 }
             }
@@ -156,7 +415,7 @@ private:
     std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> buildTensorToOriginNodeMap() const
     {
         std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> tensorToOriginNode;
-        size_t nodeCount = _sub_nodes.size();
+        const size_t nodeCount = _sub_nodes.size();
 
         for(size_t i = 0; i < nodeCount; ++i)
         {
@@ -229,7 +488,7 @@ private:
     }
 
     static Error checkTensorUidsSetImpl(
-        std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
+        const std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
     {
         std::vector<std::string> missingUidTensors;
 
@@ -258,7 +517,7 @@ private:
     }
 
     static Error checkNoDuplicateTensorIdsImpl(
-        std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
+        const std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
     {
         std::unordered_set<int64_t> seenUids;
         std::unordered_set<int64_t> duplicateUids;
@@ -355,159 +614,8 @@ private:
 
     Error deserializeFromFlatBuffer(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
     {
-        // Set graph attributes from FlatBuffer
-        if(fbGraph->name() != nullptr)
-        {
-            set_name(fbGraph->name()->c_str());
-        }
-        set_compute_data_type(fromSdkType(fbGraph->compute_data_type()));
-        set_intermediate_data_type(fromSdkType(fbGraph->intermediate_data_type()));
-        set_io_data_type(fromSdkType(fbGraph->io_data_type()));
-
-        if(fbGraph->preferred_engine_id().has_value())
-        {
-            _preferredEngineId = fbGraph->preferred_engine_id().value();
-        }
-
-        // Build tensorMap from FlatBuffer tensors
-        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
-        if(fbGraph->tensors() != nullptr)
-        {
-            for(const auto* fbTensor : *fbGraph->tensors())
-            {
-                auto tensor = TensorAttributes::fromFlatBuffer(fbTensor);
-                if(tensor != nullptr && tensor->has_uid())
-                {
-                    tensorMap[tensor->get_uid()] = tensor;
-                }
-            }
-        }
-
-        // Create nodes from FlatBuffer
-        if(fbGraph->nodes() != nullptr)
-        {
-            for(const auto* fbNode : *fbGraph->nodes())
-            {
-                auto type = fbNode->attributes_type();
-
-                switch(type)
-                {
-                case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-                {
-                    auto attr = BatchnormAttributes::fromFlatBuffer(
-                        fbNode->attributes_as_BatchnormAttributes(), tensorMap);
-                    if(fbNode->name() != nullptr)
-                    {
-                        attr.set_name(fbNode->name()->str());
-                    }
-                    _sub_nodes.emplace_back(
-                        std::make_shared<BatchnormNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
-                {
-                    auto attr = BatchnormBackwardAttributes::fromFlatBuffer(
-                        fbNode->attributes_as_BatchnormBackwardAttributes(), tensorMap);
-                    if(fbNode->name() != nullptr)
-                    {
-                        attr.set_name(fbNode->name()->str());
-                    }
-                    _sub_nodes.emplace_back(
-                        std::make_shared<BatchnormBackwardNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-                {
-                    auto attr = BatchnormInferenceAttributes::fromFlatBuffer(
-                        fbNode->attributes_as_BatchnormInferenceAttributes(), tensorMap);
-                    if(fbNode->name() != nullptr)
-                    {
-                        attr.set_name(fbNode->name()->str());
-                    }
-                    _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNode>(
-                        std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::
-                    BatchnormInferenceAttributesVarianceExt:
-                {
-                    auto attr = BatchnormInferenceAttributesVarianceExt::fromFlatBuffer(
-                        fbNode->attributes_as_BatchnormInferenceAttributesVarianceExt(), tensorMap);
-                    if(fbNode->name() != nullptr)
-                    {
-                        attr.set_name(fbNode->name()->str());
-                    }
-                    _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNodeVarianceExt>(
-                        std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
-                {
-                    auto attr = ConvFpropAttributes::fromFlatBuffer(
-                        fbNode->attributes_as_ConvolutionFwdAttributes(), tensorMap);
-                    if(fbNode->name() != nullptr)
-                    {
-                        attr.set_name(fbNode->name()->str());
-                    }
-                    _sub_nodes.emplace_back(
-                        std::make_shared<ConvolutionFpropNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
-                {
-                    auto attr = ConvDgradAttributes::fromFlatBuffer(
-                        fbNode->attributes_as_ConvolutionBwdAttributes(), tensorMap);
-                    if(fbNode->name() != nullptr)
-                    {
-                        attr.set_name(fbNode->name()->str());
-                    }
-                    _sub_nodes.emplace_back(
-                        std::make_shared<ConvolutionDgradNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
-                {
-                    auto attr = ConvWgradAttributes::fromFlatBuffer(
-                        fbNode->attributes_as_ConvolutionWrwAttributes(), tensorMap);
-                    if(fbNode->name() != nullptr)
-                    {
-                        attr.set_name(fbNode->name()->str());
-                    }
-                    _sub_nodes.emplace_back(
-                        std::make_shared<ConvolutionWgradNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
-                {
-                    auto attr = PointwiseAttributes::fromFlatBuffer(
-                        fbNode->attributes_as_PointwiseAttributes(), tensorMap);
-                    if(fbNode->name() != nullptr)
-                    {
-                        attr.set_name(fbNode->name()->str());
-                    }
-                    _sub_nodes.emplace_back(
-                        std::make_shared<PointwiseNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
-                {
-                    auto attr = MatmulAttributes::fromFlatBuffer(
-                        fbNode->attributes_as_MatmulAttributes(), tensorMap);
-                    if(fbNode->name() != nullptr)
-                    {
-                        attr.set_name(fbNode->name()->str());
-                    }
-                    _sub_nodes.emplace_back(
-                        std::make_shared<MatmulNode>(std::move(attr), graph_attributes));
-                    break;
-                }
-                default:
-                    return {ErrorCode::INVALID_VALUE, "Unsupported node type in deserialization"};
-                }
-            }
-        }
-
-        return {ErrorCode::OK, ""};
+        return detail::unpackGraphFromFlatBuffer(
+            fbGraph, _sub_nodes, graph_attributes, _preferredEngineId);
     }
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
@@ -525,12 +633,33 @@ private:
 #endif
 
 public:
+    /**
+     * @brief Construct an empty Graph
+     */
     Graph()
         : INode(GraphAttributes{})
     {
         HIPDNN_FE_LOG_INFO("Creating new Graph instance");
     }
 
+    // Copy operations disabled via INode base class
+    // Move operations defaulted - automatically handles all members
+    Graph(Graph&&) = default;
+    Graph& operator=(Graph&&) = default;
+
+    /**
+     * @brief Validate the graph structure and tensor configurations
+     *
+     * Validates that:
+     * - No duplicate tensor UIDs exist
+     * - Graph is a valid DAG (no cycles)
+     * - Graph is a single connected component
+     * - All tensor attributes are set (dims, type, strides)
+     * - All operation nodes have valid configurations
+     *
+     * @return Error with ErrorCode::INVALID_VALUE or ErrorCode::ATTRIBUTE_NOT_SET
+     *         on failure. Call get_message() for the specific failure reason.
+     */
     Error validate()
     {
         HIPDNN_FE_LOG_INFO("Validating graph " << graph_attributes.get_name());
@@ -555,6 +684,11 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Verify that no two tensors in the graph share the same UID
+     * @return ErrorCode::OK if all UIDs are unique, or ErrorCode::INVALID_VALUE
+     *         if duplicates exist. Call get_message() for the duplicate UIDs.
+     */
     Error checkNoDuplicateTensorIds()
     {
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
@@ -563,8 +697,12 @@ public:
         return checkNoDuplicateTensorIdsImpl(allTensors);
     }
 
-    /// Checks if all tensors in the graph have UIDs assigned.
-    /// Returns an error if any tensor is missing a UID.
+    /**
+     * @brief Check that all tensors in the graph have UIDs assigned
+     * @return ErrorCode::OK if all tensors have UIDs, or
+     *         ErrorCode::ATTRIBUTE_NOT_SET if any are missing. Call
+     *         get_message() for the affected tensors.
+     */
     Error checkTensorUidsSet() const
     {
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
@@ -573,9 +711,13 @@ public:
         return checkTensorUidsSetImpl(allTensors);
     }
 
-    /// Returns a map of UID -> TensorAttributes for all tensors in the graph.
-    /// Tensors without UIDs are skipped (no error is generated).
-    /// @return Map from tensor UID to tensor attributes
+    /**
+     * @brief Get all tensors in the graph indexed by UID
+     *
+     * Tensors without UIDs are skipped.
+     *
+     * @return Map from tensor UID to tensor attributes
+     */
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> getTensorsByUid() const
     {
         std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> result;
@@ -594,9 +736,13 @@ public:
         return result;
     }
 
-    /// Returns a map of name -> TensorAttributes for all tensors in the graph.
-    /// Tensors without names are skipped (no error is generated).
-    /// @return Map from tensor name to tensor attributes
+    /**
+     * @brief Get all tensors in the graph indexed by name
+     *
+     * Tensors without names are skipped.
+     *
+     * @return Map from tensor name to tensor attributes
+     */
     std::unordered_map<std::string, std::shared_ptr<TensorAttributes>> getTensorsByName() const
     {
         std::unordered_map<std::string, std::shared_ptr<TensorAttributes>> result;
@@ -615,9 +761,19 @@ public:
         return result;
     }
 
+    /**
+     * @brief Topologically sort the graph nodes
+     *
+     * Reorders internal nodes so that every node appears after its
+     * dependencies.
+     *
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE if the
+     *         graph contains a cycle or multiple disconnected components. Call
+     *         get_message() for the specific failure reason.
+     */
     Error topologicallySortGraph()
     {
-        size_t nodeCount = _sub_nodes.size();
+        const size_t nodeCount = _sub_nodes.size();
 
         if(nodeCount == 0)
         {
@@ -646,6 +802,14 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Serialize the graph to a FlatBuffer operation graph
+     *
+     * Assigns UIDs to any tensors that do not already have them, then
+     * serializes the full graph structure into a FlatBuffer.
+     *
+     * @return DetachedBuffer containing the serialized graph
+     */
     flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
     {
         assignUnsetTensorUids();
@@ -653,9 +817,31 @@ public:
         return buildFlatbufferOperationGraphConst();
     }
 
+    /**
+     * @brief Build the operation graph descriptor
+     *
+     * Creates the backend operation graph descriptor from the frontend graph
+     * representation. Typically called internally by build().
+     *
+     * @param handle The hipDNN handle
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR /
+     *         ErrorCode::INVALID_VALUE on failure. Call get_message() for the
+     *         specific failure reason.
+     */
     Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
     {
+        if(useDescriptorApi())
+        {
+            return build_operation_graph_via_descriptors(handle);
+        }
+
         HIPDNN_FE_LOG_INFO("Building operation graph " << graph_attributes.get_name());
+
+        if(!_preferredEngineId.has_value())
+        {
+            _preferredEngineId
+                = hipdnn_frontend::engine_override::getPreferredIdFromOverrideConfig(*this);
+        }
 
         auto serializedGraph = buildFlatbufferOperationGraph();
         _graphDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
@@ -672,7 +858,7 @@ public:
                                                          HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                                                          HIPDNN_TYPE_HANDLE,
                                                          1,
-                                                         &handle),
+                                                         static_cast<const void*>(&handle)),
             "Failed to set handle on the graph.");
 
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -682,7 +868,224 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    // Get knobs for a specific engine
+protected:
+    /// Get knobs for a specific engine, always using the descriptor-based
+    /// C-API path. Exposed as protected so tests can exercise this path
+    /// directly without relying on the HIPDNN_USE_DESCRIPTOR_API feature flag.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error get_knobs_for_engine_via_descriptors(int64_t engineId, std::vector<Knob>& knobs) const
+    {
+        if(!_graphDesc || !_graphDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Graph has not been built, build the operation graph first. Cannot get knobs "
+                    "for engine."};
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineDesc;
+
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
+            engineDesc, _graphDesc->get(), engineId));
+
+        return detail::unpackKnobsFromDescriptors(engineDesc.get(), knobs);
+    }
+
+    // Returns the raw backend graph descriptor, or nullptr if the graph has not been built.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    hipdnnBackendDescriptor_t get_raw_graph_descriptor() const
+    {
+        return _graphDesc ? _graphDesc->get() : nullptr;
+    }
+
+    /// Builds the operation graph using the backend descriptor C API.
+    /// Each node creates its operation descriptor(s) via virtual dispatch,
+    /// then the GraphDescriptor is assembled and finalized.
+    ///
+    /// NOTE: This method is intentionally not yet exposed publicly. It will replace
+    /// the FlatBuffer-based build_operation_graph() once all operation types are implemented.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error build_operation_graph_via_descriptors(hipdnnHandle_t handle)
+    {
+        HIPDNN_FE_LOG_INFO("Building operation graph via descriptors "
+                           << graph_attributes.get_name());
+
+        assignUnsetTensorUids();
+
+        if(!_preferredEngineId.has_value())
+        {
+            _preferredEngineId
+                = hipdnn_frontend::engine_override::getPreferredIdFromOverrideConfig(*this);
+        }
+
+        // Collect all tensor descriptors (keyed by UID for deduplication)
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+
+        // Collect operation descriptors
+        std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
+
+        // Each node creates its operation descriptor(s) via virtual dispatch
+        for(const auto& node : _sub_nodes)
+        {
+            HIPDNN_CHECK_ERROR(node->create_operation(tensorDescs, operations));
+        }
+
+        if(operations.empty())
+        {
+            return {ErrorCode::INVALID_VALUE, "No operations created for graph"};
+        }
+
+        // Assemble the graph descriptor from operations
+        auto computeDt = toHipdnnDataType(graph_attributes.get_compute_data_type());
+        auto intermediateDt = toHipdnnDataType(graph_attributes.get_intermediate_data_type());
+        auto ioDt = toHipdnnDataType(graph_attributes.get_io_data_type());
+        if(!computeDt || !intermediateDt || !ioDt)
+        {
+            return {ErrorCode::INVALID_VALUE, "Unsupported data type in graph attributes"};
+        }
+        HIPDNN_CHECK_ERROR(detail::assembleGraphDescriptor(operations,
+                                                           handle,
+                                                           *computeDt,
+                                                           *intermediateDt,
+                                                           *ioDt,
+                                                           _preferredEngineId,
+                                                           graph_attributes.get_name(),
+                                                           _graphDesc));
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /// Reconstruct the Graph from a finalized backend OperationGraph descriptor.
+    ///
+    /// Extracts operations and graph-level data types from a backend descriptor
+    /// and rebuilds the frontend Graph representation. Tensors are shared across
+    /// operations via UID-based lookup.
+    ///
+    /// NOTE: Will be renamed to `deserialize` and made public once the API
+    /// stabilizes.
+    ///
+    /// @param graphDesc A finalized backend OperationGraph descriptor
+    /// @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
+    ///         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message()
+    ///         for the specific failure reason.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error fromBackendDescriptor(hipdnnBackendDescriptor_t graphDesc)
+    {
+        std::vector<std::shared_ptr<graph::INode>> tempNodes;
+        graph::GraphAttributes tempAttrs;
+        std::optional<int64_t> tempEngineId;
+
+        HIPDNN_CHECK_ERROR(
+            detail::unpackGraphDescriptor(graphDesc, tempNodes, tempAttrs, tempEngineId));
+
+        _sub_nodes = std::move(tempNodes);
+        graph_attributes = std::move(tempAttrs);
+        _preferredEngineId = tempEngineId;
+        _graphDesc.reset();
+        _engineConfigDesc.reset();
+        _executionPlanDesc.reset();
+        return {};
+    }
+
+    /// Deserialize the graph from binary via the backend descriptor path.
+    ///
+    /// Creates a backend graph descriptor from serialized bytes and rebuilds
+    /// the frontend Graph. If a handle is provided, the descriptor is
+    /// finalized for full backend support. Graphs containing unsupported
+    /// operation types will fail.
+    ///
+    /// NOTE: This method will eventually replace the public
+    /// deserialize(hipdnnHandle_t, const std::vector<uint8_t>&) once the
+    /// FlatBuffer path is removed.
+    ///
+    /// @param handle The hipDNN handle (can be nullptr)
+    /// @param data The serialized graph bytes
+    /// @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
+    ///         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message()
+    ///         for the specific failure reason.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error deserialize_via_backend(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
+    {
+        std::vector<std::shared_ptr<graph::INode>> tempNodes;
+        graph::GraphAttributes tempAttrs;
+        std::optional<int64_t> tempEngineId;
+
+        auto [graphDesc, err]
+            = detail::deserializeAndUnpackGraph(handle, data, tempNodes, tempAttrs, tempEngineId);
+        if(err.is_bad())
+        {
+            return err;
+        }
+
+        _sub_nodes = std::move(tempNodes);
+        graph_attributes = std::move(tempAttrs);
+        _preferredEngineId = tempEngineId;
+        _graphDesc = std::move(graphDesc);
+        _engineConfigDesc.reset();
+        _executionPlanDesc.reset();
+        return {};
+    }
+
+    /// Get knobs for a specific engine, indexed by knob type, always using
+    /// the descriptor-based C-API path.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error get_knob_lookup_for_engine_via_descriptors(
+        int64_t engineId, std::unordered_map<KnobType_t, Knob>& knobs) const
+    {
+        knobs.clear();
+
+        std::vector<Knob> knobVector;
+        HIPDNN_CHECK_ERROR(get_knobs_for_engine_via_descriptors(engineId, knobVector));
+
+        for(auto& knob : knobVector)
+        {
+            knobs.try_emplace(knob.knobId(), std::move(knob));
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /// Create an execution plan with specific engine and knob settings,
+    /// always using the descriptor-based path. Exposed as protected so tests
+    /// can exercise this path directly without relying on the
+    /// HIPDNN_USE_DESCRIPTOR_API feature flag.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error create_execution_plan_ext_via_descriptors(int64_t engineId,
+                                                    const std::vector<KnobSetting>& settings)
+    {
+        HIPDNN_FE_LOG_INFO("Creating execution plans for graph " << graph_attributes.get_name());
+
+        if(!_graphDesc || !_graphDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Graph has not been built, build the operation graph first. Cannot create "
+                    "execution plan."};
+        }
+
+        std::unordered_map<KnobType_t, Knob> existingKnobs;
+        HIPDNN_CHECK_ERROR(get_knob_lookup_for_engine_via_descriptors(engineId, existingKnobs));
+        HIPDNN_CHECK_ERROR(initializeEngineConfig(engineId));
+
+        std::vector<KnobSetting> validatedSettings;
+        HIPDNN_CHECK_ERROR(
+            validateAndFilterKnobSettings(settings, existingKnobs, validatedSettings));
+        HIPDNN_CHECK_ERROR(
+            detail::applyKnobSettingsViaDescriptors(_engineConfigDesc->get(), validatedSettings));
+
+        return finalizeExecutionPlanDescriptor();
+    }
+
+public:
+    /**
+     * @brief Get available configuration knobs for a specific engine
+     *
+     * @param engineId The engine ID to query
+     * @param knobs Output vector of available Knob objects
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         if the graph has not been built. Call get_message() for the
+     *         specific failure reason.
+     *
+     * @see hipdnn_frontend::Knob, hipdnn_frontend::KnobSetting
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const
     {
@@ -698,15 +1101,37 @@ public:
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
             engineDesc, _graphDesc->get(), engineId));
 
+        if(useDescriptorApi())
+        {
+            HIPDNN_FE_LOG_INFO("Using descriptor-based API for knob retrieval");
+            return detail::unpackKnobsFromDescriptors(engineDesc.get(), knobs);
+        }
+
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getKnobsForEngine(knobs, engineDesc.get()));
 
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Get knobs for a specific engine, indexed by knob type
+     *
+     * Convenience wrapper around get_knobs_for_engine() that populates
+     * a map keyed by KnobType_t for direct lookup.
+     *
+     * @param engineId The engine ID to query
+     * @param knobs Output map populated with available knobs, keyed by type
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         if the graph has not been built. Call get_message() for the
+     *         specific failure reason.
+     *
+     * @see get_knobs_for_engine(), hipdnn_frontend::Knob
+     */
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_knob_lookup_for_engine(int64_t engineId,
                                      std::unordered_map<KnobType_t, Knob>& knobs) const
     {
+        knobs.clear();
+
         std::vector<Knob> knobVector;
         HIPDNN_CHECK_ERROR(get_knobs_for_engine(engineId, knobVector));
 
@@ -718,7 +1143,14 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    // Get ranked list of engine IDs based on heuristics
+    /**
+     * @brief Get a ranked list of engine IDs based on heuristics
+     *
+     * @param rankedEngineIds Output vector of engine IDs, ranked by expected performance
+     * @param modes Heuristic modes to use for ranking
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         on failure. Call get_message() for the specific failure reason.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
                                 const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
@@ -734,6 +1166,17 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Create execution plans using heuristics
+     *
+     * Queries the backend for available engines and selects based on the
+     * specified heuristic modes.
+     *
+     * @param modes Heuristic modes to use for engine selection
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         if the graph has not been built. Call get_message() for the
+     *         specific failure reason.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plans(const std::vector<HeuristicMode>& modes
                                  = {HeuristicMode::FALLBACK})
@@ -765,10 +1208,29 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    // Create execution plan with typed knob settings
+    /**
+     * @brief Create an execution plan with specific engine and knob settings
+     *
+     * Creates an execution plan for a specific engine, configured via knob
+     * settings. Settings for deprecated knobs or knobs that are not supported
+     * by the engine are skipped and a log message is added describing this.
+     *
+     * @param engineId The engine ID to use
+     * @param settings Knob settings to apply to the engine
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         if the graph has not been built. Call get_message() for the
+     *         specific failure reason.
+     *
+     * @see hipdnn_frontend::Knob, hipdnn_frontend::KnobSetting, get_knobs_for_engine()
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plan_ext(int64_t engineId, const std::vector<KnobSetting>& settings)
     {
+        if(useDescriptorApi())
+        {
+            return create_execution_plan_ext_via_descriptors(engineId, settings);
+        }
+
         HIPDNN_FE_LOG_INFO("Creating execution plans for graph " << graph_attributes.get_name());
 
         if(!_graphDesc || !_graphDesc->valid())
@@ -783,81 +1245,19 @@ public:
         HIPDNN_CHECK_ERROR(initializeEngineConfig(engineId));
 
         std::vector<KnobSetting> validatedSettings;
-        for(const auto& setting : settings)
-        {
-            auto knobIt = existingKnobs.find(setting.knobId());
-            if(knobIt == existingKnobs.end())
-            {
-                HIPDNN_FE_LOG_WARN("Ignoring knob " << setting.knobId()
-                                                    << " when creating execution plan for graph "
-                                                    << graph_attributes.get_name()
-                                                    << ".  Engine doesn't support chosen knob.");
-                continue;
-            }
+        HIPDNN_CHECK_ERROR(
+            validateAndFilterKnobSettings(settings, existingKnobs, validatedSettings));
+        HIPDNN_CHECK_ERROR(applyKnobSettingsToEngineConfig(validatedSettings));
 
-            const auto& knob = knobIt->second;
-
-            if(knob.isDeprecated())
-            {
-                HIPDNN_FE_LOG_WARN("Knob " << knob.knobId() << " has been marked as deprecated.");
-            }
-
-            HIPDNN_CHECK_ERROR(knob.validate(setting));
-
-            validatedSettings.emplace_back(setting);
-        }
-
-        if(!validatedSettings.empty())
-        {
-            std::vector<flatbuffers::DetachedBuffer> knobBuffers;
-            knobBuffers.reserve(validatedSettings.size());
-
-            for(const auto& setting : validatedSettings)
-            {
-                flatbuffers::FlatBufferBuilder builder;
-                auto knobSettingOffset = setting.packKnobSetting(builder);
-                builder.Finish(knobSettingOffset);
-                knobBuffers.push_back(builder.Release());
-            }
-
-            std::vector<hipdnnBackendFlatbufferData_t> flatbufferDataArray;
-            flatbufferDataArray.reserve(knobBuffers.size());
-
-            for(const auto& buffer : knobBuffers)
-            {
-                hipdnnBackendFlatbufferData_t fbData;
-                fbData.ptr = buffer.data();
-                fbData.size = buffer.size();
-                flatbufferDataArray.push_back(fbData);
-            }
-
-            HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
-                                                 _engineConfigDesc->get(),
-                                                 HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
-                                                 HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
-                                                 static_cast<int64_t>(flatbufferDataArray.size()),
-                                                 flatbufferDataArray.data()),
-                                             "Failed to set knob settings on engine config.");
-        }
-
-        // Finalize engine config after knobs have been set
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            detail::hipdnnBackend()->backendFinalize(_engineConfigDesc->get()),
-            "Failed to finalize engine config descriptor");
-
-        // Create execution plan descriptor
-        _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
-            HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
-
-        if(!_executionPlanDesc->valid())
-        {
-            return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    "Failed to create backend execution descriptor."};
-        }
-
-        return {ErrorCode::OK, ""};
+        return finalizeExecutionPlanDescriptor();
     }
 
+    /**
+     * @brief Verify that the execution plan is valid and supported
+     *
+     * @return ErrorCode::OK if valid, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         if the execution plan has not been created.
+     */
     Error check_support() // NOLINT(readability-identifier-naming)
     {
         HIPDNN_FE_LOG_INFO("Checking execution plan support for graph "
@@ -871,6 +1271,42 @@ public:
 
         return {ErrorCode::OK, ""};
     }
+
+    /**
+     * @brief Check if the graph is supported by any available engine plugin
+     * @param handle The hipDNN handle
+     * @param modes Heuristic modes for engine ranking
+     * @return Error with OK if supported, HIPDNN_BACKEND_ERROR if not
+     *
+     * Performs a lightweight check to determine if any engine plugin can
+     * handle this graph. If the graph has not yet been validated and built,
+     * those steps are performed automatically. The graph's internal state
+     * (operation graph descriptor) is preserved for subsequent operations.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error is_supported_ext(hipdnnHandle_t handle,
+                           const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+    {
+        HIPDNN_FE_LOG_INFO("Checking engine support for graph " << graph_attributes.get_name());
+
+        if(!_graphDesc || !_graphDesc->valid())
+        {
+            HIPDNN_CHECK_ERROR(validate());
+            HIPDNN_CHECK_ERROR(build_operation_graph(handle));
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
+            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/true));
+
+        HIPDNN_CHECK_ERROR(detail::hasEngineConfigs(engineHeuristicDesc.get()));
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /// @cond INTERNAL
+    // Serialization APIs are hidden from public docs — these will be
+    // removed in a future release.
 
     /// Serialize to FlatBuffer DetachedBuffer (const version)
     /// Returns error if tensor UIDs are not set
@@ -911,6 +1347,11 @@ public:
     /// Deserialize from FlatBuffer DetachedBuffer
     Error fromFlatBuffer(const flatbuffers::DetachedBuffer& buffer)
     {
+        if(useDescriptorApi())
+        {
+            return deserialize_via_backend(nullptr, {buffer.data(), buffer.data() + buffer.size()});
+        }
+
         auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
         return fromFlatBuffer(fbGraph);
     }
@@ -954,8 +1395,13 @@ public:
     }
 
     /// Deserialize from binary packed FlatBuffer
-    Error deserialize([[maybe_unused]] hipdnnHandle_t handle, const std::vector<uint8_t>& data)
+    Error deserialize(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
+        if(useDescriptorApi())
+        {
+            return deserialize_via_backend(handle, data);
+        }
+
         auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(data.data());
         return fromFlatBuffer(fbGraph);
     }
@@ -1015,18 +1461,27 @@ public:
         }
     }
 #endif
+    /// @endcond
 
+    /**
+     * @brief Finalize the execution plan
+     *
+     * Called internally by build() after create_execution_plans().
+     *
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         on failure. Call get_message() for the specific failure reason.
+     */
     Error build_plans() // NOLINT(readability-identifier-naming)
     {
         HIPDNN_FE_LOG_INFO("Building plans for graph " << graph_attributes.get_name());
 
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            detail::hipdnnBackend()->backendSetAttribute(_executionPlanDesc->get(),
-                                                         HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                         1,
-                                                         &_engineConfigDesc->get()),
-            "Failed to set the engine config on execution plan.");
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
+                                             _executionPlanDesc->get(),
+                                             HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                             1,
+                                             static_cast<const void*>(&_engineConfigDesc->get())),
+                                         "Failed to set the engine config on execution plan.");
 
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
             detail::hipdnnBackend()->backendFinalize(_executionPlanDesc->get()),
@@ -1035,9 +1490,38 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Build the complete graph and create execution plans
+     *
+     * This is the main method to prepare a graph for execution. It performs:
+     * 1. Graph validation
+     * 2. Operation graph building
+     * 3. Execution plan creation
+     * 4. Execution plan support verification
+     * 5. Plan finalization
+     *
+     * @note This method does not allow setting engine knobs. If you need
+     * to configure knobs, use get_ranked_engine_ids(), get_knobs_for_engine(),
+     * and create_execution_plan_ext() instead.
+     *
+     * @code{.cpp}
+     * hipdnnHandle_t handle;
+     * hipdnnCreate(&handle);
+     * Error err = graph.build(handle);
+     * if(err.is_bad()) { handleError(); }
+     * @endcode
+     *
+     * @param handle The hipDNN handle
+     * @param modes Heuristic modes for engine selection
+     * @param policy Build plan policy (currently only HEURISTICS_CHOICE is used)
+     * @param do_multithreaded_builds Reserved for future use
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
+     *         ErrorCode::ATTRIBUTE_NOT_SET / ErrorCode::HIPDNN_BACKEND_ERROR
+     *         on failure. Call get_message() for the specific failure reason.
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     Error build(hipdnnHandle_t handle,
-                std::vector<HeuristicMode> const& modes = {HeuristicMode::FALLBACK},
+                const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK},
                 [[maybe_unused]] BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE,
                 [[maybe_unused]] bool do_multithreaded_builds = false)
     // NOLINTEND(readability-identifier-naming)
@@ -1058,6 +1542,15 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Get the workspace memory size required for execution
+     *
+     * Call this after build() to determine how much workspace memory to allocate.
+     *
+     * @param workspaceSize Output parameter for the workspace size in bytes
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         on failure. Call get_message() for the specific failure reason.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_workspace_size(int64_t& workspaceSize) const
     {
@@ -1073,6 +1566,26 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Execute the graph with tensor pointers mapped by tensor handles
+     *
+     * @param handle The hipDNN handle
+     * @param tensorLookup Map from std::shared_ptr<TensorAttributes> (tensor handles) to device
+     * memory pointers
+     * @param workspace Pointer to workspace memory (can be nullptr if size is 0)
+     * @return ErrorCode::OK on success, ErrorCode::INVALID_VALUE if a tensor
+     *         in the lookup is null or missing a UID, or
+     *         ErrorCode::HIPDNN_BACKEND_ERROR on backend failure. Call
+     *         get_message() for the specific failure reason.
+     *
+     * @code{.cpp}
+     * std::unordered_map<std::shared_ptr<TensorAttributes>, void*> tensorLookup = {
+     *     {inputTensor, d_input},
+     *     {outputTensor, d_output}
+     * };
+     * graph.execute(handle, tensorLookup, workspace);
+     * @endcode
+     */
     Error execute(hipdnnHandle_t handle,
                   std::unordered_map<std::shared_ptr<TensorAttributes>, void*>& tensorLookup,
                   void* workspace) const
@@ -1094,6 +1607,24 @@ public:
         return execute(handle, variantPack, workspace);
     }
 
+    /**
+     * @brief Execute the graph with tensor pointers mapped by UID
+     *
+     * @param handle The hipDNN handle
+     * @param variantPack Map from tensor UID to device memory pointers
+     * @param workspace Pointer to workspace memory (can be nullptr if size is 0)
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         on failure. Call get_message() for the specific failure reason.
+     *
+     * @code{.cpp}
+     * std::unordered_map<int64_t, void*> variantPack = {
+     *     {0, d_input},   // UID 0 -> input tensor
+     *     {1, d_weights}, // UID 1 -> weights
+     *     {2, d_output}   // UID 2 -> output tensor
+     * };
+     * graph.execute(handle, variantPack, workspace);
+     * @endcode
+     */
     Error execute(hipdnnHandle_t handle,
                   std::unordered_map<int64_t, void*>& variantPack,
                   void* workspace) const
@@ -1123,7 +1654,7 @@ public:
                                              HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
                                              HIPDNN_TYPE_VOID_PTR,
                                              static_cast<int64_t>(variantPackValues.size()),
-                                             variantPackValues.data()),
+                                             static_cast<const void*>(variantPackValues.data())),
                                          "failed to set the variant pack data pointers.");
 
         HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
@@ -1139,7 +1670,7 @@ public:
                                                          HIPDNN_ATTR_VARIANT_PACK_WORKSPACE,
                                                          HIPDNN_TYPE_VOID_PTR,
                                                          1,
-                                                         &workspace),
+                                                         static_cast<const void*>(&workspace)),
             "failed to set the variant pack unique ids.");
 
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -1154,24 +1685,29 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /// @brief Get the graph name
     const std::string& get_name() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_name();
     }
 
+    /// @brief Get the compute data type (precision used inside operations, e.g. accumulation)
     DataType get_compute_data_type() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_compute_data_type();
     }
+    /// @brief Get the intermediate data type (precision of virtual tensors between fused ops)
     DataType get_intermediate_data_type() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_intermediate_data_type();
     }
+    /// @brief Get the I/O data type (precision of graph input and output tensors)
     DataType get_io_data_type() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_io_data_type();
     }
 
+    /// @brief Get the preferred engine ID, if set
     // NOLINTBEGIN(readability-identifier-naming)
     std::optional<int64_t> get_preferred_engine_id_ext() const
     // NOLINTEND(readability-identifier-naming)
@@ -1179,29 +1715,84 @@ public:
         return _preferredEngineId;
     }
 
-    // Forwarding setters
+    /// @brief Set the graph name
     Graph& set_name(const std::string& name) // NOLINT(readability-identifier-naming)
     {
         graph_attributes.set_name(name);
         return *this;
     }
+    /**
+     * @brief Set the compute data type (precision for internal math)
+     *
+     * Controls the accumulation precision inside operations — the dtype
+     * used for arithmetic during execution. For mixed-precision training
+     * you might store tensors in fp16 (`io_data_type = HALF`) but
+     * accumulate in fp32 (`compute_data_type = FLOAT`) for numerical
+     * stability.
+     */
     Graph& set_compute_data_type(DataType computeType) // NOLINT(readability-identifier-naming)
     {
         graph_attributes.set_compute_data_type(computeType);
         return *this;
     }
+    /**
+     * @brief Set the intermediate data type for virtual tensors between fused ops
+     *
+     * When the backend fuses multiple operations, intermediate results
+     * are stored in this precision. Usually matches compute_data_type.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Graph& set_intermediate_data_type(DataType intermediateType)
     {
         graph_attributes.set_intermediate_data_type(intermediateType);
         return *this;
     }
+    /**
+     * @brief Set the I/O data type — the default precision for graph inputs/outputs
+     *
+     * This is the dtype of the tensors you feed in and read out.
+     * Individual tensors can override this by calling
+     * TensorAttributes::set_data_type().
+     */
     Graph& set_io_data_type(DataType ioType) // NOLINT(readability-identifier-naming)
     {
         graph_attributes.set_io_data_type(ioType);
         return *this;
     }
 
+    /** @brief Batch normalization forward pass for training
+     *
+     * Normalizes the input across the batch dimension and computes statistics.
+     *
+     * Formula:
+     * @code
+     * mean[c]    = (1/m) * sum(x[n,c,h,w])        where m = N*H*W
+     * var[c]     = (1/m) * sum((x[n,c,h,w] - mean[c])^2)
+     * invVar[c]  = 1 / sqrt(var[c] + epsilon)
+     * y[n,c,h,w] = scale[c] * (x[n,c,h,w] - mean[c]) * invVar[c] + bias[c]
+     * @endcode
+     *
+     * When previous running statistics are provided:
+     * @code
+     * nextRunningMean = (1 - momentum) * prevRunningMean + momentum * mean
+     * nextRunningVar  = (1 - momentum) * prevRunningVar  + momentum * var
+     * @endcode
+     *
+     * @param x Input tensor with batch, channel, and spatial dimensions
+     * @param scale Per-channel scale (gamma)
+     * @param bias Per-channel bias (beta)
+     * @param attributes Configuration including epsilon; optionally
+     *        prev_running_mean, prev_running_variance, and momentum for
+     *        exponential moving average of running statistics
+     * @return Array of 5 output tensors:
+     *         - [0] y: Normalized output (same shape as x)
+     *         - [1] mean: Per-channel batch mean
+     *         - [2] invVariance: Per-channel batch inverse variance
+     *         - [3] nextRunningMean: Updated running mean (nullptr if not tracking)
+     *         - [4] nextRunningVariance: Updated running variance (nullptr if not tracking)
+     *
+     * @see hipdnn_frontend::graph::BatchnormAttributes
+     */
     std::array<std::shared_ptr<TensorAttributes>, 5>
         batchnorm(std::shared_ptr<TensorAttributes> x,
                   std::shared_ptr<TensorAttributes> scale,
@@ -1244,6 +1835,31 @@ public:
         return {y, meanOut, invVarianceOut, nextRunningMean, nextRunningVariance};
     }
 
+    /** @brief Batch normalization backward pass
+     *
+     * Computes gradients with respect to input, scale, and bias.
+     *
+     * Formula (using per-channel indexing for illustration):
+     * @code
+     * x_hat[c]  = (x[c] - mean[c]) * invVariance[c]
+     * dbias[c]  = sum(dy[c])                           // sum over batch and spatial dims
+     * dscale[c] = sum(dy[c] * x_hat[c])                // sum over batch and spatial dims
+     * dx[c]     = scale[c] * invVariance[c] * (dy[c] - (dbias[c] + x_hat[c] * dscale[c]) / m)
+     * @endcode
+     * where m = number of elements per channel (batch size * spatial dims).
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. output, same shape as x)
+     * @param x Original input from forward pass
+     * @param scale Per-channel scale (gamma)
+     * @param attributes Configuration; optionally set saved mean and inverse
+     *        variance from the forward pass via set_saved_mean_and_inv_variance()
+     * @return Array of 3 output tensors:
+     *         - [0] dx: Gradient w.r.t. input (same shape as x)
+     *         - [1] dscale: Per-channel gradient w.r.t. scale
+     *         - [2] dbias: Per-channel gradient w.r.t. bias
+     *
+     * @see hipdnn_frontend::graph::BatchnormBackwardAttributes
+     */
     std::array<std::shared_ptr<TensorAttributes>, 3>
         batchnorm_backward(std::shared_ptr<TensorAttributes> dy, // NOLINT
                            std::shared_ptr<TensorAttributes> x,
@@ -1272,6 +1888,25 @@ public:
         return {dx, dscale, dbias};
     }
 
+    /** @brief Batch normalization inference
+     *
+     * Applies pre-computed normalization statistics for inference.
+     *
+     * Formula:
+     * @code
+     * y[n,c,h,w] = scale[c] * (x[n,c,h,w] - mean[c]) * invVariance[c] + bias[c]
+     * @endcode
+     *
+     * @param x Input tensor with batch, channel, and spatial dimensions
+     * @param mean Pre-computed per-channel mean
+     * @param invVariance Pre-computed per-channel inverse variance (1/sqrt(var+epsilon))
+     * @param scale Per-channel scale (gamma)
+     * @param bias Per-channel bias (beta)
+     * @param attributes Additional configuration
+     * @return y: Normalized output tensor (same shape as x)
+     *
+     * @see hipdnn_frontend::graph::BatchnormInferenceAttributes
+     */
     std::shared_ptr<TensorAttributes>
         batchnorm_inference(std::shared_ptr<TensorAttributes> x, // NOLINT
                             std::shared_ptr<TensorAttributes> mean,
@@ -1300,6 +1935,27 @@ public:
         return y;
     }
 
+    /** @brief Batch normalization inference with variance and epsilon tensors
+     *
+     * Variant that accepts variance (instead of inverse variance) and epsilon
+     * as separate input tensors, computing inverse variance internally.
+     *
+     * Formula:
+     * @code
+     * y[n,c,h,w] = scale[c] * (x[n,c,h,w] - mean[c]) / sqrt(variance[c] + epsilon) + bias[c]
+     * @endcode
+     *
+     * @param x Input tensor with batch, channel, and spatial dimensions
+     * @param mean Pre-computed per-channel mean
+     * @param variance Pre-computed per-channel variance
+     * @param scale Per-channel scale (gamma)
+     * @param bias Per-channel bias (beta)
+     * @param epsilon Epsilon tensor for numerical stability (pass-by-value scalar)
+     * @param attributes Additional configuration
+     * @return y: Normalized output tensor (same shape as x)
+     *
+     * @see hipdnn_frontend::graph::BatchnormInferenceAttributesVarianceExt
+     */
     std::shared_ptr<TensorAttributes>
         batchnorm_inference_variance_ext(std::shared_ptr<TensorAttributes> x, // NOLINT
                                          std::shared_ptr<TensorAttributes> mean,
@@ -1331,6 +1987,233 @@ public:
         return y;
     }
 
+    /** @brief Layer normalization forward pass
+     *
+     * Normalizes the input across the last k feature dimensions, where k
+     * is inferred from the scale tensor shape. By default, all dimensions
+     * except the first (batch) dimension are normalized.
+     *
+     * Common configurations:
+     * - **Transformer**: x=[B, S, D], scale=[D] → normalizes over D (k=1)
+     * - **Vision**: x=[N, C, H, W], scale=[1, C, H, W] → normalizes over C, H, W (k=3)
+     *
+     * Formula:
+     * @code
+     * mean    = (1/m) * sum(x) over normalized dims, where m = product of normalized dims
+     * var     = (1/m) * sum((x - mean)^2) over normalized dims
+     * xhat    = (x - mean) / sqrt(var + epsilon)
+     * y       = scale * xhat + bias
+     * @endcode
+     *
+     * In training phase, mean and inverse variance are also returned as outputs.
+     *
+     * @param x Input tensor [N, D1, D2, ..., Dk]
+     * @param scale Per-feature scale (gamma) tensor, matching the normalized
+     *        dimensions. Can be full-rank with batch dims set to 1
+     *        (e.g. [1, C, H, W]) or reduced-rank with batch dims omitted
+     *        (e.g. [C, H, W])
+     * @param bias Per-feature bias (beta) tensor (same shape as scale)
+     * @param attributes Configuration including epsilon and forward phase
+     * @return Array of 3 output tensors:
+     *         - [0] y: Normalized output (same shape as x)
+     *         - [1] mean: Computed mean (nullptr in inference mode)
+     *         - [2] invVariance: Computed inverse variance (nullptr in inference mode)
+     *
+     * @see hipdnn_frontend::graph::LayernormAttributes
+     */
+    std::array<std::shared_ptr<TensorAttributes>, 3>
+        layernorm(std::shared_ptr<TensorAttributes> x,
+                  std::shared_ptr<TensorAttributes> scale,
+                  std::shared_ptr<TensorAttributes> bias,
+                  LayernormAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Layernorm_" + std::to_string(_sub_nodes.size()));
+        }
+
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        if(scale->get_name().empty())
+        {
+            scale->set_name(attributes.get_name() + "::SCALE");
+        }
+        if(bias->get_name().empty())
+        {
+            bias->set_name(attributes.get_name() + "::BIAS");
+        }
+
+        auto epsilon = attributes.get_epsilon();
+        if(epsilon && epsilon->get_name().empty())
+        {
+            epsilon->set_name(attributes.get_name() + "::EPSILON");
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        std::shared_ptr<TensorAttributes> mean = nullptr;
+        std::shared_ptr<TensorAttributes> invVariance = nullptr;
+
+        if(attributes.get_forward_phase() != NormFwdPhase::INFERENCE)
+        {
+            mean = outputTensor(attributes.get_name() + "::MEAN");
+            invVariance = outputTensor(attributes.get_name() + "::INV_VARIANCE");
+            attributes.set_mean(mean);
+            attributes.set_inv_variance(invVariance);
+        }
+
+        attributes.set_x(std::move(x));
+        attributes.set_scale(std::move(scale));
+        attributes.set_bias(std::move(bias));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<LayerNormNode>(std::move(attributes), graph_attributes));
+
+        return {y, mean, invVariance};
+    }
+
+    /** @brief RMS normalization forward pass
+     *
+     * Normalizes the input using the root mean square across the channel
+     * dimension, without mean subtraction. Unlike layer normalization,
+     * RMSNorm does not center the activations.
+     *
+     * Formula:
+     * @code
+     * rms[n,h,w]  = sqrt((1/C) * sum_c x[n,c,h,w]^2 + epsilon)
+     * y[n,c,h,w]  = scale[c] * (x[n,c,h,w] / rms[n,h,w]) + bias[c]
+     * @endcode
+     * where C = number of channels.
+     *
+     * In training phase, the inverse RMS is also returned as an output for use
+     * in the backward pass.
+     *
+     * @param x Input tensor [N, C, H, W, ...] (minimum 2 dimensions)
+     * @param scale Per-channel scale (gamma) tensor [1, C, 1, 1, ...]
+     * @param attributes Configuration including epsilon, forward phase,
+     *        and optional bias [1, C, 1, 1, ...]
+     * @return Array of 2 output tensors:
+     *         - [0] y: Normalized output (same shape as x)
+     *         - [1] invRms: Inverse RMS values (nullptr in inference mode)
+     *
+     * @see hipdnn_frontend::graph::RMSNormAttributes, hipdnn_frontend::graph::LayernormAttributes
+     */
+    std::array<std::shared_ptr<TensorAttributes>, 2>
+        rmsnorm(std::shared_ptr<TensorAttributes> x,
+                std::shared_ptr<TensorAttributes> scale,
+                RMSNormAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("RMSNorm_" + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        std::shared_ptr<TensorAttributes> invRmsOut;
+        if(attributes.get_forward_phase() == NormFwdPhase::TRAINING)
+        {
+            invRmsOut = outputTensor(attributes.get_name() + "::INV_RMS");
+            attributes.set_inv_rms(invRmsOut);
+        }
+
+        attributes.set_x(std::move(x));
+        attributes.set_scale(std::move(scale));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<RMSNormNode>(std::move(attributes), graph_attributes));
+
+        return {y, invRmsOut};
+    }
+
+    /** @brief Block-scale dequantization
+     *
+     * Dequantizes a blocked low-precision tensor using per-block scale factors.
+     * Supports MX blocked data-types (mxfp8, mxbfp8, mxfp6, mxfp4).
+     *
+     * @param x Input blocked tensor to dequantize
+     * @param scale Scale tensor for block dequantization
+     * @param attributes Configuration: block_size, is_negative_scale
+     * @return y: Dequantized output tensor
+     *
+     * @see hipdnn_frontend::graph::BlockScaleDequantizeAttributes
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes>
+        block_scale_dequantize(std::shared_ptr<TensorAttributes> x,
+                               std::shared_ptr<TensorAttributes> scale,
+                               BlockScaleDequantizeAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("BlockScaleDequantize_" + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_scale(std::move(scale));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<BlockScaleDequantizeNode>(std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
+    /** @brief Block-scale quantization
+     *
+     * Quantizes an input tensor into a blocked low-precision representation
+     * with per-block scale factors. Supports MX blocked data-types
+     * (mxfp8, mxbfp8, mxfp6, mxfp4).
+     *
+     * @param x Input tensor to quantize
+     * @param attributes Configuration: block_size, axis, transpose
+     * @return [y, scale]: Quantized output tensor and computed scale tensor
+     *
+     * @see hipdnn_frontend::graph::BlockScaleQuantizeAttributes
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 2>
+        block_scale_quantize(std::shared_ptr<TensorAttributes> x,
+                             BlockScaleQuantizeAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("BlockScaleQuantize_" + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+        auto scale = outputTensor(attributes.get_name() + "::Scale");
+
+        attributes.set_x(std::move(x));
+        attributes.set_y(y);
+        attributes.set_scale(scale);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<BlockScaleQuantizeNode>(std::move(attributes), graph_attributes));
+
+        return {y, scale};
+    }
+
+    /** @brief Unary element-wise operation
+     *
+     * Applies an element-wise function to a single input tensor. The operation
+     * is specified by PointwiseAttributes::set_mode().
+     *
+     * @param in0 Input tensor (arbitrary shape)
+     * @param attributes Configuration specifying the pointwise mode and any
+     *        mode-specific parameters (e.g., relu_lower_clip, elu_alpha)
+     * @return out0: Output tensor (same shape as in0)
+     *
+     * @see hipdnn_frontend::graph::PointwiseAttributes, hipdnn_frontend::PointwiseMode
+     */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 PointwiseAttributes attributes)
 
@@ -1354,6 +2237,18 @@ public:
         return out0;
     }
 
+    /** @brief Binary element-wise operation
+     *
+     * Applies an element-wise function to two input tensors. Inputs support
+     * broadcasting.
+     *
+     * @param in0 First input tensor
+     * @param in1 Second input tensor (broadcastable to in0 shape)
+     * @param attributes Configuration specifying the pointwise mode
+     * @return out0: Output tensor (broadcast shape of in0 and in1)
+     *
+     * @see hipdnn_frontend::graph::PointwiseAttributes, hipdnn_frontend::PointwiseMode
+     */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 std::shared_ptr<TensorAttributes> in1,
                                                 PointwiseAttributes attributes)
@@ -1383,6 +2278,20 @@ public:
         return out0;
     }
 
+    /** @brief Ternary element-wise operation
+     *
+     * Applies an element-wise function to three input tensors.
+     * Currently only BINARY_SELECT uses this overload:
+     * `out[i] = in0[i] ? in1[i] : in2[i]`
+     *
+     * @param in0 Condition tensor (selector mask)
+     * @param in1 Value selected where in0 is non-zero
+     * @param in2 Value selected where in0 is zero
+     * @param attributes Configuration specifying the pointwise mode
+     * @return out0: Output tensor
+     *
+     * @see hipdnn_frontend::graph::PointwiseAttributes, hipdnn_frontend::PointwiseMode
+     */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 std::shared_ptr<TensorAttributes> in1,
                                                 std::shared_ptr<TensorAttributes> in2,
@@ -1418,6 +2327,97 @@ public:
         return out0;
     }
 
+    /** @brief Reduction operation
+     *
+     * Reduces an input tensor along one or more dimensions using the specified
+     * reduction mode. Creates a new output tensor managed by the graph.
+     *
+     * @param x Input tensor (arbitrary shape)
+     * @param attributes Configuration specifying the reduction mode
+     * @return y: Output tensor (graph-managed, shape inferred during build)
+     *
+     * @see ReductionAttributes, ReductionMode
+     */
+    std::shared_ptr<TensorAttributes> reduction(std::shared_ptr<TensorAttributes> x,
+                                                ReductionAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Reduction_" + std::to_string(_sub_nodes.size()));
+        }
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ReductionNode>(std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
+    /** @brief Reduction operation with explicit output tensor
+     *
+     * Reduces an input tensor along one or more dimensions using the specified
+     * reduction mode. The caller provides the output tensor, allowing explicit
+     * control over output shape for partial reductions.
+     *
+     * @param x Input tensor (arbitrary shape)
+     * @param y Output tensor (caller-provided, reduced shape)
+     * @param attributes Configuration specifying the reduction mode
+     * @return y: The provided output tensor
+     *
+     * @see ReductionAttributes, ReductionMode
+     */
+    std::shared_ptr<TensorAttributes> reduction(std::shared_ptr<TensorAttributes> x,
+                                                std::shared_ptr<TensorAttributes> y,
+                                                ReductionAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Reduction_" + std::to_string(_sub_nodes.size()));
+        }
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        if(y->get_name().empty())
+        {
+            y->set_name(attributes.get_name() + "::Y");
+        }
+
+        attributes.set_x(std::move(x));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ReductionNode>(std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
+    /** @brief Matrix multiplication
+     *
+     * Computes the matrix product of two tensors with optional batch dimensions.
+     *
+     * Formula:
+     * @code
+     * C[..., i, j] = sum_k( A[..., i, k] * B[..., k, j] )
+     * @endcode
+     *
+     * Batch dimensions are broadcast when they differ (one must be divisible
+     * by the other).
+     *
+     * @param a Left input matrix [..., M, K]
+     * @param b Right input matrix [..., K, N]
+     * @param attributes Additional configuration
+     * @return c: Output matrix [..., M, N]
+     *
+     * @see hipdnn_frontend::graph::MatmulAttributes
+     */
     std::shared_ptr<TensorAttributes> matmul(std::shared_ptr<TensorAttributes> a,
                                              std::shared_ptr<TensorAttributes> b,
                                              MatmulAttributes attributes)
@@ -1447,6 +2447,225 @@ public:
         return c;
     }
 
+    /** @brief Add a custom operation to the graph
+     *
+     * Custom ops let users coordinate directly with plugins without requiring
+     * hipDNN to understand the operation. hipDNN transports the tensor I/O
+     * topology and an opaque byte payload, and the target plugin interprets
+     * the payload.
+     *
+     * @param inputs Input tensors (variable length)
+     * @param numOutputs Number of output tensors to create
+     * @param attributes Custom op configuration including opaque payload
+     * @return Vector of output tensors
+     *
+     * @note This operation requires a matching custom plugin to find an engine.
+     *       It will fail engine selection unless a plugin is loaded that explicitly
+     *       handles the specified `custom_op_id`.
+     *
+     * @see hipdnn_frontend::graph::CustomOpAttributes
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::vector<std::shared_ptr<TensorAttributes>>
+        custom_op(std::vector<std::shared_ptr<TensorAttributes>> inputs,
+                  size_t numOutputs,
+                  CustomOpAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("CustomOp_" + attributes.get_custom_op_id() + "_"
+                                + std::to_string(_sub_nodes.size()));
+        }
+
+        for(size_t i = 0; i < inputs.size(); ++i)
+        {
+            if(inputs[i] && inputs[i]->get_name().empty())
+            {
+                inputs[i]->set_name(attributes.get_name() + "::input_" + std::to_string(i));
+            }
+        }
+
+        std::vector<std::shared_ptr<TensorAttributes>> outputTensors;
+        outputTensors.reserve(numOutputs);
+        for(size_t i = 0; i < numOutputs; ++i)
+        {
+            outputTensors.push_back(
+                outputTensor(attributes.get_name() + "::output_" + std::to_string(i)));
+        }
+
+        attributes.set_inputs(std::move(inputs));
+        attributes.set_outputs(outputTensors);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<CustomOpNode>(std::move(attributes), graph_attributes));
+
+        return outputTensors;
+    }
+
+    /** @brief Scaled dot-product attention forward pass
+     *
+     * Computes scaled dot-product attention:
+     * @code
+     * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+     * @endcode
+     *
+     * Supports optional causal masking, attention bias, dropout, paged
+     * attention, and FP8 quantization via descale/scale tensors.
+     *
+     * @param q Query tensor [B, H, S_q, D]
+     * @param k Key tensor [B, H, S_kv, D]
+     * @param v Value tensor [B, H, S_kv, D]
+     * @param attributes Configuration: masking, dropout, attention scale,
+     *        paged attention, and other SDPA options
+     * @return [o, stats]: Output tensor [B, H, S_q, D] and optional softmax
+     *         statistics (nullptr if generate_stats is not set)
+     *
+     * @see hipdnn_frontend::graph::SdpaAttributes
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 2> sdpa(std::shared_ptr<TensorAttributes> q,
+                                                          std::shared_ptr<TensorAttributes> k,
+                                                          std::shared_ptr<TensorAttributes> v,
+                                                          SdpaAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("SdpaFprop_" + std::to_string(_sub_nodes.size()));
+        }
+        if(q->get_name().empty())
+        {
+            q->set_name(attributes.get_name() + "::Q");
+        }
+        if(k->get_name().empty())
+        {
+            k->set_name(attributes.get_name() + "::K");
+        }
+        if(v->get_name().empty())
+        {
+            v->set_name(attributes.get_name() + "::V");
+        }
+
+        auto o = outputTensor(attributes.get_name() + "::O");
+        std::array<std::shared_ptr<TensorAttributes>, 2> ret = {o, nullptr};
+
+        attributes.set_q(std::move(q));
+        attributes.set_k(std::move(k));
+        attributes.set_v(std::move(v));
+        attributes.set_o(o);
+
+        if(attributes.generate_stats.has_value() && attributes.generate_stats.value())
+        {
+            HIPDNN_FE_LOG_INFO("SDPA node '" << attributes.get_name()
+                                             << "' is configured to generate stats output.");
+            auto stats = outputTensor(attributes.get_name() + "::STATS");
+            attributes.set_stats(stats);
+            ret[1] = stats;
+        }
+
+        _sub_nodes.emplace_back(
+            std::make_shared<SdpaFpropNode>(std::move(attributes), graph_attributes));
+
+        return ret;
+    }
+
+    /** @brief Scaled dot-product attention backward pass
+     *
+     * Computes gradients dQ, dK, dV for the backward pass of SDPA:
+     * @code
+     * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+     * @endcode
+     *
+     * Requires softmax statistics (logsumexp) from the forward pass, which
+     * are generated when the forward pass is configured with
+     * `set_generate_stats(true)`.
+     *
+     * @param q Query tensor from forward pass [B, H, S_q, D]
+     * @param k Key tensor from forward pass [B, H, S_kv, D]
+     * @param v Value tensor from forward pass [B, H, S_kv, D]
+     * @param o Output tensor from forward pass [B, H, S_q, D]
+     * @param dO Upstream gradient tensor [B, H, S_q, D]
+     * @param stats Softmax statistics (logsumexp) from forward pass [B, H, S_q, 1]
+     * @param attributes Configuration: masking, dropout, attention scale
+     * @return Array of 3 output tensors:
+     *         - [0] dQ: Gradient w.r.t. query [B, H, S_q, D]
+     *         - [1] dK: Gradient w.r.t. key [B, H, S_kv, D]
+     *         - [2] dV: Gradient w.r.t. value [B, H, S_kv, D]
+     *
+     * @see hipdnn_frontend::graph::SdpaBackwardAttributes, hipdnn_frontend::graph::SdpaAttributes
+     */
+    std::array<std::shared_ptr<TensorAttributes>, 3>
+        sdpa_backward(std::shared_ptr<TensorAttributes> q, // NOLINT
+                      std::shared_ptr<TensorAttributes> k,
+                      std::shared_ptr<TensorAttributes> v,
+                      std::shared_ptr<TensorAttributes> o,
+                      std::shared_ptr<TensorAttributes> dO,
+                      std::shared_ptr<TensorAttributes> stats,
+                      SdpaBackwardAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("SdpaBprop_" + std::to_string(_sub_nodes.size()));
+        }
+        if(q->get_name().empty())
+        {
+            q->set_name(attributes.get_name() + "::Q");
+        }
+        if(k->get_name().empty())
+        {
+            k->set_name(attributes.get_name() + "::K");
+        }
+        if(v->get_name().empty())
+        {
+            v->set_name(attributes.get_name() + "::V");
+        }
+        if(dO->get_name().empty())
+        {
+            dO->set_name(attributes.get_name() + "::dO");
+        }
+
+        auto dq = outputTensor(attributes.get_name() + "::dQ");
+        auto dk = outputTensor(attributes.get_name() + "::dK");
+        auto dv = outputTensor(attributes.get_name() + "::dV");
+
+        attributes.set_q(std::move(q));
+        attributes.set_k(std::move(k));
+        attributes.set_v(std::move(v));
+        attributes.set_o(std::move(o));
+        attributes.set_do(std::move(dO));
+        attributes.set_stats(std::move(stats));
+        attributes.set_dq(dq);
+        attributes.set_dk(dk);
+        attributes.set_dv(dv);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<SdpaBpropNode>(std::move(attributes), graph_attributes));
+
+        return {dq, dk, dv};
+    }
+
+    /** @brief Convolution forward pass
+     *
+     * Computes a cross-correlation (or convolution) of the input with filters.
+     *
+     * Example for 2D (using NCHW notation for illustration):
+     * @code
+     * y[n,k,oh,ow] = sum_c,r,s  x[n, c, oh*stride_h + r*dilation_h - pad_h,
+     *                                     ow*stride_w + s*dilation_w - pad_w]
+     *                           * w[k, c, r, s]
+     *
+     * output_dim = floor((input + pad_before + pad_after
+     *              - dilation * (kernel - 1) - 1) / stride) + 1
+     * @endcode
+     *
+     * @param x Input activation tensor (batch, channels, spatial dimensions)
+     * @param w Filter/weight tensor (output channels, input channels, filter spatial dims)
+     * @param attributes Convolution parameters: padding, stride, dilation,
+     *        convolution mode
+     * @return y: Output activation tensor
+     *
+     * @see hipdnn_frontend::graph::ConvFpropAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_fprop(std::shared_ptr<TensorAttributes> x,
                                                  std::shared_ptr<TensorAttributes> w,
@@ -1478,6 +2697,27 @@ public:
         return y;
     }
 
+    /** @brief Convolution data gradient (backward data)
+     *
+     * Computes the gradient of the loss with respect to the convolution input,
+     * given the output gradient and the filter weights. Used during
+     * backpropagation.
+     *
+     * Example for 2D (using NCHW notation for illustration):
+     * @code
+     * dx[n,c,h,w] = sum_k,r,s  dy[n, k, p, q] * w[k, c, r, s]
+     *   where p = (h + pad_h - r*dilation_h) / stride_h  (integer, in [0, H_out))
+     *         q = (w + pad_w - s*dilation_w) / stride_w  (integer, in [0, W_out))
+     * @endcode
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. conv output)
+     * @param w Filter/weight tensor
+     * @param attributes Convolution parameters: padding, stride, dilation
+     *        (must match forward pass)
+     * @return dx: Gradient w.r.t. input (same shape as forward input)
+     *
+     * @see hipdnn_frontend::graph::ConvDgradAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_dgrad(std::shared_ptr<TensorAttributes> dy,
                                                  std::shared_ptr<TensorAttributes> w,
@@ -1509,6 +2749,27 @@ public:
         return dx;
     }
 
+    /** @brief Convolution weight gradient (backward weights)
+     *
+     * Computes the gradient of the loss with respect to the filter weights,
+     * given the output gradient and the original input. Used during
+     * backpropagation.
+     *
+     * Example for 2D (using NCHW notation for illustration):
+     * @code
+     * dw[k,c,r,s] = sum_n,p,q  dy[n, k, p, q] * x[n, c, h, w]
+     *   where h = p*stride_h - pad_h + r*dilation_h
+     *         w = q*stride_w - pad_w + s*dilation_w
+     * @endcode
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. conv output)
+     * @param x Original input activation tensor
+     * @param attributes Convolution parameters: padding, stride, dilation
+     *        (must match forward pass)
+     * @return dw: Gradient w.r.t. filter weights (same shape as forward weights)
+     *
+     * @see hipdnn_frontend::graph::ConvWgradAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_wgrad(std::shared_ptr<TensorAttributes> dy,
                                                  std::shared_ptr<TensorAttributes> x,
@@ -1540,6 +2801,11 @@ public:
         return dw;
     }
 
+    /**
+     * @brief Set the preferred engine ID for execution plan selection
+     * @param engineId Engine ID to prefer, or std::nullopt to clear
+     * @return Reference to this Graph for method chaining
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     Graph& set_preferred_engine_id_ext(std::optional<int64_t> engineId)
     // NOLINTEND(readability-identifier-naming)
@@ -1548,6 +2814,11 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Set the preferred engine by name
+     * @param engineName Engine name to look up; empty string clears the preference
+     * @return Reference to this Graph for method chaining
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     Graph& set_preferred_engine_id_ext(const std::string& engineName)
     // NOLINTEND(readability-identifier-naming)
@@ -1566,6 +2837,25 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Create a new tensor with similar properties to an existing tensor
+     * @param tensor The tensor to copy properties from
+     * @param name Optional name for the new tensor
+     * @return Shared pointer to the newly created TensorAttributes
+     *
+     * Creates a new TensorAttributes object by copying properties from the provided
+     * tensor, but clears the UID and optionally assigns a new name. This is useful
+     * for creating tensors with similar dimensions and data types but representing
+     * different data.
+     *
+     * @code{.cpp}
+     * // Create a tensor similar to x but with a different UID
+     * auto y = Graph::tensor_like(x, "output");
+     * y->set_uid(2);
+     * @endcode
+     *
+     * @see tensor() for creating a tensor with all properties preserved
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     static std::shared_ptr<TensorAttributes>
         tensor_like(const std::shared_ptr<TensorAttributes>& tensor, const std::string& name = "")
@@ -1579,6 +2869,31 @@ public:
         return newTensor;
     }
 
+    /**
+     * @brief Create a new tensor from existing tensor attributes
+     * @param tensor The tensor attributes to copy
+     * @return Shared pointer to the newly created TensorAttributes
+     *
+     * Creates a new TensorAttributes object as a copy of the provided tensor,
+     * preserving all properties including UID. This is the standard way to
+     * create a tensor for use in graph operations.
+     *
+     * @code{.cpp}
+     * // Create a tensor from attributes
+     * auto x = Graph::tensor(TensorAttributes()
+     *              .set_dim({1, 64, 28, 28})
+     *              .set_stride({50176, 784, 28, 1})
+     *              .set_data_type(DataType::HALF)
+     *              .set_uid(0));
+     * @endcode
+     *
+     * @note This creates a tensor descriptor (shape, type, strides) only.
+     *       No device memory is allocated. Device pointers are provided
+     *       at execution time via the variant pack.
+     *
+     * @see execute() for passing device memory pointers at execution time
+     * @see tensor_like() for creating a tensor with cleared UID and custom name
+     */
     static std::shared_ptr<TensorAttributes> tensor(const TensorAttributes& tensor)
     {
         auto newTensor = std::make_shared<TensorAttributes>(tensor);

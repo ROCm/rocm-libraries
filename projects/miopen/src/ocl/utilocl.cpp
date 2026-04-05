@@ -1,35 +1,11 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/datatype.hpp>
 #include <miopen/float_equal.hpp>
 #include <miopen/kernel_cache.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/util.hpp>
-
-#include <boost/range/adaptors.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -647,20 +623,155 @@ float Col2Im3dGPU(const Handle& handle,
     return handle.GetKernelTime();
 }
 
-float Im2ColGPU(
-    const Handle& handle,
-    std::size_t spatial_dim,
-    ConstData_t im,
-    std::size_t im_offset,
-    std::size_t in_c,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& in_spatial,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& wei_spatial,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& out_spatial,
-    const std::vector<int>& pad_spatial,
-    const std::vector<int>& stride_spatial,
-    const std::vector<int>& dilation_spatial,
-    Data_t col,
-    miopenDataType_t type)
+float Col2Im3dGPUBatched(const Handle& handle,
+                         ConstData_t col,
+                         uint32_t out_d,
+                         uint32_t out_h,
+                         uint32_t out_w,
+                         uint32_t wei_d,
+                         uint32_t wei_h,
+                         uint32_t wei_w,
+                         uint32_t pad_d,
+                         uint32_t pad_h,
+                         uint32_t pad_w,
+                         uint32_t stride_d,
+                         uint32_t stride_h,
+                         uint32_t stride_w,
+                         uint32_t dilation_d,
+                         uint32_t dilation_h,
+                         uint32_t dilation_w,
+                         uint32_t in_c,
+                         uint32_t in_d,
+                         uint32_t in_h,
+                         uint32_t in_w,
+                         uint32_t batch_count,
+                         uint64_t col_batch_stride,
+                         Data_t im,
+                         uint64_t im_batch_stride,
+                         uint64_t im_offset,
+                         miopenDataType_t type)
+{
+    std::string program_name = "MIOpenCol2Im3d.cpp";
+    std::string kernel_name  = "Col2Im3dUBatched";
+
+    // clang-format off
+    std::string network_config =
+        "c" + std::to_string(in_c) +
+        "i" + std::to_string(in_d) +
+        "_" + std::to_string(in_h) +
+        "_" + std::to_string(in_w) +
+        "w" + std::to_string(wei_d) +
+        "_" + std::to_string(wei_h) +
+        "_" + std::to_string(wei_w) +
+        "p" + std::to_string(pad_d) +
+        "_" + std::to_string(pad_h) +
+        "_" + std::to_string(pad_w) +
+        "s" + std::to_string(stride_d) +
+        "_" + std::to_string(stride_h) +
+        "_" + std::to_string(stride_w) +
+        "d" + std::to_string(dilation_d) +
+        "_" + std::to_string(dilation_h) +
+        "_" + std::to_string(dilation_w) +
+        "t" + std::to_string(type);
+    // clang-format on
+
+    auto&& kernels = handle.GetKernels("miopenCol2Im3dBatched", network_config);
+
+    if(!kernels.empty())
+    {
+        auto kernel = kernels.front();
+        kernel(col,
+               out_d,
+               out_h,
+               out_w,
+               wei_d,
+               wei_h,
+               wei_w,
+               pad_d,
+               pad_h,
+               pad_w,
+               stride_d,
+               stride_h,
+               stride_w,
+               dilation_d,
+               dilation_h,
+               dilation_w,
+               in_c,
+               in_d,
+               in_h,
+               in_w,
+               batch_count,
+               col_batch_stride,
+               im,
+               im_batch_stride,
+               im_offset);
+    }
+    else
+    {
+        std::size_t index_size = static_cast<size_t>(batch_count) * in_c * out_d * out_h * out_w *
+                                 wei_d * wei_w * wei_h * sizeof(ConstData_t);
+
+        const bool use_64_bit_index = index_size > 0xffffffffULL;
+
+        std::string params = GetDataTypeKernelParams(type);
+        params += use_64_bit_index ? " -DMIOPEN_USE_64BIT_INDEX=1" : " -DMIOPEN_USE_64BIT_INDEX=0";
+        // Force a distinct code-object cache key for the batched entry point.
+        params += " -DMIOPEN_COL2IM3D_BATCHED_VARIANT=1";
+
+        size_t global_threads =
+            static_cast<size_t>(batch_count) * static_cast<size_t>(in_c) * in_d * in_h * in_w;
+        size_t local_threads = std::min(WG_SIZE, global_threads);
+        if(global_threads % local_threads != 0)
+        {
+            global_threads = ((global_threads / local_threads) + 1) * local_threads;
+        }
+        const std::vector<size_t> vgd{global_threads, 1, 1};
+        const std::vector<size_t> vld{local_threads, 1, 1};
+
+        handle.AddKernel(
+            "miopenCol2Im3dBatched", network_config, program_name, kernel_name, vld, vgd, params)(
+            col,
+            out_d,
+            out_h,
+            out_w,
+            wei_d,
+            wei_h,
+            wei_w,
+            pad_d,
+            pad_h,
+            pad_w,
+            stride_d,
+            stride_h,
+            stride_w,
+            dilation_d,
+            dilation_h,
+            dilation_w,
+            in_c,
+            in_d,
+            in_h,
+            in_w,
+            batch_count,
+            col_batch_stride,
+            im,
+            im_batch_stride,
+            im_offset);
+    }
+    return handle.GetKernelTime();
+}
+
+float Im2ColGPU(const Handle& handle,
+                std::size_t spatial_dim,
+                ConstData_t im,
+                std::size_t im_offset,
+                std::size_t in_c,
+                const std::vector<size_t>& in_spatial,
+                const std::vector<size_t>& wei_spatial,
+                const std::vector<size_t>& out_spatial,
+                const std::vector<int>& pad_spatial,
+                const std::vector<int>& stride_spatial,
+                const std::vector<int>& dilation_spatial,
+                Data_t col,
+                miopenDataType_t type)
 {
     switch(spatial_dim)
     {
@@ -716,20 +827,19 @@ float Im2ColGPU(
     }
 }
 
-float Col2ImGPU(
-    const Handle& handle,
-    std::size_t spatial_dim,
-    ConstData_t col,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& out_spatial,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& wei_spatial,
-    const std::vector<int>& pad_spatial,
-    const std::vector<int>& stride_spatial,
-    const std::vector<int>& dilation_spatial,
-    std::size_t in_c,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& in_spatial,
-    Data_t im,
-    std::size_t im_offset,
-    miopenDataType_t type)
+float Col2ImGPU(const Handle& handle,
+                std::size_t spatial_dim,
+                ConstData_t col,
+                const std::vector<size_t>& out_spatial,
+                const std::vector<size_t>& wei_spatial,
+                const std::vector<int>& pad_spatial,
+                const std::vector<int>& stride_spatial,
+                const std::vector<int>& dilation_spatial,
+                std::size_t in_c,
+                const std::vector<size_t>& in_spatial,
+                Data_t im,
+                std::size_t im_offset,
+                miopenDataType_t type)
 {
     switch(spatial_dim)
     {

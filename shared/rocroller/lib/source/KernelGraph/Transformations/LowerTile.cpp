@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2026 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
@@ -133,7 +110,8 @@ namespace rocRoller
             addLoadMacroTileCTPreTiled(KernelGraph&                     graph,
                                        std::vector<DeferredConnection>& connections,
                                        int                              macTileTag,
-                                       std::vector<int> const&          sdim)
+                                       std::vector<int> const&          sdim,
+                                       bool                             updatePreTiledSubDimStrides)
         {
             namespace CT = rocRoller::KernelGraph::CoordinateGraph;
             using ET     = rocRoller::Expression::EvaluationTime;
@@ -142,26 +120,63 @@ namespace rocRoller
 
             auto tile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
-            auto sdimPTXTile = sdim[0];
-            auto sdimPTYTile = sdim[1];
-            auto sdimX       = sdim[2];
-            auto sdimY       = sdim[3];
+            auto sdimX       = sdim[0];
+            auto sdimY       = sdim[1];
+            auto sdimPTXTile = sdim[2];
+            auto sdimPTYTile = sdim[3];
 
-            auto numPTTilesX = graph.coordinates.get<SubDimension>(sdimPTXTile)->size;
-            auto numPTTilesY = graph.coordinates.get<SubDimension>(sdimPTYTile)->size;
+            auto sizeX = graph.coordinates.get<SubDimension>(sdimX)->size;
+            auto sizeY = graph.coordinates.get<SubDimension>(sdimY)->size;
 
-            auto sizePTTileXExpr = graph.coordinates.get<SubDimension>(sdimX)->size;
+            auto sizePTTileXExpr = graph.coordinates.get<SubDimension>(sdimPTXTile)->size;
             AssertFatal(
                 evaluationTimes(sizePTTileXExpr)[ET::Translate],
                 "Size of pre-tile tile must be known at translate time (ie, must be literal).");
 
-            auto sizePTTileYExpr = graph.coordinates.get<SubDimension>(sdimY)->size;
+            auto sizePTTileYExpr = graph.coordinates.get<SubDimension>(sdimPTYTile)->size;
             AssertFatal(
                 evaluationTimes(sizePTTileYExpr)[ET::Translate],
                 "Size of pre-tile tile must be known at translate time (ie, must be literal).");
 
             auto sizePTTileX = getUnsignedInt(evaluate(sizePTTileXExpr));
             auto sizePTTileY = getUnsignedInt(evaluate(sizePTTileYExpr));
+
+            if(updatePreTiledSubDimStrides)
+            {
+                auto const strideDataType = DataType::UInt32;
+
+                auto stridePTTileXExpr = graph.coordinates.get<SubDimension>(sdimPTXTile)->stride;
+                auto stridePTTileX     = getUnsignedInt(evaluate(stridePTTileXExpr));
+                auto columnMajor       = stridePTTileX == 1u;
+
+                auto subDimX = graph.coordinates.get<SubDimension>(sdimX).value();
+                auto subDimY = graph.coordinates.get<SubDimension>(sdimY).value();
+
+                auto tileSizeX = literal(sizePTTileX, strideDataType);
+                auto tileSizeY = literal(sizePTTileY, strideDataType);
+
+                if(columnMajor)
+                {
+                    subDimX.stride = tileSizeX * tileSizeY;
+                    subDimY.stride = (subDimX.size / tileSizeX) * tileSizeX * tileSizeY;
+                }
+                else
+                {
+                    subDimX.stride = (subDimY.size / tileSizeY) * tileSizeX * tileSizeY;
+                    subDimY.stride = tileSizeX * tileSizeY;
+                }
+
+                graph.coordinates.setElement(sdimX, subDimX);
+                graph.coordinates.setElement(sdimY, subDimY);
+            }
+
+            auto numPTTilesX = tileCeilDivide(sizeX, sizePTTileX);
+            auto numPTTilesY = tileCeilDivide(sizeY, sizePTTileY);
+
+            Log::debug("PreTiled CT: numPTTilesX: {}", toString(numPTTilesX));
+            Log::debug("PreTiled CT: numPTTilesY: {}", toString(numPTTilesY));
+            Log::debug("PreTiled CT: sizePTTileXExpr: {}", toString(sizePTTileXExpr));
+            Log::debug("PreTiled CT: sizePTTileYExpr: {}", toString(sizePTTileYExpr));
 
             auto nPTX = graph.coordinates.addElement(CT::WaveTileNumber(0, numPTTilesX, nullptr));
             auto nPTY = graph.coordinates.addElement(CT::WaveTileNumber(1, numPTTilesY, nullptr));
@@ -170,27 +185,42 @@ namespace rocRoller
             auto iPTY
                 = graph.coordinates.addElement(CT::WaveTileIndex(1, literal(sizePTTileY), nullptr));
 
-            graph.coordinates.addElement(PassThrough(), {sdimPTXTile}, {nPTX});
-            graph.coordinates.addElement(PassThrough(), {sdimPTYTile}, {nPTY});
+            graph.coordinates.addElement(PassThrough(), {sdimX}, {nPTX});
+            graph.coordinates.addElement(PassThrough(), {sdimY}, {nPTY});
 
-            graph.coordinates.addElement(PassThrough(), {sdimX}, {iPTX});
-            graph.coordinates.addElement(PassThrough(), {sdimY}, {iPTY});
+            graph.coordinates.addElement(PassThrough(), {sdimPTXTile}, {iPTX});
+            graph.coordinates.addElement(PassThrough(), {sdimPTYTile}, {iPTY});
 
-            connections.push_back(DC<SubDimension>(sdimX, 0));
-            connections.push_back(DC<SubDimension>(sdimY, 1));
+            connections.push_back(DC<SubDimension>(sdimPTXTile, 0));
+            connections.push_back(DC<SubDimension>(sdimPTYTile, 1));
 
-            auto numTilesX = tileCeilDivide(numPTTilesX * literal(sizePTTileX), tile.sizes[0]);
-            auto numTilesY = tileCeilDivide(numPTTilesY * literal(sizePTTileY), tile.sizes[1]);
+            auto numTilesX = tileCeilDivide(sizeX, tile.sizes[0]);
+            auto numTilesY = tileCeilDivide(sizeY, tile.sizes[1]);
+
+            Log::debug("PreTiled CT: numTilesX: {}", toString(numTilesX));
+            Log::debug("PreTiled CT: numTilesY: {}", toString(numTilesY));
 
             auto nX = graph.coordinates.addElement(tile.tileNumber(0, numTilesX));
             auto nY = graph.coordinates.addElement(tile.tileNumber(1, numTilesY));
             auto iX = graph.coordinates.addElement(tile.tileIndex(0));
             auto iY = graph.coordinates.addElement(tile.tileIndex(1));
 
-            AssertFatal(tile.sizes[0] % sizePTTileX == 0, "Pre-tile size mismatch.");
-            AssertFatal(tile.sizes[1] % sizePTTileY == 0, "Pre-tile size mismatch.");
-            AssertFatal(tile.sizes[0] / sizePTTileX > 0, "Bad pre-tile size.");
-            AssertFatal(tile.sizes[1] / sizePTTileY > 0, "Bad pre-tile size.");
+            AssertFatal(tile.sizes[0] % sizePTTileX == 0,
+                        "Pre-tile size mismatch: tile.sizes[0] must be divisible by sizePTTileX.",
+                        ShowValue(tile.sizes[0]),
+                        ShowValue(sizePTTileX));
+            AssertFatal(tile.sizes[1] % sizePTTileY == 0,
+                        "Pre-tile size mismatch: tile.sizes[1] must be divisible by sizePTTileY.",
+                        ShowValue(tile.sizes[1]),
+                        ShowValue(sizePTTileY));
+            AssertFatal(tile.sizes[0] / sizePTTileX > 0,
+                        "Bad pre-tile size: tile.sizes[0] must be greater than sizePTTileX.",
+                        ShowValue(tile.sizes[0]),
+                        ShowValue(sizePTTileX));
+            AssertFatal(tile.sizes[1] / sizePTTileY > 0,
+                        "Bad pre-tile size: tile.sizes[1] must be greater than sizePTTileY.",
+                        ShowValue(tile.sizes[1]),
+                        ShowValue(sizePTTileY));
 
             auto numPTTilesPerTileX = tile.sizes[0] / sizePTTileX;
             auto numPTTilesPerTileY = tile.sizes[1] / sizePTTileY;
@@ -230,10 +260,12 @@ namespace rocRoller
             addLoadMacroTileCT(KernelGraph&                     graph,
                                std::vector<DeferredConnection>& connections,
                                int                              macTileTag,
-                               std::vector<int> const&          sdim)
+                               std::vector<int> const&          sdim,
+                               bool                             updatePreTiledSubDimStrides)
         {
             if(sdim.size() == 4)
-                return addLoadMacroTileCTPreTiled(graph, connections, macTileTag, sdim);
+                return addLoadMacroTileCTPreTiled(
+                    graph, connections, macTileTag, sdim, updatePreTiledSubDimStrides);
 
             auto macTile   = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto sdimX     = sdim[0];

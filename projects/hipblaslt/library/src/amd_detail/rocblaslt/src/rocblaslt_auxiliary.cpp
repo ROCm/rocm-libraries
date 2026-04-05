@@ -38,6 +38,7 @@
 #include <dlfcn.h>
 #include <link.h>
 #include <unistd.h>
+#include <cstring>
 #endif
 
 #include "UserDrivenTuningParser.hpp"
@@ -397,11 +398,9 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
     constexpr bool strided_batch = true;
     constexpr bool grouped_gemm  = false;
 
-    int8_t alpha_1[16] = {0}; // use dScaleAlphaVec instead, original alpha => 1.0
-    if(scaleAlphaVec)
-    {
-        setTo1(matmul_descr->compute_type, (void*)alpha_1, &alpha);
-    }
+    // If scaleAlphaVec is enabled, we override alpha to 1.0 and rely on scaleAlphaVec instead.
+    // IMPORTANT: alpha must not point to stack memory: ASAN caught stack-use-after-return where
+    // alpha was set to a stack-local buffer (alpha_1) and then used later during solution search.
 
     RocblasltContractionProblem problem{opA,
                                         opB,
@@ -461,6 +460,15 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         handle->Synchronizer,
                                         swizzleA,
                                         swizzleB};
+
+    if(scaleAlphaVec)
+    {
+        // Fill owned storage with "1" for the compute type, and repoint alpha into it.
+        const void* alphaTmp = problem.alpha;
+        std::memset(problem.alpha_owned.data(), 0, problem.alpha_owned.size());
+        setTo1(matmul_descr->compute_type, (void*)problem.alpha_owned.data(), &alphaTmp);
+        problem.alpha = alphaTmp;
+    }
 
     return problem;
 }
@@ -1858,6 +1866,7 @@ rocblaslt_status
             if(rocblaslt_status_success
                == getAllSolutions(prob, handle, allSolutionsResults, pref->max_workspace_bytes))
             {
+                status = rocblaslt_status_success;
                 int oriReturnAlgoCount = *returnAlgoCount;
                 for(int i = 0;
                     *returnAlgoCount < requestedAlgoCount && i < allSolutionsResults.size();
@@ -2088,10 +2097,6 @@ rocblaslt_status
         }
 
         log_api(__func__, "returnAlgoCount", results.size());
-        if(status != rocblaslt_status_success)
-        {
-            throw status;
-        }
 
         int duplicated_counts = 0;
         static TensileLite::StringSet emptySet({});
@@ -2112,6 +2117,7 @@ rocblaslt_status
                == getAllSolutions(
                    gemmData, handle, gemmType, allSolutionsResults, maxWorkspaceBytes))
             {
+                status = rocblaslt_status_success;
                 int oriReturnAlgoCount = results.size();
                 for(int i = 0;
                     results.size() < requestedAlgoCount && i < allSolutionsResults.size();
@@ -2148,6 +2154,11 @@ rocblaslt_status
         }
 
         log_api(__func__, "duplicated counts from getAll", duplicated_counts);
+
+        if(status != rocblaslt_status_success)
+        {
+            throw status;
+        }
     }
     catch(const rocblaslt_status& status)
     {

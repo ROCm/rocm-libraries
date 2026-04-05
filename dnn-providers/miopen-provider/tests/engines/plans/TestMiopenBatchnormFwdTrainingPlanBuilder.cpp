@@ -6,11 +6,10 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
-#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
-
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenHandle.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 
 using namespace miopen_plugin;
@@ -21,7 +20,7 @@ class TestMiopenBatchnormFwdTrainingPlanBuilder : public ::testing::Test
 {
 protected:
     MiopenBatchnormFwdTrainingPlanBuilder _planBuilder;
-    HipdnnEnginePluginHandle _dummyHandle;
+    HipdnnMiopenHandle _dummyHandle;
 };
 
 // ============================================================================
@@ -405,7 +404,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, GetWorkspaceSizeReturnsZero)
 {
     MockGraph mockGraph;
 
-    size_t workspaceSize = _planBuilder.getWorkspaceSize(_dummyHandle, mockGraph);
+    HipdnnMiopenSettings settings;
+    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, settings);
 
     EXPECT_EQ(workspaceSize, 0u);
 }
@@ -415,7 +415,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanSetsPlanForValidSingl
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnMiopenContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
@@ -427,7 +427,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanSetsPlanForValidTwoNo
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnMiopenContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
@@ -465,7 +465,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanThrowsForUnsupportedN
 
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnMiopenContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
@@ -917,7 +917,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForMix
 
     std::vector<int64_t> stridesNCHW = {588, 196, 14, 1}; // NCHW
     std::vector<int64_t> dimsNCHW = {1, 3, 14, 14};
-    std::vector<int64_t> stridesNHWC = {3, 14 * 14 * 3, 14 * 3, 3}; // NHWC
+    std::vector<int64_t> stridesNHWC = {3, 14L * 14L * 3L, 14L * 3L, 3}; // NHWC
     std::vector<int64_t> dimsNHWC = {1, 3, 14, 14};
     std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
     std::vector<int64_t> derivedDims = {1, 3, 1, 1};
