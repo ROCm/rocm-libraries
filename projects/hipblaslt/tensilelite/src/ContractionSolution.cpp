@@ -2135,9 +2135,12 @@ namespace TensileLite
         }
         // Adding the batchmode kernel argument for post GSU kernel to determine 
         // how to index the batch dimension in Strided Batch versus General Batched.
-        uint32_t batch_mode = problem.batchMode();
-        args.template append<uint32_t>("batchMode", batch_mode);
-        args.template append<uint32_t>("additionalPaddingPerBatch", additional_padding_per_batch_general_batch);        
+        if(problemType.groupedGemm == false)
+        {
+            uint32_t batch_mode = problem.batchMode();
+            args.template append<uint32_t>("batchMode", batch_mode);
+            args.template append<uint32_t>("additionalPaddingPerBatch", additional_padding_per_batch_general_batch);        
+        }
     }
 
     template <bool T_Debug>

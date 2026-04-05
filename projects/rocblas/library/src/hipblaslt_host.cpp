@@ -142,10 +142,7 @@ namespace
     do                                                                                             \
     {                                                                                              \
         if(SOL_COUNT == 0)                                                                         \
-        {                                                                                          \
-            rocblas_cerr << "error: NO solution found! at " __FILE__ ":" << __LINE__ << std::endl; \
             return rocblas_status_internal_error;                                                  \
-        }                                                                                          \
     } while(0)
 #define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)               \
     do                                                                                  \
