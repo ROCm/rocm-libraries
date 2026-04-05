@@ -26,20 +26,11 @@ class WaveRaceState {
 public:
   WaveRaceState(int vgprCount, WaveId waveId, RaceDetector *detector);
 
-  /// Register in-flight memory events. execMask is passed explicitly (no
+  /// Register an in-flight memory event. execMask is passed explicitly (no
   /// dependency on Wave).
-  void registerGlobalToVgprEvent(int pc, const std::vector<uint32_t> &registers,
-                                 uint64_t execMask, uint8_t byteMask = 0xF);
-  void registerVgprToGlobalEvent(int pc, const std::vector<uint32_t> &registers,
-                                 uint64_t execMask);
-  void registerLdsToVgprEvent(int pc, const std::vector<uint32_t> &registers,
-                              const IntervalSet &ldsIntervals,
-                              uint64_t execMask, uint8_t byteMask = 0xF);
-  void registerVgprToLdsEvent(int pc, const std::vector<uint32_t> &registers,
-                              const IntervalSet &ldsIntervals,
-                              uint64_t execMask);
-  void registerGlobalToLdsEvent(int pc, const IntervalSet &ldsIntervals,
-                                uint64_t execMask);
+  void registerEvent(int pc, MemoryEventType type,
+                     const std::vector<uint32_t> &registers, uint64_t execMask,
+                     uint8_t byteMask = 0xF, IntervalSet ldsIntervals = {});
 
   /// Retire global memory events until at most vmcnt remain outstanding.
   void sWaitCntVmcnt(int vmcnt);

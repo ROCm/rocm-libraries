@@ -366,7 +366,7 @@ void runRaggedComplex(const ArchParam &arch) {
 //     __syncthreads();
 //     data[tid] = temp[256 - tid - 1];
 //   }
-void runLdsReverse(const ArchParam &arch) {
+void runLdsReverse(const ArchParam &arch, bool enableRaceChecks = true) {
   auto emulator = loadEmulator(arch, "lds_reverse_2.s");
 
   int N = 256;
@@ -375,7 +375,7 @@ void runLdsReverse(const ArchParam &arch) {
   int *d_data = h_data.data();
 
   emulator.addKernarg(0, &d_data);
-  emulator.run(Dim3d(0), {256, 1, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(0), {256, 1, 1}, {.raceChecks = enableRaceChecks});
 
   std::vector<std::string> errors;
   for (int i = 0; i < N; ++i) {
@@ -450,7 +450,7 @@ void runNaiveMatmul(const ArchParam &arch) {
 
 // HIP source (lds_transpose.s):
 //   Load MxN tile row-major into LDS, barrier, read transposed, store.
-void runLdsTranspose(const ArchParam &arch) {
+void runLdsTranspose(const ArchParam &arch, bool enableRaceChecks = true) {
   auto emulator = loadEmulator(arch, "lds_transpose.s");
 
   // Non-square dimensions with bounds checking.
@@ -474,7 +474,7 @@ void runLdsTranspose(const ArchParam &arch) {
   emulator.addKernarg(3, &N);
 
   // LDS size = M * N * sizeof(int) = 10 * 12 * 4 = 480 bytes
-  emulator.run(Dim3d(0), {16, 16, 1}, {.raceChecks = true});
+  emulator.run(Dim3d(0), {16, 16, 1}, {.raceChecks = enableRaceChecks});
 
   // Verify: out is NxM row-major, out[j][i] should be in[i][j]
   for (int j = 0; j < N; ++j) {
@@ -597,6 +597,8 @@ TEST(Gfx1151, DoubleEvens) { runDoubleEvens(kGfx1151); }
 
 TEST(Gfx942, LdsReverse) { runLdsReverse(kGfx942); }
 TEST(Gfx1151, LdsReverse) { runLdsReverse(kGfx1151); }
+TEST(Gfx942, LdsReverseNoRaceChecks) { runLdsReverse(kGfx942, false); }
+TEST(Gfx1151, LdsReverseNoRaceChecks) { runLdsReverse(kGfx1151, false); }
 
 TEST(Gfx942, BF16Adder) { runBF16Adder(kGfx942); }
 TEST(Gfx1151, BF16Adder) { runBF16Adder(kGfx1151); }
@@ -606,6 +608,10 @@ TEST(Gfx1151, NaiveMatmul) { runNaiveMatmul(kGfx1151); }
 
 TEST(Gfx942, LdsTranspose) { runLdsTranspose(kGfx942); }
 TEST(Gfx1151, LdsTranspose) { runLdsTranspose(kGfx1151); }
+TEST(Gfx942, LdsTransposeNoRaceChecks) { runLdsTranspose(kGfx942, false); }
+TEST(Gfx1151, LdsTransposeNoRaceChecks) {
+  runLdsTranspose(kGfx1151, false);
+}
 
 TEST(Gfx942, F16Adder) { runF16Adder(kGfx942); }
 TEST(Gfx1151, F16Adder) { runF16Adder(kGfx1151); }

@@ -1151,7 +1151,8 @@ TEST(GlobalToLds, CrossWaveRace) {
   IntervalSet intervals;
   intervals.append(0, 64);
   auto *rs0 = wave0.getRaceState();
-  rs0->registerGlobalToLdsEvent(/*pc=*/10, intervals, wave0.getExecU64());
+  rs0->registerEvent(/*pc=*/10, MemoryEventType::GLOBAL_TO_LDS, {},
+                     wave0.getExecU64(), 0xF, std::move(intervals));
   rs0->sWaitCntVmcnt(0);
 
   // Wave 0 can read safely (WAVE_COMPLETE for its own wave).
@@ -1180,7 +1181,8 @@ TEST(GlobalToLds, CrossWaveSafeAfterBarrier) {
   IntervalSet intervals;
   intervals.append(0, 64);
   auto *rs0 = wave0.getRaceState();
-  rs0->registerGlobalToLdsEvent(/*pc=*/10, intervals, wave0.getExecU64());
+  rs0->registerEvent(/*pc=*/10, MemoryEventType::GLOBAL_TO_LDS, {},
+                     wave0.getExecU64(), 0xF, std::move(intervals));
   rs0->sWaitCntVmcnt(0);
 
   // Simulate barrier: flush all wave-complete events.

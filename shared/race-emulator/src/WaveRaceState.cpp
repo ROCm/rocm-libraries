@@ -17,73 +17,17 @@ WaveRaceState::WaveRaceState(int vgprCount, WaveId waveId,
   }
 }
 
-void WaveRaceState::registerGlobalToVgprEvent(
-    int pc, const std::vector<uint32_t> &regIds, uint64_t execMask,
-    uint8_t byteMask) {
-  auto eventId = detector->allocateEventId(
-      waveId, pc, MemoryEventType::GLOBAL_TO_VGPR, regIds, execMask, byteMask);
-
+void WaveRaceState::registerEvent(int pc, MemoryEventType type,
+                                  const std::vector<uint32_t> &regIds,
+                                  uint64_t execMask, uint8_t byteMask,
+                                  IntervalSet ldsIntervals) {
+  auto sw = profileScope("registerEvent");
+  auto eventId = detector->allocateEventId(waveId, pc, type, regIds, execMask,
+                                           byteMask, ldsIntervals);
   for (auto reg : regIds) {
     vgprMemoryEvents[reg].push_back(eventId);
-    regEventCountInc(MemoryEventType::GLOBAL_TO_VGPR, reg);
+    regEventCountInc(type, reg);
   }
-
-  waveMemoryEvents.push_back(eventId);
-}
-
-void WaveRaceState::registerVgprToGlobalEvent(
-    int pc, const std::vector<uint32_t> &regIds, uint64_t execMask) {
-  auto eventId = detector->allocateEventId(
-      waveId, pc, MemoryEventType::VGPR_TO_GLOBAL, regIds, execMask);
-
-  for (auto reg : regIds) {
-    vgprMemoryEvents[reg].push_back(eventId);
-    regEventCountInc(MemoryEventType::VGPR_TO_GLOBAL, reg);
-  }
-
-  waveMemoryEvents.push_back(eventId);
-}
-
-void WaveRaceState::registerLdsToVgprEvent(int pc,
-                                           const std::vector<uint32_t> &regIds,
-                                           const IntervalSet &ldsIntervals,
-                                           uint64_t execMask,
-                                           uint8_t byteMask) {
-  auto sw = profileScope("registerLdsToVgprEvent");
-  auto eventId =
-      detector->allocateEventId(waveId, pc, MemoryEventType::LDS_TO_VGPR,
-                                regIds, execMask, byteMask, ldsIntervals);
-  for (auto reg : regIds) {
-    vgprMemoryEvents[reg].push_back(eventId);
-    regEventCountInc(MemoryEventType::LDS_TO_VGPR, reg);
-  }
-
-  waveMemoryEvents.push_back(eventId);
-}
-
-void WaveRaceState::registerVgprToLdsEvent(int pc,
-                                           const std::vector<uint32_t> &regIds,
-                                           const IntervalSet &ldsIntervals,
-                                           uint64_t execMask) {
-  auto sw = profileScope("registerVgprToLdsEvent");
-  auto eventId =
-      detector->allocateEventId(waveId, pc, MemoryEventType::VGPR_TO_LDS,
-                                regIds, execMask, 0xF, ldsIntervals);
-
-  for (auto reg : regIds) {
-    vgprMemoryEvents[reg].push_back(eventId);
-    regEventCountInc(MemoryEventType::VGPR_TO_LDS, reg);
-  }
-
-  waveMemoryEvents.push_back(eventId);
-}
-
-void WaveRaceState::registerGlobalToLdsEvent(int pc,
-                                             const IntervalSet &ldsIntervals,
-                                             uint64_t execMask) {
-  auto eventId =
-      detector->allocateEventId(waveId, pc, MemoryEventType::GLOBAL_TO_LDS, {},
-                                execMask, 0xF, ldsIntervals);
   waveMemoryEvents.push_back(eventId);
 }
 

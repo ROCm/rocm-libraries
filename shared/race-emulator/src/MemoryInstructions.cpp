@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
-#include <iostream>
+#include <numeric>
 #include <ostream>
 #include <stdexcept>
 #include <string>
@@ -23,6 +23,12 @@
 namespace raceemulator {
 
 namespace {
+
+std::vector<uint32_t> registerIndexRange(int base, int count) {
+  std::vector<uint32_t> indices(count);
+  std::iota(indices.begin(), indices.end(), static_cast<uint32_t>(base));
+  return indices;
+}
 
 template <typename T_Storage>
 void executeLoadAndWrite(Wave &wave, int lane, uint64_t finalAddr,
@@ -87,13 +93,8 @@ public:
       }
     }
 
-    std::vector<uint32_t> waveWritten;
-    for (int i = 0; i < numElements; ++i) {
-      waveWritten.push_back(dst.index + i);
-    }
-
     int n = numElements;
-    return [&wave, dst, src0, src1, hasSaddr, instOffset, n, waveWritten]() {
+    return [&wave, dst, src0, src1, hasSaddr, instOffset, n]() {
       auto run = [&](int lane) {
         uint64_t finalAddr = 0;
 
@@ -116,7 +117,8 @@ public:
       wave.runExecConditionedForLanes(run);
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        rs->registerGlobalToVgprEvent(pc, waveWritten, wave.getExecU64());
+        rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
+                          registerIndexRange(dst.index, n), wave.getExecU64());
       }
       return pc + 1;
     };
@@ -164,14 +166,8 @@ public:
       }
     }
 
-    std::vector<uint32_t> waveRead;
-    for (int i = 0; i < numElements; ++i) {
-      waveRead.push_back(dataSrc.index + i);
-    }
-
     int n = numElements;
-    return [&wave, addrSrc, dataSrc, baseSrc, hasSaddr, instOffset, n,
-            waveRead]() {
+    return [&wave, addrSrc, dataSrc, baseSrc, hasSaddr, instOffset, n]() {
       auto run = [&](int lane) {
         uint64_t finalAddr = 0;
         if (hasSaddr) {
@@ -203,7 +199,8 @@ public:
       wave.runExecConditionedForLanes(run);
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        rs->registerVgprToGlobalEvent(pc, waveRead, wave.getExecU64());
+        rs->registerEvent(pc, MemoryEventType::VGPR_TO_GLOBAL,
+                          registerIndexRange(dataSrc.index, n), wave.getExecU64());
       }
       return pc + 1;
     };
@@ -447,6 +444,7 @@ public:
     if (config.useLds) {
       int bytesPerLane = n * static_cast<int>(sizeof(T));
       return [&wave, forEachElement, bytesPerLane]() {
+        auto *rs = wave.getRaceState();
         IntervalSet intervals;
         uint32_t m0 = wave.getM0();
         forEachElement(
@@ -454,13 +452,16 @@ public:
               int ldsAddr =
                   static_cast<int>(m0 + lane * bytesPerLane + i * sizeof(T));
               wave.getWorkgroup().getLds().write<T>(ldsAddr, val);
-              intervals.append(ldsAddr, ldsAddr + static_cast<int>(sizeof(T)));
+              if (rs) {
+                intervals.append(ldsAddr,
+                                 ldsAddr + static_cast<int>(sizeof(T)));
+              }
             },
             [](int, int) {});
-        intervals.finalize();
-        if (auto *rs = wave.getRaceState()) {
-          rs->registerGlobalToLdsEvent(wave.getPc(), intervals,
-                                       wave.getExecU64());
+        if (rs) {
+          intervals.finalize();
+          rs->registerEvent(wave.getPc(), MemoryEventType::GLOBAL_TO_LDS, {},
+                            wave.getExecU64(), 0xF, std::move(intervals));
         }
         return wave.getPc() + 1;
       };
@@ -469,20 +470,15 @@ public:
     // Standard buffer load: data goes to VGPRs.
     auto dstReg = wave.getFirstRegister(parts[1]);
 
-    std::vector<uint32_t> waveWritten;
-    for (int i = 0; i < numElements; ++i) {
-      waveWritten.push_back(dstReg.index + i);
-    }
-
-    return [&wave, forEachElement, dstReg, waveWritten]() {
+    return [&wave, forEachElement, dstReg, n]() {
       forEachElement(
           [&](int lane, int i, T val) {
             wave.setVgpr(dstReg.index + i, lane, val);
           },
           [&](int lane, int i) { wave.setVgpr(dstReg.index + i, lane, 0); });
       if (auto *rs = wave.getRaceState()) {
-        rs->registerGlobalToVgprEvent(wave.getPc(), waveWritten,
-                                      wave.getExecU64());
+        rs->registerEvent(wave.getPc(), MemoryEventType::GLOBAL_TO_VGPR,
+                          registerIndexRange(dstReg.index, n), wave.getExecU64());
       }
       return wave.getPc() + 1;
     };
@@ -502,12 +498,7 @@ public:
     auto srcReg = wave.getFirstRegister(parts[1]);
     int n = numElements;
 
-    std::vector<uint32_t> waveRead;
-    for (int i = 0; i < numElements; ++i) {
-      waveRead.push_back(srcReg.index + i);
-    }
-
-    return [&wave, config, srcReg, n, waveRead]() {
+    return [&wave, config, srcReg, n]() {
       auto run = [&](int lane) {
         auto state = BufferState::compute(wave, lane, config);
 
@@ -533,8 +524,8 @@ public:
       };
       wave.runExecConditionedForLanes(run);
       if (auto *rs = wave.getRaceState()) {
-        rs->registerVgprToGlobalEvent(wave.getPc(), waveRead,
-                                      wave.getExecU64());
+        rs->registerEvent(wave.getPc(), MemoryEventType::VGPR_TO_GLOBAL,
+                          registerIndexRange(srcReg.index, n), wave.getExecU64());
       }
       return wave.getPc() + 1;
     };
@@ -616,18 +607,16 @@ public:
       }
     }
 
-    std::vector<uint32_t> waveRead;
-    for (int i = 0; i < numElements; ++i) {
-      waveRead.push_back(dataReg.index + i);
-    }
-
     int n = numElements;
     bool high = useHighBits; // Capture the flag for the lambda
 
-    return [&wave, addrReg, dataReg, instOffset, n, waveRead, high]() {
+    return [&wave, addrReg, dataReg, instOffset, n, high]() {
       (void)high;
+      auto *rs = wave.getRaceState();
       IntervalSet intervals;
-      intervals.reserve(wave.getWaveSize() * n);
+      if (rs) {
+        intervals.reserve(wave.getWaveSize() * n);
+      }
       auto run = [&](int lane) {
         uint32_t vOffset = wave.getVgpr(addrReg.index, lane);
         uint32_t effectiveAddr = vOffset + static_cast<uint32_t>(instOffset);
@@ -646,16 +635,20 @@ public:
 
           wave.writeLds<T_Storage>(addr, lane, valToStore);
 
-          intervals.append(static_cast<int>(addr),
-                           static_cast<int>(addr + sizeof(T_Storage)));
+          if (rs) {
+            intervals.append(static_cast<int>(addr),
+                             static_cast<int>(addr + sizeof(T_Storage)));
+          }
         }
       };
 
       auto pc = wave.getPc();
       wave.runExecConditionedForLanes(run);
-      intervals.finalize();
-      if (auto *rs = wave.getRaceState()) {
-        rs->registerVgprToLdsEvent(pc, waveRead, intervals, wave.getExecU64());
+      if (rs) {
+        intervals.finalize();
+        rs->registerEvent(pc, MemoryEventType::VGPR_TO_LDS,
+                          registerIndexRange(dataReg.index, n), wave.getExecU64(), 0xF,
+                          std::move(intervals));
       }
       return pc + 1;
     };
@@ -702,28 +695,26 @@ public:
       }
     }
 
-    std::vector<uint32_t> waveWritten;
-    for (int i = 0; i < N_Regs; ++i) {
-      waveWritten.push_back(dstReg.index + i);
-    }
-
     // Capture flags for lambda
     bool d16 = isD16;
     bool high = isHigh;
 
-    return [&wave, dstReg, addrReg, instOffset, waveWritten, d16, high]() {
+    return [&wave, dstReg, addrReg, instOffset, d16, high]() {
+      auto *rs = wave.getRaceState();
+      IntervalSet intervals;
       auto sw = wave.profileScope("DsRead_intervals");
       std::vector<uint32_t> addrBuffer(wave.getWaveSize());
       wave.getVgprs(addrReg.index, addrBuffer.data());
-      IntervalSet intervals;
-      intervals.reserve(wave.getWaveSize() * N_Regs);
-      wave.runExecConditionedForLanes([&](int lane) {
-        uint32_t baseAddr =
-            addrBuffer[lane] + static_cast<uint32_t>(instOffset);
-        intervals.append(static_cast<int>(baseAddr),
-                         static_cast<int>(baseAddr + sizeof(T_Mem) * N_Regs));
-      });
-      intervals.finalize();
+      if (rs) {
+        intervals.reserve(wave.getWaveSize() * N_Regs);
+        wave.runExecConditionedForLanes([&](int lane) {
+          uint32_t baseAddr =
+              addrBuffer[lane] + static_cast<uint32_t>(instOffset);
+          intervals.append(static_cast<int>(baseAddr),
+                           static_cast<int>(baseAddr + sizeof(T_Mem) * N_Regs));
+        });
+        intervals.finalize();
+      }
 
       sw = wave.profileScope("DsRead_readLds");
       wave.runExecConditionedForLanes([&](int lane) {
@@ -775,10 +766,11 @@ public:
       });
 
       auto pc = wave.getPc();
-      if (auto *rs = wave.getRaceState()) {
+      if (rs) {
         uint8_t byteMask = d16 ? (high ? 0xC : 0x3) : 0xF;
-        rs->registerLdsToVgprEvent(pc, waveWritten, intervals,
-                                   wave.getExecU64(), byteMask);
+        rs->registerEvent(pc, MemoryEventType::LDS_TO_VGPR,
+                          registerIndexRange(dstReg.index, N_Regs), wave.getExecU64(),
+                          byteMask, std::move(intervals));
       }
       return pc + 1;
     };
@@ -820,9 +812,7 @@ public:
     auto dstReg = wave.getFirstRegister(parts[1]);
     bool hi = high;
 
-    std::vector<uint32_t> waveWritten = {static_cast<uint32_t>(dstReg.index)};
-
-    return [&wave, config, dstReg, hi, waveWritten]() {
+    return [&wave, config, dstReg, hi]() {
       auto run = [&](int lane) {
         auto state = BufferState::compute(wave, lane, config);
         if (state.isInBounds(0, sizeof(uint16_t))) {
@@ -838,8 +828,9 @@ public:
       wave.runExecConditionedForLanes(run);
       if (auto *rs = wave.getRaceState()) {
         uint8_t byteMask = hi ? 0xC : 0x3;
-        rs->registerGlobalToVgprEvent(wave.getPc(), waveWritten,
-                                      wave.getExecU64(), byteMask);
+        rs->registerEvent(wave.getPc(), MemoryEventType::GLOBAL_TO_VGPR,
+                          registerIndexRange(dstReg.index, 1), wave.getExecU64(),
+                          byteMask);
       }
       return wave.getPc() + 1;
     };
@@ -975,17 +966,12 @@ public:
       }
     }
 
-    std::vector<uint32_t> waveRead;
-    for (int i = 0; i < 2; ++i) {
-      waveRead.push_back(data0Reg.index + i);
-    }
-    for (int i = 0; i < 2; ++i) {
-      waveRead.push_back(data1Reg.index + i);
-    }
-
-    return [&wave, addrReg, data0Reg, data1Reg, offset0, offset1, waveRead]() {
+    return [&wave, addrReg, data0Reg, data1Reg, offset0, offset1]() {
+      auto *rs = wave.getRaceState();
       IntervalSet intervals;
-      intervals.reserve(wave.getWaveSize() * 4);
+      if (rs) {
+        intervals.reserve(wave.getWaveSize() * 4);
+      }
       auto run = [&](int lane) {
         uint32_t vAddr = wave.getVgpr(addrReg.index, lane);
 
@@ -995,7 +981,10 @@ public:
           uint32_t val = wave.getVgpr(data0Reg.index + i, lane);
           int64_t addr = addr0 + i * 4;
           wave.writeLds<uint32_t>(addr, lane, val);
-          intervals.append(static_cast<int>(addr), static_cast<int>(addr + 4));
+          if (rs) {
+            intervals.append(static_cast<int>(addr),
+                             static_cast<int>(addr + 4));
+          }
         }
 
         // Write second 8 bytes (2 dwords) at vAddr + offset1*8
@@ -1004,15 +993,24 @@ public:
           uint32_t val = wave.getVgpr(data1Reg.index + i, lane);
           int64_t addr = addr1 + i * 4;
           wave.writeLds<uint32_t>(addr, lane, val);
-          intervals.append(static_cast<int>(addr), static_cast<int>(addr + 4));
+          if (rs) {
+            intervals.append(static_cast<int>(addr),
+                             static_cast<int>(addr + 4));
+          }
         }
       };
 
       auto pc = wave.getPc();
       wave.runExecConditionedForLanes(run);
-      intervals.finalize();
-      if (auto *rs = wave.getRaceState()) {
-        rs->registerVgprToLdsEvent(pc, waveRead, intervals, wave.getExecU64());
+      if (rs) {
+        intervals.finalize();
+        std::vector<uint32_t> regs = {
+            static_cast<uint32_t>(data0Reg.index),
+            static_cast<uint32_t>(data0Reg.index + 1),
+            static_cast<uint32_t>(data1Reg.index),
+            static_cast<uint32_t>(data1Reg.index + 1)};
+        rs->registerEvent(pc, MemoryEventType::VGPR_TO_LDS, regs,
+                          wave.getExecU64(), 0xF, std::move(intervals));
       }
       return pc + 1;
     };
@@ -1044,14 +1042,12 @@ public:
       }
     }
 
-    std::vector<uint32_t> waveWritten;
-    for (int i = 0; i < 4; ++i) {
-      waveWritten.push_back(dstReg.index + i);
-    }
-
-    return [&wave, dstReg, addrReg, offset0, offset1, waveWritten]() {
+    return [&wave, dstReg, addrReg, offset0, offset1]() {
+      auto *rs = wave.getRaceState();
       IntervalSet intervals;
-      intervals.reserve(wave.getWaveSize() * 4);
+      if (rs) {
+        intervals.reserve(wave.getWaveSize() * 4);
+      }
 
       auto run = [&](int lane) {
         uint32_t vAddr = wave.getVgpr(addrReg.index, lane);
@@ -1060,8 +1056,10 @@ public:
         uint32_t addr0 = vAddr + static_cast<uint32_t>(offset0) * 8;
         for (int i = 0; i < 2; ++i) {
           uint32_t finalAddr = addr0 + i * 4;
-          intervals.append(static_cast<int>(finalAddr),
-                           static_cast<int>(finalAddr + 4));
+          if (rs) {
+            intervals.append(static_cast<int>(finalAddr),
+                             static_cast<int>(finalAddr + 4));
+          }
           uint32_t val =
               wave.readLds<uint32_t>(static_cast<int>(finalAddr), lane);
           wave.setVgpr(dstReg.index + i, lane, val);
@@ -1071,8 +1069,10 @@ public:
         uint32_t addr1 = vAddr + static_cast<uint32_t>(offset1) * 8;
         for (int i = 0; i < 2; ++i) {
           uint32_t finalAddr = addr1 + i * 4;
-          intervals.append(static_cast<int>(finalAddr),
-                           static_cast<int>(finalAddr + 4));
+          if (rs) {
+            intervals.append(static_cast<int>(finalAddr),
+                             static_cast<int>(finalAddr + 4));
+          }
           uint32_t val =
               wave.readLds<uint32_t>(static_cast<int>(finalAddr), lane);
           wave.setVgpr(dstReg.index + 2 + i, lane, val);
@@ -1080,11 +1080,12 @@ public:
       };
 
       wave.runExecConditionedForLanes(run);
-      intervals.finalize();
       auto pc = wave.getPc();
-      if (auto *rs = wave.getRaceState()) {
-        rs->registerLdsToVgprEvent(pc, waveWritten, intervals,
-                                   wave.getExecU64());
+      if (rs) {
+        intervals.finalize();
+        rs->registerEvent(pc, MemoryEventType::LDS_TO_VGPR,
+                          registerIndexRange(dstReg.index, 4), wave.getExecU64(), 0xF,
+                          std::move(intervals));
       }
       return pc + 1;
     };
