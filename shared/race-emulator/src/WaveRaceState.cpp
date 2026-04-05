@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "race-emulator/WaveRaceState.h"
+#include "race-emulator/IntervalSet.h"
 #include "race-emulator/RaceDetector.h"
+#include "race-emulator/Util.h"
 #include <bit>
-#include <cassert>
 
 namespace raceemulator {
 
@@ -19,8 +20,13 @@ WaveRaceState::WaveRaceState(int vgprCount, WaveId waveId,
 
 void WaveRaceState::registerEvent(int pc, MemoryEventType type,
                                   const std::vector<uint32_t> &regIds,
-                                  uint64_t execMask, uint8_t byteMask,
-                                  IntervalSet ldsIntervals) {
+                                  uint64_t execMask, uint8_t byteMask) {
+  registerEventWithIntervals(pc, type, regIds, execMask, byteMask, {});
+}
+
+void WaveRaceState::registerEventWithIntervals(
+    int pc, MemoryEventType type, const std::vector<uint32_t> &regIds,
+    uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals) {
   auto sw = profileScope("registerEvent");
   auto eventId = detector->allocateEventId(waveId, pc, type, regIds, execMask,
                                            byteMask, ldsIntervals);
@@ -29,6 +35,37 @@ void WaveRaceState::registerEvent(int pc, MemoryEventType type,
     regEventCountInc(type, reg);
   }
   waveMemoryEvents.push_back(eventId);
+}
+
+void WaveRaceState::registerLdsEvent(
+    int pc, MemoryEventType type, const std::vector<uint32_t> &registers,
+    uint64_t execMask, int waveSize,
+    const std::vector<uint32_t> &laneBaseAddresses, int bytesPerLane,
+    uint8_t byteMask) {
+  IntervalSet intervals;
+  forEachActiveLane(execMask, waveSize, [&](int lane) {
+    int addr = static_cast<int>(laneBaseAddresses[lane]);
+    intervals.append(addr, addr + bytesPerLane);
+  });
+  intervals.finalize();
+  registerEventWithIntervals(pc, type, registers, execMask, byteMask, std::move(intervals));
+}
+
+void WaveRaceState::registerDualOffsetLdsEvent(
+    int pc, MemoryEventType type, const std::vector<uint32_t> &registers,
+    uint64_t execMask, int waveSize,
+    const std::vector<uint32_t> &laneBaseAddresses, int32_t offset0,
+    int32_t offset1) {
+  IntervalSet intervals;
+  forEachActiveLane(execMask, waveSize, [&](int lane) {
+    uint32_t vAddr = laneBaseAddresses[lane];
+    int intAddr0 = static_cast<int>(vAddr + static_cast<uint32_t>(offset0) * 8);
+    intervals.append(intAddr0, intAddr0 + 8);
+    int intAddr1 = static_cast<int>(vAddr + static_cast<uint32_t>(offset1) * 8);
+    intervals.append(intAddr1, intAddr1 + 8);
+  });
+  intervals.finalize();
+  registerEventWithIntervals(pc, type, registers, execMask, 0xF, std::move(intervals));
 }
 
 void WaveRaceState::retireEventRegisters(EventId eventId) {

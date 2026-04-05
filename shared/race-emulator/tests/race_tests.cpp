@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "race-emulator/Emulator.h"
-#include "race-emulator/IntervalSet.h"
 #include "race-emulator/WaveRaceState.h"
 #include <cstring> // For std::memcpy
 #include <gtest/gtest.h>
@@ -1148,11 +1147,11 @@ TEST(GlobalToLds, CrossWaveRace) {
   auto &wave1 = wg.getWave(1);
   (void)wave1;
 
-  IntervalSet intervals;
-  intervals.append(0, 64);
+  std::vector<uint32_t> ldsAddresses = {0};
   auto *rs0 = wave0.getRaceState();
-  rs0->registerEvent(/*pc=*/10, MemoryEventType::GLOBAL_TO_LDS, {},
-                     wave0.getExecU64(), 0xF, std::move(intervals));
+  rs0->registerLdsEvent(/*pc=*/10, MemoryEventType::GLOBAL_TO_LDS, {},
+                        /*execMask=*/1, /*waveSize=*/1, ldsAddresses,
+                        /*bytesPerLane=*/64);
   rs0->sWaitCntVmcnt(0);
 
   // Wave 0 can read safely (WAVE_COMPLETE for its own wave).
@@ -1178,11 +1177,11 @@ TEST(GlobalToLds, CrossWaveSafeAfterBarrier) {
   auto &wave1 = wg.getWave(1);
   (void)wave1;
 
-  IntervalSet intervals;
-  intervals.append(0, 64);
+  std::vector<uint32_t> ldsAddresses = {0};
   auto *rs0 = wave0.getRaceState();
-  rs0->registerEvent(/*pc=*/10, MemoryEventType::GLOBAL_TO_LDS, {},
-                     wave0.getExecU64(), 0xF, std::move(intervals));
+  rs0->registerLdsEvent(/*pc=*/10, MemoryEventType::GLOBAL_TO_LDS, {},
+                        /*execMask=*/1, /*waveSize=*/1, ldsAddresses,
+                        /*bytesPerLane=*/64);
   rs0->sWaitCntVmcnt(0);
 
   // Simulate barrier: flush all wave-complete events.

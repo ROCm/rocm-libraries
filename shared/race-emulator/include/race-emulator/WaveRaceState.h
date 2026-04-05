@@ -3,7 +3,6 @@
 
 #pragma once
 #include "CommonRegister.h"
-#include "IntervalSet.h"
 #include "Profiler.h"
 #include "Types.h"
 #include <array>
@@ -13,6 +12,7 @@
 
 namespace raceemulator {
 
+class IntervalSet;
 class RaceDetector;
 
 /// Per-wave race detection state. Owns VGPR event lists, wave-level event
@@ -26,11 +26,29 @@ class WaveRaceState {
 public:
   WaveRaceState(int vgprCount, WaveId waveId, RaceDetector *detector);
 
-  /// Register an in-flight memory event. execMask is passed explicitly (no
-  /// dependency on Wave).
+  /// Register an in-flight global memory event (no LDS intervals).
   void registerEvent(int pc, MemoryEventType type,
                      const std::vector<uint32_t> &registers, uint64_t execMask,
-                     uint8_t byteMask = 0xF, IntervalSet ldsIntervals = {});
+                     uint8_t byteMask = 0xF);
+
+  /// Register an LDS event with contiguous intervals built from per-lane base
+  /// addresses. Each active lane contributes one interval of bytesPerLane
+  /// starting at laneBaseAddresses[lane].
+  void registerLdsEvent(int pc, MemoryEventType type,
+                        const std::vector<uint32_t> &registers,
+                        uint64_t execMask, int waveSize,
+                        const std::vector<uint32_t> &laneBaseAddresses,
+                        int bytesPerLane, uint8_t byteMask = 0xF);
+
+  /// Register an LDS event with dual-offset intervals. Each active lane
+  /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8
+  /// and laneBaseAddresses[lane] + offset1*8.
+  void
+  registerDualOffsetLdsEvent(int pc, MemoryEventType type,
+                             const std::vector<uint32_t> &registers,
+                             uint64_t execMask, int waveSize,
+                             const std::vector<uint32_t> &laneBaseAddresses,
+                             int32_t offset0, int32_t offset1);
 
   /// Retire global memory events until at most vmcnt remain outstanding.
   void sWaitCntVmcnt(int vmcnt);
@@ -73,6 +91,10 @@ public:
   void setProfiler(Profiler *p) { profiler = p; }
 
 private:
+  void registerEventWithIntervals(int pc, MemoryEventType type,
+                                  const std::vector<uint32_t> &registers,
+                                  uint64_t execMask, uint8_t byteMask,
+                                  IntervalSet ldsIntervals);
   void retireEventRegisters(EventId);
   void resolveWaitCnt(int limit,
                       std::function<bool(MemoryEventType)> isTargetType);

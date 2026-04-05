@@ -110,16 +110,12 @@ public:
       });
     };
 
-    auto raceFunction = [dst, n](WaveRaceState *rs, int pc, uint64_t execMask) {
-      rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
-                        registerIndexRange(dst.index, n), execMask);
-    };
-
-    return [&wave, emulationFunction, raceFunction]() {
+    return [&wave, emulationFunction, dst, n]() {
       emulationFunction();
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        raceFunction(rs, pc, wave.getExecU64());
+        rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
+                          registerIndexRange(dst.index, n), wave.getExecU64());
       }
       return pc + 1;
     };
@@ -200,17 +196,13 @@ public:
       });
     };
 
-    auto raceFunction = [dataSrc, n](WaveRaceState *rs, int pc,
-                                     uint64_t execMask) {
-      rs->registerEvent(pc, MemoryEventType::VGPR_TO_GLOBAL,
-                        registerIndexRange(dataSrc.index, n), execMask);
-    };
-
-    return [&wave, emulationFunction, raceFunction]() {
+    return [&wave, emulationFunction, dataSrc, n]() {
       emulationFunction();
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        raceFunction(rs, pc, wave.getExecU64());
+        rs->registerEvent(pc, MemoryEventType::VGPR_TO_GLOBAL,
+                          registerIndexRange(dataSrc.index, n),
+                          wave.getExecU64());
       }
       return pc + 1;
     };
@@ -452,44 +444,30 @@ public:
     if (config.useLds) {
       int bytesPerLane = n * static_cast<int>(sizeof(T));
 
-      auto emulationFunction =
-          [&wave, forEachElement,
-           bytesPerLane](std::vector<uint32_t> &ldsBaseAddresses) {
-            ldsBaseAddresses.resize(wave.getWaveSize());
-            uint32_t m0 = wave.getM0();
-            wave.runExecConditionedForLanes([&](int lane) {
-              ldsBaseAddresses[lane] = m0 + lane * bytesPerLane;
-            });
-            forEachElement(
-                [&](int lane, int i, T val) {
-                  int ldsAddr = static_cast<int>(ldsBaseAddresses[lane] +
-                                                 i * sizeof(T));
-                  wave.getWorkgroup().getLds().write<T>(ldsAddr, val);
-                },
-                [](int, int) {});
-          };
+      auto emulationFunction = [&wave, forEachElement, bytesPerLane](
+                                   std::vector<uint32_t> &ldsBaseAddresses) {
+        ldsBaseAddresses.resize(wave.getWaveSize());
+        uint32_t m0 = wave.getM0();
+        wave.runExecConditionedForLanes([&](int lane) {
+          ldsBaseAddresses[lane] = m0 + lane * bytesPerLane;
+        });
+        forEachElement(
+            [&](int lane, int i, T val) {
+              int ldsAddr =
+                  static_cast<int>(ldsBaseAddresses[lane] + i * sizeof(T));
+              wave.getWorkgroup().getLds().write<T>(ldsAddr, val);
+            },
+            [](int, int) {});
+      };
 
-      auto raceFunction =
-          [n](WaveRaceState *rs, int pc, uint64_t execMask, int waveSize,
-              const std::vector<uint32_t> &ldsBaseAddresses) {
-            IntervalSet intervals;
-            forEachActiveLane(execMask, waveSize, [&](int lane) {
-              int addr = static_cast<int>(ldsBaseAddresses[lane]);
-              intervals.append(addr,
-                               addr + n * static_cast<int>(sizeof(T)));
-            });
-            intervals.finalize();
-            rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_LDS, {},
-                              execMask, 0xF, std::move(intervals));
-          };
-
-      return [&wave, emulationFunction, raceFunction]() {
+      return [&wave, emulationFunction, bytesPerLane]() {
         std::vector<uint32_t> ldsBaseAddresses;
         emulationFunction(ldsBaseAddresses);
         auto pc = wave.getPc();
         if (auto *rs = wave.getRaceState()) {
-          raceFunction(rs, pc, wave.getExecU64(), wave.getWaveSize(),
-                       ldsBaseAddresses);
+          rs->registerLdsEvent(pc, MemoryEventType::GLOBAL_TO_LDS, {},
+                               wave.getExecU64(), wave.getWaveSize(),
+                               ldsBaseAddresses, bytesPerLane);
         }
         return pc + 1;
       };
@@ -506,17 +484,13 @@ public:
           [&](int lane, int i) { wave.setVgpr(dstReg.index + i, lane, 0); });
     };
 
-    auto raceFunction = [dstReg, n](WaveRaceState *rs, int pc,
-                                    uint64_t execMask) {
-      rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
-                        registerIndexRange(dstReg.index, n), execMask);
-    };
-
-    return [&wave, emulationFunction, raceFunction]() {
+    return [&wave, emulationFunction, dstReg, n]() {
       emulationFunction();
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        raceFunction(rs, pc, wave.getExecU64());
+        rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
+                          registerIndexRange(dstReg.index, n),
+                          wave.getExecU64());
       }
       return pc + 1;
     };
@@ -562,17 +536,13 @@ public:
       });
     };
 
-    auto raceFunction = [srcReg, n](WaveRaceState *rs, int pc,
-                                    uint64_t execMask) {
-      rs->registerEvent(pc, MemoryEventType::VGPR_TO_GLOBAL,
-                        registerIndexRange(srcReg.index, n), execMask);
-    };
-
-    return [&wave, emulationFunction, raceFunction]() {
+    return [&wave, emulationFunction, srcReg, n]() {
       emulationFunction();
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        raceFunction(rs, pc, wave.getExecU64());
+        rs->registerEvent(pc, MemoryEventType::VGPR_TO_GLOBAL,
+                          registerIndexRange(srcReg.index, n),
+                          wave.getExecU64());
       }
       return pc + 1;
     };
@@ -681,29 +651,16 @@ public:
       });
     };
 
-    auto raceFunction = [dataReg,
-                         n](WaveRaceState *rs, int pc, uint64_t execMask,
-                            int waveSize,
-                            const std::vector<uint32_t> &laneAddresses) {
-      IntervalSet intervals;
-      intervals.reserve(waveSize * n);
-      forEachActiveLane(execMask, waveSize, [&](int lane) {
-        int addr = static_cast<int>(laneAddresses[lane]);
-        intervals.append(addr, addr + n * static_cast<int>(sizeof(T_Storage)));
-      });
-      intervals.finalize();
-      rs->registerEvent(pc, MemoryEventType::VGPR_TO_LDS,
-                        registerIndexRange(dataReg.index, n), execMask, 0xF,
-                        std::move(intervals));
-    };
-
-    return [&wave, emulationFunction, raceFunction]() {
+    int bytesPerLane = n * static_cast<int>(sizeof(T_Storage));
+    return [&wave, emulationFunction, dataReg, n, bytesPerLane]() {
       std::vector<uint32_t> laneAddresses;
       emulationFunction(laneAddresses);
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        raceFunction(rs, pc, wave.getExecU64(), wave.getWaveSize(),
-                     laneAddresses);
+        rs->registerLdsEvent(pc, MemoryEventType::VGPR_TO_LDS,
+                             registerIndexRange(dataReg.index, n),
+                             wave.getExecU64(), wave.getWaveSize(),
+                             laneAddresses, bytesPerLane);
       }
       return pc + 1;
     };
@@ -754,15 +711,16 @@ public:
     bool high = isHigh;
 
     auto emulationFunction = [&wave, dstReg, addrReg, instOffset, d16,
-                              high](std::vector<uint32_t> &addrBuffer) {
+                              high](std::vector<uint32_t> &laneAddresses) {
       auto sw = wave.profileScope("DsRead_intervals");
-      addrBuffer.resize(wave.getWaveSize());
-      wave.getVgprs(addrReg.index, addrBuffer.data());
+      laneAddresses.resize(wave.getWaveSize());
+      wave.getVgprs(addrReg.index, laneAddresses.data());
 
       sw = wave.profileScope("DsRead_readLds");
       wave.runExecConditionedForLanes([&](int lane) {
         uint32_t baseAddr =
-            addrBuffer[lane] + static_cast<uint32_t>(instOffset);
+            laneAddresses[lane] + static_cast<uint32_t>(instOffset);
+        laneAddresses[lane] = baseAddr;
         T_Mem ldsValues[N_Regs];
         wave.readLds<T_Mem>(static_cast<int>(baseAddr), lane, ldsValues,
                             N_Regs);
@@ -805,31 +763,17 @@ public:
       });
     };
 
-    auto raceFunction = [dstReg, instOffset, d16,
-                         high](WaveRaceState *rs, int pc, uint64_t execMask,
-                               int waveSize,
-                               const std::vector<uint32_t> &addrBuffer) {
-      IntervalSet intervals;
-      intervals.reserve(waveSize * N_Regs);
-      forEachActiveLane(execMask, waveSize, [&](int lane) {
-        uint32_t baseAddr =
-            addrBuffer[lane] + static_cast<uint32_t>(instOffset);
-        intervals.append(static_cast<int>(baseAddr),
-                         static_cast<int>(baseAddr + sizeof(T_Mem) * N_Regs));
-      });
-      intervals.finalize();
-      uint8_t byteMask = d16 ? (high ? 0xC : 0x3) : 0xF;
-      rs->registerEvent(pc, MemoryEventType::LDS_TO_VGPR,
-                        registerIndexRange(dstReg.index, N_Regs), execMask,
-                        byteMask, std::move(intervals));
-    };
-
-    return [&wave, emulationFunction, raceFunction]() {
-      std::vector<uint32_t> addrBuffer;
-      emulationFunction(addrBuffer);
+    int bytesPerLane = N_Regs * static_cast<int>(sizeof(T_Mem));
+    return [&wave, emulationFunction, dstReg, d16, high, bytesPerLane]() {
+      std::vector<uint32_t> laneAddresses;
+      emulationFunction(laneAddresses);
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        raceFunction(rs, pc, wave.getExecU64(), wave.getWaveSize(), addrBuffer);
+        uint8_t byteMask = d16 ? (high ? 0xC : 0x3) : 0xF;
+        rs->registerLdsEvent(pc, MemoryEventType::LDS_TO_VGPR,
+                             registerIndexRange(dstReg.index, N_Regs),
+                             wave.getExecU64(), wave.getWaveSize(),
+                             laneAddresses, bytesPerLane, byteMask);
       }
       return pc + 1;
     };
@@ -886,19 +830,14 @@ public:
       });
     };
 
-    auto raceFunction = [dstReg, hi](WaveRaceState *rs, int pc,
-                                     uint64_t execMask) {
-      uint8_t byteMask = hi ? 0xC : 0x3;
-      rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
-                        registerIndexRange(dstReg.index, 1), execMask,
-                        byteMask);
-    };
-
-    return [&wave, emulationFunction, raceFunction]() {
+    return [&wave, emulationFunction, dstReg, hi]() {
       emulationFunction();
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        raceFunction(rs, pc, wave.getExecU64());
+        uint8_t byteMask = hi ? 0xC : 0x3;
+        rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
+                          registerIndexRange(dstReg.index, 1),
+                          wave.getExecU64(), byteMask);
       }
       return pc + 1;
     };
@@ -1055,37 +994,19 @@ public:
       });
     };
 
-    auto raceFunction = [data0Reg, data1Reg, offset0,
-                         offset1](WaveRaceState *rs, int pc, uint64_t execMask,
-                                  int waveSize,
-                                  const std::vector<uint32_t> &laneAddresses) {
-      IntervalSet intervals;
-      intervals.reserve(waveSize * 4);
-      forEachActiveLane(execMask, waveSize, [&](int lane) {
-        uint32_t vAddr = laneAddresses[lane];
-        int intAddr0 =
-            static_cast<int>(vAddr + static_cast<uint32_t>(offset0) * 8);
-        intervals.append(intAddr0, intAddr0 + 8);
-        int intAddr1 =
-            static_cast<int>(vAddr + static_cast<uint32_t>(offset1) * 8);
-        intervals.append(intAddr1, intAddr1 + 8);
-      });
-      intervals.finalize();
-      std::vector<uint32_t> regs = {static_cast<uint32_t>(data0Reg.index),
-                                    static_cast<uint32_t>(data0Reg.index + 1),
-                                    static_cast<uint32_t>(data1Reg.index),
-                                    static_cast<uint32_t>(data1Reg.index + 1)};
-      rs->registerEvent(pc, MemoryEventType::VGPR_TO_LDS, regs, execMask, 0xF,
-                        std::move(intervals));
-    };
-
-    return [&wave, emulationFunction, raceFunction]() {
+    return [&wave, emulationFunction, data0Reg, data1Reg, offset0, offset1]() {
       std::vector<uint32_t> laneAddresses;
       emulationFunction(laneAddresses);
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        raceFunction(rs, pc, wave.getExecU64(), wave.getWaveSize(),
-                     laneAddresses);
+        std::vector<uint32_t> regs = {
+            static_cast<uint32_t>(data0Reg.index),
+            static_cast<uint32_t>(data0Reg.index + 1),
+            static_cast<uint32_t>(data1Reg.index),
+            static_cast<uint32_t>(data1Reg.index + 1)};
+        rs->registerDualOffsetLdsEvent(pc, MemoryEventType::VGPR_TO_LDS, regs,
+                                       wave.getExecU64(), wave.getWaveSize(),
+                                       laneAddresses, offset0, offset1);
       }
       return pc + 1;
     };
@@ -1140,34 +1061,15 @@ public:
       });
     };
 
-    auto raceFunction = [dstReg, offset0,
-                         offset1](WaveRaceState *rs, int pc, uint64_t execMask,
-                                  int waveSize,
-                                  const std::vector<uint32_t> &laneAddresses) {
-      IntervalSet intervals;
-      intervals.reserve(waveSize * 4);
-      forEachActiveLane(execMask, waveSize, [&](int lane) {
-        uint32_t vAddr = laneAddresses[lane];
-        int intAddr0 =
-            static_cast<int>(vAddr + static_cast<uint32_t>(offset0) * 8);
-        intervals.append(intAddr0, intAddr0 + 8);
-        int intAddr1 =
-            static_cast<int>(vAddr + static_cast<uint32_t>(offset1) * 8);
-        intervals.append(intAddr1, intAddr1 + 8);
-      });
-      intervals.finalize();
-      rs->registerEvent(pc, MemoryEventType::LDS_TO_VGPR,
-                        registerIndexRange(dstReg.index, 4), execMask, 0xF,
-                        std::move(intervals));
-    };
-
-    return [&wave, emulationFunction, raceFunction]() {
+    return [&wave, emulationFunction, dstReg, offset0, offset1]() {
       std::vector<uint32_t> laneAddresses;
       emulationFunction(laneAddresses);
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        raceFunction(rs, pc, wave.getExecU64(), wave.getWaveSize(),
-                     laneAddresses);
+        rs->registerDualOffsetLdsEvent(pc, MemoryEventType::LDS_TO_VGPR,
+                                       registerIndexRange(dstReg.index, 4),
+                                       wave.getExecU64(), wave.getWaveSize(),
+                                       laneAddresses, offset0, offset1);
       }
       return pc + 1;
     };
