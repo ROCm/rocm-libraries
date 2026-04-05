@@ -6,6 +6,7 @@
 #include "race-emulator/Util.h"
 #include "race-emulator/Wave.h"
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cassert>
 #include <cmath>

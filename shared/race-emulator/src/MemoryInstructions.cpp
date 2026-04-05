@@ -7,13 +7,10 @@
 #include "race-emulator/Wave.h"
 #include "race-emulator/WaveRaceState.h"
 #include "race-emulator/Workgroup.h"
-#include <cassert>
-#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <functional>
 #include <numeric>
-#include <ostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -94,31 +91,35 @@ public:
     }
 
     int n = numElements;
-    return [&wave, dst, src0, src1, hasSaddr, instOffset, n]() {
-      auto run = [&](int lane) {
+
+    auto emulationFunction = [&wave, dst, src0, src1, hasSaddr, instOffset,
+                              n]() {
+      wave.runExecConditionedForLanes([&](int lane) {
         uint64_t finalAddr = 0;
 
         if (hasSaddr) {
-          // Mode: base (SGPR) + offset (VGPR)
-          // Example: global_load_dword v2, v0, s[0:1]
           uint64_t base = wave.getSgpr64(src1.index);
           uint32_t offset = wave.getVgpr(src0.index, lane);
           finalAddr = base + offset;
         } else {
-          // Mode: pointer (VGPR 64-bit)
-          // Example: global_load_dword v3, v[0:1]
           finalAddr = wave.getVgpr64(src0.index, lane);
         }
         finalAddr += instOffset;
         executeLoadAndWrite<T_Storage>(wave, lane, finalAddr, dst, n,
                                        wave.isCompleteEmulation());
-      };
+      });
+    };
 
-      wave.runExecConditionedForLanes(run);
+    auto raceFunction = [dst, n](WaveRaceState *rs, int pc, uint64_t execMask) {
+      rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
+                        registerIndexRange(dst.index, n), execMask);
+    };
+
+    return [&wave, emulationFunction, raceFunction]() {
+      emulationFunction();
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
-                          registerIndexRange(dst.index, n), wave.getExecU64());
+        raceFunction(rs, pc, wave.getExecU64());
       }
       return pc + 1;
     };
@@ -167,8 +168,10 @@ public:
     }
 
     int n = numElements;
-    return [&wave, addrSrc, dataSrc, baseSrc, hasSaddr, instOffset, n]() {
-      auto run = [&](int lane) {
+
+    auto emulationFunction = [&wave, addrSrc, dataSrc, baseSrc, hasSaddr,
+                              instOffset, n]() {
+      wave.runExecConditionedForLanes([&](int lane) {
         uint64_t finalAddr = 0;
         if (hasSaddr) {
           uint64_t base = wave.getSgpr64(baseSrc.index);
@@ -194,13 +197,20 @@ public:
             ptr[i] = valToStore;
           }
         }
-      };
+      });
+    };
 
-      wave.runExecConditionedForLanes(run);
+    auto raceFunction = [dataSrc, n](WaveRaceState *rs, int pc,
+                                     uint64_t execMask) {
+      rs->registerEvent(pc, MemoryEventType::VGPR_TO_GLOBAL,
+                        registerIndexRange(dataSrc.index, n), execMask);
+    };
+
+    return [&wave, emulationFunction, raceFunction]() {
+      emulationFunction();
       auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        rs->registerEvent(pc, MemoryEventType::VGPR_TO_GLOBAL,
-                          registerIndexRange(dataSrc.index, n), wave.getExecU64());
+        raceFunction(rs, pc, wave.getExecU64());
       }
       return pc + 1;
     };
@@ -322,8 +332,6 @@ struct BufferState {
     return state;
   }
 
-  // Inside MemoryInstructions.h -> BufferState
-
   bool isInBounds(int64_t elementOffset, int elementSize) const {
     if (isStructured) {
       return index < size;
@@ -443,44 +451,74 @@ public:
 
     if (config.useLds) {
       int bytesPerLane = n * static_cast<int>(sizeof(T));
-      return [&wave, forEachElement, bytesPerLane]() {
-        auto *rs = wave.getRaceState();
-        IntervalSet intervals;
-        uint32_t m0 = wave.getM0();
-        forEachElement(
-            [&](int lane, int i, T val) {
-              int ldsAddr =
-                  static_cast<int>(m0 + lane * bytesPerLane + i * sizeof(T));
-              wave.getWorkgroup().getLds().write<T>(ldsAddr, val);
-              if (rs) {
-                intervals.append(ldsAddr,
-                                 ldsAddr + static_cast<int>(sizeof(T)));
-              }
-            },
-            [](int, int) {});
-        if (rs) {
-          intervals.finalize();
-          rs->registerEvent(wave.getPc(), MemoryEventType::GLOBAL_TO_LDS, {},
-                            wave.getExecU64(), 0xF, std::move(intervals));
+
+      auto emulationFunction =
+          [&wave, forEachElement,
+           bytesPerLane](std::vector<uint32_t> &ldsBaseAddresses) {
+            ldsBaseAddresses.resize(wave.getWaveSize());
+            uint32_t m0 = wave.getM0();
+            wave.runExecConditionedForLanes([&](int lane) {
+              ldsBaseAddresses[lane] = m0 + lane * bytesPerLane;
+            });
+            forEachElement(
+                [&](int lane, int i, T val) {
+                  int ldsAddr = static_cast<int>(ldsBaseAddresses[lane] +
+                                                 i * sizeof(T));
+                  wave.getWorkgroup().getLds().write<T>(ldsAddr, val);
+                },
+                [](int, int) {});
+          };
+
+      auto raceFunction =
+          [n](WaveRaceState *rs, int pc, uint64_t execMask, int waveSize,
+              const std::vector<uint32_t> &ldsBaseAddresses) {
+            IntervalSet intervals;
+            forEachActiveLane(execMask, waveSize, [&](int lane) {
+              int addr = static_cast<int>(ldsBaseAddresses[lane]);
+              intervals.append(addr,
+                               addr + n * static_cast<int>(sizeof(T)));
+            });
+            intervals.finalize();
+            rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_LDS, {},
+                              execMask, 0xF, std::move(intervals));
+          };
+
+      return [&wave, emulationFunction, raceFunction]() {
+        std::vector<uint32_t> ldsBaseAddresses;
+        emulationFunction(ldsBaseAddresses);
+        auto pc = wave.getPc();
+        if (auto *rs = wave.getRaceState()) {
+          raceFunction(rs, pc, wave.getExecU64(), wave.getWaveSize(),
+                       ldsBaseAddresses);
         }
-        return wave.getPc() + 1;
+        return pc + 1;
       };
     }
 
     // Standard buffer load: data goes to VGPRs.
     auto dstReg = wave.getFirstRegister(parts[1]);
 
-    return [&wave, forEachElement, dstReg, n]() {
+    auto emulationFunction = [&wave, forEachElement, dstReg]() {
       forEachElement(
           [&](int lane, int i, T val) {
             wave.setVgpr(dstReg.index + i, lane, val);
           },
           [&](int lane, int i) { wave.setVgpr(dstReg.index + i, lane, 0); });
+    };
+
+    auto raceFunction = [dstReg, n](WaveRaceState *rs, int pc,
+                                    uint64_t execMask) {
+      rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
+                        registerIndexRange(dstReg.index, n), execMask);
+    };
+
+    return [&wave, emulationFunction, raceFunction]() {
+      emulationFunction();
+      auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        rs->registerEvent(wave.getPc(), MemoryEventType::GLOBAL_TO_VGPR,
-                          registerIndexRange(dstReg.index, n), wave.getExecU64());
+        raceFunction(rs, pc, wave.getExecU64());
       }
-      return wave.getPc() + 1;
+      return pc + 1;
     };
   }
 };
@@ -498,8 +536,8 @@ public:
     auto srcReg = wave.getFirstRegister(parts[1]);
     int n = numElements;
 
-    return [&wave, config, srcReg, n]() {
-      auto run = [&](int lane) {
+    auto emulationFunction = [&wave, config, srcReg, n]() {
+      wave.runExecConditionedForLanes([&](int lane) {
         auto state = BufferState::compute(wave, lane, config);
 
         for (int i = 0; i < n; ++i) {
@@ -521,13 +559,22 @@ public:
           }
           // OOB -> Drop silently
         }
-      };
-      wave.runExecConditionedForLanes(run);
+      });
+    };
+
+    auto raceFunction = [srcReg, n](WaveRaceState *rs, int pc,
+                                    uint64_t execMask) {
+      rs->registerEvent(pc, MemoryEventType::VGPR_TO_GLOBAL,
+                        registerIndexRange(srcReg.index, n), execMask);
+    };
+
+    return [&wave, emulationFunction, raceFunction]() {
+      emulationFunction();
+      auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        rs->registerEvent(wave.getPc(), MemoryEventType::VGPR_TO_GLOBAL,
-                          registerIndexRange(srcReg.index, n), wave.getExecU64());
+        raceFunction(rs, pc, wave.getExecU64());
       }
-      return wave.getPc() + 1;
+      return pc + 1;
     };
   }
 };
@@ -608,21 +655,18 @@ public:
     }
 
     int n = numElements;
-    bool high = useHighBits; // Capture the flag for the lambda
+    bool high = useHighBits;
 
-    return [&wave, addrReg, dataReg, instOffset, n, high]() {
+    auto emulationFunction = [&wave, addrReg, dataReg, instOffset, n,
+                              high](std::vector<uint32_t> &laneAddresses) {
       (void)high;
-      auto *rs = wave.getRaceState();
-      IntervalSet intervals;
-      if (rs) {
-        intervals.reserve(wave.getWaveSize() * n);
-      }
-      auto run = [&](int lane) {
-        uint32_t vOffset = wave.getVgpr(addrReg.index, lane);
-        uint32_t effectiveAddr = vOffset + static_cast<uint32_t>(instOffset);
+      laneAddresses.resize(wave.getWaveSize());
+      wave.runExecConditionedForLanes([&](int lane) {
+        uint32_t effectiveAddr = wave.getVgpr(addrReg.index, lane) +
+                                 static_cast<uint32_t>(instOffset);
+        laneAddresses[lane] = effectiveAddr;
 
         for (int i = 0; i < n; ++i) {
-
           T_Storage valToStore;
           if constexpr (sizeof(T_Storage) <= 2) {
             valToStore = static_cast<T_Storage>(
@@ -632,23 +676,34 @@ public:
                 static_cast<T_Storage>(wave.getVgpr(dataReg.index + i, lane));
           }
           int64_t addr = effectiveAddr + i * sizeof(T_Storage);
-
           wave.writeLds<T_Storage>(addr, lane, valToStore);
-
-          if (rs) {
-            intervals.append(static_cast<int>(addr),
-                             static_cast<int>(addr + sizeof(T_Storage)));
-          }
         }
-      };
+      });
+    };
 
+    auto raceFunction = [dataReg,
+                         n](WaveRaceState *rs, int pc, uint64_t execMask,
+                            int waveSize,
+                            const std::vector<uint32_t> &laneAddresses) {
+      IntervalSet intervals;
+      intervals.reserve(waveSize * n);
+      forEachActiveLane(execMask, waveSize, [&](int lane) {
+        int addr = static_cast<int>(laneAddresses[lane]);
+        intervals.append(addr, addr + n * static_cast<int>(sizeof(T_Storage)));
+      });
+      intervals.finalize();
+      rs->registerEvent(pc, MemoryEventType::VGPR_TO_LDS,
+                        registerIndexRange(dataReg.index, n), execMask, 0xF,
+                        std::move(intervals));
+    };
+
+    return [&wave, emulationFunction, raceFunction]() {
+      std::vector<uint32_t> laneAddresses;
+      emulationFunction(laneAddresses);
       auto pc = wave.getPc();
-      wave.runExecConditionedForLanes(run);
-      if (rs) {
-        intervals.finalize();
-        rs->registerEvent(pc, MemoryEventType::VGPR_TO_LDS,
-                          registerIndexRange(dataReg.index, n), wave.getExecU64(), 0xF,
-                          std::move(intervals));
+      if (auto *rs = wave.getRaceState()) {
+        raceFunction(rs, pc, wave.getExecU64(), wave.getWaveSize(),
+                     laneAddresses);
       }
       return pc + 1;
     };
@@ -695,26 +750,14 @@ public:
       }
     }
 
-    // Capture flags for lambda
     bool d16 = isD16;
     bool high = isHigh;
 
-    return [&wave, dstReg, addrReg, instOffset, d16, high]() {
-      auto *rs = wave.getRaceState();
-      IntervalSet intervals;
+    auto emulationFunction = [&wave, dstReg, addrReg, instOffset, d16,
+                              high](std::vector<uint32_t> &addrBuffer) {
       auto sw = wave.profileScope("DsRead_intervals");
-      std::vector<uint32_t> addrBuffer(wave.getWaveSize());
+      addrBuffer.resize(wave.getWaveSize());
       wave.getVgprs(addrReg.index, addrBuffer.data());
-      if (rs) {
-        intervals.reserve(wave.getWaveSize() * N_Regs);
-        wave.runExecConditionedForLanes([&](int lane) {
-          uint32_t baseAddr =
-              addrBuffer[lane] + static_cast<uint32_t>(instOffset);
-          intervals.append(static_cast<int>(baseAddr),
-                           static_cast<int>(baseAddr + sizeof(T_Mem) * N_Regs));
-        });
-        intervals.finalize();
-      }
 
       sw = wave.profileScope("DsRead_readLds");
       wave.runExecConditionedForLanes([&](int lane) {
@@ -726,8 +769,6 @@ public:
         for (int i = 0; i < N_Regs; ++i) {
           T_Mem rawValue = ldsValues[i];
           if (!d16) {
-            // Standard Behavior: Zero/Sign extend to 32-bits and OVERWRITE
-            // register (Used by ds_read_u8, ds_read_i8, ds_read_b32, etc.)
             uint32_t extended;
             if constexpr (std::is_signed_v<T_Mem>) {
               extended = static_cast<uint32_t>(static_cast<int32_t>(rawValue));
@@ -736,10 +777,8 @@ public:
             }
             wave.setVgpr(dstReg.index + i, lane, extended);
           } else {
-            // D16 Behavior: write only 16 bits of the destination register.
             uint16_t valToPack = 0;
 
-            // 1. Handle Extension (8-bit to 16-bit)
             if constexpr (sizeof(T_Mem) == 1) {
               if constexpr (std::is_signed_v<T_Mem>) {
                 valToPack =
@@ -764,13 +803,33 @@ public:
           }
         }
       });
+    };
 
+    auto raceFunction = [dstReg, instOffset, d16,
+                         high](WaveRaceState *rs, int pc, uint64_t execMask,
+                               int waveSize,
+                               const std::vector<uint32_t> &addrBuffer) {
+      IntervalSet intervals;
+      intervals.reserve(waveSize * N_Regs);
+      forEachActiveLane(execMask, waveSize, [&](int lane) {
+        uint32_t baseAddr =
+            addrBuffer[lane] + static_cast<uint32_t>(instOffset);
+        intervals.append(static_cast<int>(baseAddr),
+                         static_cast<int>(baseAddr + sizeof(T_Mem) * N_Regs));
+      });
+      intervals.finalize();
+      uint8_t byteMask = d16 ? (high ? 0xC : 0x3) : 0xF;
+      rs->registerEvent(pc, MemoryEventType::LDS_TO_VGPR,
+                        registerIndexRange(dstReg.index, N_Regs), execMask,
+                        byteMask, std::move(intervals));
+    };
+
+    return [&wave, emulationFunction, raceFunction]() {
+      std::vector<uint32_t> addrBuffer;
+      emulationFunction(addrBuffer);
       auto pc = wave.getPc();
-      if (rs) {
-        uint8_t byteMask = d16 ? (high ? 0xC : 0x3) : 0xF;
-        rs->registerEvent(pc, MemoryEventType::LDS_TO_VGPR,
-                          registerIndexRange(dstReg.index, N_Regs), wave.getExecU64(),
-                          byteMask, std::move(intervals));
+      if (auto *rs = wave.getRaceState()) {
+        raceFunction(rs, pc, wave.getExecU64(), wave.getWaveSize(), addrBuffer);
       }
       return pc + 1;
     };
@@ -812,8 +871,8 @@ public:
     auto dstReg = wave.getFirstRegister(parts[1]);
     bool hi = high;
 
-    return [&wave, config, dstReg, hi]() {
-      auto run = [&](int lane) {
+    auto emulationFunction = [&wave, config, dstReg, hi]() {
+      wave.runExecConditionedForLanes([&](int lane) {
         auto state = BufferState::compute(wave, lane, config);
         if (state.isInBounds(0, sizeof(uint16_t))) {
           uint64_t addr = state.baseAddress + state.baseOffset;
@@ -824,15 +883,24 @@ public:
           }
           wave.setVgprHalf(dstReg.index, lane, hi, val16);
         }
-      };
-      wave.runExecConditionedForLanes(run);
+      });
+    };
+
+    auto raceFunction = [dstReg, hi](WaveRaceState *rs, int pc,
+                                     uint64_t execMask) {
+      uint8_t byteMask = hi ? 0xC : 0x3;
+      rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
+                        registerIndexRange(dstReg.index, 1), execMask,
+                        byteMask);
+    };
+
+    return [&wave, emulationFunction, raceFunction]() {
+      emulationFunction();
+      auto pc = wave.getPc();
       if (auto *rs = wave.getRaceState()) {
-        uint8_t byteMask = hi ? 0xC : 0x3;
-        rs->registerEvent(wave.getPc(), MemoryEventType::GLOBAL_TO_VGPR,
-                          registerIndexRange(dstReg.index, 1), wave.getExecU64(),
-                          byteMask);
+        raceFunction(rs, pc, wave.getExecU64());
       }
-      return wave.getPc() + 1;
+      return pc + 1;
     };
   }
 };
@@ -966,51 +1034,58 @@ public:
       }
     }
 
-    return [&wave, addrReg, data0Reg, data1Reg, offset0, offset1]() {
-      auto *rs = wave.getRaceState();
-      IntervalSet intervals;
-      if (rs) {
-        intervals.reserve(wave.getWaveSize() * 4);
-      }
-      auto run = [&](int lane) {
+    auto emulationFunction = [&wave, addrReg, data0Reg, data1Reg, offset0,
+                              offset1](std::vector<uint32_t> &laneAddresses) {
+      laneAddresses.resize(wave.getWaveSize());
+      wave.runExecConditionedForLanes([&](int lane) {
         uint32_t vAddr = wave.getVgpr(addrReg.index, lane);
+        laneAddresses[lane] = vAddr;
 
-        // Write first 8 bytes (2 dwords) at vAddr + offset0*8
         uint32_t addr0 = vAddr + static_cast<uint32_t>(offset0) * 8;
         for (int i = 0; i < 2; ++i) {
           uint32_t val = wave.getVgpr(data0Reg.index + i, lane);
-          int64_t addr = addr0 + i * 4;
-          wave.writeLds<uint32_t>(addr, lane, val);
-          if (rs) {
-            intervals.append(static_cast<int>(addr),
-                             static_cast<int>(addr + 4));
-          }
+          wave.writeLds<uint32_t>(addr0 + i * 4, lane, val);
         }
 
-        // Write second 8 bytes (2 dwords) at vAddr + offset1*8
         uint32_t addr1 = vAddr + static_cast<uint32_t>(offset1) * 8;
         for (int i = 0; i < 2; ++i) {
           uint32_t val = wave.getVgpr(data1Reg.index + i, lane);
-          int64_t addr = addr1 + i * 4;
-          wave.writeLds<uint32_t>(addr, lane, val);
-          if (rs) {
-            intervals.append(static_cast<int>(addr),
-                             static_cast<int>(addr + 4));
-          }
+          wave.writeLds<uint32_t>(addr1 + i * 4, lane, val);
         }
-      };
+      });
+    };
 
+    auto raceFunction = [data0Reg, data1Reg, offset0,
+                         offset1](WaveRaceState *rs, int pc, uint64_t execMask,
+                                  int waveSize,
+                                  const std::vector<uint32_t> &laneAddresses) {
+      IntervalSet intervals;
+      intervals.reserve(waveSize * 4);
+      forEachActiveLane(execMask, waveSize, [&](int lane) {
+        uint32_t vAddr = laneAddresses[lane];
+        int intAddr0 =
+            static_cast<int>(vAddr + static_cast<uint32_t>(offset0) * 8);
+        intervals.append(intAddr0, intAddr0 + 8);
+        int intAddr1 =
+            static_cast<int>(vAddr + static_cast<uint32_t>(offset1) * 8);
+        intervals.append(intAddr1, intAddr1 + 8);
+      });
+      intervals.finalize();
+      std::vector<uint32_t> regs = {static_cast<uint32_t>(data0Reg.index),
+                                    static_cast<uint32_t>(data0Reg.index + 1),
+                                    static_cast<uint32_t>(data1Reg.index),
+                                    static_cast<uint32_t>(data1Reg.index + 1)};
+      rs->registerEvent(pc, MemoryEventType::VGPR_TO_LDS, regs, execMask, 0xF,
+                        std::move(intervals));
+    };
+
+    return [&wave, emulationFunction, raceFunction]() {
+      std::vector<uint32_t> laneAddresses;
+      emulationFunction(laneAddresses);
       auto pc = wave.getPc();
-      wave.runExecConditionedForLanes(run);
-      if (rs) {
-        intervals.finalize();
-        std::vector<uint32_t> regs = {
-            static_cast<uint32_t>(data0Reg.index),
-            static_cast<uint32_t>(data0Reg.index + 1),
-            static_cast<uint32_t>(data1Reg.index),
-            static_cast<uint32_t>(data1Reg.index + 1)};
-        rs->registerEvent(pc, MemoryEventType::VGPR_TO_LDS, regs,
-                          wave.getExecU64(), 0xF, std::move(intervals));
+      if (auto *rs = wave.getRaceState()) {
+        raceFunction(rs, pc, wave.getExecU64(), wave.getWaveSize(),
+                     laneAddresses);
       }
       return pc + 1;
     };
@@ -1042,50 +1117,57 @@ public:
       }
     }
 
-    return [&wave, dstReg, addrReg, offset0, offset1]() {
-      auto *rs = wave.getRaceState();
-      IntervalSet intervals;
-      if (rs) {
-        intervals.reserve(wave.getWaveSize() * 4);
-      }
-
-      auto run = [&](int lane) {
+    auto emulationFunction = [&wave, dstReg, addrReg, offset0,
+                              offset1](std::vector<uint32_t> &laneAddresses) {
+      laneAddresses.resize(wave.getWaveSize());
+      wave.runExecConditionedForLanes([&](int lane) {
         uint32_t vAddr = wave.getVgpr(addrReg.index, lane);
+        laneAddresses[lane] = vAddr;
 
-        // Read first 8 bytes (2 dwords) from vAddr + offset0*8
         uint32_t addr0 = vAddr + static_cast<uint32_t>(offset0) * 8;
         for (int i = 0; i < 2; ++i) {
-          uint32_t finalAddr = addr0 + i * 4;
-          if (rs) {
-            intervals.append(static_cast<int>(finalAddr),
-                             static_cast<int>(finalAddr + 4));
-          }
           uint32_t val =
-              wave.readLds<uint32_t>(static_cast<int>(finalAddr), lane);
+              wave.readLds<uint32_t>(static_cast<int>(addr0 + i * 4), lane);
           wave.setVgpr(dstReg.index + i, lane, val);
         }
 
-        // Read second 8 bytes (2 dwords) from vAddr + offset1*8
         uint32_t addr1 = vAddr + static_cast<uint32_t>(offset1) * 8;
         for (int i = 0; i < 2; ++i) {
-          uint32_t finalAddr = addr1 + i * 4;
-          if (rs) {
-            intervals.append(static_cast<int>(finalAddr),
-                             static_cast<int>(finalAddr + 4));
-          }
           uint32_t val =
-              wave.readLds<uint32_t>(static_cast<int>(finalAddr), lane);
+              wave.readLds<uint32_t>(static_cast<int>(addr1 + i * 4), lane);
           wave.setVgpr(dstReg.index + 2 + i, lane, val);
         }
-      };
+      });
+    };
 
-      wave.runExecConditionedForLanes(run);
+    auto raceFunction = [dstReg, offset0,
+                         offset1](WaveRaceState *rs, int pc, uint64_t execMask,
+                                  int waveSize,
+                                  const std::vector<uint32_t> &laneAddresses) {
+      IntervalSet intervals;
+      intervals.reserve(waveSize * 4);
+      forEachActiveLane(execMask, waveSize, [&](int lane) {
+        uint32_t vAddr = laneAddresses[lane];
+        int intAddr0 =
+            static_cast<int>(vAddr + static_cast<uint32_t>(offset0) * 8);
+        intervals.append(intAddr0, intAddr0 + 8);
+        int intAddr1 =
+            static_cast<int>(vAddr + static_cast<uint32_t>(offset1) * 8);
+        intervals.append(intAddr1, intAddr1 + 8);
+      });
+      intervals.finalize();
+      rs->registerEvent(pc, MemoryEventType::LDS_TO_VGPR,
+                        registerIndexRange(dstReg.index, 4), execMask, 0xF,
+                        std::move(intervals));
+    };
+
+    return [&wave, emulationFunction, raceFunction]() {
+      std::vector<uint32_t> laneAddresses;
+      emulationFunction(laneAddresses);
       auto pc = wave.getPc();
-      if (rs) {
-        intervals.finalize();
-        rs->registerEvent(pc, MemoryEventType::LDS_TO_VGPR,
-                          registerIndexRange(dstReg.index, 4), wave.getExecU64(), 0xF,
-                          std::move(intervals));
+      if (auto *rs = wave.getRaceState()) {
+        raceFunction(rs, pc, wave.getExecU64(), wave.getWaveSize(),
+                     laneAddresses);
       }
       return pc + 1;
     };

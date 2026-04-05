@@ -244,28 +244,7 @@ private:
 
 public:
   template <typename F> void runExecConditionedForLanes(F func) {
-
-    int waveSize = getWaveSize();
-
-    uint64_t execMask = getExecU64();
-
-    // 1. Calculate the 'all active'
-    uint64_t fullMask = (waveSize == 64) ? ~0ULL : ((1ULL << waveSize) - 1);
-
-    // 2. Fast path: All lanes enabled
-    if ((execMask & fullMask) == fullMask) {
-      for (int lane = 0; lane < waveSize; ++lane) {
-        func(lane);
-      }
-    }
-    // 3. Slow path: Check bits
-    else {
-      for (int lane = 0; lane < waveSize; ++lane) {
-        if ((execMask >> lane) & 1) {
-          func(lane);
-        }
-      }
-    }
+    forEachActiveLane(getExecU64(), getWaveSize(), func);
   }
 };
 

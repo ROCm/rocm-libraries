@@ -17,7 +17,7 @@ class RaceDetector;
 
 /// Per-wave race detection state. Owns VGPR event lists, wave-level event
 /// queues, and provides event registration, waitcnt resolution, and VGPR
-/// race checking. Holds a reference to the shared RaceDetector for event
+/// race checking. Holds a pointer to the shared RaceDetector for event
 /// allocation and lifecycle transitions.
 ///
 /// This class is self-contained: it has no dependency on Wave, Workgroup,

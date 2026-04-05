@@ -20,7 +20,7 @@ using namespace raceemulator;
 //   CASES:     Initializer list of Scalar3OpCase
 #define TEST_SCALAR_BINARY_OP(TEST_NAME, ASM_OP, ...)                          \
   TEST(Instructions, TEST_NAME) {                                              \
-    Workgroup wg({.vgprCount = 8, .sgprCount = 8, .waveSize = WaveSize{8}});    \
+    Workgroup wg({.vgprCount = 8, .sgprCount = 8, .waveSize = WaveSize{8}});   \
     auto &regs = wg.getWave(0);                                                \
     std::vector<Scalar3OpCase> cases = {__VA_ARGS__};                          \
                                                                                \
@@ -42,7 +42,7 @@ using namespace raceemulator;
 
 #define TEST_SCALAR_CMP(TEST_NAME, ASM_OP, ...)                                \
   TEST(Instructions, TEST_NAME) {                                              \
-    Workgroup wg({.vgprCount = 8, .sgprCount = 8, .waveSize = WaveSize{8}});    \
+    Workgroup wg({.vgprCount = 8, .sgprCount = 8, .waveSize = WaveSize{8}});   \
     auto &regs = wg.getWave(0);                                                \
     struct Case {                                                              \
       uint32_t s0;                                                             \

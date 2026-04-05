@@ -609,9 +609,7 @@ TEST(Gfx1151, NaiveMatmul) { runNaiveMatmul(kGfx1151); }
 TEST(Gfx942, LdsTranspose) { runLdsTranspose(kGfx942); }
 TEST(Gfx1151, LdsTranspose) { runLdsTranspose(kGfx1151); }
 TEST(Gfx942, LdsTransposeNoRaceChecks) { runLdsTranspose(kGfx942, false); }
-TEST(Gfx1151, LdsTransposeNoRaceChecks) {
-  runLdsTranspose(kGfx1151, false);
-}
+TEST(Gfx1151, LdsTransposeNoRaceChecks) { runLdsTranspose(kGfx1151, false); }
 
 TEST(Gfx942, F16Adder) { runF16Adder(kGfx942); }
 TEST(Gfx1151, F16Adder) { runF16Adder(kGfx1151); }
