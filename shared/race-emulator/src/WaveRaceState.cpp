@@ -6,6 +6,7 @@
 #include "race-emulator/RaceDetector.h"
 #include "race-emulator/Util.h"
 #include <bit>
+#include <span>
 
 namespace raceemulator {
 
@@ -19,28 +20,34 @@ WaveRaceState::WaveRaceState(int vgprCount, WaveId waveId,
 }
 
 void WaveRaceState::registerEvent(int pc, MemoryEventType type,
-                                  const std::vector<uint32_t> &regIds,
+                                  std::vector<uint32_t> regIds,
                                   uint64_t execMask, uint8_t byteMask) {
-  registerEventWithIntervals(pc, type, regIds, execMask, byteMask, {});
+  registerEventWithIntervals(pc, type, std::move(regIds), execMask, byteMask,
+                             {});
 }
 
-void WaveRaceState::registerEventWithIntervals(
-    int pc, MemoryEventType type, const std::vector<uint32_t> &regIds,
-    uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals) {
+void WaveRaceState::registerEventWithIntervals(int pc, MemoryEventType type,
+                                               std::vector<uint32_t> regIds,
+                                               uint64_t execMask,
+                                               uint8_t byteMask,
+                                               IntervalSet ldsIntervals) {
   auto sw = profileScope("registerEvent");
-  auto eventId = detector->allocateEventId(waveId, pc, type, regIds, execMask,
-                                           byteMask, ldsIntervals);
   for (auto reg : regIds) {
-    vgprMemoryEvents[reg].push_back(eventId);
     regEventCountInc(type, reg);
+  }
+  auto eventId =
+      detector->allocateEventId(waveId, pc, type, std::move(regIds), execMask,
+                                byteMask, std::move(ldsIntervals));
+  for (uint32_t reg : detector->getEventRegisters(eventId)) {
+    vgprMemoryEvents[reg].push_back(eventId);
   }
   waveMemoryEvents.push_back(eventId);
 }
 
 void WaveRaceState::registerLdsEvent(
-    int pc, MemoryEventType type, const std::vector<uint32_t> &registers,
+    int pc, MemoryEventType type, std::vector<uint32_t> registers,
     uint64_t execMask, int waveSize,
-    const std::vector<uint32_t> &laneBaseAddresses, int bytesPerLane,
+    std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
     uint8_t byteMask) {
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
@@ -48,13 +55,14 @@ void WaveRaceState::registerLdsEvent(
     intervals.append(addr, addr + bytesPerLane);
   });
   intervals.finalize();
-  registerEventWithIntervals(pc, type, registers, execMask, byteMask, std::move(intervals));
+  registerEventWithIntervals(pc, type, std::move(registers), execMask, byteMask,
+                             std::move(intervals));
 }
 
 void WaveRaceState::registerDualOffsetLdsEvent(
-    int pc, MemoryEventType type, const std::vector<uint32_t> &registers,
+    int pc, MemoryEventType type, std::vector<uint32_t> registers,
     uint64_t execMask, int waveSize,
-    const std::vector<uint32_t> &laneBaseAddresses, int32_t offset0,
+    std::span<const uint32_t> laneBaseAddresses, int32_t offset0,
     int32_t offset1) {
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
@@ -65,7 +73,8 @@ void WaveRaceState::registerDualOffsetLdsEvent(
     intervals.append(intAddr1, intAddr1 + 8);
   });
   intervals.finalize();
-  registerEventWithIntervals(pc, type, registers, execMask, 0xF, std::move(intervals));
+  registerEventWithIntervals(pc, type, std::move(registers), execMask, 0xF,
+                             std::move(intervals));
 }
 
 void WaveRaceState::retireEventRegisters(EventId eventId) {

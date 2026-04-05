@@ -32,13 +32,14 @@ void RaceDetector::setProfiler(Profiler *p) {
 
 EventId RaceDetector::allocateEventId(WaveId waveId, int pc,
                                       MemoryEventType type,
-                                      const std::vector<uint32_t> &registers,
+                                      std::vector<uint32_t> registers,
                                       uint64_t execMask, uint8_t byteMask,
                                       IntervalSet ldsIntervals) {
   int id = static_cast<int>(eventRegistry.size());
   bool hasLds = !ldsIntervals.empty();
   eventRegistry.push_back({waveId, pc, type, EventStatus::ACTIVE, byteMask,
-                           execMask, registers, std::move(ldsIntervals)});
+                           execMask, std::move(registers),
+                           std::move(ldsIntervals)});
   EventId eid{id};
   if (hasLds) {
     const auto &ivs = eventRegistry[id].ldsIntervals;
@@ -136,7 +137,7 @@ std::string RaceDetector::decorateException(
     std::function<std::string_view(int)> getSourceLine) const {
 
   auto printCodeBlock = [&](std::ostringstream &oss, int startLine, int endLine,
-                            const std::vector<int> &arrowLines) {
+                            std::span<const int> arrowLines) {
     for (int i = startLine; i <= endLine; ++i) {
       if (i < 0 || i >= numSourceLines) {
         continue;
@@ -226,7 +227,8 @@ std::string RaceDetector::decorateException(
         oss << " Lane " << entry.lane;
       }
       oss << ":\n";
-      printCodeBlock(oss, entry.pc - nBefore, entry.pc + nAfter, {entry.pc});
+      std::array<int, 1> arrowLine = {entry.pc};
+      printCodeBlock(oss, entry.pc - nBefore, entry.pc + nAfter, arrowLine);
       oss << "\n";
     }
     return oss.str();

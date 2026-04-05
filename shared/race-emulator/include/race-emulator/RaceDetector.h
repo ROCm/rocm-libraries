@@ -9,6 +9,7 @@
 #include "WaveRaceState.h"
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -52,8 +53,8 @@ public:
 
   /// Allocate a workgroup-global event ID and record its metadata.
   EventId allocateEventId(WaveId waveId, int pc, MemoryEventType type,
-                          const std::vector<uint32_t> &registers,
-                          uint64_t execMask, uint8_t byteMask = 0xF,
+                          std::vector<uint32_t> registers, uint64_t execMask,
+                          uint8_t byteMask = 0xF,
                           IntervalSet ldsIntervals = {});
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
@@ -107,7 +108,7 @@ public:
     return isLaneActive(eventRegistry[eventId.value].execMask, lane);
   }
 
-  const std::vector<uint32_t> &getEventRegisters(EventId eventId) const {
+  std::span<const uint32_t> getEventRegisters(EventId eventId) const {
     return eventRegistry[eventId.value].registers;
   }
 
@@ -117,7 +118,9 @@ public:
   const std::vector<EventId> &getLdsReadEvents() const { return ldsReadEvents; }
 
   Dim3d getWorkgroupId() const { return workgroupId; }
-  const std::function<void(RaceViolation)> &getRaceHandler() const { return raceHandler; }
+  const std::function<void(RaceViolation)> &getRaceHandler() const {
+    return raceHandler;
+  }
 
   /// Format a RaceViolation with assembly context for diagnostics.
   /// getSourceLine(i) returns the original source text for line index i.

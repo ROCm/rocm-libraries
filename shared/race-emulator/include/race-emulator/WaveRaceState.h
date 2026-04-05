@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <vector>
 
 namespace raceemulator {
@@ -28,27 +29,26 @@ public:
 
   /// Register an in-flight global memory event (no LDS intervals).
   void registerEvent(int pc, MemoryEventType type,
-                     const std::vector<uint32_t> &registers, uint64_t execMask,
+                     std::vector<uint32_t> registers, uint64_t execMask,
                      uint8_t byteMask = 0xF);
 
   /// Register an LDS event with contiguous intervals built from per-lane base
   /// addresses. Each active lane contributes one interval of bytesPerLane
   /// starting at laneBaseAddresses[lane].
   void registerLdsEvent(int pc, MemoryEventType type,
-                        const std::vector<uint32_t> &registers,
-                        uint64_t execMask, int waveSize,
-                        const std::vector<uint32_t> &laneBaseAddresses,
+                        std::vector<uint32_t> registers, uint64_t execMask,
+                        int waveSize,
+                        std::span<const uint32_t> laneBaseAddresses,
                         int bytesPerLane, uint8_t byteMask = 0xF);
 
   /// Register an LDS event with dual-offset intervals. Each active lane
   /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8
   /// and laneBaseAddresses[lane] + offset1*8.
-  void
-  registerDualOffsetLdsEvent(int pc, MemoryEventType type,
-                             const std::vector<uint32_t> &registers,
-                             uint64_t execMask, int waveSize,
-                             const std::vector<uint32_t> &laneBaseAddresses,
-                             int32_t offset0, int32_t offset1);
+  void registerDualOffsetLdsEvent(int pc, MemoryEventType type,
+                                  std::vector<uint32_t> registers,
+                                  uint64_t execMask, int waveSize,
+                                  std::span<const uint32_t> laneBaseAddresses,
+                                  int32_t offset0, int32_t offset1);
 
   /// Retire global memory events until at most vmcnt remain outstanding.
   void sWaitCntVmcnt(int vmcnt);
@@ -92,7 +92,7 @@ public:
 
 private:
   void registerEventWithIntervals(int pc, MemoryEventType type,
-                                  const std::vector<uint32_t> &registers,
+                                  std::vector<uint32_t> registers,
                                   uint64_t execMask, uint8_t byteMask,
                                   IntervalSet ldsIntervals);
   void retireEventRegisters(EventId);
