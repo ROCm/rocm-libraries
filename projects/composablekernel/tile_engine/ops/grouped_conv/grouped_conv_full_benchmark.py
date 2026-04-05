@@ -109,8 +109,12 @@ def main():
         from bwd_weight_synthetic_extended import TRAINING_PROBLEMS_BWD_WEIGHT_SYNTHETIC as problems
     elif args.problems == "bwd_weight_test_validation":
         from bwd_weight_test_validation import VALIDATION_PROBLEMS_BWD_WEIGHT as problems
+    elif args.problems == "forward_training":
+        from forward_training import TRAINING_PROBLEMS_FORWARD as problems
+    elif args.problems == "forward_validation_model_crawler_100":
+        from forward_validation_model_crawler_100 import VALIDATION_PROBLEMS_FORWARD_MODEL_CRAWLER_100 as problems
     else:
-        raise ValueError(f"Unknown problem set: {args.problems}. Use: bwd_data_synthetic_extended, bwd_data_test_validation, bwd_weight_synthetic_extended, or bwd_weight_test_validation")
+        raise ValueError(f"Unknown problem set: {args.problems}. Available: forward_training, forward_validation_model_crawler_100, bwd_data_synthetic_extended, bwd_data_test_validation, bwd_weight_synthetic_extended, bwd_weight_test_validation")
 
     print(f"  Problems: {len(problems)}")
     print(f"  Total measurements: {len(built_kernels)} x {len(problems)} = {len(built_kernels) * len(problems)}")
@@ -153,7 +157,11 @@ def main():
 
     worker_path = _THIS_DIR / "run_one_grouped_conv_kernel.py"
     worker_env = os.environ.copy()
-    worker_env["GCONV_PYPATH"] = str(_DISPATCHER_ROOT / "python")
+    # Worker needs both dispatcher/python (for dispatcher_common) and current dir (for grouped_conv_utils)
+    worker_env["GCONV_PYPATH"] = os.pathsep.join([
+        str(_DISPATCHER_ROOT / "python"),
+        str(_THIS_DIR)
+    ])
 
     total_measurements = 0
     total_failures = 0
@@ -250,8 +258,10 @@ def main():
                             csv_file.flush()
                             total_measurements += 1
                         else:
-                            error_msg = result.get("error", "unknown")[:30]
-                            print(f"  {cfg.name:<60} {'FAILED':>10} {error_msg:>20}")
+                            error_msg = result.get("error", "unknown")
+                            # Show full error for debugging (first 100 chars)
+                            print(f"  {cfg.name:<60} FAILED")
+                            print(f"    Error: {error_msg[:100]}")
                             total_failures += 1
 
                     except json.JSONDecodeError:
