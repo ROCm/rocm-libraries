@@ -3,6 +3,7 @@
 
 #include "race-emulator/Emulator.h"
 #include "race-emulator/IntervalSet.h"
+#include "race-emulator/WaveRaceState.h"
 #include <cstring> // For std::memcpy
 #include <gtest/gtest.h>
 #include <numeric>
@@ -56,7 +57,7 @@ amdhsa.target:   amdgcn-amd-amdhsa--gfx942
 )BOILER";
 
 struct RaceVerifier {
-  std::optional<RaceConditionException::Space> space;
+  std::optional<RaceViolation::Space> space;
   std::optional<int> address;  // LDS Byte or Register Index
   std::optional<bool> isWrite; // Did the crash happen on a Write?
   std::optional<int> waveId;   // Which wave crashed?
@@ -65,14 +66,14 @@ struct RaceVerifier {
 
   static RaceVerifier LdsAccess(int addr) {
     RaceVerifier v;
-    v.space = RaceConditionException::Space::LDS;
+    v.space = RaceViolation::Space::LDS;
     v.address = addr;
     return v;
   }
 
   static RaceVerifier VgprAccess(int regIdx) {
     RaceVerifier v;
-    v.space = RaceConditionException::Space::VGPR;
+    v.space = RaceViolation::Space::VGPR;
     v.address = regIdx;
     return v;
   }
@@ -113,16 +114,16 @@ protected:
         const RaceVerifier &v = verifier.value();
 
         if (v.space.has_value()) {
-          EXPECT_EQ(e.space, v.space.value());
+          EXPECT_EQ(e.violation.space, v.space.value());
         }
         if (v.address.has_value()) {
-          EXPECT_EQ(e.index, v.address.value());
+          EXPECT_EQ(e.violation.index, v.address.value());
         }
         if (v.isWrite.has_value()) {
-          EXPECT_EQ(e.isWrite, v.isWrite.value());
+          EXPECT_EQ(e.violation.isWrite, v.isWrite.value());
         }
         if (v.waveId.has_value()) {
-          EXPECT_EQ(e.wave, v.waveId.value());
+          EXPECT_EQ(e.violation.wave, v.waveId.value());
         }
         if (v.instructionSubstring.has_value()) {
           // TODO(newling) need to capture instruction text in exception
@@ -1134,16 +1135,24 @@ TEST_F(RaceTestFixture, ExecMask_CrossWave_MissingBarrier2) {
 // Even after vmcnt, the event is only WAVE_COMPLETE (safe for wave 0) but
 // still unsafe for wave 1 until barrier.
 TEST(GlobalToLds, CrossWaveRace) {
-  Workgroup wg({.nWaves = 2, .vgprCount = 4, .sgprCount = 4,
-                .waveSize = WaveSize{64}, .ldsSize = 1024, .raceChecks = true});
+  Workgroup wg({.nWaves = 2,
+                .vgprCount = 4,
+                .sgprCount = 4,
+                .waveSize = WaveSize{64},
+                .ldsSize = 1024,
+                .raceChecks = true,
+                .raceHandler = [](RaceViolation v) {
+                  throw RaceConditionException(v);
+                }});
   auto &wave0 = wg.getWave(0);
   auto &wave1 = wg.getWave(1);
   (void)wave1;
 
   IntervalSet intervals;
   intervals.append(0, 64);
-  wave0.registerGlobalToLdsEvent(/*pc=*/10, intervals);
-  wave0.sWaitCntVmcnt(0);
+  auto *rs0 = wave0.getRaceState();
+  rs0->registerGlobalToLdsEvent(/*pc=*/10, intervals, wave0.getExecU64());
+  rs0->sWaitCntVmcnt(0);
 
   // Wave 0 can read safely (WAVE_COMPLETE for its own wave).
   EXPECT_NO_THROW(wg.readLds<uint32_t>(0, WaveId{0}, 0));
@@ -1155,16 +1164,24 @@ TEST(GlobalToLds, CrossWaveRace) {
 // After barrier (flushWaveCompleteMemoryEvents), the event is fully retired
 // and other waves can safely access the LDS range.
 TEST(GlobalToLds, CrossWaveSafeAfterBarrier) {
-  Workgroup wg({.nWaves = 2, .vgprCount = 4, .sgprCount = 4,
-                .waveSize = WaveSize{64}, .ldsSize = 1024, .raceChecks = true});
+  Workgroup wg({.nWaves = 2,
+                .vgprCount = 4,
+                .sgprCount = 4,
+                .waveSize = WaveSize{64},
+                .ldsSize = 1024,
+                .raceChecks = true,
+                .raceHandler = [](RaceViolation v) {
+                  throw RaceConditionException(v);
+                }});
   auto &wave0 = wg.getWave(0);
   auto &wave1 = wg.getWave(1);
   (void)wave1;
 
   IntervalSet intervals;
   intervals.append(0, 64);
-  wave0.registerGlobalToLdsEvent(/*pc=*/10, intervals);
-  wave0.sWaitCntVmcnt(0);
+  auto *rs0 = wave0.getRaceState();
+  rs0->registerGlobalToLdsEvent(/*pc=*/10, intervals, wave0.getExecU64());
+  rs0->sWaitCntVmcnt(0);
 
   // Simulate barrier: flush all wave-complete events.
   wave0.flushWaveCompleteMemoryEvents();
@@ -1202,7 +1219,8 @@ TEST_F(RaceTestFixture, MultiWorkgroupRaceReportsWorkgroupIndex) {
     FAIL() << "Expected RaceConditionException";
   } catch (const RaceConditionException &e) {
     std::string msg = e.what();
-    EXPECT_NE(msg.find("Races detected in 3 of 3 workgroups"), std::string::npos)
+    EXPECT_NE(msg.find("Races detected in 3 of 3 workgroups"),
+              std::string::npos)
         << msg;
     EXPECT_NE(msg.find("LDS race in byte 0"), std::string::npos) << msg;
     EXPECT_NE(msg.find("workgroup ("), std::string::npos) << msg;

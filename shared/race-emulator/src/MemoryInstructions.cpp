@@ -5,6 +5,7 @@
 #include "race-emulator/Instruction.h"
 #include "race-emulator/Util.h"
 #include "race-emulator/Wave.h"
+#include "race-emulator/WaveRaceState.h"
 #include "race-emulator/Workgroup.h"
 #include <cassert>
 #include <cmath>
@@ -114,7 +115,9 @@ public:
 
       wave.runExecConditionedForLanes(run);
       auto pc = wave.getPc();
-      wave.registerGlobalToVgprEvent(pc, waveWritten);
+      if (auto *rs = wave.getRaceState()) {
+        rs->registerGlobalToVgprEvent(pc, waveWritten, wave.getExecU64());
+      }
       return pc + 1;
     };
   }
@@ -199,7 +202,9 @@ public:
 
       wave.runExecConditionedForLanes(run);
       auto pc = wave.getPc();
-      wave.registerVgprToGlobalEvent(pc, waveRead);
+      if (auto *rs = wave.getRaceState()) {
+        rs->registerVgprToGlobalEvent(pc, waveRead, wave.getExecU64());
+      }
       return pc + 1;
     };
   }
@@ -453,7 +458,10 @@ public:
             },
             [](int, int) {});
         intervals.finalize();
-        wave.registerGlobalToLdsEvent(wave.getPc(), intervals);
+        if (auto *rs = wave.getRaceState()) {
+          rs->registerGlobalToLdsEvent(wave.getPc(), intervals,
+                                       wave.getExecU64());
+        }
         return wave.getPc() + 1;
       };
     }
@@ -472,7 +480,10 @@ public:
             wave.setVgpr(dstReg.index + i, lane, val);
           },
           [&](int lane, int i) { wave.setVgpr(dstReg.index + i, lane, 0); });
-      wave.registerGlobalToVgprEvent(wave.getPc(), waveWritten);
+      if (auto *rs = wave.getRaceState()) {
+        rs->registerGlobalToVgprEvent(wave.getPc(), waveWritten,
+                                      wave.getExecU64());
+      }
       return wave.getPc() + 1;
     };
   }
@@ -521,7 +532,10 @@ public:
         }
       };
       wave.runExecConditionedForLanes(run);
-      wave.registerVgprToGlobalEvent(wave.getPc(), waveRead);
+      if (auto *rs = wave.getRaceState()) {
+        rs->registerVgprToGlobalEvent(wave.getPc(), waveRead,
+                                      wave.getExecU64());
+      }
       return wave.getPc() + 1;
     };
   }
@@ -640,7 +654,9 @@ public:
       auto pc = wave.getPc();
       wave.runExecConditionedForLanes(run);
       intervals.finalize();
-      wave.registerVgprToLdsEvent(pc, waveRead, intervals);
+      if (auto *rs = wave.getRaceState()) {
+        rs->registerVgprToLdsEvent(pc, waveRead, intervals, wave.getExecU64());
+      }
       return pc + 1;
     };
   }
@@ -759,8 +775,11 @@ public:
       });
 
       auto pc = wave.getPc();
-      uint8_t byteMask = d16 ? (high ? 0xC : 0x3) : 0xF;
-      wave.registerLdsToVgprEvent(pc, waveWritten, intervals, byteMask);
+      if (auto *rs = wave.getRaceState()) {
+        uint8_t byteMask = d16 ? (high ? 0xC : 0x3) : 0xF;
+        rs->registerLdsToVgprEvent(pc, waveWritten, intervals,
+                                   wave.getExecU64(), byteMask);
+      }
       return pc + 1;
     };
   }
@@ -817,8 +836,11 @@ public:
         }
       };
       wave.runExecConditionedForLanes(run);
-      uint8_t byteMask = hi ? 0xC : 0x3;
-      wave.registerGlobalToVgprEvent(wave.getPc(), waveWritten, byteMask);
+      if (auto *rs = wave.getRaceState()) {
+        uint8_t byteMask = hi ? 0xC : 0x3;
+        rs->registerGlobalToVgprEvent(wave.getPc(), waveWritten,
+                                      wave.getExecU64(), byteMask);
+      }
       return wave.getPc() + 1;
     };
   }
@@ -989,7 +1011,9 @@ public:
       auto pc = wave.getPc();
       wave.runExecConditionedForLanes(run);
       intervals.finalize();
-      wave.registerVgprToLdsEvent(pc, waveRead, intervals);
+      if (auto *rs = wave.getRaceState()) {
+        rs->registerVgprToLdsEvent(pc, waveRead, intervals, wave.getExecU64());
+      }
       return pc + 1;
     };
   }
@@ -1058,7 +1082,10 @@ public:
       wave.runExecConditionedForLanes(run);
       intervals.finalize();
       auto pc = wave.getPc();
-      wave.registerLdsToVgprEvent(pc, waveWritten, intervals);
+      if (auto *rs = wave.getRaceState()) {
+        rs->registerLdsToVgprEvent(pc, waveWritten, intervals,
+                                   wave.getExecU64());
+      }
       return pc + 1;
     };
   }

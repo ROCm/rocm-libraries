@@ -4,6 +4,7 @@
 #include "race-emulator/Instruction.h"
 #include "race-emulator/Util.h"
 #include "race-emulator/Wave.h"
+#include "race-emulator/WaveRaceState.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -67,11 +68,13 @@ public:
     }
 
     return [&wave, vmcnt, lgkmcnt]() {
-      if (vmcnt >= 0) {
-        wave.sWaitCntVmcnt(vmcnt);
-      }
-      if (lgkmcnt >= 0) {
-        wave.sWaitCntLgkmcnt(lgkmcnt);
+      if (auto *rs = wave.getRaceState()) {
+        if (vmcnt >= 0) {
+          rs->sWaitCntVmcnt(vmcnt);
+        }
+        if (lgkmcnt >= 0) {
+          rs->sWaitCntLgkmcnt(lgkmcnt);
+        }
       }
       return wave.getPc() + 1;
     };

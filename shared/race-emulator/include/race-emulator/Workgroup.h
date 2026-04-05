@@ -30,6 +30,8 @@ struct WorkgroupConfig {
   bool raceChecks = false;
   bool completeEmulation = true;
   WaveSchedule waveSchedule = WaveSchedule::Sequential;
+  Dim3d workgroupId{0, 0, 0};
+  std::function<void(RaceViolation)> raceHandler = {};
   const std::map<std::string, int> *labels = nullptr;
   const std::map<std::string, Macro> *macros = nullptr;
 };
@@ -95,12 +97,6 @@ public:
 
   void setProfiler(Profiler *p);
 
-  void setWorkgroupId(Dim3d id) {
-    workgroupId = id;
-    if (raceDetector) {
-      raceDetector->setWorkgroupId(id);
-    }
-  }
   Dim3d getWorkgroupId() const { return workgroupId; }
 
   // --- Race detector access ---
@@ -118,7 +114,7 @@ private:
   std::unique_ptr<RaceDetector> raceDetector;
 
   bool completeEmulation{true};
-  Dim3d workgroupId{0, 0, 0};
+  Dim3d workgroupId;
 };
 
 } // namespace raceemulator

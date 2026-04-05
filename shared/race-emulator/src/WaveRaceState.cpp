@@ -44,13 +44,15 @@ void WaveRaceState::registerVgprToGlobalEvent(
   waveMemoryEvents.push_back(eventId);
 }
 
-void WaveRaceState::registerLdsToVgprEvent(
-    int pc, const std::vector<uint32_t> &regIds,
-    const IntervalSet &ldsIntervals, uint64_t execMask, uint8_t byteMask) {
+void WaveRaceState::registerLdsToVgprEvent(int pc,
+                                           const std::vector<uint32_t> &regIds,
+                                           const IntervalSet &ldsIntervals,
+                                           uint64_t execMask,
+                                           uint8_t byteMask) {
   auto sw = profileScope("registerLdsToVgprEvent");
   auto eventId =
       detector->allocateEventId(waveId, pc, MemoryEventType::LDS_TO_VGPR,
-                               regIds, execMask, byteMask, ldsIntervals);
+                                regIds, execMask, byteMask, ldsIntervals);
   for (auto reg : regIds) {
     vgprMemoryEvents[reg].push_back(eventId);
     regEventCountInc(MemoryEventType::LDS_TO_VGPR, reg);
@@ -59,13 +61,14 @@ void WaveRaceState::registerLdsToVgprEvent(
   waveMemoryEvents.push_back(eventId);
 }
 
-void WaveRaceState::registerVgprToLdsEvent(
-    int pc, const std::vector<uint32_t> &regIds,
-    const IntervalSet &ldsIntervals, uint64_t execMask) {
+void WaveRaceState::registerVgprToLdsEvent(int pc,
+                                           const std::vector<uint32_t> &regIds,
+                                           const IntervalSet &ldsIntervals,
+                                           uint64_t execMask) {
   auto sw = profileScope("registerVgprToLdsEvent");
-  auto eventId = detector->allocateEventId(
-      waveId, pc, MemoryEventType::VGPR_TO_LDS, regIds, execMask, 0xF,
-      ldsIntervals);
+  auto eventId =
+      detector->allocateEventId(waveId, pc, MemoryEventType::VGPR_TO_LDS,
+                                regIds, execMask, 0xF, ldsIntervals);
 
   for (auto reg : regIds) {
     vgprMemoryEvents[reg].push_back(eventId);
@@ -78,9 +81,9 @@ void WaveRaceState::registerVgprToLdsEvent(
 void WaveRaceState::registerGlobalToLdsEvent(int pc,
                                              const IntervalSet &ldsIntervals,
                                              uint64_t execMask) {
-  auto eventId = detector->allocateEventId(
-      waveId, pc, MemoryEventType::GLOBAL_TO_LDS, {}, execMask, 0xF,
-      ldsIntervals);
+  auto eventId =
+      detector->allocateEventId(waveId, pc, MemoryEventType::GLOBAL_TO_LDS, {},
+                                execMask, 0xF, ldsIntervals);
   waveMemoryEvents.push_back(eventId);
 }
 
@@ -146,8 +149,8 @@ void WaveRaceState::checkVgprRead(int reg, int lane, uint8_t byteMask) const {
     if (isToVgpr(detector->getEventType(eid)) &&
         (detector->getEventByteMask(eid) & byteMask) != 0 &&
         detector->isEventActiveForLane(eid, lane)) {
-      throw RaceConditionException::Vgpr(reg, waveId.value, lane, false,
-                                         detector->getWorkgroupId());
+      detector->getRaceHandler()({RaceViolation::Space::VGPR, reg, waveId.value,
+                                  lane, false, detector->getWorkgroupId()});
     }
   }
 }
@@ -159,8 +162,9 @@ void WaveRaceState::checkVgprReadAllLanes(int reg) const {
       if (isToVgpr(detector->getEventType(eid)) &&
           (detector->getEventByteMask(eid) & 0xF) != 0) {
         int lane = std::countr_zero(detector->getEventExecMask(eid));
-        throw RaceConditionException::Vgpr(reg, waveId.value, lane, false,
-                                           detector->getWorkgroupId());
+        detector->getRaceHandler()({RaceViolation::Space::VGPR, reg,
+                                    waveId.value, lane, false,
+                                    detector->getWorkgroupId()});
       }
     }
   }
@@ -177,7 +181,8 @@ bool WaveRaceState::isOutstandingFromVgpr(int lane, int reg) const {
 }
 
 Profiler::ScopedStopwatch WaveRaceState::profileScope(std::string_view key) {
-  return profiler ? profiler->scopedStopwatch(key) : Profiler::ScopedStopwatch{};
+  return profiler ? profiler->scopedStopwatch(key)
+                  : Profiler::ScopedStopwatch{};
 }
 
 } // namespace raceemulator

@@ -75,8 +75,8 @@ public:
   /// "exec") and return the first register in the range.
   CommonRegister getFirstRegister(std::string_view regStr) const;
 
-  /// Return the value in the given VGPR. Throws RaceConditionException if
-  /// race checks are enabled and an outstanding load targets this register.
+  /// Return the value in the given VGPR. Calls the race handler if race
+  /// checks are enabled and an outstanding load targets this register.
   uint32_t getVgpr(int reg, int lane) const;
 
   /// Read all lanes of a single VGPR into out[0..waveSize-1]. Race checking
@@ -152,43 +152,12 @@ public:
   /// Validated LDS write: auto-supplies waveId and delegates to Workgroup.
   template <typename T> void writeLds(int addr, int lane, T value);
 
-  /// Register an in-flight memory event. The event remains outstanding until
-  /// retired by s_waitcnt. byteMask selects which bytes of each register are
-  /// covered (0xF = all 4 bytes).
-  void registerGlobalToVgprEvent(int pc, const std::vector<uint32_t> &registers,
-                                 uint8_t byteMask = 0xF);
-  void registerVgprToGlobalEvent(int pc,
-                                 const std::vector<uint32_t> &registers);
-  void registerLdsToVgprEvent(int pc, const std::vector<uint32_t> &registers,
-                              const IntervalSet &ldsIntervals,
-                              uint8_t byteMask = 0xF);
-  void registerVgprToLdsEvent(int pc, const std::vector<uint32_t> &registers,
-                              const IntervalSet &ldsIntervals);
-
-  /// Direct-to-LDS: no VGPR registers, only LDS intervals. Counted by vmcnt.
-  void registerGlobalToLdsEvent(int pc, const IntervalSet &ldsIntervals);
-
-  /// True if any outstanding store reads from the given VGPR lane.
-  bool isOutstandingFromVgpr(int lane, int reg) const;
-
-  bool isRaceChecks() const;
   bool isCompleteEmulation() const;
 
-  /// Retire global memory events until at most vmcnt remain outstanding.
-  void sWaitCntVmcnt(int vmcnt);
-
-  /// Retire LDS events until at most lgkmcnt remain outstanding.
-  void sWaitCntLgkmcnt(int lgkmcnt);
-
-  /// Number of outstanding events of a given type on a register (across all
-  /// lanes). Used by getVgprs() to skip per-lane checks when zero.
-  int getRegEventCount(MemoryEventType type, int reg) const;
-
-  std::vector<EventId> &getVgprMemoryEvents(int reg);
-
-  const std::vector<EventId> &getWaveMemoryEvents() const;
-
-  const std::vector<EventId> &getWaveCompleteMemoryEvents() const;
+  /// Per-wave race detection state. Returns null when race checks are
+  /// disabled, so callers can use `if (auto *rs = getRaceState()) { ... }`.
+  WaveRaceState *getRaceState() { return raceState; }
+  const WaveRaceState *getRaceState() const { return raceState; }
 
   WaveId getWaveId() const { return waveId; }
 

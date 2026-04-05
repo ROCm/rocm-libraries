@@ -20,18 +20,20 @@ Workgroup::Workgroup(Workgroup &&) noexcept = default;
 Workgroup &Workgroup::operator=(Workgroup &&) noexcept = default;
 
 Workgroup::Workgroup(const WorkgroupConfig &config)
-    : waveSchedule(config.waveSchedule), completeEmulation(config.completeEmulation) {
+    : waveSchedule(config.waveSchedule),
+      completeEmulation(config.completeEmulation),
+      workgroupId(config.workgroupId) {
   if (config.ldsSize > 0) {
     lds.resize(config.ldsSize);
   }
 
   if (config.raceChecks) {
     raceDetector = std::make_unique<RaceDetector>(
-        lds.getSize(), config.nWaves, config.vgprCount);
+        lds.getSize(), config.nWaves, config.vgprCount, config.workgroupId,
+        config.raceHandler);
   }
 
-  int agprOffset =
-      config.agprOffset < 0 ? config.vgprCount : config.agprOffset;
+  int agprOffset = config.agprOffset < 0 ? config.vgprCount : config.agprOffset;
   const auto *labels = config.labels ? config.labels : &emptyLabels;
   const auto *macros = config.macros ? config.macros : &emptyMacros;
 

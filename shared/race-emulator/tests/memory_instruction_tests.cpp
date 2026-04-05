@@ -4,6 +4,7 @@
 #include "race-emulator/CommonRegister.h"
 #include "race-emulator/EmulatorException.h"
 #include "race-emulator/Wave.h"
+#include "race-emulator/WaveRaceState.h"
 #include "race-emulator/Workgroup.h"
 #include <cstring>
 #include <gtest/gtest.h>
@@ -29,8 +30,13 @@ void setupSrd(Wave &wave, int srdBase, uintptr_t baseAddr, uint32_t size) {
 } // namespace
 
 TEST(Instructions, MemoryRoundTrip) {
-  Workgroup wg({.vgprCount = 10, .sgprCount = 10, .waveSize = WaveSize{1},
-                .raceChecks = true});
+  Workgroup wg({.vgprCount = 10,
+                .sgprCount = 10,
+                .waveSize = WaveSize{1},
+                .raceChecks = true,
+                .raceHandler = [](RaceViolation v) {
+                  throw RaceConditionException(v);
+                }});
   auto &regs = wg.getWave(0);
 
   // 1. Allocate a safe "global memory" buffer on the host
@@ -116,8 +122,12 @@ TEST(Instructions, DS_Write_B32_Direct) {
   // 1. Setup LDS Storage (Simulating 1KB of Shared Memory)
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Workgroup wg({.vgprCount = 4, .sgprCount = 0, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .labels = &labels, .macros = &macros});
+  Workgroup wg({.vgprCount = 4,
+                .sgprCount = 0,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .labels = &labels,
+                .macros = &macros});
   auto &regs = wg.getWave(0);
 
   // 3. Setup Operand State
@@ -145,8 +155,11 @@ TEST(Instructions, DS_Write_AllVariants_Combined) {
   // 1. Setup (One-time cost)
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Workgroup wg({.vgprCount = 16, .sgprCount = 0, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .labels = &labels,
+  Workgroup wg({.vgprCount = 16,
+                .sgprCount = 0,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .labels = &labels,
                 .macros = &macros}); // Need enough VGPRs for b128
   auto &regs = wg.getWave(0);
 
@@ -236,8 +249,12 @@ TEST(Instructions, DS_Write_AllVariants_Combined) {
 TEST(Instructions, DS_Read_Variants) {
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Workgroup wg({.vgprCount = 10, .sgprCount = 0, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .labels = &labels, .macros = &macros});
+  Workgroup wg({.vgprCount = 10,
+                .sgprCount = 0,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .labels = &labels,
+                .macros = &macros});
   auto &regs = wg.getWave(0);
 
   // Setup Memory
@@ -470,8 +487,12 @@ TEST(Instructions, BufferLoad_OutOfBounds_ReturnsZero) {
 TEST(Instructions, DS_Write_B8_D16_HI) {
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Workgroup wg({.vgprCount = 16, .sgprCount = 0, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .labels = &labels, .macros = &macros});
+  Workgroup wg({.vgprCount = 16,
+                .sgprCount = 0,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .labels = &labels,
+                .macros = &macros});
   auto &regs = wg.getWave(0);
 
   // --- Test Case: ds_write_b8_d16_hi ---
@@ -501,8 +522,12 @@ TEST(Instructions, DS_Write_Extended_Features) {
   // Setup
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Workgroup wg({.vgprCount = 16, .sgprCount = 0, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .labels = &labels, .macros = &macros});
+  Workgroup wg({.vgprCount = 16,
+                .sgprCount = 0,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .labels = &labels,
+                .macros = &macros});
   auto &regs = wg.getWave(0);
 
   // --- Test Case E: ds_write_b16_d16_hi ---
@@ -547,8 +572,12 @@ TEST(Instructions, DS_Write_Extended_Features) {
 TEST(Instructions, DS_Read_AllVariants_Extended) {
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Workgroup wg({.vgprCount = 10, .sgprCount = 0, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .labels = &labels, .macros = &macros});
+  Workgroup wg({.vgprCount = 10,
+                .sgprCount = 0,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .labels = &labels,
+                .macros = &macros});
   auto &regs = wg.getWave(0);
   regs.setDsPreserve(true); // Test d16 preserve behavior
 
@@ -622,8 +651,12 @@ TEST(Instructions, DS_Read_AllVariants_Extended) {
 TEST(Instructions, DS_Write2_B64) {
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Workgroup wg({.vgprCount = 16, .sgprCount = 0, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .labels = &labels, .macros = &macros});
+  Workgroup wg({.vgprCount = 16,
+                .sgprCount = 0,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .labels = &labels,
+                .macros = &macros});
   auto &regs = wg.getWave(0);
 
   // ds_write2_b64 vaddr, v[data0:data0+1], v[data1:data1+1] offset0:N offset1:M
@@ -651,8 +684,12 @@ TEST(Instructions, DS_Write2_B64) {
 TEST(Instructions, DS_Write2_B64_DefaultOffset0) {
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Workgroup wg({.vgprCount = 16, .sgprCount = 0, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .labels = &labels, .macros = &macros});
+  Workgroup wg({.vgprCount = 16,
+                .sgprCount = 0,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .labels = &labels,
+                .macros = &macros});
   auto &regs = wg.getWave(0);
 
   // When offset0 is omitted, it defaults to 0.
@@ -675,8 +712,12 @@ TEST(Instructions, DS_Write2_B64_DefaultOffset0) {
 TEST(Instructions, DS_Read2_B64) {
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Workgroup wg({.vgprCount = 16, .sgprCount = 0, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .labels = &labels, .macros = &macros});
+  Workgroup wg({.vgprCount = 16,
+                .sgprCount = 0,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .labels = &labels,
+                .macros = &macros});
   auto &regs = wg.getWave(0);
 
   // ds_read2_b64 v[dst:dst+3], vaddr offset0:N offset1:M
@@ -703,8 +744,12 @@ TEST(Instructions, DS_Read2_B64) {
 TEST(Instructions, DS_Read2_Write2_B64_Roundtrip) {
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Workgroup wg({.vgprCount = 16, .sgprCount = 0, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .labels = &labels, .macros = &macros});
+  Workgroup wg({.vgprCount = 16,
+                .sgprCount = 0,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .labels = &labels,
+                .macros = &macros});
   auto &regs = wg.getWave(0);
 
   // Write via ds_write2_b64, then read back via ds_read2_b64
@@ -728,8 +773,12 @@ TEST(Instructions, DS_Read2_Write2_B64_Roundtrip) {
 TEST(Instructions, DS_Store_Load_2addr_B64_RdnaAliases) {
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Workgroup wg({.vgprCount = 16, .sgprCount = 0, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .labels = &labels, .macros = &macros});
+  Workgroup wg({.vgprCount = 16,
+                .sgprCount = 0,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .labels = &labels,
+                .macros = &macros});
   auto &regs = wg.getWave(0);
 
   // RDNA aliases: ds_store_2addr_b64 = ds_write2_b64
@@ -881,8 +930,12 @@ TEST(Instructions, BufferLoadD16) {
 TEST(Instructions, DsStoreB16_RDNA3Rename) {
   std::map<std::string, int> labels;
   std::map<std::string, Macro> macros;
-  Workgroup wg({.vgprCount = 16, .sgprCount = 0, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .labels = &labels, .macros = &macros});
+  Workgroup wg({.vgprCount = 16,
+                .sgprCount = 0,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .labels = &labels,
+                .macros = &macros});
   auto &regs = wg.getWave(0);
 
   // ds_store_b16: writes low 16 bits of data VGPR.
@@ -902,8 +955,13 @@ TEST(Instructions, DsStoreB16_RDNA3Rename) {
 // Two d16 loads to different halves of the same register should not race
 // when only the drained half is subsequently read.
 TEST(Instructions, BufferLoadD16_ByteLevelRace) {
-  Workgroup wg({.vgprCount = 64, .sgprCount = 32, .waveSize = WaveSize{1},
-                .raceChecks = true});
+  Workgroup wg({.vgprCount = 64,
+                .sgprCount = 32,
+                .waveSize = WaveSize{1},
+                .raceChecks = true,
+                .raceHandler = [](RaceViolation v) {
+                  throw RaceConditionException(v);
+                }});
   auto &regs = wg.getWave(0);
 
   uint16_t hostMem[] = {0x1234, 0xABCD, 0x5678, 0x9999};
@@ -923,7 +981,7 @@ TEST(Instructions, BufferLoadD16_ByteLevelRace) {
   tryExecute(regs, "buffer_load_d16_hi_b16 v0, v29, s[4:7], 0 offen");
 
   // Two vmcnt events outstanding. Drain the oldest (lo half).
-  regs.sWaitCntVmcnt(1);
+  regs.getRaceState()->sWaitCntVmcnt(1);
 
   // Reading the lo half via getHalfVgpr should NOT race.
   EXPECT_NO_THROW(regs.getHalfVgpr(0, 0, false));
@@ -936,7 +994,7 @@ TEST(Instructions, BufferLoadD16_ByteLevelRace) {
   EXPECT_THROW(regs.getVgpr(0, 0), RaceConditionException);
 
   // Drain the hi half too.
-  regs.sWaitCntVmcnt(0);
+  regs.getRaceState()->sWaitCntVmcnt(0);
 
   // Now both halves are safe.
   EXPECT_NO_THROW(regs.getVgpr(0, 0));
@@ -951,8 +1009,14 @@ TEST(Instructions, BufferLoadD16_ByteLevelRace) {
 // directly into LDS at m0 + lane * 16.
 TEST(Instructions, BufferLoad_Lds_DirectToLds) {
   // waveSize=2 for manageable test size (2 lanes × 16 bytes = 32 bytes LDS).
-  Workgroup wg({.vgprCount = 4, .sgprCount = 10, .waveSize = WaveSize{2},
-                .ldsSize = 1024, .raceChecks = true});
+  Workgroup wg({.vgprCount = 4,
+                .sgprCount = 10,
+                .waveSize = WaveSize{2},
+                .ldsSize = 1024,
+                .raceChecks = true,
+                .raceHandler = [](RaceViolation v) {
+                  throw RaceConditionException(v);
+                }});
   auto &wave = wg.getWave(0);
 
   // Host memory: 8 dwords (4 per lane × 2 lanes).
@@ -984,21 +1048,29 @@ TEST(Instructions, BufferLoad_Lds_DirectToLds) {
   EXPECT_EQ(lds.read<uint32_t>(92), 0x88888888u);
 
   // Verify GLOBAL_TO_LDS event was registered.
-  EXPECT_EQ(wave.getWaveMemoryEvents().size(), 1u);
-  EventId eid = wave.getWaveMemoryEvents()[0];
-  EXPECT_EQ(wg.getRaceDetector()->getEventType(eid), MemoryEventType::GLOBAL_TO_LDS);
+  EXPECT_EQ(wave.getRaceState()->getWaveMemoryEvents().size(), 1u);
+  EventId eid = wave.getRaceState()->getWaveMemoryEvents()[0];
+  EXPECT_EQ(wg.getRaceDetector()->getEventType(eid),
+            MemoryEventType::GLOBAL_TO_LDS);
   EXPECT_EQ(wg.getRaceDetector()->getLdsWriteEvents().size(), 1u);
 
   // Verify vmcnt retires it.
-  wave.sWaitCntVmcnt(0);
-  EXPECT_TRUE(wave.getWaveMemoryEvents().empty());
-  EXPECT_EQ(wg.getRaceDetector()->getEventStatus(eid), EventStatus::WAVE_COMPLETE);
+  wave.getRaceState()->sWaitCntVmcnt(0);
+  EXPECT_TRUE(wave.getRaceState()->getWaveMemoryEvents().empty());
+  EXPECT_EQ(wg.getRaceDetector()->getEventStatus(eid),
+            EventStatus::WAVE_COMPLETE);
 }
 
 // Verify that LDS reads race against an outstanding DTL write (before vmcnt).
 TEST(Instructions, BufferLoad_Lds_RaceBeforeVmcnt) {
-  Workgroup wg({.vgprCount = 4, .sgprCount = 10, .waveSize = WaveSize{1},
-                .ldsSize = 1024, .raceChecks = true});
+  Workgroup wg({.vgprCount = 4,
+                .sgprCount = 10,
+                .waveSize = WaveSize{1},
+                .ldsSize = 1024,
+                .raceChecks = true,
+                .raceHandler = [](RaceViolation v) {
+                  throw RaceConditionException(v);
+                }});
   auto &wave = wg.getWave(0);
 
   std::vector<uint32_t> hostMem = {0xAAAAAAAA};
@@ -1014,7 +1086,7 @@ TEST(Instructions, BufferLoad_Lds_RaceBeforeVmcnt) {
   EXPECT_THROW(wg.readLds<uint32_t>(0, WaveId{0}, 0), RaceConditionException);
 
   // After vmcnt → safe.
-  wave.sWaitCntVmcnt(0);
+  wave.getRaceState()->sWaitCntVmcnt(0);
   EXPECT_NO_THROW(wg.readLds<uint32_t>(0, WaveId{0}, 0));
   EXPECT_EQ(wg.readLds<uint32_t>(0, WaveId{0}, 0), 0xAAAAAAAAu);
 }

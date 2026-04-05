@@ -3,12 +3,14 @@
 
 #pragma once
 #include "CommonRegister.h"
-#include "EmulatorException.h"
 #include "IntervalSet.h"
 #include "Types.h"
 #include "Util.h"
 #include "WaveRaceState.h"
 #include <cstdint>
+#include <functional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace raceemulator {
@@ -24,7 +26,7 @@ class Profiler;
 ///   3. retireEvent() — removes from live lists, decrements byte counts
 ///      (s_barrier).
 ///
-/// Race validation uses a two-level approach:
+/// LDS race validation uses a two-level approach:
 ///   - Fast path: per-byte counters (byteWriteCounts / byteReadCounts)
 ///     provide O(1) checks.
 ///   - Slow path: when counts are non-zero, scans live event intervals
@@ -32,7 +34,7 @@ class Profiler;
 class RaceDetector {
   friend class Workgroup;
 
-  /// Per-event metadata, stored once in the event registry (not per byte).
+  /// Per-event metadata stored in the event registry.
   struct EventInfo {
     WaveId waveId;
     int pc;
@@ -45,7 +47,8 @@ class RaceDetector {
   };
 
 public:
-  RaceDetector(int ldsSize, int nWaves, int vgprCount);
+  RaceDetector(int ldsSize, int nWaves, int vgprCount, Dim3d workgroupId,
+               std::function<void(RaceViolation)> raceHandler);
 
   /// Allocate a workgroup-global event ID and record its metadata.
   EventId allocateEventId(WaveId waveId, int pc, MemoryEventType type,
@@ -111,12 +114,17 @@ public:
   const std::vector<EventId> &getLdsWriteEvents() const {
     return ldsWriteEvents;
   }
-  const std::vector<EventId> &getLdsReadEvents() const {
-    return ldsReadEvents;
-  }
+  const std::vector<EventId> &getLdsReadEvents() const { return ldsReadEvents; }
 
-  void setWorkgroupId(Dim3d id) { workgroupId = id; }
   Dim3d getWorkgroupId() const { return workgroupId; }
+  const std::function<void(RaceViolation)> &getRaceHandler() const { return raceHandler; }
+
+  /// Format a RaceViolation with assembly context for diagnostics.
+  /// getSourceLine(i) returns the original source text for line index i.
+  std::string
+  decorateException(const RaceViolation &v, int wavePc,
+                    WaveRaceState *waveRaceState, int numSourceLines,
+                    std::function<std::string_view(int)> getSourceLine) const;
 
 private:
   /// Propagate profiler to all owned WaveRaceStates.
@@ -125,14 +133,25 @@ private:
   WaveRaceState &getWaveRaceState(int waveIndex);
 
   static void adjustByteCounts(const IntervalSet &ivs, std::vector<int> &counts,
-                                int delta);
+                               int delta);
 
+  /// Active LDS write events (for scanning during read validation).
   std::vector<EventId> ldsWriteEvents;
+
+  /// Active LDS read events (for scanning during write validation).
   std::vector<EventId> ldsReadEvents;
+
+  /// Per-LDS-byte outstanding write/read counts for fast-path validation.
   std::vector<int> byteWriteCounts;
   std::vector<int> byteReadCounts;
+
+  /// All events ever allocated, indexed by EventId::value.
   std::vector<EventInfo> eventRegistry;
-  Dim3d workgroupId{0, 0, 0};
+
+  Dim3d workgroupId;
+  std::function<void(RaceViolation)> raceHandler;
+
+  /// One WaveRaceState per wave, indexed by wave ID.
   std::vector<WaveRaceState> waveRaceStates;
 };
 

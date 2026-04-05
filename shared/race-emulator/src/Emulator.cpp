@@ -4,8 +4,8 @@
 #include "race-emulator/Emulator.h"
 #include "race-emulator/EmulatorException.h"
 #include "race-emulator/Parsing.h"
+#include "race-emulator/RaceDetector.h"
 #include "race-emulator/Util.h"
-#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -271,12 +271,11 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
       if (parsedAsm->args[i].valueKind.find("hidden") != std::string::npos) {
         continue;
       }
-      throw std::runtime_error("Kernarg " + std::to_string(i) + " name=(" +
-                               parsedAsm->args[i].name +
-                               ") not set! There are " +
-                               std::to_string(kernargIsSet.size()) +
-                               " kernarg(s). All (non hidden) kernargs must "
-                               "be set before running the kernel!");
+      throw std::runtime_error(
+          "Kernarg " + std::to_string(i) + " name=(" + parsedAsm->args[i].name +
+          ") not set! There are " + std::to_string(kernargIsSet.size()) +
+          " kernarg(s). All (non hidden) kernargs must "
+          "be set before running the kernel!");
     }
   }
 
@@ -294,23 +293,33 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
   threads.reserve(nWorkgroups);
 
   auto wgConfig = buildWorkgroupConfig(nWaves, config);
+  wgConfig.raceHandler = [](RaceViolation v) {
+    throw RaceConditionException(v);
+  };
 
   for (int i = 0; i < nWorkgroups; ++i) {
     threads.emplace_back([&, i]() {
       try {
-        Workgroup workgroup(wgConfig);
+        auto perWgConfig = wgConfig;
+        perWgConfig.workgroupId = wgIds[i];
+        Workgroup workgroup(perWgConfig);
         {
           auto sw = wgProfilers[i].scopedStopwatch("initializeWaveState");
           initializeWaveState(workgroup, wgIds[i], blockDim, nWaves);
         }
         workgroup.setProfiler(&wgProfilers[i]);
-        workgroup.setWorkgroupId(wgIds[i]);
         try {
           workgroup.run(tokens);
         } catch (RaceConditionException &e) {
-          auto msg = decorateRaceException(workgroup, e);
-          throw RaceConditionException(msg, e.space, e.index, e.wave, e.lane,
-                                       e.isWrite, e.workgroupId);
+          auto &wave = workgroup.getWave(e.violation.wave);
+          auto *detector = workgroup.getRaceDetector();
+          auto msg = detector->decorateException(
+              e.violation, wave.getPc(), wave.getRaceState(),
+              static_cast<int>(parsedAsm->tokens.size()),
+              [&](int j) -> std::string_view {
+                return parsedAsm->tokens[j].originalLine;
+              });
+          throw RaceConditionException(msg, e.violation);
         }
       } catch (...) {
         exceptions[i] = std::current_exception();
@@ -347,8 +356,7 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
         std::string msg = "Races detected in " + std::to_string(nExceptions) +
                           " of " + std::to_string(nWorkgroups) +
                           " workgroups. Showing first:\n" + e.what();
-        throw RaceConditionException(msg, e.space, e.index, e.wave, e.lane,
-                                     e.isWrite, e.workgroupId);
+        throw RaceConditionException(msg, e.violation);
       }
       std::cerr << e.what() << std::endl;
       throw;
@@ -377,113 +385,6 @@ void Emulator::addAllKernargs(const void *args) {
   }
   // Copy only the declared kernarg size, not the full (padded) buffer.
   std::memcpy(kernargSegment.data(), args, parsedAsm->kernargSegmentSize);
-}
-
-std::string
-Emulator::decorateRaceException(Workgroup &workgroup,
-                                const RaceConditionException &e) const {
-  int pc = workgroup.getWave(e.wave).getPc();
-
-  auto printCodeBlock = [&](std::ostringstream &oss, int startLine,
-                            int endLine, const std::vector<int> &arrowLines) {
-    for (int i = startLine; i <= endLine; ++i) {
-      if (i < 0 || i >= static_cast<int>(parsedAsm->tokens.size())) {
-        continue;
-      }
-      const auto &t = parsedAsm->tokens[i];
-      bool isArrow = std::find(arrowLines.begin(), arrowLines.end(), i) !=
-                     arrowLines.end();
-      if (isArrow) {
-        oss << i << " --> | " << t.originalLine << "\n";
-      } else {
-        oss << i << "     | " << t.originalLine << "\n";
-      }
-    }
-  };
-
-  constexpr int nBefore = 1;
-  constexpr int nAfter = 1;
-  Dim3d wgId = workgroup.getWorkgroupId();
-
-  if (e.space == RaceConditionException::Space::VGPR) {
-    std::ostringstream oss;
-    oss << "\nVGPR race detected on line " << pc << " (wave " << e.wave
-        << ", lane " << e.lane << ") in workgroup (" << wgId.x << ","
-        << wgId.y << "," << wgId.z << "). Conflicting events:\n\n";
-
-    auto &wave = workgroup.getWave(e.wave);
-    auto *detector = workgroup.getRaceDetector();
-    std::vector<int> eventPcs{pc};
-    for (EventId evtId : wave.getVgprMemoryEvents(e.index)) {
-      eventPcs.push_back(detector->getEventPc(evtId));
-    }
-    std::sort(eventPcs.begin(), eventPcs.end());
-
-    if (!eventPcs.empty()) {
-      int blockStart = eventPcs[0] - nBefore;
-      int blockEnd = eventPcs[0] + nAfter;
-      std::vector<int> arrows = {eventPcs[0]};
-
-      for (size_t i = 1; i < eventPcs.size(); ++i) {
-        if (eventPcs[i] - nBefore <= blockEnd + 1) {
-          blockEnd = std::max(blockEnd, eventPcs[i] + nAfter);
-          arrows.push_back(eventPcs[i]);
-        } else {
-          printCodeBlock(oss, blockStart, blockEnd, arrows);
-          oss << "\n";
-          blockStart = eventPcs[i] - nBefore;
-          blockEnd = eventPcs[i] + nAfter;
-          arrows = {eventPcs[i]};
-        }
-      }
-      printCodeBlock(oss, blockStart, blockEnd, arrows);
-      oss << "\n";
-    }
-    return oss.str();
-  }
-
-  if (e.space == RaceConditionException::Space::LDS) {
-    std::ostringstream oss;
-    oss << "\nLDS race in byte " << e.index << " detected in workgroup ("
-        << wgId.x << "," << wgId.y << "," << wgId.z
-        << "). Race between a pair in:\n\n";
-
-    struct PcWaveLane {
-      int pc;
-      int wave;
-      int lane;
-    };
-    std::vector<PcWaveLane> entries{{pc, e.wave, e.lane}};
-
-    auto *detector = workgroup.getRaceDetector();
-    auto scanEvents = [&](const std::vector<EventId> &events) {
-      for (EventId eventId : events) {
-        if (detector->getEventIntervals(eventId).contains(e.index)) {
-          entries.push_back({detector->getEventPc(eventId),
-                             detector->getEventWaveId(eventId).value, -1});
-        }
-      }
-    };
-    scanEvents(detector->getLdsWriteEvents());
-    scanEvents(detector->getLdsReadEvents());
-    std::sort(entries.begin(), entries.end(),
-              [](const PcWaveLane &a, const PcWaveLane &b) {
-                return std::tie(a.pc, a.wave) < std::tie(b.pc, b.wave);
-              });
-
-    for (const auto &entry : entries) {
-      oss << "Wave " << entry.wave;
-      if (entry.lane >= 0) {
-        oss << " Lane " << entry.lane;
-      }
-      oss << ":\n";
-      printCodeBlock(oss, entry.pc - nBefore, entry.pc + nAfter, {entry.pc});
-      oss << "\n";
-    }
-    return oss.str();
-  }
-
-  return "\nRace detector for SGPR coming soon\n";
 }
 
 Emulator::Emulator(Emulator &&other) noexcept = default;

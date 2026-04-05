@@ -2,12 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 #include "race-emulator/RaceDetector.h"
+#include <algorithm>
 #include <cassert>
+#include <sstream>
 
 namespace raceemulator {
 
-RaceDetector::RaceDetector(int ldsSize, int nWaves, int vgprCount)
-    : byteWriteCounts(ldsSize, 0), byteReadCounts(ldsSize, 0) {
+RaceDetector::RaceDetector(int ldsSize, int nWaves, int vgprCount,
+                           Dim3d workgroupId,
+                           std::function<void(RaceViolation)> raceHandler)
+    : byteWriteCounts(ldsSize, 0), byteReadCounts(ldsSize, 0),
+      workgroupId(workgroupId), raceHandler(std::move(raceHandler)) {
   waveRaceStates.reserve(nWaves);
   for (int i = 0; i < nWaves; ++i) {
     waveRaceStates.emplace_back(vgprCount, WaveId{i}, this);
@@ -15,8 +20,7 @@ RaceDetector::RaceDetector(int ldsSize, int nWaves, int vgprCount)
 }
 
 WaveRaceState &RaceDetector::getWaveRaceState(int waveIndex) {
-  assert(waveIndex >= 0 &&
-         waveIndex < static_cast<int>(waveRaceStates.size()));
+  assert(waveIndex >= 0 && waveIndex < static_cast<int>(waveRaceStates.size()));
   return waveRaceStates[waveIndex];
 }
 
@@ -86,8 +90,8 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane,
       continue;
     }
     if (info.ldsIntervals.overlapsRange(addr, addr + nBytes)) {
-      throw RaceConditionException::Lds(addr, wave.value, lane, false,
-                                        workgroupId);
+      raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, false,
+                   workgroupId});
     }
   }
 }
@@ -111,19 +115,124 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane,
       continue;
     }
     if (info.ldsIntervals.overlapsRange(addr, addr + nBytes)) {
-      throw RaceConditionException::Lds(addr, wave.value, lane, true,
-                                        workgroupId);
+      raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, true,
+                   workgroupId});
     }
   }
 }
 
 void RaceDetector::adjustByteCounts(const IntervalSet &ivs,
-                                     std::vector<int> &counts, int delta) {
+                                    std::vector<int> &counts, int delta) {
   for (const auto &iv : ivs) {
     for (int b = iv.start; b < iv.end; ++b) {
       counts[b] += delta;
     }
   }
+}
+
+std::string RaceDetector::decorateException(
+    const RaceViolation &e, int wavePc, WaveRaceState *waveRaceState,
+    int numSourceLines,
+    std::function<std::string_view(int)> getSourceLine) const {
+
+  auto printCodeBlock = [&](std::ostringstream &oss, int startLine, int endLine,
+                            const std::vector<int> &arrowLines) {
+    for (int i = startLine; i <= endLine; ++i) {
+      if (i < 0 || i >= numSourceLines) {
+        continue;
+      }
+      bool isArrow = std::find(arrowLines.begin(), arrowLines.end(), i) !=
+                     arrowLines.end();
+      if (isArrow) {
+        oss << i << " --> | " << getSourceLine(i) << "\n";
+      } else {
+        oss << i << "     | " << getSourceLine(i) << "\n";
+      }
+    }
+  };
+
+  constexpr int nBefore = 1;
+  constexpr int nAfter = 1;
+
+  if (e.space == RaceViolation::Space::VGPR) {
+    std::ostringstream oss;
+    oss << "\nVGPR race detected on line " << wavePc << " (wave " << e.wave
+        << ", lane " << e.lane << ") in workgroup (" << workgroupId.x << ","
+        << workgroupId.y << "," << workgroupId.z
+        << "). Conflicting events:\n\n";
+
+    std::vector<int> eventPcs{wavePc};
+    if (waveRaceState) {
+      for (EventId evtId : waveRaceState->getVgprMemoryEvents(e.index)) {
+        eventPcs.push_back(getEventPc(evtId));
+      }
+    }
+    std::sort(eventPcs.begin(), eventPcs.end());
+
+    if (!eventPcs.empty()) {
+      int blockStart = eventPcs[0] - nBefore;
+      int blockEnd = eventPcs[0] + nAfter;
+      std::vector<int> arrows = {eventPcs[0]};
+
+      for (size_t i = 1; i < eventPcs.size(); ++i) {
+        if (eventPcs[i] - nBefore <= blockEnd + 1) {
+          blockEnd = std::max(blockEnd, eventPcs[i] + nAfter);
+          arrows.push_back(eventPcs[i]);
+        } else {
+          printCodeBlock(oss, blockStart, blockEnd, arrows);
+          oss << "\n";
+          blockStart = eventPcs[i] - nBefore;
+          blockEnd = eventPcs[i] + nAfter;
+          arrows = {eventPcs[i]};
+        }
+      }
+      printCodeBlock(oss, blockStart, blockEnd, arrows);
+      oss << "\n";
+    }
+    return oss.str();
+  }
+
+  if (e.space == RaceViolation::Space::LDS) {
+    std::ostringstream oss;
+    oss << "\nLDS race in byte " << e.index << " detected in workgroup ("
+        << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
+        << "). Race between a pair in:\n\n";
+
+    struct PcWaveLane {
+      int pc;
+      int wave;
+      int lane;
+    };
+    std::vector<PcWaveLane> entries{{wavePc, e.wave, e.lane}};
+
+    auto scanEvents = [&](const std::vector<EventId> &events) {
+      for (EventId eventId : events) {
+        if (getEventIntervals(eventId).contains(e.index)) {
+          entries.push_back(
+              {getEventPc(eventId), getEventWaveId(eventId).value, -1});
+        }
+      }
+    };
+    scanEvents(ldsWriteEvents);
+    scanEvents(ldsReadEvents);
+    std::sort(entries.begin(), entries.end(),
+              [](const PcWaveLane &a, const PcWaveLane &b) {
+                return std::tie(a.pc, a.wave) < std::tie(b.pc, b.wave);
+              });
+
+    for (const auto &entry : entries) {
+      oss << "Wave " << entry.wave;
+      if (entry.lane >= 0) {
+        oss << " Lane " << entry.lane;
+      }
+      oss << ":\n";
+      printCodeBlock(oss, entry.pc - nBefore, entry.pc + nAfter, {entry.pc});
+      oss << "\n";
+    }
+    return oss.str();
+  }
+
+  return "\nRace detector for SGPR coming soon\n";
 }
 
 } // namespace raceemulator

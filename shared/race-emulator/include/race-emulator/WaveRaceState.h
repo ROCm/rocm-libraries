@@ -28,18 +28,14 @@ public:
 
   /// Register in-flight memory events. execMask is passed explicitly (no
   /// dependency on Wave).
-  void registerGlobalToVgprEvent(int pc,
-                                 const std::vector<uint32_t> &registers,
+  void registerGlobalToVgprEvent(int pc, const std::vector<uint32_t> &registers,
                                  uint64_t execMask, uint8_t byteMask = 0xF);
-  void registerVgprToGlobalEvent(int pc,
-                                 const std::vector<uint32_t> &registers,
+  void registerVgprToGlobalEvent(int pc, const std::vector<uint32_t> &registers,
                                  uint64_t execMask);
-  void registerLdsToVgprEvent(int pc,
-                              const std::vector<uint32_t> &registers,
+  void registerLdsToVgprEvent(int pc, const std::vector<uint32_t> &registers,
                               const IntervalSet &ldsIntervals,
                               uint64_t execMask, uint8_t byteMask = 0xF);
-  void registerVgprToLdsEvent(int pc,
-                              const std::vector<uint32_t> &registers,
+  void registerVgprToLdsEvent(int pc, const std::vector<uint32_t> &registers,
                               const IntervalSet &ldsIntervals,
                               uint64_t execMask);
   void registerGlobalToLdsEvent(int pc, const IntervalSet &ldsIntervals,
@@ -54,7 +50,7 @@ public:
   /// Discard all wave-complete events (called when all waves reach barrier).
   void flushWaveCompleteMemoryEvents();
 
-  /// Check a full VGPR read for races. Throws RaceConditionException.
+  /// Check a full VGPR read for races. Calls the RaceHandler on violation.
   void checkVgprRead(int reg, int lane, uint8_t byteMask) const;
 
   /// Check all lanes of a VGPR for races (used by getVgprs bulk read).

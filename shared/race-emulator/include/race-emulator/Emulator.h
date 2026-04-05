@@ -83,8 +83,6 @@ private:
   /// PC) on an already-constructed Workgroup.
   void initializeWaveState(Workgroup &workgroup, Dim3d wgId, Dim3d blockDim,
                            int nWaves);
-  std::string decorateRaceException(Workgroup &workgroup,
-                                    const RaceConditionException &e) const;
   std::shared_ptr<Architecture> arch;
   std::unique_ptr<ParsedAsm> parsedAsm;
   std::vector<char> kernargSegment;

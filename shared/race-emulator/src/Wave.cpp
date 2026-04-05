@@ -68,90 +68,10 @@ Wave::~Wave() = default;
 Wave::Wave(Wave &&other) noexcept = default;
 Wave &Wave::operator=(Wave &&other) noexcept = default;
 
-// --- Race-checking forwarding wrappers ---
-
-void Wave::registerGlobalToVgprEvent(int pc,
-                                     const std::vector<uint32_t> &regIds,
-                                     uint8_t byteMask) {
-  if (raceState) {
-    raceState->registerGlobalToVgprEvent(pc, regIds, getExecU64(), byteMask);
-  }
-}
-
-void Wave::registerVgprToGlobalEvent(int pc,
-                                     const std::vector<uint32_t> &regIds) {
-  if (raceState) {
-    raceState->registerVgprToGlobalEvent(pc, regIds, getExecU64());
-  }
-}
-
-void Wave::registerLdsToVgprEvent(int pc, const std::vector<uint32_t> &regIds,
-                                  const IntervalSet &ldsIntervals,
-                                  uint8_t byteMask) {
-  if (raceState) {
-    raceState->registerLdsToVgprEvent(pc, regIds, ldsIntervals, getExecU64(),
-                                      byteMask);
-  }
-}
-
-void Wave::registerVgprToLdsEvent(int pc, const std::vector<uint32_t> &regIds,
-                                  const IntervalSet &ldsIntervals) {
-  if (raceState) {
-    raceState->registerVgprToLdsEvent(pc, regIds, ldsIntervals, getExecU64());
-  }
-}
-
-void Wave::registerGlobalToLdsEvent(int pc, const IntervalSet &ldsIntervals) {
-  if (raceState) {
-    raceState->registerGlobalToLdsEvent(pc, ldsIntervals, getExecU64());
-  }
-}
-
-void Wave::sWaitCntVmcnt(int vmcnt) {
-  if (raceState) {
-    raceState->sWaitCntVmcnt(vmcnt);
-  }
-}
-
-void Wave::sWaitCntLgkmcnt(int lgkmcnt) {
-  if (raceState) {
-    raceState->sWaitCntLgkmcnt(lgkmcnt);
-  }
-}
-
 void Wave::flushWaveCompleteMemoryEvents() {
   if (raceState) {
     raceState->flushWaveCompleteMemoryEvents();
   }
-}
-
-bool Wave::isOutstandingFromVgpr(int lane, int reg) const {
-  if (raceState) {
-    return raceState->isOutstandingFromVgpr(lane, reg);
-  }
-  return false;
-}
-
-int Wave::getRegEventCount(MemoryEventType type, int reg) const {
-  if (raceState) {
-    return raceState->getRegEventCount(type, reg);
-  }
-  return 0;
-}
-
-std::vector<EventId> &Wave::getVgprMemoryEvents(int reg) {
-  assert(raceState && "getVgprMemoryEvents called without race state");
-  return raceState->getVgprMemoryEvents(reg);
-}
-
-const std::vector<EventId> &Wave::getWaveMemoryEvents() const {
-  assert(raceState && "getWaveMemoryEvents called without race state");
-  return raceState->getWaveMemoryEvents();
-}
-
-const std::vector<EventId> &Wave::getWaveCompleteMemoryEvents() const {
-  assert(raceState && "getWaveCompleteMemoryEvents called without race state");
-  return raceState->getWaveCompleteMemoryEvents();
 }
 
 // --- VGPR access with race checking ---
@@ -448,8 +368,6 @@ template void Wave::readLds<uint32_t>(int, int, uint32_t *, int) const;
 template void Wave::writeLds<uint8_t>(int, int, uint8_t);
 template void Wave::writeLds<uint16_t>(int, int, uint16_t);
 template void Wave::writeLds<uint32_t>(int, int, uint32_t);
-
-bool Wave::isRaceChecks() const { return raceState != nullptr; }
 
 bool Wave::isCompleteEmulation() const {
   return workgroup->isCompleteEmulation();
