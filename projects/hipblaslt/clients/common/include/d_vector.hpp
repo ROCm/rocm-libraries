@@ -248,6 +248,22 @@ private:
     M get(size_t bytes, bool use_HMM = false)
     {
         auto& pool = use_HMM ? m_pool_managed : m_pool;
+        
+        // For Windows system with not enough system memory, 
+        // not suitable for memory pool management when it needs another allocation
+        #ifdef _WIN32
+        MEMORYSTATUSEX memStatus = {};
+        memStatus.dwLength = sizeof(memStatus);
+        if(GlobalMemoryStatusEx(&memStatus))
+        {
+            // If the shared memory is less than 64GB(128 / 2), may not enough for the hipblaslt-test to run
+            if(memStatus.ullTotalPhys <= (128ULL << 30))
+            {
+                pool.clear();
+            }
+        }
+        #endif
+
         auto  it   = std::lower_bound(pool.begin(), pool.end(), bytes);
         if(it != pool.end() && // found a buffer that is large enough ..
            it->capacity() < 2 * bytes) // but not way too large
@@ -269,21 +285,6 @@ private:
             // remove the (largest) buffer that was too small
             if(it != pool.begin())
                 pool.erase(it - 1);
-
-            // For Windows system with not enough system memory, 
-            // not suitable for memory pool management when it needs another allocation
-            #ifdef _WIN32
-            MEMORYSTATUSEX memStatus = {};
-            memStatus.dwLength = sizeof(memStatus);
-            if(GlobalMemoryStatusEx(&memStatus))
-            {
-                // If the shared memory is less than 64GB(128 / 2), may not enough for the hipblaslt-test to run
-                if(memStatus.ullTotalPhys <= (128ULL << 30))
-                {
-                    pool.clear();
-                }
-            }
-            #endif
 
             // Allocate 20% extra if it is not huge_request for later reuse
             size_t alloc_capacity = huge_request ? bytes : static_cast<size_t>(bytes * 1.2);
