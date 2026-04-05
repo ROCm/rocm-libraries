@@ -55,7 +55,7 @@ class GroupedConvFeatureEngine(FeatureEngine):
 
     def get_feature_names(self) -> list[str]:
         return [
-            # Problem features (30)
+            # Problem features (30 -> 38 with Tier-1 additions)
             "N", "C", "K", "G",
             "Hi", "Wi", "Y", "X",
             "stride_h", "stride_w",
@@ -73,7 +73,16 @@ class GroupedConvFeatureEngine(FeatureEngine):
             "channels_per_group",  # C / G
             "aspect_ratio_hw",     # Hi / Wi
             "aspect_ratio_filter", # Y / X
-            # Kernel features (15)
+            # Tier-1 Group-specific features (8)
+            "log2_channels_per_group",
+            "log2_output_channels_per_group",
+            "is_depthwise",
+            "group_density",
+            "is_small_group",
+            "channels_product_per_group",
+            "batch_group_product",
+            "is_small_batch_grouped",
+            # Kernel features (15 -> 21 with Tier-1 additions)
             "block_size",
             "gemm_m_per_block",
             "gemm_n_per_block",
@@ -175,6 +184,17 @@ class GroupedConvFeatureEngine(FeatureEngine):
         aspect_ratio_hw = Hi / max(Wi, 1)
         aspect_ratio_filter = Y / max(X, 1)
 
+        # Tier-1 Group-specific features (8)
+        output_channels_per_group = K / max(G, 1)
+        log2_channels_per_group = math.log2(max(channels_per_group, 1))
+        log2_output_channels_per_group = math.log2(max(output_channels_per_group, 1))
+        is_depthwise = float(G == C and G == K)
+        group_density = G / max(C, 1)
+        is_small_group = float(channels_per_group < 16 or output_channels_per_group < 16)
+        channels_product_per_group = channels_per_group * output_channels_per_group
+        batch_group_product = N * G
+        is_small_batch_grouped = float(N < 8 and G > 1)
+
         # Kernel features
         block_size = int(kernel.get("block_size", 16))
         gemm_m_per_block = int(kernel.get("gemm_m_per_block", 64))
@@ -247,6 +267,10 @@ class GroupedConvFeatureEngine(FeatureEngine):
                 ai,
                 filter_area, is_1x1_conv, is_3x3_conv,
                 channels_per_group, aspect_ratio_hw, aspect_ratio_filter,
+                # Tier-1 Group-specific features (8)
+                log2_channels_per_group, log2_output_channels_per_group,
+                is_depthwise, group_density, is_small_group,
+                channels_product_per_group, batch_group_product, is_small_batch_grouped,
                 # Kernel features (15)
                 block_size, gemm_m_per_block, gemm_n_per_block,
                 pipeline_code,
@@ -323,6 +347,17 @@ class GroupedConvFeatureEngine(FeatureEngine):
         channels_per_group = C / np.maximum(G, 1)
         aspect_ratio_hw = Hi / np.maximum(Wi, 1)
         aspect_ratio_filter = Y / np.maximum(X, 1)
+
+        # Tier-1 Group-specific features (8)
+        output_channels_per_group = K / np.maximum(G, 1)
+        log2_channels_per_group = np.log2(np.maximum(channels_per_group, 1))
+        log2_output_channels_per_group = np.log2(np.maximum(output_channels_per_group, 1))
+        is_depthwise = ((G == C) & (G == K)).astype(np.float64)
+        group_density = G / np.maximum(C, 1)
+        is_small_group = ((channels_per_group < 16) | (output_channels_per_group < 16)).astype(np.float64)
+        channels_product_per_group = channels_per_group * output_channels_per_group
+        batch_group_product = N * G
+        is_small_batch_grouped = ((N < 8) & (G > 1)).astype(np.float64)
 
         # Kernel features
         block_size = df["block_size"].values.astype(np.float64)
@@ -412,6 +447,16 @@ class GroupedConvFeatureEngine(FeatureEngine):
         result[:, idx] = channels_per_group; idx += 1
         result[:, idx] = aspect_ratio_hw; idx += 1
         result[:, idx] = aspect_ratio_filter; idx += 1
+        # Tier-1 Group-specific features (8)
+        result[:, idx] = log2_channels_per_group; idx += 1
+        result[:, idx] = log2_output_channels_per_group; idx += 1
+        result[:, idx] = is_depthwise; idx += 1
+        result[:, idx] = group_density; idx += 1
+        result[:, idx] = is_small_group; idx += 1
+        result[:, idx] = channels_product_per_group; idx += 1
+        result[:, idx] = batch_group_product; idx += 1
+        result[:, idx] = is_small_batch_grouped; idx += 1
+        # Kernel features
         result[:, idx] = block_size; idx += 1
         result[:, idx] = gemm_m_per_block; idx += 1
         result[:, idx] = gemm_n_per_block; idx += 1

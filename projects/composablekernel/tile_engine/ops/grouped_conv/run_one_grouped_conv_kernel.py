@@ -21,10 +21,12 @@ import os
 import sys
 from pathlib import Path
 
-# Add dispatcher python path from environment
-for p in [os.environ.get("GCONV_PYPATH", "")]:
-    if p and p not in sys.path:
-        sys.path.insert(0, p)
+# Add dispatcher python paths from environment (can be multiple paths separated by os.pathsep)
+gconv_pypath = os.environ.get("GCONV_PYPATH", "")
+if gconv_pypath:
+    for p in gconv_pypath.split(os.pathsep):
+        if p and p not in sys.path:
+            sys.path.insert(0, p)
 
 from grouped_conv_utils import GroupedConvProblem, GpuGroupedConvRunner  # noqa: E402
 import numpy as np  # noqa: E402
