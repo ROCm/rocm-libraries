@@ -36,6 +36,12 @@
 #include <ck/tensor_operation/gpu/element/binary_element_wise_operation.hpp>
 #include <hiptensor/hiptensor_types.h>
 
+#if HIPTENSOR_INLINE_UNARY_OPS
+#define HIPTENSOR_UNARY_INLINE
+#else
+#define HIPTENSOR_UNARY_INLINE __attribute__((noinline))
+#endif
+
 namespace ck
 {
     namespace tensor_operation
@@ -179,7 +185,7 @@ namespace ck
                     = default;
 
                 template <typename T>
-                __host__ __device__ void switch_op(T& y, T const& x) const
+                __host__ __device__ HIPTENSOR_UNARY_INLINE void switch_op(T& y, T const& x) const
                 {
                     switch(op_type)
                     {

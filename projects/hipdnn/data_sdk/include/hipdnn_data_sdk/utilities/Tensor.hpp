@@ -45,6 +45,16 @@ struct TensorLayout
     static const TensorLayout NHWC; ///< 4D channel-last layout
     static const TensorLayout NCDHW; ///< 5D channel-first layout
     static const TensorLayout NDHWC; ///< 5D channel-last layout
+
+    /// SDPA row-major layout for dims [batch, heads, seq_len, head_dim].
+    /// Same stride order as NCHW ({3,2,1,0}): head_dim is most contiguous.
+    static const TensorLayout BHSD;
+
+    /// SDPA sequence-major layout for dims [batch, seq_len, heads, head_dim].
+    /// Stride order {3,1,2,0}: head_dim contiguous, then heads, then seq_len, then batch.
+    /// @note This is NOT the same stride order as NHWC. NHWC ({3,0,2,1}) would make
+    /// heads contiguous, which is not the intended BSHD layout.
+    static const TensorLayout BSHD;
 };
 
 // NOLINTBEGIN(bugprone-throwing-static-initialization) fixed-size layout constants
@@ -54,6 +64,8 @@ inline const TensorLayout TensorLayout::NCHW{"NCHW", {3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NHWC{"NHWC", strideOrderNhwc(4)};
 inline const TensorLayout TensorLayout::NCDHW{"NCDHW", {4, 3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NDHWC{"NDHWC", strideOrderNhwc(5)};
+inline const TensorLayout TensorLayout::BHSD{"BHSD", {3, 2, 1, 0}};
+inline const TensorLayout TensorLayout::BSHD{"BSHD", {3, 1, 2, 0}};
 // NOLINTEND(bugprone-throwing-static-initialization)
 
 inline std::ostream& operator<<(std::ostream& os, const TensorLayout& layout)
