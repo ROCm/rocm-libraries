@@ -234,6 +234,7 @@ set( MIOpen_Source
     solver/conv/conv_ocl_dir2D_bwdWrW_1x1.cpp
     solver/conv/conv_ocl_dir2D_bwdWrW_2.cpp
     solver/conv/conv_ocl_dir2D_bwdWrW_53.cpp
+    solver/conv/conv_hip_dir2D11x11.cpp
 
     solver/conv/conv_ocl_dir2Dfwd.cpp
     solver/conv/conv_ocl_dir2Dfwd_exhaustive_search.cpp
@@ -590,6 +591,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenConvBwdWrW_LxG_P53.cl
         kernels/MIOpenGroupConvBwdWrW_LxG_P53.cl
         kernels/MIOpenConvBwdWrW1x1_PAD_read4.cl
+        kernels/MIOpenConvFwd_LxL_11.cpp
 
         kernels/MIOpenConvFFT.cpp
         kernels/MIOpenRNNHiddenStateUpdate.cpp
