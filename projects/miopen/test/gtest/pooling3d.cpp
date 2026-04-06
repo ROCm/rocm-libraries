@@ -20,23 +20,22 @@ std::vector<PoolingTestCase> GetPooling3dTestCases()
     std::vector<PoolingTestCase> test_cases;
 
     // Dataset 0: Default dataset (various tensor sizes)
-    std::vector<std::vector<int>> dataset0_inputs = {
-        {16, 64, 3, 4, 4},
-        {16, 32, 4, 9, 9},
-        {8, 512, 3, 14, 14},
-        {8, 512, 4, 28, 28},
-        {16, 64, 56, 56, 56},
-        {4, 3, 4, 227, 227},
-        {4, 4, 4, 161, 700},
-        {1, 3, 4, 4, 4},
-        {2, 8, 2, 8, 8},
-        {1, 16, 3, 5, 5},
-        {1, 32, 4, 14, 14},
-        {2, 64, 8, 8, 8},
-        {1, 16, 4, 28, 28},
-        {1, 3, 8, 56, 56},
-        {2, 64, 4, 28, 28},
-        {1, 32, 16, 32, 32}};
+    std::vector<std::vector<int>> dataset0_inputs = {{16, 64, 3, 4, 4},
+                                                     {16, 32, 4, 9, 9},
+                                                     {8, 512, 3, 14, 14},
+                                                     {8, 512, 4, 28, 28},
+                                                     {16, 64, 56, 56, 56},
+                                                     {4, 3, 4, 227, 227},
+                                                     {4, 4, 4, 161, 700},
+                                                     {1, 3, 4, 4, 4},
+                                                     {2, 8, 2, 8, 8},
+                                                     {1, 16, 3, 5, 5},
+                                                     {1, 32, 4, 14, 14},
+                                                     {2, 64, 8, 8, 8},
+                                                     {1, 16, 4, 28, 28},
+                                                     {1, 3, 8, 56, 56},
+                                                     {2, 64, 4, 28, 28},
+                                                     {1, 32, 16, 32, 32}};
 
     std::vector<std::vector<int>> dataset0_lens    = {{2, 2, 2}, {3, 3, 3}, {1, 2, 2}};
     std::vector<std::vector<int>> dataset0_strides = {{2, 2, 2}, {1, 1, 1}, {1, 2, 2}};
@@ -55,21 +54,21 @@ std::vector<PoolingTestCase> GetPooling3dTestCases()
     for(const auto& in_shape : dataset0_inputs)
     {
         pooling_gtest::AddTestCasesForInput(in_shape,
-                                              dataset0_lens,
-                                              dataset0_strides,
-                                              dataset0_pads,
-                                              dataset0_index_types,
-                                              modes,
-                                              wsidx_values,
-                                              test_cases,
-                                              num_uint16_case,
-                                              num_uint32_case,
-                                              num_uint32_case_imgidx,
-                                              num_uint64_case,
-                                              num_uint64_case_imgidx,
-                                              true,
-                                              false,
-                                              "NCDHW");
+                                            dataset0_lens,
+                                            dataset0_strides,
+                                            dataset0_pads,
+                                            dataset0_index_types,
+                                            modes,
+                                            wsidx_values,
+                                            test_cases,
+                                            num_uint16_case,
+                                            num_uint32_case,
+                                            num_uint32_case_imgidx,
+                                            num_uint64_case,
+                                            num_uint64_case_imgidx,
+                                            true,
+                                            false,
+                                            "NCDHW");
     }
 
     cached_test_cases = test_cases;
