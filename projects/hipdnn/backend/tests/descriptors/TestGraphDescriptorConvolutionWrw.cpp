@@ -29,6 +29,7 @@ using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 namespace
 {
 
@@ -122,10 +123,12 @@ protected:
 
 TEST_F(TestGraphDescriptorConvolutionWrw, BuildFromSingleOperation)
 {
-    auto xDesc = createFinalizedTensor(K_WGRAD_TENSOR_X_UID, {1, 3, 32, 32}, {3072, 1024, 32, 1});
-    auto dyDesc
-        = createFinalizedTensor(K_WGRAD_TENSOR_DY_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto dwDesc = createFinalizedTensor(K_WGRAD_TENSOR_DW_UID, {64, 3, 3, 3}, {27, 9, 3, 1});
+    auto xDesc = createFinalizedTensor(
+        K_WGRAD_TENSOR_X_UID, toVec(K_WGRAD_TENSOR_X_DIMS), toVec(K_WGRAD_TENSOR_X_STRIDES));
+    auto dyDesc = createFinalizedTensor(
+        K_WGRAD_TENSOR_DY_UID, toVec(K_WGRAD_TENSOR_DY_DIMS), toVec(K_WGRAD_TENSOR_DY_STRIDES));
+    auto dwDesc = createFinalizedTensor(
+        K_WGRAD_TENSOR_DW_UID, toVec(K_WGRAD_TENSOR_DW_DIMS), toVec(K_WGRAD_TENSOR_DW_STRIDES));
     auto opDesc = createFinalizedConvolutionWrwOp(xDesc.get(), dyDesc.get(), dwDesc.get());
 
     auto desc = getDescriptor();
@@ -165,10 +168,12 @@ TEST_F(TestGraphDescriptorConvolutionWrw, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorConvolutionWrw, ComputeDataTypePreserved)
 {
-    auto xDesc = createFinalizedTensor(K_WGRAD_TENSOR_X_UID, {1, 3, 32, 32}, {3072, 1024, 32, 1});
-    auto dyDesc
-        = createFinalizedTensor(K_WGRAD_TENSOR_DY_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto dwDesc = createFinalizedTensor(K_WGRAD_TENSOR_DW_UID, {64, 3, 3, 3}, {27, 9, 3, 1});
+    auto xDesc = createFinalizedTensor(
+        K_WGRAD_TENSOR_X_UID, toVec(K_WGRAD_TENSOR_X_DIMS), toVec(K_WGRAD_TENSOR_X_STRIDES));
+    auto dyDesc = createFinalizedTensor(
+        K_WGRAD_TENSOR_DY_UID, toVec(K_WGRAD_TENSOR_DY_DIMS), toVec(K_WGRAD_TENSOR_DY_STRIDES));
+    auto dwDesc = createFinalizedTensor(
+        K_WGRAD_TENSOR_DW_UID, toVec(K_WGRAD_TENSOR_DW_DIMS), toVec(K_WGRAD_TENSOR_DW_STRIDES));
     auto opDesc = createFinalizedConvolutionWrwOp(
         xDesc.get(), dyDesc.get(), dwDesc.get(), HIPDNN_DATA_HALF);
 
@@ -191,10 +196,12 @@ TEST_F(TestGraphDescriptorConvolutionWrw, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorConvolutionWrw, OperationNamePreservedInSerialization)
 {
-    auto xDesc = createFinalizedTensor(K_WGRAD_TENSOR_X_UID, {1, 3, 32, 32}, {3072, 1024, 32, 1});
-    auto dyDesc
-        = createFinalizedTensor(K_WGRAD_TENSOR_DY_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto dwDesc = createFinalizedTensor(K_WGRAD_TENSOR_DW_UID, {64, 3, 3, 3}, {27, 9, 3, 1});
+    auto xDesc = createFinalizedTensor(
+        K_WGRAD_TENSOR_X_UID, toVec(K_WGRAD_TENSOR_X_DIMS), toVec(K_WGRAD_TENSOR_X_STRIDES));
+    auto dyDesc = createFinalizedTensor(
+        K_WGRAD_TENSOR_DY_UID, toVec(K_WGRAD_TENSOR_DY_DIMS), toVec(K_WGRAD_TENSOR_DY_STRIDES));
+    auto dwDesc = createFinalizedTensor(
+        K_WGRAD_TENSOR_DW_UID, toVec(K_WGRAD_TENSOR_DW_DIMS), toVec(K_WGRAD_TENSOR_DW_STRIDES));
     auto opDesc = createFinalizedConvolutionWrwOp(
         xDesc.get(), dyDesc.get(), dwDesc.get(), HIPDNN_DATA_FLOAT, "test_wrw_op");
 
@@ -217,10 +224,12 @@ TEST_F(TestGraphDescriptorConvolutionWrw, OperationNamePreservedInSerialization)
 
 TEST_F(TestGraphDescriptorConvolutionWrw, OperationNameRoundTripThroughLifting)
 {
-    auto xDesc = createFinalizedTensor(K_WGRAD_TENSOR_X_UID, {1, 3, 32, 32}, {3072, 1024, 32, 1});
-    auto dyDesc
-        = createFinalizedTensor(K_WGRAD_TENSOR_DY_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto dwDesc = createFinalizedTensor(K_WGRAD_TENSOR_DW_UID, {64, 3, 3, 3}, {27, 9, 3, 1});
+    auto xDesc = createFinalizedTensor(
+        K_WGRAD_TENSOR_X_UID, toVec(K_WGRAD_TENSOR_X_DIMS), toVec(K_WGRAD_TENSOR_X_STRIDES));
+    auto dyDesc = createFinalizedTensor(
+        K_WGRAD_TENSOR_DY_UID, toVec(K_WGRAD_TENSOR_DY_DIMS), toVec(K_WGRAD_TENSOR_DY_STRIDES));
+    auto dwDesc = createFinalizedTensor(
+        K_WGRAD_TENSOR_DW_UID, toVec(K_WGRAD_TENSOR_DW_DIMS), toVec(K_WGRAD_TENSOR_DW_STRIDES));
     auto opDesc = createFinalizedConvolutionWrwOp(
         xDesc.get(), dyDesc.get(), dwDesc.get(), HIPDNN_DATA_FLOAT, "lift_wrw_name");
 

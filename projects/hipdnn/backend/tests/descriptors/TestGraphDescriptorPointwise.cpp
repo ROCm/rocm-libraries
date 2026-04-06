@@ -28,6 +28,7 @@ using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 namespace
 {
 
@@ -102,10 +103,10 @@ protected:
 
 TEST_F(TestGraphDescriptorPointwise, BuildFromSingleOperation)
 {
-    auto in0Desc
-        = createFinalizedTensor(K_PW_TENSOR_IN0_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto out0Desc
-        = createFinalizedTensor(K_PW_TENSOR_OUT0_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+    auto in0Desc = createFinalizedTensor(
+        K_PW_TENSOR_IN0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+    auto out0Desc = createFinalizedTensor(
+        K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
     auto in1Desc = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
     auto in2Desc = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
     auto opDesc
@@ -150,10 +151,10 @@ TEST_F(TestGraphDescriptorPointwise, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorPointwise, ComputeDataTypePreserved)
 {
-    auto in0Desc
-        = createFinalizedTensor(K_PW_TENSOR_IN0_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto out0Desc
-        = createFinalizedTensor(K_PW_TENSOR_OUT0_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+    auto in0Desc = createFinalizedTensor(
+        K_PW_TENSOR_IN0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+    auto out0Desc = createFinalizedTensor(
+        K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
     auto in1Desc = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
     auto in2Desc = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
     auto opDesc = createFinalizedPointwiseOp(
