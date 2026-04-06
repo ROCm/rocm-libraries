@@ -20,7 +20,8 @@ std::vector<PoolingTestCase> GetWidePooling2dTestCases()
     std::vector<PoolingTestCase> test_cases;
 
     // Dataset 2: Wide dataset
-    std::vector<std::vector<int>> dataset2_inputs  = {{1, 3, 255, 255}, {2, 3, 227, 227}, {1, 7, 127, 127}, {1, 1, 410, 400}};
+    std::vector<std::vector<int>> dataset2_inputs = {
+        {1, 3, 255, 255}, {2, 3, 227, 227}, {1, 7, 127, 127}, {1, 1, 410, 400}};
     std::vector<std::vector<int>> dataset2_lens    = {{35, 35}, {100, 100}, {255, 255}, {410, 400}};
     std::vector<std::vector<int>> dataset2_strides = {{1, 1}};
     std::vector<std::vector<int>> dataset2_pads    = {{0, 0}};
@@ -36,11 +37,22 @@ std::vector<PoolingTestCase> GetWidePooling2dTestCases()
 
     for(const auto& in_shape : dataset2_inputs)
     {
-        pooling_gtest::AddTestCasesForInput(in_shape, dataset2_lens, dataset2_strides, dataset2_pads,
-                                              index_types, modes, wsidx_values, test_cases,
-                                              num_uint16_case, num_uint32_case, num_uint32_case_imgidx,
-                                              num_uint64_case, num_uint64_case_imgidx,
-                                              false, true, "NCHW");
+        pooling_gtest::AddTestCasesForInput(in_shape,
+                                            dataset2_lens,
+                                            dataset2_strides,
+                                            dataset2_pads,
+                                            index_types,
+                                            modes,
+                                            wsidx_values,
+                                            test_cases,
+                                            num_uint16_case,
+                                            num_uint32_case,
+                                            num_uint32_case_imgidx,
+                                            num_uint64_case,
+                                            num_uint64_case_imgidx,
+                                            false,
+                                            true,
+                                            "NCHW");
     }
 
     cached_test_cases = test_cases;
