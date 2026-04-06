@@ -23,7 +23,7 @@ class TestFp8E4M3 : public ::testing::Test
 {
 protected:
     // FP8 E4M3 has limited precision, use larger tolerance
-    static constexpr float K_TOLERANCE = 0.2f; // NOLINT(readability-identifier-naming)
+    static constexpr float K_TOLERANCE = 0.2f;
 
     static bool nearEqual(float a, float b, float tol = K_TOLERANCE)
     {
@@ -43,7 +43,7 @@ protected:
 TEST_F(TestFp8E4M3, NoInfinity)
 {
     // E4M3 OCP format has no infinity, large values saturate to max
-    fp8_e4m3 nan = fp8_e4m3::from_bits(0x7F);
+    const fp8_e4m3 nan = fp8_e4m3::from_bits(0x7F);
     EXPECT_FALSE(isinf(nan)); // 0x7F is NaN, not infinity
     EXPECT_TRUE(isnan(nan));
 }
@@ -55,7 +55,7 @@ TEST_F(TestFp8E4M3, NoInfinity)
 TEST_F(TestFp8E4M3, SaturationOnOverflow)
 {
     // Values beyond 448 should saturate to max
-    fp8_e4m3 large(1000.0f);
+    const fp8_e4m3 large(1000.0f);
     EXPECT_TRUE(isfinite(large));
     EXPECT_TRUE(nearEqual(static_cast<float>(large), 448.0f, 10.0f));
 }
@@ -63,7 +63,7 @@ TEST_F(TestFp8E4M3, SaturationOnOverflow)
 TEST_F(TestFp8E4M3, MaxRepresentableValue)
 {
     // Test max representable value (448)
-    fp8_e4m3 d(448.0f);
+    const fp8_e4m3 d(448.0f);
     EXPECT_TRUE(nearEqual(static_cast<float>(d), 448.0f, 1.0f));
 }
 
@@ -74,27 +74,30 @@ TEST_F(TestFp8E4M3, MaxRepresentableValue)
 TEST_F(TestFp8E4M3, NumericLimitsSpecificValues)
 {
     // E4M3 OCP max is 0x7E = (1 + 6/8) * 2^8 = 1.75 * 256 = 448.0
-    fp8_e4m3 maxVal = std::numeric_limits<fp8_e4m3>::max();
+    const fp8_e4m3 maxVal = std::numeric_limits<fp8_e4m3>::max();
     auto maxFloat = static_cast<float>(maxVal);
     EXPECT_EQ(maxFloat, 448.0f);
     EXPECT_EQ(maxVal.data, 0x7E);
 
     // E4M3 min (smallest positive normal) is 0x08 = 2^(1-7) = 2^-6 = 0.015625
-    fp8_e4m3 minVal = std::numeric_limits<fp8_e4m3>::min();
+    const fp8_e4m3 minVal = std::numeric_limits<fp8_e4m3>::min();
     auto minFloat = static_cast<float>(minVal);
     EXPECT_EQ(minFloat, 0.015625f);
     EXPECT_EQ(minVal.data, 0x08);
 
     // E4M3 lowest is -max = 0xFE = -448.0
-    fp8_e4m3 lowestVal = std::numeric_limits<fp8_e4m3>::lowest();
+    const fp8_e4m3 lowestVal = std::numeric_limits<fp8_e4m3>::lowest();
     auto lowestFloat = static_cast<float>(lowestVal);
     EXPECT_EQ(lowestFloat, -448.0f);
     EXPECT_EQ(lowestVal.data, 0xFE);
 
     // E4M3 epsilon is 2^-3 = 0.125 (3 mantissa bits)
-    fp8_e4m3 eps = std::numeric_limits<fp8_e4m3>::epsilon();
+    const fp8_e4m3 eps = std::numeric_limits<fp8_e4m3>::epsilon();
     auto epsFloat = static_cast<float>(eps);
     EXPECT_EQ(epsFloat, 0.125f);
+
+    // E4M3 round_error is 0.5
+    EXPECT_EQ(static_cast<float>(std::numeric_limits<fp8_e4m3>::round_error()), 0.5f);
 }
 
 // ============================================================================
@@ -118,12 +121,12 @@ TEST_F(TestFp8E4M3, NamedConstants)
 
 TEST_F(TestFp8E4M3, ConstructSubnormal)
 {
-    fp8_e4m3 val(0x1p-7f);
+    const fp8_e4m3 val(0x1p-7f);
     EXPECT_EQ(static_cast<float>(val), 0x1p-7f);
 }
 
 TEST_F(TestFp8E4M3, ConstructFromInt64)
 {
-    fp8_e4m3 d(int64_t{16});
+    const fp8_e4m3 d(int64_t{16});
     EXPECT_TRUE(nearEqual(static_cast<float>(d), 16.0f));
 }

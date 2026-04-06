@@ -46,6 +46,8 @@ namespace hipdnn_frontend::graph
 class MatmulAttributes : public Attributes<MatmulAttributes>
 {
 public:
+    MatmulAttributes() = default;
+
     /// Input tensor identifiers
     enum class InputNames
     {

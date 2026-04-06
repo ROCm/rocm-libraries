@@ -13,6 +13,27 @@
 namespace hipdnn_frontend::detail
 {
 
+inline Error hasEngineConfigs(hipdnnBackendDescriptor_t engineHeuristicDesc)
+{
+    int64_t availableEngineCount = 0;
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendGetAttribute(engineHeuristicDesc,
+                                             HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                             0,
+                                             &availableEngineCount,
+                                             nullptr),
+        "Failed to get attribute from the engine heuristic descriptor.");
+
+    if(availableEngineCount == 0)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "No engine configurations available for the graph."};
+    }
+
+    return {ErrorCode::OK, ""};
+}
+
 inline Error
     getEngineConfigs(std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>>& engineConfigs,
                      std::vector<int64_t>& engineIds,
@@ -37,7 +58,7 @@ inline Error
 
     // Get only top hit if preferred engine id isn't set.
     // Otherwise get all available engine configs to search for preferred id.
-    int64_t requiredCount = getAll ? availableEngineCount : 1;
+    const int64_t requiredCount = getAll ? availableEngineCount : 1;
     std::vector<hipdnnBackendDescriptor_t> engineConfigsShallow;
     for(size_t i = 0; i < static_cast<size_t>(requiredCount); ++i)
     {
@@ -88,7 +109,7 @@ inline Error
             "Failed to get engine from engine configuration descriptor.");
 
         // Clean-up engineDesc once we no longer need it within this scope.
-        ScopedHipdnnBackendDescriptor scopedEngineDesc(engineDesc);
+        const ScopedHipdnnBackendDescriptor scopedEngineDesc(engineDesc);
 
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
             hipdnnBackend()->backendGetAttribute(engineDesc,

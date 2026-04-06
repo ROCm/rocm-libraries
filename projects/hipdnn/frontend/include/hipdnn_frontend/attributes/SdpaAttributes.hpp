@@ -33,13 +33,23 @@ namespace hipdnn_frontend::graph
  * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
  * @endcode
  *
+ * **Tensor Shapes (BHSD ordering):**
+ * - **Q** (query): `(B, H, S_q, D)` — batch, heads, query sequence length, head dimension
+ * - **K** (key): `(B, H_k, S_kv, D)` — batch, key heads, key/value sequence length, head dimension
+ * - **V** (value): `(B, H_v, S_kv, D_v)` — batch, value heads, key/value sequence length, value head dimension
+ * - **O** (output): `(B, H, S_q, D_v)` — batch, heads, query sequence length, value head dimension
+ * - **Stats** (optional): `(B, H, S_q, 1)` — softmax statistics (when generate_stats is true)
+ *
+ * Memory layout is controlled via strides. Use `TensorLayout::BHSD` for row-major or
+ * `TensorLayout::BSHD` for sequence-major layout.
+ *
  * **Required inputs:**
- * - Q: Query tensor [B, H, S_q, D]
- * - K: Key tensor [B, H, S_kv, D]
- * - V: Value tensor [B, H, S_kv, D]
+ * - Q: Query tensor
+ * - K: Key tensor (num_heads must divide evenly into Q's num_heads for GQA/MQA)
+ * - V: Value tensor (seq_kv must match K)
  *
  * **Outputs:**
- * - O: Attention output tensor [B, H, S_q, D]
+ * - O: Attention output tensor
  * - Stats: Softmax statistics (optional, when generate_stats is set)
  *
  * **Optional features:**
@@ -62,6 +72,8 @@ namespace hipdnn_frontend::graph
 class SdpaAttributes : public Attributes<SdpaAttributes>
 {
 public:
+    SdpaAttributes() = default;
+
     // NOLINTBEGIN(readability-identifier-naming)
     enum class InputNames
     {
@@ -601,6 +613,12 @@ public:
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_dropout_probability(float probability)
+    {
+        dropout_probability = probability;
+        return *this;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_attn_scale_value(float value)
     {
         attn_scale_value = value;
@@ -624,6 +642,7 @@ public:
         max_seq_len_kv = value;
         return *this;
     }
+    /// @brief Set the diagonal alignment for causal masking
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_diagonal_alignment(DiagonalAlignment value)
     {
@@ -636,6 +655,7 @@ public:
         mma_core_mode = value;
         return *this;
     }
+    /// @brief Set the execution strategy for SDPA
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_implementation(AttentionImplementation value)
     {

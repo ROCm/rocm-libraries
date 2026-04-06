@@ -105,22 +105,6 @@ set( MIOpen_Source
     getitem_api.cpp
     glu/problem_description.cpp
     glu_api.cpp
-    graphapi/convolution.cpp
-    graphapi/conv_bias_res_add_activ_forward_executor.cpp
-    graphapi/engine.cpp
-    graphapi/enginecfg.cpp
-    graphapi/engineheur.cpp
-    graphapi/execution_plan.cpp
-    graphapi/find_engine.cpp
-    graphapi/graphapi.cpp
-    graphapi/matmul.cpp
-    graphapi/opgraph.cpp
-    graphapi/pointwise.cpp
-    graphapi/reduction.cpp
-    graphapi/reshape.cpp
-    graphapi/rng.cpp
-    graphapi/tensor.cpp
-    graphapi/variant_pack.cpp
     groupnorm_api.cpp
     groupnorm/problem_description.cpp
     handle_api.cpp
@@ -220,7 +204,6 @@ set( MIOpen_Source
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
     solver/conv/conv_direct_naive_conv_wrw.cpp
-    solver/conv/conv_hip_implicit_gemm_bwd_data_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v1r1.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v1r1_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v4r1.cpp
@@ -230,10 +213,10 @@ set( MIOpen_Source
     solver/conv/conv_hip_implicit_gemm_fwd_v4r4_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r4_xdlops_padded_gemm.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r5_xdlops.cpp
-    solver/conv/conv_hip_implicit_gemm_fwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_fwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_bwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp
+    solver/ck_grouped_conv_lib_loader.cpp
     solver/conv/conv_hip_implicit_gemm_3d_grouped_fwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_3d_grouped_wrw_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_3d_grouped_bwd_xdlops.cpp
@@ -939,8 +922,6 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
         
         if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
-            add_subdirectory(kernels/ck_builder)
-            list(APPEND MIOPEN_CK_LINK_FLAGS ck_builder)
             add_definitions(-DCK_EXPERIMENTAL_BUILDER)
         endif()
     endif()
@@ -950,6 +931,9 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
     if(GPU_TARGETS MATCHES "gfx950")
         target_compile_definitions(MIOpen PRIVATE CK_USE_GFX95)
     endif()
+
+    # Build per-GPU-target CK grouped conv shared libraries
+    add_subdirectory(ck_impl)
 endif()
 
 if(WIN32)

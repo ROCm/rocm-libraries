@@ -33,7 +33,8 @@ Checks: >
   -portability-avoid-pragma-once,
   -modernize-use-scoped-lock,
   -readability-use-concise-preprocessor-directives,
-  -readability-math-missing-parentheses
+  -readability-math-missing-parentheses,
+  -misc-*
 
 WarningsAsErrors: "*"
 HeaderFileExtensions: ['h','hpp']

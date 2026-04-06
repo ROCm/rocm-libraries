@@ -1849,6 +1849,14 @@ def fp4_kernels_wgm():
     yield from fp4_single_scale_target_d2lds_mi16x16x128_pf4x1_wgm()
 
 
+def fp4_kernels_wgm_streamk():
+    # TODO: simplify to addStreamK(fp4_kernels_wgm()) once all tests are working
+    yield from addStreamK(fp4_target_d2lds_mi32x32x64_pf2x1_wgm())
+    # yield from addStreamK(fp4_target_d2lds_mi32x32x64_pf4x1_wgm())
+    # yield from addStreamK(fp4_target_d2lds_mi16x16x128_pf4x1_wgm())
+    yield from addStreamK(fp4_single_scale_target_d2lds_mi16x16x128_pf4x1_wgm())
+
+
 def fp4_16x16x128_scale_options():
     yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
     yield from addSkipPermlane(fp4_target_d2lds_mi16x16x128_pf4x1_wgm())
@@ -1864,6 +1872,7 @@ def fp4_32x32x64_scale_options():
 def fp4_kernels():
     yield from fp4_kernels_no_wgm()
     yield from fp4_kernels_wgm()
+    yield from fp4_kernels_wgm_streamk()
     yield from fp4_16x16x128_scale_options()
     yield from fp4_32x32x64_scale_options()
     yield from fp4_d2lds_wgts256x256x256()

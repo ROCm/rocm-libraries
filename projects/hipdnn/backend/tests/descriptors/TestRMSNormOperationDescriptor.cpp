@@ -386,7 +386,7 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeTensorDescriptor)
                                        1,
                                        &elementCount,
                                        static_cast<void*>(&rawX)));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
+    const std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedX, nullptr);
@@ -681,7 +681,7 @@ TEST_F(TestRMSNormOperationDescriptor, ToStringContainsExpectedInfo)
     setAllAttributesExcept();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("RMSNormOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=" + std::to_string(K_RMSNORM_TENSOR_X_UID)), std::string::npos);
     ASSERT_NE(str.find("scale_uid=" + std::to_string(K_RMSNORM_TENSOR_SCALE_UID)),

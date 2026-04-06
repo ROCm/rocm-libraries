@@ -66,7 +66,9 @@ struct SolutionIndexParameters
     WorkGroupTileSize workgroupTile;
     bool              workgroupMapping;
     bool              streamK;
-    bool              tailLoops = true;
+    bool              tailLoops     = true;
+    bool              nonTemporalA  = false;
+    bool              nonTemporalB  = false;
 
     auto operator<=>(const SolutionIndexParameters& other) const = default;
 };

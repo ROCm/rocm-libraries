@@ -568,10 +568,8 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
                        ++id,
                        conv::ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC{},
                        miopenConvolutionAlgoImplicitGEMM);
-    RegisterWithSolver(
-        registry, ++id, conv::ConvHipImplicitGemmFwdXdlops{}, miopenConvolutionAlgoImplicitGEMM);
-    RegisterWithSolver(
-        registry, ++id, conv::ConvHipImplicitGemmBwdXdlops{}, miopenConvolutionAlgoImplicitGEMM);
+    ++id; // removed solver ConvHipImplicitGemmFwdXdlops
+    ++id; // removed solver ConvHipImplicitGemmBwdXdlops
     Register(registry,
              ++id,
              Primitive::Fusion,
@@ -703,13 +701,10 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     // Transposed Winograd solvers for NHWC layout support
     RegisterWithSolver(
         registry, ++id, conv::TransposedConvBinWinograd3x3U{}, miopenConvolutionAlgoWinograd);
-    MIOPEN_LOG_I("Registering TransposedConvBinWinograd3x3U with id=" << id);
     RegisterWithSolver(
         registry, ++id, conv::TransposedConvBinWinogradRxS{}, miopenConvolutionAlgoWinograd);
-    MIOPEN_LOG_I("Registering TransposedConvBinWinogradRxS with id=" << id);
     RegisterWithSolver(
         registry, ++id, conv::TransposedConvBinWinogradRxSf2x3g1{}, miopenConvolutionAlgoWinograd);
-    MIOPEN_LOG_I("Registering TransposedConvBinWinogradRxSf2x3g1 with id=" << id);
     // Transposed non-tunable Winograd solvers
     RegisterWithSolver(
         registry, ++id, conv::TransposedConvWinoFuryRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
