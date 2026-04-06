@@ -59,10 +59,11 @@ inline Error createBlockScaleDequantizeOperation(
                                 "block_scale_dequantize is_negative_scale"));
 
     // Set compute data type
-    HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_COMP_TYPE,
-                                                 attributes.compute_data_type,
-                                                 "block_scale_dequantize compute data type"));
+    HIPDNN_CHECK_ERROR(
+        setDescriptorAttrDataType(opDesc.get(),
+                                  HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC,
+                                  attributes.compute_data_type,
+                                  "block_scale_dequantize compute data type"));
 
     // Set operation name if provided
     auto& opName = attributes.get_name();

@@ -92,7 +92,7 @@ void BlockScaleDequantizeOperationDescriptor::setAttribute(
                   arrayOfElements,
                   "BlockScaleDequantizeOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_COMP_TYPE:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -174,7 +174,7 @@ void BlockScaleDequantizeOperationDescriptor::getAttribute(
                   arrayOfElements,
                   "BlockScaleDequantizeOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_COMP_TYPE:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,

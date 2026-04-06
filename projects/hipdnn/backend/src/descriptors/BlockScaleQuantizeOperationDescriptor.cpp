@@ -98,7 +98,7 @@ void BlockScaleQuantizeOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                   arrayOfElements,
                   "BlockScaleQuantizeOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -187,7 +187,7 @@ void BlockScaleQuantizeOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                   arrayOfElements,
                   "BlockScaleQuantizeOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,

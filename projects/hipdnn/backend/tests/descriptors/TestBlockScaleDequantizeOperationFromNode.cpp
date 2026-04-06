@@ -258,7 +258,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, GetAttributeWorksAfterFromNode
     // Verify compute type
     hipdnnDataType_t computeType = {};
     int64_t dtCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_COMP_TYPE,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC,
                        HIPDNN_TYPE_DATA_TYPE,
                        1,
                        &dtCount,

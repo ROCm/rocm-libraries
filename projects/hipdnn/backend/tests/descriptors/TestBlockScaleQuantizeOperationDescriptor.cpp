@@ -67,12 +67,14 @@ public:
                                1,
                                &blockSize);
         }
-        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE)
+        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC)
            == skip.end())
         {
             auto computeType = HIPDNN_DATA_FLOAT;
-            desc->setAttribute(
-                HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+            desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                               HIPDNN_TYPE_DATA_TYPE,
+                               1,
+                               &computeType);
         }
     }
 
@@ -151,7 +153,7 @@ INSTANTIATE_TEST_SUITE_P(RequiredAttributes,
                                            HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_YDESC,
                                            HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_DESC,
                                            HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE,
-                                           HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE));
+                                           HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC));
 
 // =============================================================================
 // SetAttribute Tests - Tensor Descriptors
@@ -242,8 +244,10 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetComputeDataType)
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                                       HIPDNN_TYPE_DATA_TYPE,
+                                       1,
+                                       &computeType));
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
 }
@@ -254,8 +258,10 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetComputeDataTypeWrongElement
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(
-            HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                           HIPDNN_TYPE_DATA_TYPE,
+                           2,
+                           &computeType),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -353,13 +359,15 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeComputeType)
     auto desc = getDescriptor();
     setAllAttributesExcept();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                       HIPDNN_TYPE_DATA_TYPE,
+                       1,
+                       &computeType);
     desc->finalize();
 
     hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
                                        HIPDNN_TYPE_DATA_TYPE,
                                        1,
                                        &elementCount,
@@ -555,7 +563,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeComputeTypeQueryRe
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
                                        HIPDNN_TYPE_DATA_TYPE,
                                        0,
                                        &elementCount,
@@ -667,8 +675,10 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
-    desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                       HIPDNN_TYPE_DATA_TYPE,
+                       1,
+                       &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -689,8 +699,10 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeWithHalfComputeType)
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                       HIPDNN_TYPE_DATA_TYPE,
+                       1,
+                       &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();

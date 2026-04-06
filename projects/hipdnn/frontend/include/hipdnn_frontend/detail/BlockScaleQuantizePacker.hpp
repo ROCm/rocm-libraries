@@ -73,10 +73,11 @@ inline Error createBlockScaleQuantizeOperation(
                                 transpose,
                                 "blockscalequantize transpose"));
 
-    HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE,
-                                                 attributes.compute_data_type,
-                                                 "blockscalequantize MATH_PREC"));
+    HIPDNN_CHECK_ERROR(
+        setDescriptorAttrDataType(opDesc.get(),
+                                  HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                                  attributes.compute_data_type,
+                                  "blockscalequantize MATH_PREC"));
 
     // Set operation name
     const auto& opName = attributes.get_name();

@@ -70,7 +70,7 @@ namespace hipdnn_frontend::detail
 
     // Unpack compute data type
     auto [dt, dtErr] = unpackGraphDataType(opDesc,
-                                           HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_COMP_TYPE,
+                                           HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC,
                                            "block_scale_dequantize compute data type");
     if(dtErr.is_bad())
     {

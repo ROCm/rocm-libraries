@@ -71,8 +71,10 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        1,
                        &transpose);
 
-    desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                       HIPDNN_TYPE_DATA_TYPE,
+                       1,
+                       &computeType);
 
     desc->finalize();
     return wrapper;

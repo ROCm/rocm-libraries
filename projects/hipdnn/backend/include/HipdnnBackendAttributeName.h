@@ -871,7 +871,7 @@ typedef enum
     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT = 2805,
 
     /** @brief Math precision for block scale quantize */
-    HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE = 2806,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC = 2806,
 
     /** @} */
 
@@ -897,7 +897,7 @@ typedef enum
     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_NEG_SCALE = 2811,
 
     /** @brief Math precision for block scale dequantize */
-    HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_COMP_TYPE = 2812,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC = 2812,
 
     /** @} */
 

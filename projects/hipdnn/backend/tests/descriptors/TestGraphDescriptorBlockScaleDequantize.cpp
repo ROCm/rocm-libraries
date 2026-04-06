@@ -62,8 +62,10 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        HIPDNN_TYPE_INT32,
                        1,
                        blockSize.data());
-    desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC,
+                       HIPDNN_TYPE_DATA_TYPE,
+                       1,
+                       &computeType);
 
     desc->finalize();
     return wrapper;
@@ -320,8 +322,10 @@ TEST_F(TestGraphDescriptorBlockScaleDequantize, DeserializePreservesIsNegativeSc
                          &isNegativeScale);
 
     hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT;
-    opDesc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC,
+                         HIPDNN_TYPE_DATA_TYPE,
+                         1,
+                         &computeType);
     opDesc->finalize();
 
     auto serializedBytes = buildAndSerializeGraph(wrapper.get());
