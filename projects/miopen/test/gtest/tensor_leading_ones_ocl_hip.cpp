@@ -301,7 +301,7 @@ protected:
             beta,
             uint64_t(0), // Aoffset
             uint64_t(0), // Boffset
-            uint64_t(0), // Coffset
+            uint64_t(0)  // Coffset
         );
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
