@@ -207,6 +207,8 @@ ConvSolution ConvHipDirectFwd11x11::GetSolution(const ExecutionContext& /*ctx*/,
         {"MLO_LG2_WAVE_SZ", LG2_WAVE_SZ},
         {"MLO_N_WAVES_MASK", N_WAVES_MASK},
         {"MLO_CONV_BIAS", problem.GetBias()},
+        {"MIOPEN_USE_BFP16", static_cast<int>(problem.IsBfp16())},
+        {"MIOPEN_USE_FP16", static_cast<int>(problem.IsFp16())},
     };
 
     const std::string comp_options = build_params.GenerateFor(kbp::HIP{});
