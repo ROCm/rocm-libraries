@@ -29,33 +29,14 @@ std::vector<PoolingTestCase> GetPooling2dTestCases()
     std::set<std::vector<int>> in_dim_set = get_inputs<int>(batch_factor);
     dataset0_inputs.assign(in_dim_set.begin(), in_dim_set.end());
 #else
-    dataset0_inputs = {{1, 19, 1024, 2048},
-                       {10, 3, 32, 32},
-                       {5, 32, 8, 8},
-                       {2, 1024, 12, 12},
-                       {4, 3, 231, 231},
-                       {8, 3, 227, 227},
-                       {1, 384, 13, 13},
-                       {1, 96, 27, 27},
-                       {2, 160, 7, 7},
-                       {1, 192, 256, 512},
-                       {2, 192, 28, 28},
-                       {1, 832, 64, 128},
-                       {1, 256, 56, 56},
-                       {4, 3, 224, 224},
-                       {2, 64, 112, 112},
-                       {2, 608, 4, 4},
-                       {1, 2048, 11, 11},
-                       {1, 16, 4096, 4096},
-                       {1, 3, 8, 8},
-                       {2, 16, 14, 14},
-                       {1, 32, 7, 7},
-                       {4, 64, 4, 4},
-                       {1, 3, 32, 32},
-                       {2, 64, 56, 56},
-                       {1, 128, 28, 28},
-                       {1, 3, 224, 224},
-                       {1, 64, 112, 112}};
+    dataset0_inputs = {
+        {1, 19, 1024, 2048}, {10, 3, 32, 32},     {5, 32, 8, 8},     {2, 1024, 12, 12},
+        {4, 3, 231, 231},    {8, 3, 227, 227},    {1, 384, 13, 13},  {1, 96, 27, 27},
+        {2, 160, 7, 7},      {1, 192, 256, 512},  {2, 192, 28, 28},  {1, 832, 64, 128},
+        {1, 256, 56, 56},    {4, 3, 224, 224},    {2, 64, 112, 112}, {2, 608, 4, 4},
+        {1, 2048, 11, 11},   {1, 16, 4096, 4096}, {1, 3, 8, 8},      {2, 16, 14, 14},
+        {1, 32, 7, 7},       {4, 64, 4, 4},       {1, 3, 32, 32},    {2, 64, 56, 56},
+        {1, 128, 28, 28},    {1, 3, 224, 224},    {1, 64, 112, 112}};
 #endif
     std::vector<std::vector<int>> dataset0_lens         = {{2, 2}, {3, 3}};
     std::vector<std::vector<int>> dataset0_strides      = {{2, 2}, {1, 1}};
@@ -71,11 +52,22 @@ std::vector<PoolingTestCase> GetPooling2dTestCases()
 
     for(const auto& in_shape : dataset0_inputs)
     {
-        pooling_gtest::AddTestCasesForInput(in_shape, dataset0_lens, dataset0_strides, dataset0_pads,
-                                              dataset0_index_types, modes, wsidx_values, test_cases,
-                                              num_uint16_case, num_uint32_case, num_uint32_case_imgidx,
-                                              num_uint64_case, num_uint64_case_imgidx,
-                                              true, false, "NCHW");
+        pooling_gtest::AddTestCasesForInput(in_shape,
+                                            dataset0_lens,
+                                            dataset0_strides,
+                                            dataset0_pads,
+                                            dataset0_index_types,
+                                            modes,
+                                            wsidx_values,
+                                            test_cases,
+                                            num_uint16_case,
+                                            num_uint32_case,
+                                            num_uint32_case_imgidx,
+                                            num_uint64_case,
+                                            num_uint64_case_imgidx,
+                                            true,
+                                            false,
+                                            "NCHW");
     }
 
     cached_test_cases = test_cases;
