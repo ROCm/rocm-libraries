@@ -1,9 +1,0 @@
-metric,value
-total_problems,231
-mean_efficiency,93.05
-p10_efficiency,79.21
-p50_efficiency,96.80
-min_efficiency,63.06
-max_efficiency,100.00
-top1_accuracy,21.6
-top5_hit_rate,70.6
