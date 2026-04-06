@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -721,8 +721,6 @@ struct traits_init_bsr<
         rocsparse_int            M         = mb_ * block_dim;
         rocsparse_int            N         = nb_ * block_dim;
         host_csr_matrix<T, I, J> hA_uncompressed;
-
-        std::cout << "M: " << M << " N: " << N << " block_dim: " << block_dim << std::endl;
 
         // Always generate sorted CSR matrix as convert routine requires CSR matrix to be sorted
         hA_uncompressed.define(M, N, 0, base_);
