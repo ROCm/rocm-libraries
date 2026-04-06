@@ -414,8 +414,9 @@ private:
       scaleValue = scaleTensor->value_as_Float32Value()->value();
     }
 
-    // GQA: enable when Q has more heads than K/V.
-    bool enableGqa = q->getDim()[1] != k->getDim()[1];
+    // GQA: enable when Q has more heads than K or V.
+    bool enableGqa =
+        q->getDim()[1] != k->getDim()[1] || q->getDim()[1] != v->getDim()[1];
 
     // Build MLIR template and create CustomOp.
     std::string mlir = SdpaImport::buildMLIR(hasAttnMask, /*dropoutP=*/0.0f,

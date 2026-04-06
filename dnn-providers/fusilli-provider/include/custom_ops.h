@@ -160,8 +160,8 @@ validateTemplate(const hipdnn_data_sdk::data_objects::SdpaAttributes *attrs) {
 }
 
 // Validate tensor dimension constraints for SDPA.
-// Expected layout: Q[B,H,S,D], K[B,H_kv,S,D], V[B,H_kv,S,D] where H is a
-// multiple of H_kv (equal for standard MHA and > 1 for GQA).
+// Expected layout: Q[B,H_q,S,D], K[B,H_k,S,D], V[B,H_v,S,D] where H_q is a
+// multiple of both H_k and H_v (equal for standard MHA, > 1 for GQA).
 inline fusilli::ErrorObject
 validateInputs(const std::shared_ptr<fusilli::TensorAttr> &q,
                const std::shared_ptr<fusilli::TensorAttr> &k,
@@ -178,14 +178,15 @@ validateInputs(const std::shared_ptr<fusilli::TensorAttr> &q,
   if (qDim[0] != kDim[0] || qDim[0] != vDim[0])
     return fusilli::error(fusilli::ErrorCode::InvalidAttribute,
                           "SDPA batch dimensions must match.");
-  if (kDim[1] != vDim[1])
-    return fusilli::error(fusilli::ErrorCode::InvalidAttribute,
-                          "SDPA K and V num_heads must match.");
-  // GQA: query heads must be a multiple of KV heads.
+  // GQA: query heads must be a multiple of both K and V heads.
   if (qDim[1] % kDim[1] != 0)
     return fusilli::error(fusilli::ErrorCode::InvalidAttribute,
                           "SDPA Q num_heads must be a multiple of "
-                          "K/V num_heads for GQA.");
+                          "K num_heads for GQA.");
+  if (qDim[1] % vDim[1] != 0)
+    return fusilli::error(fusilli::ErrorCode::InvalidAttribute,
+                          "SDPA Q num_heads must be a multiple of "
+                          "V num_heads for GQA.");
   if (kDim[2] != vDim[2])
     return fusilli::error(fusilli::ErrorCode::InvalidAttribute,
                           "SDPA K and V seq_len must match.");
@@ -195,7 +196,7 @@ validateInputs(const std::shared_ptr<fusilli::TensorAttr> &q,
 
   // #TODO(iree/issues/21858) GQA with f32 triggers an IREE distribution
   // failure.
-  bool isGqa = qDim[1] != kDim[1];
+  bool isGqa = qDim[1] != kDim[1] || qDim[1] != vDim[1];
   if (isGqa && q->getDataType() == fusilli::DataType::Float)
     return fusilli::error(fusilli::ErrorCode::NotImplemented,
                           "SDPA GQA with f32 not supported.");
