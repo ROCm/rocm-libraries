@@ -3,7 +3,7 @@
 
 #include "pooling_common.hpp"
 
-#define WORKAROUND_ISSUE_1670 0
+#define WORKAROUND_ISSUE_1670 1
 
 namespace {
 
