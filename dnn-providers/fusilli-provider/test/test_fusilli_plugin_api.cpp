@@ -56,7 +56,7 @@ void testLoggingCallback(hipdnnSeverity_t severity, const char *msg) {
 }
 
 // Build matmul + pointwise graph using frontend API.
-flatbuffers::DetachedBuffer
+std::vector<uint8_t>
 buildMatmulActivGraph(const std::vector<int64_t> &aDims,
                       const std::vector<int64_t> &bDims,
                       const std::vector<int64_t> &cDims,
@@ -107,7 +107,12 @@ buildMatmulActivGraph(const std::vector<int64_t> &aDims,
                              result.get_message());
   }
 
-  return graph.toBinary();
+  auto [serializedGraph, serErr] = graph.to_binary();
+  if (serErr.is_bad()) {
+    throw std::runtime_error("Graph serialization failed: " +
+                             serErr.get_message());
+  }
+  return serializedGraph;
 }
 
 TEST(TestFusilliPluginApi, Logging) {

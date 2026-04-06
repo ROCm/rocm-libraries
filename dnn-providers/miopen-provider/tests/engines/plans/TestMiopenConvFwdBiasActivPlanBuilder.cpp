@@ -572,7 +572,8 @@ std::vector<ConvolutionBiasActivationTestParam> testParams()
 
 TEST_P(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableGetWorkspaceSizeAndBuildPlan)
 {
-    auto graphBuffer = _graphObj.toBinary();
+    auto [graphBuffer, serErr] = _graphObj.to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     auto graph = GraphWrapper(graphBuffer.data(), graphBuffer.size());
     MockEngineConfig mockEngineConfig;
 

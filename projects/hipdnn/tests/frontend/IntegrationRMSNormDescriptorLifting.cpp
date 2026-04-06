@@ -337,7 +337,8 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormLiftWithoutFinalization)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary
-    auto data = graph->toBinary();
+    auto [data, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create backend descriptor from bytes (no handle, no finalize)
@@ -399,7 +400,8 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormDeserializeViaBackendWithHand
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto data = graph->toBinary();
+    auto [data, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a new graph and use deserialize with handle
@@ -606,8 +608,6 @@ TEST_F(IntegrationRMSNormDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip
     EXPECT_EQ(nodeUids.size(), 5u) << "RMSNorm node tensor UIDs are not distinct";
 }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-
 // Exercises the JSON serialize/deserialize path with a handle (full finalization)
 // for a training rmsnorm graph.
 TEST_F(IntegrationRMSNormDescriptorLifting, JsonRoundTripWithHandle)
@@ -696,7 +696,5 @@ TEST_F(IntegrationRMSNormDescriptorLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(rmsNode->attributes.get_inv_rms()->get_uid(),
               rms_constants::K_RMSNORM_TENSOR_INV_RMS_UID);
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

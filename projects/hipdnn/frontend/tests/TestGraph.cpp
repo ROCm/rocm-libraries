@@ -5597,3 +5597,224 @@ TEST_F(TestGraph, JsonDeserializeInvalidJson)
 }
 
 #endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// ============================================================================
+// Handle-less deserialize tests (no handle, structure only)
+// ============================================================================
+
+TEST_F(TestGraph, DeserializeBinaryHandleLess)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Serialize the graph to binary
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t,
+                          size_t requestedSize,
+                          size_t* graphByteSize,
+                          uint8_t* data) {
+            *graphByteSize = 8;
+            if(data != nullptr && requestedSize >= 8)
+            {
+                std::memset(data, 0xBB, 8);
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<uint8_t> data;
+    auto serResult = graph.serialize(data);
+    ASSERT_TRUE(serResult.is_good()) << serResult.get_message();
+    ASSERT_EQ(data.size(), 8u);
+
+    // Verify handle-less deserialize forwards correct data to backend
+    std::vector<uint8_t> capturedData;
+
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&capturedData](hipdnnBackendDescriptor_t*,
+                                  const uint8_t* serializedGraph,
+                                  size_t graphByteSize) {
+            capturedData.assign(serializedGraph, serializedGraph + graphByteSize);
+            return HIPDNN_STATUS_INTERNAL_ERROR;
+        });
+
+    Graph graph2;
+    auto result = graph2.deserialize(data);
+
+    EXPECT_EQ(capturedData, data);
+    EXPECT_TRUE(result.is_bad());
+}
+
+TEST_F(TestGraph, DeserializeStringHandleLess)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Serialize the graph to JSON string
+    ON_CALL(*_mockBackend, backendGetSerializedJsonGraphExt(_, _, _, _))
+        .WillByDefault(
+            [](hipdnnBackendDescriptor_t, size_t requestedSize, size_t* graphByteSize, char* data) {
+                const char* fakeJson = R"({"test": true})";
+                auto len = std::strlen(fakeJson) + 1;
+                *graphByteSize = len;
+                if(data != nullptr && requestedSize >= len)
+                {
+                    std::strcpy(data, fakeJson);
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    std::string jsonData;
+    auto serResult = graph.serialize(jsonData);
+    ASSERT_TRUE(serResult.is_good()) << serResult.get_message();
+    ASSERT_FALSE(jsonData.empty());
+
+    // Verify handle-less deserialize forwards correct data to backend
+    std::string capturedJson;
+
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeJsonGraphExt(_, _, _))
+        .WillOnce([&capturedJson](
+                      hipdnnBackendDescriptor_t*, const char* jsonGraph, size_t jsonByteSize) {
+            capturedJson = std::string(jsonGraph, jsonByteSize);
+            return HIPDNN_STATUS_INTERNAL_ERROR;
+        });
+
+    Graph graph2;
+    auto result = graph2.deserialize(jsonData);
+
+    EXPECT_EQ(capturedJson, jsonData);
+    EXPECT_TRUE(result.is_bad());
+}
+
+TEST_F(TestGraph, DeserializeHandleLessThenBuild)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Handle-less deserialize fails because backend rejects the data
+    ON_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillByDefault(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    const std::vector<uint8_t> data = {0x01, 0x02, 0x03, 0x04};
+    auto desResult = graph.deserialize(data);
+    EXPECT_TRUE(desResult.is_bad());
+
+    // The graph should still be buildable via the normal path
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+}
+
+// ============================================================================
+// nlohmann::json serialize/deserialize tests
+// ============================================================================
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+#include <nlohmann/json.hpp>
+
+TEST_F(TestGraph, SerializeToJsonObject)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Auto-lower needs the serialize backend call
+    ON_CALL(*_mockBackend, backendGetSerializedJsonGraphExt(_, _, _, _))
+        .WillByDefault(
+            [](hipdnnBackendDescriptor_t, size_t requestedSize, size_t* graphByteSize, char* data) {
+                const char* fakeJson = R"({"operations": [{"type": "batchnorm"}]})";
+                auto len = std::strlen(fakeJson) + 1;
+                *graphByteSize = len;
+                if(data != nullptr && requestedSize >= len)
+                {
+                    std::strcpy(data, fakeJson);
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    // Auto-lower (non-const serialize), then serialize to json object
+    nlohmann::json j;
+    auto result = graph.serialize(j);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+
+    EXPECT_FALSE(j.empty());
+    EXPECT_TRUE(j.contains("operations"));
+}
+
+TEST_F(TestGraph, SerializeToJsonObjectAutoLower)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    ON_CALL(*_mockBackend, backendGetSerializedJsonGraphExt(_, _, _, _))
+        .WillByDefault(
+            [](hipdnnBackendDescriptor_t, size_t requestedSize, size_t* graphByteSize, char* data) {
+                const char* fakeJson = R"({"graph": "auto-lowered"})";
+                auto len = std::strlen(fakeJson) + 1;
+                *graphByteSize = len;
+                if(data != nullptr && requestedSize >= len)
+                {
+                    std::strcpy(data, fakeJson);
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    // Graph is not lowered — non-const serialize(nlohmann::json&) should auto-lower
+    nlohmann::json j;
+    auto result = graph.serialize(j);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+
+    EXPECT_FALSE(j.empty());
+    EXPECT_TRUE(j.contains("graph"));
+    EXPECT_EQ(j["graph"], "auto-lowered");
+}
+
+TEST_F(TestGraph, DeserializeFromJsonObjectHandleLess)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+
+    // Verify handle-less deserialize from nlohmann::json forwards data to backend
+    std::string capturedJson;
+
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeJsonGraphExt(_, _, _))
+        .WillOnce([&capturedJson](
+                      hipdnnBackendDescriptor_t*, const char* jsonGraph, size_t jsonByteSize) {
+            capturedJson = std::string(jsonGraph, jsonByteSize);
+            return HIPDNN_STATUS_INTERNAL_ERROR;
+        });
+
+    const nlohmann::json j = {{"operations", nlohmann::json::array()}};
+    auto result = graph.deserialize(j);
+
+    // The nlohmann::json is serialized via dump() before forwarding
+    EXPECT_EQ(capturedJson, j.dump());
+    EXPECT_TRUE(result.is_bad());
+}
+
+TEST_F(TestGraph, DeserializeFromJsonObjectWithHandle)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+
+    // Verify with-handle deserialize from nlohmann::json forwards data to backend
+    std::string capturedJson;
+
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeJsonGraphExt(_, _, _))
+        .WillOnce([&capturedJson](
+                      hipdnnBackendDescriptor_t*, const char* jsonGraph, size_t jsonByteSize) {
+            capturedJson = std::string(jsonGraph, jsonByteSize);
+            return HIPDNN_STATUS_INTERNAL_ERROR;
+        });
+
+    const nlohmann::json j = {{"graph", "test"}, {"operations", nlohmann::json::array()}};
+    auto result = graph.deserialize(_handle, j);
+
+    EXPECT_EQ(capturedJson, j.dump());
+    EXPECT_TRUE(result.is_bad());
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB

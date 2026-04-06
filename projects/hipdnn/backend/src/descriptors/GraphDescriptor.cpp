@@ -428,7 +428,7 @@ hipdnnPluginConstData_t GraphDescriptor::getSerializedGraph() const
 
     // Build and cache the serialized buffer on demand from operations.
     // This supports serialization of unfinalized graphs (e.g. for the
-    // frontend's toBinary() path which lowers without a handle).
+    // frontend's to_binary() path which lowers without a handle).
     THROW_IF_TRUE(_operations.empty(),
                   HIPDNN_STATUS_BAD_PARAM,
                   "GraphDescriptor::getSerializedGraph: no operations set and no graph "

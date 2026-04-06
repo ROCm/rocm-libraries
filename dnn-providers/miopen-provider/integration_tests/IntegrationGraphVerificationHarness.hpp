@@ -267,7 +267,8 @@ private:
     void executeCpuGraph(hipdnn_frontend::graph::Graph& graph,
                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
-        auto serializedGraph = graph.toBinary();
+        auto [serializedGraph, serErr] = graph.to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), bundle.toHostVariantPack());

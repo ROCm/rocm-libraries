@@ -39,7 +39,8 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
                                                              DataType::FLOAT,
                                                              dims,
                                                              TensorLayout::NHWC);
-    auto serializedGraph = graph->toBinary();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     BatchnormFwdWithVarianceTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
@@ -104,7 +105,8 @@ TEST(TestBatchnormFwdWithVariancePlanBuilder, PlanConstruction)
                                                              DataType::FLOAT,
                                                              dims,
                                                              TensorLayout::NHWC);
-    auto serializedGraph = graph->toBinary();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
@@ -132,7 +134,8 @@ TEST(TestBatchnormFwdWithVariancePlanBuilder, IsApplicable)
                                                              DataType::FLOAT,
                                                              dims,
                                                              TensorLayout::NHWC);
-    auto serializedGraph = graph->toBinary();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,

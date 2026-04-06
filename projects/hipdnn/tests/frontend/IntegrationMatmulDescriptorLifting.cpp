@@ -287,7 +287,8 @@ TEST_F(IntegrationMatmulDescriptorLifting, MatmulLiftWithoutFinalization)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
@@ -333,8 +334,6 @@ TEST_F(IntegrationMatmulDescriptorLifting, MatmulLiftWithoutFinalization)
     EXPECT_EQ(tensorMap[K_MATMUL_TENSOR_C_UID]->get_stride(), toVec(K_MATMUL_TENSOR_C_STRIDES));
     EXPECT_EQ(tensorMap[K_MATMUL_TENSOR_C_UID]->get_name(), "C");
 }
-
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 // Exercises the JSON serialize/deserialize path with a handle (full finalization).
 TEST_F(IntegrationMatmulDescriptorLifting, JsonRoundTripWithHandle)
@@ -401,7 +400,5 @@ TEST_F(IntegrationMatmulDescriptorLifting, JsonRoundTripWithHandle)
     // Verify operation name
     EXPECT_EQ(matmulNode->attributes.get_name(), "matmul_op");
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

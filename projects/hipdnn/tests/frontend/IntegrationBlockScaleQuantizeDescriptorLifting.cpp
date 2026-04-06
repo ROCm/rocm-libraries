@@ -338,7 +338,8 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BsqLiftWithoutFinalizatio
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
@@ -385,8 +386,6 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BsqLiftWithoutFinalizatio
     ASSERT_NE(tensorMap.count(K_BSQ_TENSOR_SCALE_UID), 0u);
     EXPECT_EQ(tensorMap[K_BSQ_TENSOR_SCALE_UID]->get_name(), "Scale");
 }
-
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 // Exercises the JSON serialize/deserialize path with a handle (full finalization).
 TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, JsonRoundTripWithHandle)
@@ -443,7 +442,5 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, JsonRoundTripWithHandle)
     EXPECT_FALSE(bsqNode->attributes.get_transpose());
     EXPECT_EQ(bsqNode->attributes.get_name(), "bsq_op");
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

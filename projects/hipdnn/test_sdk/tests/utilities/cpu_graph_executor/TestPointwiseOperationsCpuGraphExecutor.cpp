@@ -68,7 +68,8 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto serializedGraph = graph->toBinary();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
         auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
         const auto& nodeWrap = graphWrap.getNodeWrapper(0);
         const auto& attributes = nodeWrap.attributesAs<PointwiseAttributes>();
@@ -106,7 +107,8 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto serializedGraph = graph->toBinary();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
         auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
         const auto& nodeWrap = graphWrap.getNodeWrapper(0);
         const auto& attributes = nodeWrap.attributesAs<PointwiseAttributes>();

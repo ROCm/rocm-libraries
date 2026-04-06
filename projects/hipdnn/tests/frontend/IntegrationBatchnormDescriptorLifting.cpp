@@ -402,7 +402,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormLiftWithoutFinalization)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
@@ -874,8 +875,6 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormPeerStatsPreserved)
     EXPECT_EQ(liftedPeerStats[1].get(), liftedPeerStat1.get());
 }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-
 // Exercises the JSON serialize/deserialize path with a handle (full finalization).
 TEST_F(IntegrationBatchnormDescriptorLifting, JsonRoundTripWithHandle)
 {
@@ -965,7 +964,5 @@ TEST_F(IntegrationBatchnormDescriptorLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(bnNode->attributes.get_name(), "bn_fwd_op");
     EXPECT_EQ(bnNode->attributes.compute_data_type, DataType::FLOAT);
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

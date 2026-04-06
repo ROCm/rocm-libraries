@@ -358,7 +358,8 @@ TEST_F(IntegrationCustomOpDescriptorLifting, CustomOpLiftWithoutFinalization)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
@@ -533,8 +534,6 @@ TEST_F(IntegrationCustomOpDescriptorLifting, ZeroOutputCustomOpRoundTrip)
     ASSERT_EQ(customOpNode->attributes.get_outputs().size(), 0u);
 }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-
 // Exercises the JSON serialize/deserialize path with a handle (full finalization).
 TEST_F(IntegrationCustomOpDescriptorLifting, JsonRoundTripWithHandle)
 {
@@ -599,7 +598,5 @@ TEST_F(IntegrationCustomOpDescriptorLifting, JsonRoundTripWithHandle)
     ASSERT_EQ(customOpNode->attributes.get_outputs().size(), 1u);
     EXPECT_EQ(customOpNode->attributes.get_outputs()[0]->get_uid(), K_CUSTOM_OP_OUTPUT_UID_0);
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

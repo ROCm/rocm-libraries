@@ -32,7 +32,8 @@ TEST(TestSdpaFwdPlan, ExecutePlan)
 
     auto graphTuple = buildSdpaFwdGraph(planTensorBundle, DataType::FLOAT);
     auto& graph = std::get<0>(graphTuple);
-    auto serializedGraph = graph->toBinary();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const auto* nodeAttributes = graphWrapper.getNode(0).attributes_as_SdpaAttributes();
@@ -78,7 +79,8 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithCausalMask)
 
     auto graphTuple = buildSdpaFwdGraph(planTensorBundle, DataType::FLOAT, /*causalMask=*/true);
     auto& graph = std::get<0>(graphTuple);
-    auto serializedGraph = graph->toBinary();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const auto* nodeAttributes = graphWrapper.getNode(0).attributes_as_SdpaAttributes();
@@ -125,7 +127,8 @@ TEST(TestSdpaFwdPlanBuilder, PlanConstruction)
 
     auto graphTuple = buildSdpaFwdGraph(tensorBundle, DataType::FLOAT);
     auto& graph = std::get<0>(graphTuple);
-    auto serializedGraph = graph->toBinary();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
@@ -148,7 +151,8 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicable)
 
     auto graphTuple = buildSdpaFwdGraph(tensorBundle, DataType::FLOAT);
     auto& graph = std::get<0>(graphTuple);
-    auto serializedGraph = graph->toBinary();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 

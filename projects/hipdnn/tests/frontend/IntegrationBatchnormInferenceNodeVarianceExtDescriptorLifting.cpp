@@ -299,7 +299,8 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
@@ -489,8 +490,6 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
               toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
 }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-
 // Exercises the JSON serialize/deserialize path with a handle (full finalization).
 TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting, JsonRoundTripWithHandle)
 {
@@ -565,7 +564,5 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting, JsonRoundTripW
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

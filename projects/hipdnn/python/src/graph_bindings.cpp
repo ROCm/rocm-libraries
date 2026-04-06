@@ -135,7 +135,14 @@ void graph_bindings(nb::module_& m)
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
         .def(
             "to_json",
-            [](graph::Graph& g) { return g.toJson(); },
+            [](graph::Graph& g) {
+                auto [json, err] = g.to_json();
+                if(err.is_bad())
+                {
+                    throw std::runtime_error(err.get_message());
+                }
+                return json;
+            },
             "Serialize the graph to a JSON string")
         .def(
             "from_json",

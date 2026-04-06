@@ -108,7 +108,11 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     }
 
     // Serialize graph and create tensor bundle
-    auto serializedGraph = graph->toBinary();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    if(serErr.is_bad())
+    {
+        throw std::runtime_error("Graph serialization failed: " + serErr.get_message());
+    }
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
                                                                          serializedGraph.size());
     auto nodeWrap = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper(&graphWrap.getNode(0));
@@ -224,7 +228,11 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     }
 
     // Serialize graph and create tensor bundle
-    auto serializedGraph = graph->toBinary();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    if(serErr.is_bad())
+    {
+        throw std::runtime_error("Graph serialization failed: " + serErr.get_message());
+    }
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
                                                                          serializedGraph.size());
     auto nodeWrap = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper(&graphWrap.getNode(0));

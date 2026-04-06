@@ -374,7 +374,8 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormLiftWithoutFinalization)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary
-    auto data = graph->toBinary();
+    auto [data, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create backend descriptor from bytes (no handle, no finalize)
@@ -431,7 +432,8 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormDeserializeViaBackendWith
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto data = graph->toBinary();
+    auto [data, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a new graph and use deserialize with handle
@@ -462,8 +464,6 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormDeserializeViaBackendWith
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_SCALE_UID]->get_dim(),
               toVec(ln_constants::K_LAYERNORM_TENSOR_SCALE_DIMS));
 }
-
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 // Exercises the JSON serialize/deserialize path with a handle (full finalization).
 TEST_F(IntegrationLayerNormDescriptorLifting, JsonRoundTripWithHandle)
@@ -558,7 +558,5 @@ TEST_F(IntegrationLayerNormDescriptorLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(lnNode->attributes.get_inv_variance()->get_uid(),
               ln_constants::K_LAYERNORM_TENSOR_INV_VARIANCE_UID);
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

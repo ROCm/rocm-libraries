@@ -55,7 +55,8 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto serializedGraph = graph->toBinary();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
         const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
         BatchnormFwdTensorBundle tensorBundle(
@@ -91,7 +92,8 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto serializedGraph = graph->toBinary();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -125,7 +127,8 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto serializedGraph = graph->toBinary();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -150,7 +153,8 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto serializedGraph = graph->toBinary();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -175,7 +179,8 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto serializedGraph = graph->toBinary();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -200,7 +205,8 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto serializedGraph = graph->toBinary();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -223,7 +229,8 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto serializedGraph = graph->toBinary();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         CpuReferenceGraphExecutor().execute(
             serializedGraph.data(), serializedGraph.size(), variantPack);
@@ -370,7 +377,8 @@ TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)
                                     1,
                                     TensorLayout::NCHW);
 
-    auto serializedGraph = graph->toBinary();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     CpuReferenceGraphExecutor().execute(
         serializedGraph.data(), serializedGraph.size(), variantPack);
 }

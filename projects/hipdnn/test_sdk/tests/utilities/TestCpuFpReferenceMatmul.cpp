@@ -74,7 +74,8 @@ TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
         auto graphTuple = buildMatmulGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
         auto& graph = std::get<0>(graphTuple);
-        auto serializedGraph = graph->toBinary();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         const hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrap(serializedGraph.data(),
                                                                             serializedGraph.size());
@@ -95,7 +96,8 @@ TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
                                                    TensorLayout::NCHW);
 
         auto& graph = std::get<0>(graphTuple);
-        auto serializedGraph = graph->toBinary();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         const hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrap(serializedGraph.data(),
                                                                             serializedGraph.size());

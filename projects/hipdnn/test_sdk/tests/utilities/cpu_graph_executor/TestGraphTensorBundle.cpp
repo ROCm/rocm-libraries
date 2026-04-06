@@ -32,7 +32,11 @@ protected:
                                                      dims,
                                                      TensorLayout::NCHW);
 
-        auto serializedGraph = graph->toBinary();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        if(serErr.is_bad())
+        {
+            throw std::runtime_error("Graph serialization failed: " + serErr.get_message());
+        }
         _serializedData = std::move(serializedGraph);
 
         return std::make_unique<GraphWrapper>(_serializedData.data(), _serializedData.size());
@@ -69,7 +73,8 @@ TEST_F(TestGraphTensorBundle, ConstructorSkipsVirtualTensors)
                                                  TensorLayout::NCHW,
                                                  true);
 
-    auto serializedGraph = graph->toBinary();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     auto& tensorMap = graphWrapper.getTensorMap();
 

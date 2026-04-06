@@ -320,7 +320,8 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseLiftWithoutFinalization)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary
-    auto data = graph->toBinary();
+    auto [data, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create backend descriptor from bytes (no handle, no finalize)
@@ -661,8 +662,6 @@ TEST_F(IntegrationPointwiseDescriptorLifting, ConvFpropReluFusionRoundTrip)
     EXPECT_NE(tensorMap.count(K_PW_RELU_OUT_UID), 0u) << "relu_out tensor not found";
 }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-
 // Exercises the JSON serialize/deserialize path with a handle (full finalization)
 // for a binary pointwise (ADD) graph.
 TEST_F(IntegrationPointwiseDescriptorLifting, JsonRoundTripWithHandle)
@@ -739,7 +738,5 @@ TEST_F(IntegrationPointwiseDescriptorLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(pwNode->attributes.get_input_1()->get_uid(), K_PW_TENSOR_IN1_UID);
     EXPECT_EQ(pwNode->attributes.get_output_0()->get_uid(), K_PW_TENSOR_OUT0_UID);
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

@@ -578,7 +578,8 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropLiftWithoutFinalization)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
@@ -623,7 +624,8 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropDeserializeViaBackendWithHandle)
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     auto liftedGraph = std::make_shared<TestableGraph>();
@@ -655,8 +657,6 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropDeserializeViaBackendWithHandle)
     EXPECT_EQ(sdpaNode->attributes.get_q()->get_uid(), K_SDPA_BPROP_TENSOR_Q_UID);
     EXPECT_EQ(sdpaNode->attributes.get_dv()->get_uid(), K_SDPA_BPROP_TENSOR_DV_UID);
 }
-
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 // Exercises the JSON serialize/deserialize path with a handle (full finalization)
 // for an SDPA backward graph.
@@ -723,7 +723,5 @@ TEST_F(IntegrationSdpaBpropLifting, JsonRoundTripWithHandle)
     ASSERT_NE(sdpaNode, nullptr) << "Expected a SdpaBpropNode";
     EXPECT_EQ(sdpaNode->attributes.get_name(), "sdpa_bprop_op");
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

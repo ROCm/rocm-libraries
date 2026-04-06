@@ -377,7 +377,8 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropLiftWithoutFinalization)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
@@ -428,8 +429,6 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropLiftWithoutFinalization)
     EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_stride(), toVec(K_TENSOR_Y_STRIDES));
     EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_name(), "Y");
 }
-
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 // Exercises the JSON serialize/deserialize path with a handle (full finalization).
 TEST_F(IntegrationConvFpropDescriptorLifting, JsonRoundTripWithHandle)
@@ -492,7 +491,5 @@ TEST_F(IntegrationConvFpropDescriptorLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
     EXPECT_EQ(convNode->attributes.get_name(), "conv_fprop_op");
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

@@ -379,7 +379,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardLiftWitho
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
@@ -625,8 +626,6 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardAutoAssig
     EXPECT_EQ(tensorMap[dxUid]->get_stride(), toVec(K_BN_BWD_AUTO_DATA_STRIDES));
 }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-
 // Exercises the JSON serialize/deserialize path with a handle (full finalization).
 TEST_F(IntegrationBatchnormBackwardDescriptorLifting, JsonRoundTripWithHandle)
 {
@@ -698,7 +697,5 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(bnBwdNode->attributes.get_name(), "bn_bwd_op");
     EXPECT_EQ(bnBwdNode->attributes.compute_data_type, DataType::FLOAT);
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

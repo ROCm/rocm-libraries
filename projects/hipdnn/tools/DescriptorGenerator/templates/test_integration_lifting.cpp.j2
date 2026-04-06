@@ -266,8 +266,8 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinali
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
-    ASSERT_FALSE(data.empty());
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
     const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());

@@ -160,7 +160,8 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     // Execute the graph using CPU graph executor
     CpuReferenceGraphExecutor graphExecutor;
     // Serialize the frontend graph to flatbuffer format
-    auto serializedGraph = graph->toBinary();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     // Execute with correct 3-parameter signature
     graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
 

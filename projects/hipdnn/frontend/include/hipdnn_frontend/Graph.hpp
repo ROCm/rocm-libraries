@@ -119,6 +119,10 @@
 #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+#include <nlohmann/json.hpp>
+#endif
+
 namespace hipdnn_frontend::graph
 {
 
@@ -1085,9 +1089,9 @@ public:
 
     /// @cond INTERNAL
 
+    // ── Binary serialization (always available) ─────────────────────────
+
     /// Serialize a graph to a binary byte vector, auto-lowering if needed.
-    /// If the graph has not been lowered or built, this overload automatically
-    /// calls lower_to_backend() before serializing.
     Error serialize(std::vector<uint8_t>& data)
     {
         if(!_graphDesc || !_graphDesc->valid())
@@ -1099,8 +1103,6 @@ public:
     }
 
     /// Serialize a previously built graph to a binary byte vector.
-    /// The graph must have been built (build_operation_graph / build) before
-    /// calling this method, or use the non-const overload for auto-lowering.
     Error serialize(std::vector<uint8_t>& data) const
     {
         if(!_graphDesc || !_graphDesc->valid())
@@ -1126,21 +1128,16 @@ public:
         return {};
     }
 
-    /// Serialize the graph to a binary byte vector.
-    /// Automatically lowers to backend if not already lowered/built.
-    /// @throws std::runtime_error if serialization or lowering fails.
-    std::vector<uint8_t> toBinary()
+    /// Serialize the graph to a binary byte vector, auto-lowering if needed.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::pair<std::vector<uint8_t>, Error> to_binary()
     {
         std::vector<uint8_t> data;
         auto err = serialize(data);
-        if(err.is_bad())
-        {
-            throw std::runtime_error(err.get_message());
-        }
-        return data;
+        return {std::move(data), std::move(err)};
     }
 
-    /// Deserialize a graph from a binary byte vector.
+    /// Deserialize a graph from a binary byte vector with handle (finalizes).
     Error deserialize(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
         std::vector<std::shared_ptr<graph::INode>> tempNodes;
@@ -1163,10 +1160,17 @@ public:
         return {};
     }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    /// Deserialize a graph from a binary byte vector (structure only).
+    /// The backend descriptor is not finalized. Call build_operation_graph()
+    /// afterwards to finalize for execution.
+    Error deserialize(const std::vector<uint8_t>& data)
+    {
+        return deserialize(nullptr, data);
+    }
+
+    // ── JSON string serialization (always available) ────────────────────
+
     /// Serialize a previously built graph to a JSON string.
-    /// The graph must have been built (build_operation_graph / build) before
-    /// calling this method, or use the non-const overload for auto-lowering.
     Error serialize(std::string& jsonData) const
     {
         if(!_graphDesc || !_graphDesc->valid())
@@ -1198,8 +1202,6 @@ public:
     }
 
     /// Serialize a graph to a JSON string, auto-lowering if needed.
-    /// If the graph has not been lowered or built, this overload automatically
-    /// calls lower_to_backend() before serializing.
     Error serialize(std::string& jsonData)
     {
         if(!_graphDesc || !_graphDesc->valid())
@@ -1210,21 +1212,16 @@ public:
         return std::as_const(*this).serialize(jsonData);
     }
 
-    /// Serialize the graph to a JSON string.
-    /// Automatically lowers to backend if not already lowered/built.
-    /// @throws std::runtime_error if serialization or lowering fails.
-    std::string toJson()
+    /// Serialize the graph to a JSON string, auto-lowering if needed.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::pair<std::string, Error> to_json()
     {
         std::string jsonData;
         auto err = serialize(jsonData);
-        if(err.is_bad())
-        {
-            throw std::runtime_error("toJson failed: " + err.get_message());
-        }
-        return jsonData;
+        return {std::move(jsonData), std::move(err)};
     }
 
-    /// Deserialize a graph from a JSON string.
+    /// Deserialize a graph from a JSON string with handle (finalizes).
     Error deserialize(hipdnnHandle_t handle, const std::string& jsonData)
     {
         std::vector<std::shared_ptr<graph::INode>> tempNodes;
@@ -1245,6 +1242,81 @@ public:
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
         return {};
+    }
+
+    /// Deserialize a graph from a JSON string (structure only).
+    /// The backend descriptor is not finalized. Call build_operation_graph()
+    /// afterwards to finalize for execution.
+    Error deserialize(const std::string& jsonData)
+    {
+        return deserialize(nullptr, jsonData);
+    }
+
+    // ── nlohmann::json serialization (requires JSON library) ────────────
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    /// Serialize a previously built graph to a nlohmann::json object.
+    Error serialize(nlohmann::json& j) const
+    {
+        std::string jsonData;
+        HIPDNN_CHECK_ERROR(serialize(jsonData));
+        try
+        {
+            j = nlohmann::json::parse(jsonData);
+        }
+        catch(const nlohmann::json::exception& e)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("Failed to parse serialized JSON: ") + e.what()};
+        }
+        return {};
+    }
+
+    /// Serialize a graph to a nlohmann::json object, auto-lowering if needed.
+    Error serialize(nlohmann::json& j)
+    {
+        std::string jsonData;
+        HIPDNN_CHECK_ERROR(serialize(jsonData));
+        try
+        {
+            j = nlohmann::json::parse(jsonData);
+        }
+        catch(const nlohmann::json::exception& e)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("Failed to parse serialized JSON: ") + e.what()};
+        }
+        return {};
+    }
+
+    /// Deserialize a graph from a nlohmann::json object with handle (finalizes).
+    Error deserialize(hipdnnHandle_t handle, const nlohmann::json& j)
+    {
+        try
+        {
+            return deserialize(handle, j.dump());
+        }
+        catch(const nlohmann::json::exception& e)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("Failed to dump JSON for deserialization: ") + e.what()};
+        }
+    }
+
+    /// Deserialize a graph from a nlohmann::json object (structure only).
+    /// The backend descriptor is not finalized. Call build_operation_graph()
+    /// afterwards to finalize for execution.
+    Error deserialize(const nlohmann::json& j)
+    {
+        try
+        {
+            return deserialize(nullptr, j.dump());
+        }
+        catch(const nlohmann::json::exception& e)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("Failed to dump JSON for deserialization: ") + e.what()};
+        }
     }
 #endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 

@@ -282,7 +282,8 @@ TEST_F(IntegrationGraphLifting, ConvFpropLiftWithoutFinalization)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
@@ -332,7 +333,8 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithHandle)
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a new graph and use deserialize with handle
@@ -375,7 +377,8 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithoutHandle)
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a new graph and use deserialize without handle
@@ -480,7 +483,8 @@ TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughDeserializeViaBackend)
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a new graph and use deserialize without handle
@@ -490,8 +494,6 @@ TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughDeserializeViaBackend)
 
     EXPECT_EQ(liftedGraph->get_name(), "LiftingTestGraph");
 }
-
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 // Exercises the JSON serialize/deserialize path with a handle (full finalization).
 TEST_F(IntegrationGraphLifting, JsonRoundTripWithHandle)
@@ -537,7 +539,5 @@ TEST_F(IntegrationGraphLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_dim(), toVec(K_TENSOR_X_DIMS));
     EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_dim(), toVec(K_TENSOR_W_DIMS));
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

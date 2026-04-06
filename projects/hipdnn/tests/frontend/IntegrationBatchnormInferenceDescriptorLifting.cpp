@@ -261,7 +261,8 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, BatchnormInferenceLiftWit
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
@@ -408,8 +409,6 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, AutoAssignedUidsPreserved
     EXPECT_EQ(tensorMap[yUid]->get_dim(), toVec(K_SPATIAL_DIMS));
 }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-
 // Exercises the JSON serialize/deserialize path with a handle (full finalization).
 TEST_F(IntegrationBatchnormInferenceDescriptorLifting, JsonRoundTripWithHandle)
 {
@@ -475,7 +474,5 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, JsonRoundTripWithHandle)
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

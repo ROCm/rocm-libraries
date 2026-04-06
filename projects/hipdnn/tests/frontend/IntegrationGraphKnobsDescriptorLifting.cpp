@@ -290,8 +290,6 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, FloatConstraintWithZeroMin)
     EXPECT_DOUBLE_EQ(floatConstraint->getMaxValue(), 1.0);
 }
 
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-
 // Exercises the JSON serialize/deserialize path with a handle (full finalization)
 // for the knob descriptor lifting. Builds a graph, serializes to JSON,
 // deserializes with handle, then queries knobs and verifies they survive.
@@ -389,7 +387,5 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, JsonRoundTripWithHandle)
         EXPECT_FALSE(knob->isDeprecated());
     }
 }
-
-#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace
