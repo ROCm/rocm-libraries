@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python"))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "heuristics"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # heuristics
 
 import pandas as pd
 import numpy as np
