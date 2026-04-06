@@ -248,6 +248,10 @@ namespace rocRoller
             return "MATRIX_B";
         case LayoutType::MATRIX_ACCUMULATOR:
             return "MATRIX_ACCUMULATOR";
+        case LayoutType::ROW_MAJOR:
+            return "ROW_MAJOR";
+        case LayoutType::COLUMN_MAJOR:
+            return "COLUMN_MAJOR";
         case LayoutType::None:
             return "None";
 
@@ -268,6 +272,10 @@ namespace rocRoller
             return "B";
         case LayoutType::MATRIX_ACCUMULATOR:
             return "ACC";
+        case LayoutType::ROW_MAJOR:
+            return "ROW";
+        case LayoutType::COLUMN_MAJOR:
+            return "COL";
         case LayoutType::None:
             return "N/A";
         case LayoutType::Count:
