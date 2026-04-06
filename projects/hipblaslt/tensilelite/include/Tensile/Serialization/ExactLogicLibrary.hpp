@@ -31,6 +31,7 @@
 
 #include <Tensile/ExactLogicLibrary.hpp>
 
+#include <set>
 #include <type_traits>
 
 namespace TensileLite
@@ -76,51 +77,51 @@ namespace TensileLite
                 iot::mapRequired(io, "predicate", row.first.value);
                 iot::mapRequired(io, "library", row.second);
 
-                // After deserialization, extract the target PCI chip ID from
+                // After deserialization, extract target PCI chip IDs from
                 // the predicate tree so the runtime path is cast-free.
                 if constexpr(std::is_same_v<MyPredicate, HardwarePredicate>)
                 {
                     if(!iot::outputting(io))
-                        row.first.targetPciChipId
-                            = extractPciChipId(row.first.value.get());
+                        row.first.targetPciChipIds
+                            = extractPciChipIds(row.first.value.get());
                 }
             }
 
             const static bool flow = false;
 
         private:
-            // Walk the predicate tree once at deserialization to find
-            // PciChipIdEqual and extract its target chip ID.
-            static std::optional<int> extractPciChipId(Predicates::Predicate<Hardware> const* root)
+            // Walk the predicate tree once at deserialization to find all
+            // PciChipIdEqual nodes and extract their target chip IDs.
+            static std::set<int> extractPciChipIds(Predicates::Predicate<Hardware> const* root)
             {
                 if(!root)
-                    return std::nullopt;
+                    return {};
 
                 auto const* isc = dynamic_cast<Predicates::IsSubclass<Hardware, AMDGPU> const*>(root);
                 if(!isc || !isc->value)
-                    return std::nullopt;
+                    return {};
 
-                return findPciChipId(isc->value.get());
+                return findPciChipIds(isc->value.get());
             }
 
-            static std::optional<int> findPciChipId(Predicates::Predicate<AMDGPU> const* pred)
+            static std::set<int> findPciChipIds(Predicates::Predicate<AMDGPU> const* pred)
             {
                 if(!pred)
-                    return std::nullopt;
+                    return {};
 
                 // Leaf
                 if(auto const* pci = dynamic_cast<Predicates::GPU::PciChipIdEqual const*>(pred))
-                    return pci->value;
+                    return {pci->value};
 
                 // Search children of composite predicates
-                auto searchChildren = [](auto const& children) -> std::optional<int> {
+                auto searchChildren = [](auto const& children) -> std::set<int> {
+                    std::set<int> ids;
                     for(auto const& child : children)
                     {
-                        auto id = findPciChipId(child.get());
-                        if(id.has_value())
-                            return id;
+                        auto childIds = findPciChipIds(child.get());
+                        ids.insert(childIds.begin(), childIds.end());
                     }
-                    return std::nullopt;
+                    return ids;
                 };
 
                 if(auto const* a = dynamic_cast<Predicates::And<AMDGPU> const*>(pred))
@@ -128,9 +129,9 @@ namespace TensileLite
                 if(auto const* o = dynamic_cast<Predicates::Or<AMDGPU> const*>(pred))
                     return searchChildren(o->value);
                 if(auto const* n = dynamic_cast<Predicates::Not<AMDGPU> const*>(pred))
-                    return findPciChipId(n->value.get());
+                    return findPciChipIds(n->value.get());
 
-                return std::nullopt;
+                return {};
             }
         };
     } // namespace Serialization

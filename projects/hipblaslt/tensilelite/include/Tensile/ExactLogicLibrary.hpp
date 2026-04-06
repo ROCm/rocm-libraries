@@ -27,6 +27,8 @@
 #pragma once
 
 #include <atomic>
+#include <optional>
+#include <set>
 
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/Debug.hpp>
@@ -342,16 +344,24 @@ namespace TensileLite
     {
         std::shared_ptr<Predicates::Predicate<Hardware>> value;
 
-        // The chip ID this predicate targets, if any.  Set by callers that
-        // know the chip ID (e.g. makeHwPred, deserialization).  When nullopt
+        // The chip IDs this predicate targets, if any. Set by callers that
+        // know the chip IDs (e.g. makeHwPred, deserialization). When empty
         // the predicate has no chip-ID constraint and every match is exact.
-        std::optional<int> targetPciChipId;
+        std::set<int> targetPciChipIds;
 
         HardwarePredicate() = default;
         HardwarePredicate(std::shared_ptr<Predicates::Predicate<Hardware>> init,
                           std::optional<int> chipId = std::nullopt)
             : value(init)
-            , targetPciChipId(chipId)
+        {
+            if(chipId)
+                targetPciChipIds.insert(chipId.value());
+        }
+
+        HardwarePredicate(std::shared_ptr<Predicates::Predicate<Hardware>> init,
+                          std::set<int>                                 chipIds)
+            : value(init)
+            , targetPciChipIds(chipIds)
         {
         }
 
@@ -376,14 +386,14 @@ namespace TensileLite
         // compatibility via ChipIdRegistry::canUseSolution).
         bool isFallbackMatch(Hardware const& hardware) const
         {
-            if(!targetPciChipId)
+            if(targetPciChipIds.empty())
                 return false;
 
             auto gpuChipId = hardware.pciChipId();
             if(!gpuChipId)
                 return false;
 
-            return gpuChipId.value() != targetPciChipId.value();
+            return targetPciChipIds.count(gpuChipId.value()) == 0;
         }
     };
 

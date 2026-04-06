@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <iostream>
+#include <set>
 
 #include <hip/hip_runtime.h>
 
@@ -136,6 +137,39 @@ TEST(PciChipIdTest, PciChipIdEqualIgnoredOnNonGfx950)
         << "PciChipIdEqual must ignore chip IDs for non-gfx950 processors";
     EXPECT_FALSE(pred->isFallbackMatch(gpuWithChipId))
         << "Fallback matching must also be disabled for non-gfx950 processors";
+}
+
+TEST(PciChipIdTest, OrPciChipIdPredicateExactForAllTargets)
+{
+    constexpr int chipA        = 0x75a0;
+    constexpr int chipB        = 0x75a2;
+    constexpr int chipFallback = 0x75a3; // Falls back to 0x75a0.
+
+    auto isProcessor = std::make_shared<Predicates::GPU::ProcessorEqual>(AMDGPU::Processor::gfx950);
+    auto isChipA     = std::make_shared<Predicates::GPU::PciChipIdEqual>(chipA);
+    auto isChipB     = std::make_shared<Predicates::GPU::PciChipIdEqual>(chipB);
+    auto isChipAOrB  = std::make_shared<Predicates::Or<AMDGPU>>(
+        std::initializer_list<std::shared_ptr<Predicates::Predicate<AMDGPU>>>{isChipA, isChipB});
+    auto isTargetDevice = std::make_shared<Predicates::And<AMDGPU>>(
+        std::initializer_list<std::shared_ptr<Predicates::Predicate<AMDGPU>>>{isProcessor, isChipAOrB});
+
+    HardwarePredicate pred(std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(isTargetDevice),
+                           std::set<int>{chipA, chipB});
+
+    AMDGPU gpuA(AMDGPU::Processor::gfx950, 256, "gpuA", std::make_optional(chipA));
+    AMDGPU gpuB(AMDGPU::Processor::gfx950, 256, "gpuB", std::make_optional(chipB));
+    AMDGPU gpuFallback(AMDGPU::Processor::gfx950, 256, "gpuFallback", std::make_optional(chipFallback));
+
+    // Both members of the Or chip-ID set are exact (not fallback).
+    EXPECT_TRUE(pred(dummyProblem(), gpuA));
+    EXPECT_FALSE(pred.isFallbackMatch(gpuA));
+
+    EXPECT_TRUE(pred(dummyProblem(), gpuB));
+    EXPECT_FALSE(pred.isFallbackMatch(gpuB));
+
+    // A chip that matches through fallback should still be classified as fallback.
+    EXPECT_TRUE(pred(dummyProblem(), gpuFallback));
+    EXPECT_TRUE(pred.isFallbackMatch(gpuFallback));
 }
 
 // Test: Hardware selection with PciChipIdEqual in a library hierarchy
