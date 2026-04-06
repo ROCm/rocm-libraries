@@ -11,6 +11,7 @@
 #include "ck_tile/host/device_memory.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/arch/mma/scale/mfma/scale_gfx9.hpp"
 
 #include <cstdio>
 #include <vector>
@@ -23,6 +24,9 @@ using namespace ck_tile::core::arch;
 using namespace mma;
 
 using I4        = pk_int4_t;
+using F4        = pk_fp4_t;
+using F8        = fp8_t;
+using BF8       = bf8_t;
 using I32       = int32_t;
 using F16       = fp16_t;
 using BF16      = bf16_t;
@@ -197,6 +201,14 @@ struct MmaLayoutTestKernel
             {
                 c_frag = MmaOp::exec(a_frag, b_frag, c_frag, sparse_idx);
             }
+            else if constexpr(MmaOpTraits<MmaOp>::IsScale)
+            {
+                // The actual scale is computed as pow(2, scale - 127), so:
+                // 125 -> 2^-2 and 129 -> 2^2.
+                int scale_A = 125;
+                int scale_B = 129;
+                c_frag      = MmaOp::exec(a_frag, b_frag, c_frag, scale_A, scale_B);
+            }
             else
             {
                 c_frag = MmaOp::exec(a_frag, b_frag, c_frag);
@@ -299,13 +311,13 @@ using Gfx942Intrinsics = ::testing::Types<
     amdgcn_mma<F16, F16, F32, 16u, 16u, 32u, DefaultSparseMfmaCtrlFlags,          Target942, MmaOpFamily::SPARSE>  // smfmac_f32_16x16x32_f16
 >;
 using Gfx950Intrinsics = ::testing::Types<
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 32u,  DefaultMfmaCtrlFlags,                Target950, MmaOpFamily::DENSE>, // mfma_f32_16x16x32_f16
-    amdgcn_mma<F8,  F8,  F32, 16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,           Target950, MmaOpFamily::SCALE>, // mfma_scale_f32_16x16x128_f8f6f4
-    amdgcn_mma<BF8, BF8, F32, 16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,           Target950, MmaOpFamily::SCALE>, // mfma_scale_f32_16x16x128_f8f6f4
-    // amdgcn_mma<F4,  F4,  F32, 16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,           Target950, MmaOpFamily::SCALE>, // mfma_scale_f32_16x16x128_f8f6f4
-    amdgcn_mma<F8,  F8,  F32, 32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,           Target950, MmaOpFamily::SCALE>, // mfma_scale_f32_32x32x64_f8f6f4
-    amdgcn_mma<BF8, BF8, F32, 32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,           Target950, MmaOpFamily::SCALE>  // mfma_scale_f32_32x32x64_f8f6f4
-    // amdgcn_mma<F4,  F4,  F32, 32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,           Target950, MmaOpFamily::SCALE>  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 32u,  DefaultMfmaCtrlFlags,               Target950, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_f16
+    amdgcn_mma<F8,  F8,  F32, 16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<BF8, BF8, F32, 16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F4,  F4,  F32, 16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F8,  F8,  F32, 32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<BF8, BF8, F32, 32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F4,  F4,  F32, 32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>   // mfma_scale_f32_32x32x64_f8f6f4
 >;
 using Gfx11Intrinsics = ::testing::Types<
     amdgcn_mma<F16,  F16,  F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,              Target11,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32
