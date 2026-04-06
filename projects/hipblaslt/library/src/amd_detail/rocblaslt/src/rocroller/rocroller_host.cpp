@@ -428,7 +428,7 @@ rocblaslt_status
     auto params = genSolutionParameters(kernelType, solutionIndexParameter);
     try
     {
-        kernel = genGemmKernel(params);
+        kernel = RocRollerGemmKernel::generate(params);
         rocroller_handle->cache.addKernel(kernelType, solutionIndexParameter, kernel);
     }
     catch(const std::exception& e)
@@ -552,7 +552,7 @@ rocblaslt_status
         heuristicResultsArray[i].algo.max_workspace_bytes = maxWorkSpaceBytes;
         heuristicResultsArray[i].algo.fallback            = false;
         heuristicResultsArray[i].state                    = rocblaslt_status_success;
-        heuristicResultsArray[i].workspaceSize            = workspaceRequired(kernel, prob);
+        heuristicResultsArray[i].workspaceSize            = kernel->workspaceRequired(prob);
         i++;
     }
 
@@ -651,7 +651,7 @@ rocblaslt_status isRocRollerSolutionSupported(rocblaslt_handle             handl
     if(status != rocblaslt_status_success)
         return status;
 
-    if(!isSupportedProblem(kernel, prob))
+    if(!kernel->isSupportedProblem(prob))
     {
         return rocblaslt_status_invalid_value;
     }
@@ -729,8 +729,5 @@ rocblaslt_status runRocRollerContractionProblem(rocblaslt_handle                
                            hotIterations);
     }
 
-    if(kernel->isCustomKernel())
-        return runCustomKernel(kernel, prob);
-
-    return runGemmKernel(kernel, prob);
+    return kernel->run(prob);
 }
