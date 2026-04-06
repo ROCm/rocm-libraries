@@ -216,8 +216,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_ENGINE_LAYOUT_INFO");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE),
                  "HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE");
-    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET),
-                 "HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT),
+                 "HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINE_DEVICEPROP),
                  "HIPDNN_ATTR_ENGINE_DEVICEPROP");
 

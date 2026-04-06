@@ -365,8 +365,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_ENGINE_LAYOUT_INFO";
     case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
         return "HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE";
-    case HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET:
-        return "HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET";
+    case HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT:
+        return "HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT";
     case HIPDNN_ATTR_ENGINE_DEVICEPROP:
         return "HIPDNN_ATTR_ENGINE_DEVICEPROP";
 

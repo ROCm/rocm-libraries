@@ -244,7 +244,7 @@ TEST_F(TestEngineDescriptor, GetEngineDescriptorUnsupportedAttr)
 
     ASSERT_THROW_HIPDNN_STATUS(
         engine->getAttribute(
-            HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET, HIPDNN_TYPE_INT32, 1, nullptr, &dummy),
+            HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT, HIPDNN_TYPE_INT32, 1, nullptr, &dummy),
         HIPDNN_STATUS_NOT_SUPPORTED);
 }
 

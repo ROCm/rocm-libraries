@@ -314,7 +314,7 @@ typedef enum
     HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE = 1005,
 
     /** @brief Target SM count for this engine */
-    HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET = 1006,
+    HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT = 1006,
 
     /** @brief Device properties for this engine */
     HIPDNN_ATTR_ENGINE_DEVICEPROP = 1007,

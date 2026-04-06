@@ -111,7 +111,7 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
     case HIPDNN_ATTR_ENGINE_LAYOUT_INFO:
     case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
-    case HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET:
+    case HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT:
     case HIPDNN_ATTR_ENGINE_DEVICEPROP:
     default:
         throw HipdnnException(
@@ -197,7 +197,7 @@ void EngineDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
     case HIPDNN_ATTR_ENGINE_LAYOUT_INFO:
     case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
-    case HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET:
+    case HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT:
     case HIPDNN_ATTR_ENGINE_DEVICEPROP:
     default:
         throw HipdnnException(
