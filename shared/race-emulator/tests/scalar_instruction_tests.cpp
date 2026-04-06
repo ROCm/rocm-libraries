@@ -21,21 +21,21 @@ using namespace raceemulator;
 #define TEST_SCALAR_BINARY_OP(TEST_NAME, ASM_OP, ...)                          \
   TEST(Instructions, TEST_NAME) {                                              \
     Workgroup wg({.vgprCount = 8, .sgprCount = 8, .waveSize = WaveSize{8}});   \
-    auto &regs = wg.getWave(0);                                                \
+    auto &wave = wg.getWave(0);                                                \
     std::vector<Scalar3OpCase> cases = {__VA_ARGS__};                          \
                                                                                \
     for (size_t i = 0; i < cases.size(); ++i) {                                \
       const auto &c = cases[i];                                                \
-      regs.setSgpr(0, c.src0);                                                 \
-      regs.setSgpr(1, c.src1);                                                 \
+      wave.setSgpr(0, c.src0);                                                 \
+      wave.setSgpr(1, c.src1);                                                 \
       /* Reset SCC to ensure we aren't seeing stale state */                   \
-      regs.setScc(0);                                                          \
+      wave.setScc(0);                                                          \
                                                                                \
-      tryExecute(regs, std::string(ASM_OP) + " s2, s0, s1");                   \
+      tryExecute(wave, std::string(ASM_OP) + " s2, s0, s1");                   \
                                                                                \
-      EXPECT_EQ(regs.getSgpr(2), c.expectedDst)                                \
+      EXPECT_EQ(wave.getSgpr(2), c.expectedDst)                                \
           << "Dst mismatch at index " << i << " (" #ASM_OP ")";                \
-      EXPECT_EQ(regs.getScc(), c.expectedScc)                                  \
+      EXPECT_EQ(wave.getScc(), c.expectedScc)                                  \
           << "SCC mismatch at index " << i << " (" #ASM_OP ")";                \
     }                                                                          \
   }
@@ -43,7 +43,7 @@ using namespace raceemulator;
 #define TEST_SCALAR_CMP(TEST_NAME, ASM_OP, ...)                                \
   TEST(Instructions, TEST_NAME) {                                              \
     Workgroup wg({.vgprCount = 8, .sgprCount = 8, .waveSize = WaveSize{8}});   \
-    auto &regs = wg.getWave(0);                                                \
+    auto &wave = wg.getWave(0);                                                \
     struct Case {                                                              \
       uint32_t s0;                                                             \
       uint32_t s1;                                                             \
@@ -51,10 +51,10 @@ using namespace raceemulator;
     };                                                                         \
     std::vector<Case> cases = {__VA_ARGS__};                                   \
     for (const auto &c : cases) {                                              \
-      regs.setSgpr(0, c.s0);                                                   \
-      regs.setSgpr(1, c.s1);                                                   \
-      tryExecute(regs, std::string(ASM_OP) + " s0, s1");                       \
-      EXPECT_EQ(regs.getScc(), c.expectedScc)                                  \
+      wave.setSgpr(0, c.s0);                                                   \
+      wave.setSgpr(1, c.s1);                                                   \
+      tryExecute(wave, std::string(ASM_OP) + " s0, s1");                       \
+      EXPECT_EQ(wave.getScc(), c.expectedScc)                                  \
           << "Failed: " << c.s0 << " vs " << c.s1;                             \
     }                                                                          \
   }
@@ -65,15 +65,15 @@ struct Scalar3OpCase {
   uint32_t expectedDst;
   uint32_t expectedScc;
 };
-void tryExecute(Wave &regs, const std::string &line) {
+void tryExecute(Wave &wave, const std::string &line) {
   // Hacky way to run each instruction as if it is in its own program.
   // static int pc = 0;
   // std::map<std::string, int> labels;
   // std::map<std::string, Macro> macros;
   // ++pc;
-  // return regs.tryExecute(line, pc, labels, macros);
-  regs.tryExecute(line, false);
-  regs.getWorkgroup().dispatchPendingRaceEvents(regs.getWaveId());
+  // return wave.tryExecute(line, pc, labels, macros);
+  wave.tryExecute(line, false);
+  wave.getWorkgroup().dispatchPendingRaceEvents(wave.getWaveId());
 }
 
 } // namespace
@@ -81,307 +81,307 @@ void tryExecute(Wave &regs, const std::string &line) {
 TEST(Instructions, SAndB32_Detailed) {
 
   Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
-  regs.setSgpr(0, 0b1100); // s0 = 12
-  regs.setSgpr(1, 0b1010); // s1 = 10
-  regs.setScc(false);
-  tryExecute(regs, "s_and_b32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 0b1000); // s2 = 8
-  EXPECT_TRUE(regs.getScc());         // and was not zero, so scc true.
+  auto &wave = wg.getWave(0);
+  wave.setSgpr(0, 0b1100); // s0 = 12
+  wave.setSgpr(1, 0b1010); // s1 = 10
+  wave.setScc(false);
+  tryExecute(wave, "s_and_b32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 0b1000); // s2 = 8
+  EXPECT_TRUE(wave.getScc());         // and was not zero, so scc true.
 
-  tryExecute(regs, "s_and_b32 s2, s0, s0");
-  EXPECT_EQ(regs.getSgpr(2), 0b1100); // s2 = 12
-  EXPECT_TRUE(regs.getScc());         // and was not zero, so scc true
-  regs.setSgpr(3, 0b0011);            // s3 = 3
-  tryExecute(regs, "s_and_b32 s2, s0, s3");
-  EXPECT_EQ(regs.getSgpr(2), 0b0000); // s2 = 0
-  EXPECT_FALSE(regs.getScc());        // and was zero,
+  tryExecute(wave, "s_and_b32 s2, s0, s0");
+  EXPECT_EQ(wave.getSgpr(2), 0b1100); // s2 = 12
+  EXPECT_TRUE(wave.getScc());         // and was not zero, so scc true
+  wave.setSgpr(3, 0b0011);            // s3 = 3
+  tryExecute(wave, "s_and_b32 s2, s0, s3");
+  EXPECT_EQ(wave.getSgpr(2), 0b0000); // s2 = 0
+  EXPECT_FALSE(wave.getScc());        // and was zero,
 
-  tryExecute(regs, "s_and_b32 s2, 7, 8");
-  EXPECT_EQ(regs.getSgpr(2), 0b0000); // s2 = 0
-  EXPECT_FALSE(regs.getScc());        // and was zero
+  tryExecute(wave, "s_and_b32 s2, 7, 8");
+  EXPECT_EQ(wave.getSgpr(2), 0b0000); // s2 = 0
+  EXPECT_FALSE(wave.getScc());        // and was zero
 
-  tryExecute(regs, "s_and_b32 s2, 7, 9");
-  EXPECT_EQ(regs.getSgpr(2), 1);
-  EXPECT_TRUE(regs.getScc());
+  tryExecute(wave, "s_and_b32 s2, 7, 9");
+  EXPECT_EQ(wave.getSgpr(2), 1);
+  EXPECT_TRUE(wave.getScc());
 }
 
 // Test s_cmp_eq_u32 with literal operands and same-register comparison.
 TEST(Instructions, SCmpEqU32_Literals) {
   Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
-  regs.setSgpr(0, 42);  // s0 = 42
-  regs.setSgpr(1, 100); // s1 = 100
-  tryExecute(regs, "s_cmp_eq_u32 s0, s0");
-  EXPECT_TRUE(regs.getScc()); // 42 == 42
-  tryExecute(regs, "s_cmp_eq_u32 s0, 42");
-  EXPECT_TRUE(regs.getScc()); // 42 == 42
-  tryExecute(regs, "s_cmp_eq_u32 s0, s1");
-  EXPECT_FALSE(regs.getScc()); // 42 != 100
-  tryExecute(regs, "s_cmp_eq_u32 50, s1");
-  EXPECT_FALSE(regs.getScc()); // 50 != 100
-  tryExecute(regs, "s_cmp_eq_u32 42, s0");
-  EXPECT_TRUE(regs.getScc()); // 42 == 42
+  auto &wave = wg.getWave(0);
+  wave.setSgpr(0, 42);  // s0 = 42
+  wave.setSgpr(1, 100); // s1 = 100
+  tryExecute(wave, "s_cmp_eq_u32 s0, s0");
+  EXPECT_TRUE(wave.getScc()); // 42 == 42
+  tryExecute(wave, "s_cmp_eq_u32 s0, 42");
+  EXPECT_TRUE(wave.getScc()); // 42 == 42
+  tryExecute(wave, "s_cmp_eq_u32 s0, s1");
+  EXPECT_FALSE(wave.getScc()); // 42 != 100
+  tryExecute(wave, "s_cmp_eq_u32 50, s1");
+  EXPECT_FALSE(wave.getScc()); // 50 != 100
+  tryExecute(wave, "s_cmp_eq_u32 42, s0");
+  EXPECT_TRUE(wave.getScc()); // 42 == 42
 }
 
 TEST(Instructions, SBfeU32) {
   // Setup: 1 VGPR (unused), 5 SGPRs, WaveSize 1
   Workgroup wg({.vgprCount = 1, .sgprCount = 5, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // Data to extract from: 0x12345678
   // Binary: ... 0001 0010 0011 0100 0101 0110 0111 1000
-  regs.setSgpr(0, 0x12345678);
+  wave.setSgpr(0, 0x12345678);
 
   // --- Test 1: Extract the lowest byte (0x78) ---
   // Offset: 0, Width: 8
   // Packed Control: (8 << 16) | 0 = 0x00080000
-  regs.setSgpr(1, 0x00080000);
+  wave.setSgpr(1, 0x00080000);
 
   // s2 = BFE(s0, s1)
-  tryExecute(regs, "s_bfe_u32 s2, s0, s1");
+  tryExecute(wave, "s_bfe_u32 s2, s0, s1");
 
-  EXPECT_EQ(regs.getSgpr(2), 0x78); // Result should be 0x78
-  EXPECT_TRUE(regs.getScc());       // Result is non-zero, so SCC = 1
+  EXPECT_EQ(wave.getSgpr(2), 0x78); // Result should be 0x78
+  EXPECT_TRUE(wave.getScc());       // Result is non-zero, so SCC = 1
 
   // --- Test 2: Extract a middle nibble (0x5) ---
   // We want to extract the '5' from 0x...5678
   // '8' is bits 0-3, '7' is 4-7, '6' is 8-11, '5' is 12-15.
   // Offset: 12, Width: 4
   // Packed Control: (4 << 16) | 12 = 0x0004000C
-  regs.setSgpr(3, 0x0004000C);
+  wave.setSgpr(3, 0x0004000C);
 
-  tryExecute(regs, "s_bfe_u32 s2, s0, s3");
+  tryExecute(wave, "s_bfe_u32 s2, s0, s3");
 
-  EXPECT_EQ(regs.getSgpr(2), 0x5);
-  EXPECT_TRUE(regs.getScc());
+  EXPECT_EQ(wave.getSgpr(2), 0x5);
+  EXPECT_TRUE(wave.getScc());
 
   // --- Test 3: Zero Width Edge Case ---
   // Offset: 0, Width: 0 -> Result should be 0
-  regs.setSgpr(4, 0x0);
+  wave.setSgpr(4, 0x0);
 
-  tryExecute(regs, "s_bfe_u32 s2, s0, s4");
+  tryExecute(wave, "s_bfe_u32 s2, s0, s4");
 
-  EXPECT_EQ(regs.getSgpr(2), 0x0);
-  EXPECT_FALSE(regs.getScc()); // Result is zero, so SCC = 0
+  EXPECT_EQ(wave.getSgpr(2), 0x0);
+  EXPECT_FALSE(wave.getScc()); // Result is zero, so SCC = 0
 
   // --- Test 4: Literal Support ---
   // Extract bits 4-7 (the value 0x7) using a literal for the control
   // Offset 4, Width 4 -> (4 << 16) | 4 = 0x40004 = 262148
 
-  tryExecute(regs, "s_bfe_u32 s2, s0, 262148");
+  tryExecute(wave, "s_bfe_u32 s2, s0, 262148");
 
-  EXPECT_EQ(regs.getSgpr(2), 0x7);
-  EXPECT_TRUE(regs.getScc());
+  EXPECT_EQ(wave.getSgpr(2), 0x7);
+  EXPECT_TRUE(wave.getScc());
 }
 
 TEST(Instructions, SAddI32) {
   Workgroup wg({.vgprCount = 1, .sgprCount = 5, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // Case 1: Simple Addition (No Overflow)
   // 10 + 20 = 30
-  regs.setSgpr(0, 10);
-  regs.setSgpr(1, 20);
-  tryExecute(regs, "s_add_i32 s2, s0, s1");
+  wave.setSgpr(0, 10);
+  wave.setSgpr(1, 20);
+  tryExecute(wave, "s_add_i32 s2, s0, s1");
 
-  EXPECT_EQ(regs.getSgpr(2), 30);
-  EXPECT_FALSE(regs.getScc()); // Result fits in i32
+  EXPECT_EQ(wave.getSgpr(2), 30);
+  EXPECT_FALSE(wave.getScc()); // Result fits in i32
 
   // Case 2: Positive Overflow
   // MaxInt (0x7FFFFFFF) + 1 -> Should wrap to MinInt (0x80000000)
   // This is +2147483647 + 1 = -2147483648
-  regs.setSgpr(0, 0x7FFFFFFF);
-  regs.setSgpr(1, 1);
-  tryExecute(regs, "s_add_i32 s2, s0, s1");
+  wave.setSgpr(0, 0x7FFFFFFF);
+  wave.setSgpr(1, 1);
+  tryExecute(wave, "s_add_i32 s2, s0, s1");
 
-  EXPECT_EQ(regs.getSgpr(2), 0x80000000);
-  EXPECT_TRUE(regs.getScc()); // Overflow detected!
+  EXPECT_EQ(wave.getSgpr(2), 0x80000000);
+  EXPECT_TRUE(wave.getScc()); // Overflow detected!
 
   // Case 3: Negative Addition (No Overflow)
   // -5 + (-10) = -15
   // (0xFFFFFFFB + 0xFFFFFFF6 = 0xFFFFFFF1)
-  regs.setSgpr(0, -5);
-  regs.setSgpr(1, -10);
-  tryExecute(regs, "s_add_i32 s2, s0, s1");
+  wave.setSgpr(0, -5);
+  wave.setSgpr(1, -10);
+  tryExecute(wave, "s_add_i32 s2, s0, s1");
 
-  EXPECT_EQ(static_cast<int32_t>(regs.getSgpr(2)), -15);
-  EXPECT_FALSE(regs.getScc()); // -15 fits in i32
+  EXPECT_EQ(static_cast<int32_t>(wave.getSgpr(2)), -15);
+  EXPECT_FALSE(wave.getScc()); // -15 fits in i32
 
   // Case 4: Negative Overflow
   // MinInt (-2147483648) + (-1) -> Should wrap to MaxInt
   // (0x80000000 + 0xFFFFFFFF = 0x7FFFFFFF) ... carry bit discarded
-  regs.setSgpr(0, 0x80000000); // Min Signed Int
-  regs.setSgpr(1, -1);         // -1
-  tryExecute(regs, "s_add_i32 s2, s0, s1");
+  wave.setSgpr(0, 0x80000000); // Min Signed Int
+  wave.setSgpr(1, -1);         // -1
+  tryExecute(wave, "s_add_i32 s2, s0, s1");
 
-  EXPECT_EQ(regs.getSgpr(2), 0x7FFFFFFF); // Wrapped to Max Positive
-  EXPECT_TRUE(regs.getScc());             // Overflow detected!
+  EXPECT_EQ(wave.getSgpr(2), 0x7FFFFFFF); // Wrapped to Max Positive
+  EXPECT_TRUE(wave.getScc());             // Overflow detected!
 
   // Case 5: Mixed Signs (Never Overflows)
   // MaxInt + (-1) = MaxInt - 1
-  regs.setSgpr(0, 0x7FFFFFFF);
-  regs.setSgpr(1, -1);
-  tryExecute(regs, "s_add_i32 s2, s0, s1");
+  wave.setSgpr(0, 0x7FFFFFFF);
+  wave.setSgpr(1, -1);
+  tryExecute(wave, "s_add_i32 s2, s0, s1");
 
-  EXPECT_EQ(regs.getSgpr(2), 0x7FFFFFFE);
-  EXPECT_FALSE(regs.getScc());
+  EXPECT_EQ(wave.getSgpr(2), 0x7FFFFFFE);
+  EXPECT_FALSE(wave.getScc());
 }
 
 TEST(Instructions, SCSelectB32) {
   // 5 SGPRs.
   Workgroup wg({.vgprCount = 1, .sgprCount = 5, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // Setup inputs
   // s0 = 0xAAAA (The "True" value)
   // s1 = 0xBBBB (The "False" value)
-  regs.setSgpr(0, 0xAAAA);
-  regs.setSgpr(1, 0xBBBB);
+  wave.setSgpr(0, 0xAAAA);
+  wave.setSgpr(1, 0xBBBB);
 
   // Case 1: SCC is True -> Select First Operand (s0)
-  regs.setScc(true);
-  tryExecute(regs, "s_cselect_b32 s2, s0, s1");
+  wave.setScc(true);
+  tryExecute(wave, "s_cselect_b32 s2, s0, s1");
 
-  EXPECT_EQ(regs.getSgpr(2), 0xAAAA);
+  EXPECT_EQ(wave.getSgpr(2), 0xAAAA);
 
   // Case 2: SCC is False -> Select Second Operand (s1)
-  regs.setScc(false);
-  tryExecute(regs, "s_cselect_b32 s2, s0, s1");
+  wave.setScc(false);
+  tryExecute(wave, "s_cselect_b32 s2, s0, s1");
 
-  EXPECT_EQ(regs.getSgpr(2), 0xBBBB);
+  EXPECT_EQ(wave.getSgpr(2), 0xBBBB);
 
   // Case 3: Literals (Just to be sure)
   // s2 = SCC ? 100 : 200
-  regs.setScc(true);
-  tryExecute(regs, "s_cselect_b32 s2, 100, 200");
-  EXPECT_EQ(regs.getSgpr(2), 100);
+  wave.setScc(true);
+  tryExecute(wave, "s_cselect_b32 s2, 100, 200");
+  EXPECT_EQ(wave.getSgpr(2), 100);
 
-  regs.setScc(false);
-  tryExecute(regs, "s_cselect_b32 s2, 100, 200");
-  EXPECT_EQ(regs.getSgpr(2), 200);
+  wave.setScc(false);
+  tryExecute(wave, "s_cselect_b32 s2, 100, 200");
+  EXPECT_EQ(wave.getSgpr(2), 200);
 }
 
 TEST(Instructions, SXorB64) {
   // Setup: 1 VGPR, 6 SGPRs (s0-s5), WaveSize 1
   Workgroup wg({.vgprCount = 1, .sgprCount = 6, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // Case 1: Simple XOR (Result is Non-Zero)
   // s[0:1] = 0x...F0F0 ^ 0x...0F0F = 0x...FFFF
-  regs.setSgpr64(2, 0xF0F0F0F0F0F0F0F0ULL);
-  regs.setSgpr64(4, 0x0F0F0F0F0F0F0F0FULL);
+  wave.setSgpr64(2, 0xF0F0F0F0F0F0F0F0ULL);
+  wave.setSgpr64(4, 0x0F0F0F0F0F0F0F0FULL);
 
-  tryExecute(regs, "s_xor_b64 s[0:1], s[2:3], s[4:5]");
+  tryExecute(wave, "s_xor_b64 s[0:1], s[2:3], s[4:5]");
 
-  EXPECT_EQ(regs.getSgpr64(0), 0xFFFFFFFFFFFFFFFFULL);
-  EXPECT_TRUE(regs.getScc()); // Result is non-zero
+  EXPECT_EQ(wave.getSgpr64(0), 0xFFFFFFFFFFFFFFFFULL);
+  EXPECT_TRUE(wave.getScc()); // Result is non-zero
 
   // Case 2: Identical Inputs (Result is Zero)
   // X ^ X = 0
-  regs.setSgpr64(2, 0x123456789ABCDEF0ULL);
+  wave.setSgpr64(2, 0x123456789ABCDEF0ULL);
   // Re-using s[2:3] as both inputs
-  tryExecute(regs, "s_xor_b64 s[0:1], s[2:3], s[2:3]");
+  tryExecute(wave, "s_xor_b64 s[0:1], s[2:3], s[2:3]");
 
-  EXPECT_EQ(regs.getSgpr64(0), 0ULL);
-  EXPECT_FALSE(regs.getScc()); // Result is zero
+  EXPECT_EQ(wave.getSgpr64(0), 0ULL);
+  EXPECT_FALSE(wave.getScc()); // Result is zero
 
   // Case 3: High-Bit Check
   // Verify we aren't accidentally doing 32-bit math.
   // A = 1 << 63, B = 0. Result should have bit 63 set.
-  regs.setSgpr64(2, 1ULL << 63);
-  regs.setSgpr64(4, 0ULL);
+  wave.setSgpr64(2, 1ULL << 63);
+  wave.setSgpr64(4, 0ULL);
 
-  tryExecute(regs, "s_xor_b64 s[0:1], s[2:3], s[4:5]");
+  tryExecute(wave, "s_xor_b64 s[0:1], s[2:3], s[4:5]");
 
-  EXPECT_EQ(regs.getSgpr64(0), 1ULL << 63);
-  EXPECT_TRUE(regs.getScc());
+  EXPECT_EQ(wave.getSgpr64(0), 1ULL << 63);
+  EXPECT_TRUE(wave.getScc());
 }
 
 TEST(Instructions, SMovkI32_SignExtension) {
   Workgroup wg({.vgprCount = 1, .sgprCount = 1, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // Case 1: Positive Signed Integer
   // 0x7FFF = 32767 (Max positive 16-bit integer)
   // Sign bit (bit 15) is 0.
-  tryExecute(regs, "s_movk_i32 s0, 0x7FFF");
-  EXPECT_EQ(regs.getSgpr(0), 0x00007FFF);
-  EXPECT_EQ(static_cast<int32_t>(regs.getSgpr(0)), 32767);
+  tryExecute(wave, "s_movk_i32 s0, 0x7FFF");
+  EXPECT_EQ(wave.getSgpr(0), 0x00007FFF);
+  EXPECT_EQ(static_cast<int32_t>(wave.getSgpr(0)), 32767);
 
   // Case 2: Negative Signed Integer (-1)
   // 0xFFFF represents -1 in 16-bit.
   // It should be sign-extended to 32-bit: 0xFFFFFFFF (-1).
-  tryExecute(regs, "s_movk_i32 s0, 0xFFFF");
+  tryExecute(wave, "s_movk_i32 s0, 0xFFFF");
 
   // This is the check that would FAIL if we used <int32_t, int32_t>
-  EXPECT_EQ(regs.getSgpr(0), 0xFFFFFFFF);
-  EXPECT_EQ(static_cast<int32_t>(regs.getSgpr(0)), -1);
+  EXPECT_EQ(wave.getSgpr(0), 0xFFFFFFFF);
+  EXPECT_EQ(static_cast<int32_t>(wave.getSgpr(0)), -1);
 
   // Case 3: Smallest Negative Integer (-32768)
   // 0x8000 is -32768 in 16-bit.
   // Should become 0xFFFF8000 in 32-bit.
-  tryExecute(regs, "s_movk_i32 s0, 0x8000");
-  EXPECT_EQ(regs.getSgpr(0), 0xFFFF8000);
-  EXPECT_EQ(static_cast<int32_t>(regs.getSgpr(0)), -32768);
+  tryExecute(wave, "s_movk_i32 s0, 0x8000");
+  EXPECT_EQ(wave.getSgpr(0), 0xFFFF8000);
+  EXPECT_EQ(static_cast<int32_t>(wave.getSgpr(0)), -32768);
 }
 
 TEST(Instructions, SAdd) {
   // Setup: 8 VGPRs, 8 SGPRs, 8 waves per thread.
   Workgroup wg({.vgprCount = 8, .sgprCount = 8, .waveSize = WaveSize{8}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // Tests of s_add_u32 //
   ////////////////////////
-  regs.setSgpr(0, 15);
-  regs.setSgpr(1, 27);
-  tryExecute(regs, "s_add_u32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 42);
-  EXPECT_EQ(regs.getScc(), 0);
+  wave.setSgpr(0, 15);
+  wave.setSgpr(1, 27);
+  tryExecute(wave, "s_add_u32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 42);
+  EXPECT_EQ(wave.getScc(), 0);
 
-  regs.setSgpr(0, 0xFFFFFFFF);
-  regs.setSgpr(1, 1);
-  tryExecute(regs, "s_add_u32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 0);
-  EXPECT_EQ(regs.getScc(), 1);
+  wave.setSgpr(0, 0xFFFFFFFF);
+  wave.setSgpr(1, 1);
+  tryExecute(wave, "s_add_u32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 0);
+  EXPECT_EQ(wave.getScc(), 1);
 
-  regs.setSgpr(0, 0xFFFFFFFF);
-  regs.setSgpr(1, 0xFFFFFFFF);
-  tryExecute(regs, "s_add_u32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 0xFFFFFFFE);
-  EXPECT_EQ(regs.getScc(), 1);
+  wave.setSgpr(0, 0xFFFFFFFF);
+  wave.setSgpr(1, 0xFFFFFFFF);
+  tryExecute(wave, "s_add_u32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 0xFFFFFFFE);
+  EXPECT_EQ(wave.getScc(), 1);
 
   // Tests of s_add_i32 //
   ////////////////////////
-  regs.setSgpr(0, int32_t(15));
-  regs.setSgpr(1, int32_t(27));
-  tryExecute(regs, "s_add_u32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 42);
-  EXPECT_EQ(regs.getScc(), 0);
+  wave.setSgpr(0, int32_t(15));
+  wave.setSgpr(1, int32_t(27));
+  tryExecute(wave, "s_add_u32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 42);
+  EXPECT_EQ(wave.getScc(), 0);
 
-  regs.setSgpr(0, int32_t(-1));
-  regs.setSgpr(1, int32_t(1));
-  tryExecute(regs, "s_add_i32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 0);
-  EXPECT_EQ(regs.getScc(), 0);
+  wave.setSgpr(0, int32_t(-1));
+  wave.setSgpr(1, int32_t(1));
+  tryExecute(wave, "s_add_i32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 0);
+  EXPECT_EQ(wave.getScc(), 0);
 
-  regs.setSgpr(0, int32_t(-1));
-  regs.setSgpr(1, int32_t(-1));
-  tryExecute(regs, "s_add_i32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), int32_t(-2));
-  EXPECT_EQ(regs.getScc(), 0);
+  wave.setSgpr(0, int32_t(-1));
+  wave.setSgpr(1, int32_t(-1));
+  tryExecute(wave, "s_add_i32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), int32_t(-2));
+  EXPECT_EQ(wave.getScc(), 0);
 
-  regs.setSgpr(0, std::numeric_limits<int>::lowest());
-  regs.setSgpr(1, int32_t(-2));
-  tryExecute(regs, "s_add_i32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), std::numeric_limits<int>::max() - 1);
-  EXPECT_EQ(regs.getScc(), 1);
+  wave.setSgpr(0, std::numeric_limits<int>::lowest());
+  wave.setSgpr(1, int32_t(-2));
+  tryExecute(wave, "s_add_i32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), std::numeric_limits<int>::max() - 1);
+  EXPECT_EQ(wave.getScc(), 1);
 
-  regs.setSgpr(0, std::numeric_limits<int>::max());
-  regs.setSgpr(1, int32_t(2));
-  tryExecute(regs, "s_add_i32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), std::numeric_limits<int>::lowest() + 1);
-  EXPECT_EQ(regs.getScc(), 1);
+  wave.setSgpr(0, std::numeric_limits<int>::max());
+  wave.setSgpr(1, int32_t(2));
+  tryExecute(wave, "s_add_i32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), std::numeric_limits<int>::lowest() + 1);
+  EXPECT_EQ(wave.getScc(), 1);
 
   // etc.
 }
@@ -428,39 +428,39 @@ TEST_SCALAR_BINARY_OP(SMulHiI32, "s_mul_hi_i32",
 
 TEST(Instructions, SAddCU32) {
   Workgroup wg({.vgprCount = 8, .sgprCount = 8, .waveSize = WaveSize{8}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // 1. No Carry In
-  regs.setScc(0);
-  regs.setSgpr(0, 10);
-  regs.setSgpr(1, 20);
-  tryExecute(regs, "s_addc_u32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 30);
-  EXPECT_EQ(regs.getScc(), 0);
+  wave.setScc(0);
+  wave.setSgpr(0, 10);
+  wave.setSgpr(1, 20);
+  tryExecute(wave, "s_addc_u32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 30);
+  EXPECT_EQ(wave.getScc(), 0);
 
   // 2. Carry In
-  regs.setScc(1);
-  regs.setSgpr(0, 10);
-  regs.setSgpr(1, 20);
-  tryExecute(regs, "s_addc_u32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 31); // 10 + 20 + 1
-  EXPECT_EQ(regs.getScc(), 0);
+  wave.setScc(1);
+  wave.setSgpr(0, 10);
+  wave.setSgpr(1, 20);
+  tryExecute(wave, "s_addc_u32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 31); // 10 + 20 + 1
+  EXPECT_EQ(wave.getScc(), 0);
 
   // 3. Carry Out Generated
-  regs.setScc(0);
-  regs.setSgpr(0, 0xFFFFFFFF);
-  regs.setSgpr(1, 1);
-  tryExecute(regs, "s_addc_u32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 0);
-  EXPECT_EQ(regs.getScc(), 1);
+  wave.setScc(0);
+  wave.setSgpr(0, 0xFFFFFFFF);
+  wave.setSgpr(1, 1);
+  tryExecute(wave, "s_addc_u32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 0);
+  EXPECT_EQ(wave.getScc(), 1);
 
   // 3. Carry Out Generated
-  regs.setScc(1);
-  regs.setSgpr(0, 0xFFFFFFFF);
-  regs.setSgpr(1, 1);
-  tryExecute(regs, "s_addc_u32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 1);
-  EXPECT_EQ(regs.getScc(), 1);
+  wave.setScc(1);
+  wave.setSgpr(0, 0xFFFFFFFF);
+  wave.setSgpr(1, 1);
+  tryExecute(wave, "s_addc_u32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 1);
+  EXPECT_EQ(wave.getScc(), 1);
 }
 
 TEST_SCALAR_CMP(SCmpEqU32, "s_cmp_eq_u32", {10, 10, 1}, {10, 11, 0})
@@ -478,166 +478,166 @@ TEST_SCALAR_CMP(SCmpGtI32, "s_cmp_gt_i32", {10, 5, 1}, {5, 10, 0},
 TEST(Instructions, S_LSHL_B64) {
   // Needs s0-s4 (5 registers)
   Workgroup wg({.vgprCount = 0, .sgprCount = 6, .waveSize = WaveSize{64}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // Setup Input: s[0:1] = 1 (64-bit integer)
   // We can now set this directly as a 64-bit value
-  regs.setSgpr64(0, 1);
+  wave.setSgpr64(0, 1);
 
   // Setup Shift Amount: s4 = 33
-  regs.setSgpr(4, 33);
+  wave.setSgpr(4, 33);
 
   // Execute: s[2:3] = s[0:1] << s4
   // Result should be 1 << 33 = 0x200000000
-  tryExecute(regs, "s_lshl_b64 s[2:3], s[0:1], s4");
+  tryExecute(wave, "s_lshl_b64 s[2:3], s[0:1], s4");
 
   // Verify Result using 64-bit getter
-  EXPECT_EQ(regs.getSgpr64(2), 0x200000000ULL);
+  EXPECT_EQ(wave.getSgpr64(2), 0x200000000ULL);
 
   // Verify SCC (Result is non-zero, so SCC=1)
-  EXPECT_EQ(regs.getScc(), 1);
+  EXPECT_EQ(wave.getScc(), 1);
 }
 
 // s_ctz_i32_b32: RDNA3+ name for s_ff1_i32_b32 (count trailing zeros).
 TEST(Instructions, S_CTZ_I32_B32) {
   Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // Trailing zeros of 0b...1000 = 3
-  regs.setSgpr(0, 0x18); // 0b11000
-  tryExecute(regs, "s_ctz_i32_b32 s1, s0");
-  EXPECT_EQ(regs.getSgpr(1), 3u);
+  wave.setSgpr(0, 0x18); // 0b11000
+  tryExecute(wave, "s_ctz_i32_b32 s1, s0");
+  EXPECT_EQ(wave.getSgpr(1), 3u);
 
   // Trailing zeros of 1 = 0
-  regs.setSgpr(0, 1);
-  tryExecute(regs, "s_ctz_i32_b32 s1, s0");
-  EXPECT_EQ(regs.getSgpr(1), 0u);
+  wave.setSgpr(0, 1);
+  tryExecute(wave, "s_ctz_i32_b32 s1, s0");
+  EXPECT_EQ(wave.getSgpr(1), 0u);
 
   // Input 0 returns -1 (0xFFFFFFFF)
-  regs.setSgpr(0, 0);
-  tryExecute(regs, "s_ctz_i32_b32 s1, s0");
-  EXPECT_EQ(regs.getSgpr(1), 0xFFFFFFFFu);
+  wave.setSgpr(0, 0);
+  tryExecute(wave, "s_ctz_i32_b32 s1, s0");
+  EXPECT_EQ(wave.getSgpr(1), 0xFFFFFFFFu);
 
   // Only bit 31 set => 31 trailing zeros
-  regs.setSgpr(0, 0x80000000);
-  tryExecute(regs, "s_ctz_i32_b32 s1, s0");
-  EXPECT_EQ(regs.getSgpr(1), 31u);
+  wave.setSgpr(0, 0x80000000);
+  tryExecute(wave, "s_ctz_i32_b32 s1, s0");
+  EXPECT_EQ(wave.getSgpr(1), 31u);
 }
 
 // s_bfm_b32: bitfield mask. D = ((1 << S0[4:0]) - 1) << S1[4:0].
 TEST(Instructions, S_BFM_B32) {
   Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // Width=8, Offset=0 => mask = 0xFF
-  regs.setSgpr(0, 8);
-  regs.setSgpr(1, 0);
-  tryExecute(regs, "s_bfm_b32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 0xFFu);
+  wave.setSgpr(0, 8);
+  wave.setSgpr(1, 0);
+  tryExecute(wave, "s_bfm_b32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 0xFFu);
 
   // Width=4, Offset=4 => mask = 0xF0
-  regs.setSgpr(0, 4);
-  regs.setSgpr(1, 4);
-  tryExecute(regs, "s_bfm_b32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 0xF0u);
+  wave.setSgpr(0, 4);
+  wave.setSgpr(1, 4);
+  tryExecute(wave, "s_bfm_b32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 0xF0u);
 
   // Width=0, any offset => mask = 0
-  regs.setSgpr(0, 0);
-  regs.setSgpr(1, 16);
-  tryExecute(regs, "s_bfm_b32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 0u);
+  wave.setSgpr(0, 0);
+  wave.setSgpr(1, 16);
+  tryExecute(wave, "s_bfm_b32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 0u);
 
   // Width=32, Offset=0 => uses only S0[4:0]=0, so width=0 => 0
   // (32 & 0x1F = 0)
-  regs.setSgpr(0, 32);
-  regs.setSgpr(1, 0);
-  tryExecute(regs, "s_bfm_b32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 0u);
+  wave.setSgpr(0, 32);
+  wave.setSgpr(1, 0);
+  tryExecute(wave, "s_bfm_b32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 0u);
 
   // Width=1, Offset=31 => mask = 0x80000000
-  regs.setSgpr(0, 1);
-  regs.setSgpr(1, 31);
-  tryExecute(regs, "s_bfm_b32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 0x80000000u);
+  wave.setSgpr(0, 1);
+  wave.setSgpr(1, 31);
+  tryExecute(wave, "s_bfm_b32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 0x80000000u);
 }
 
 // s_lshl2_add_u32: D = (S0 << 2) + S1. SCC = carry out.
 TEST(Instructions, S_LSHL2_ADD_U32) {
   Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // Simple: (3 << 2) + 5 = 17
-  regs.setSgpr(0, 3);
-  regs.setSgpr(1, 5);
-  tryExecute(regs, "s_lshl2_add_u32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 17u);
-  EXPECT_FALSE(regs.getScc()); // no carry
+  wave.setSgpr(0, 3);
+  wave.setSgpr(1, 5);
+  tryExecute(wave, "s_lshl2_add_u32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 17u);
+  EXPECT_FALSE(wave.getScc()); // no carry
 
   // Carry: (0xC0000000 << 2) overflows + 1 => carry
-  regs.setSgpr(0, 0xC0000000);
-  regs.setSgpr(1, 1);
-  tryExecute(regs, "s_lshl2_add_u32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 1u); // 0x300000000 + 1 truncated
-  EXPECT_TRUE(regs.getScc());     // carry
+  wave.setSgpr(0, 0xC0000000);
+  wave.setSgpr(1, 1);
+  tryExecute(wave, "s_lshl2_add_u32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 1u); // 0x300000000 + 1 truncated
+  EXPECT_TRUE(wave.getScc());     // carry
 }
 
 // s_cmpk_lg_u32: compare SGPR != immediate, set SCC.
 TEST(Instructions, S_CMPK_LG_U32) {
   Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
-  regs.setSgpr(0, 42);
-  tryExecute(regs, "s_cmpk_lg_u32 s0, 0x2a"); // 0x2a = 42
-  EXPECT_FALSE(regs.getScc());                // equal => not "lg" => SCC=0
+  wave.setSgpr(0, 42);
+  tryExecute(wave, "s_cmpk_lg_u32 s0, 0x2a"); // 0x2a = 42
+  EXPECT_FALSE(wave.getScc());                // equal => not "lg" => SCC=0
 
-  tryExecute(regs, "s_cmpk_lg_u32 s0, 0x0");
-  EXPECT_TRUE(regs.getScc()); // 42 != 0 => SCC=1
+  tryExecute(wave, "s_cmpk_lg_u32 s0, 0x0");
+  EXPECT_TRUE(wave.getScc()); // 42 != 0 => SCC=1
 }
 
 TEST(Instructions, MOV_Ops_V2) {
   Workgroup wg({.vgprCount = 4, .sgprCount = 4, .waveSize = WaveSize{64}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // s_mov_b32 (Scalar)
-  regs.setSgpr(0, 0x12345678);
-  tryExecute(regs, "s_mov_b32 s1, s0");
-  EXPECT_EQ(regs.getSgpr(1), 0x12345678);
+  wave.setSgpr(0, 0x12345678);
+  tryExecute(wave, "s_mov_b32 s1, s0");
+  EXPECT_EQ(wave.getSgpr(1), 0x12345678);
 
   // s_mov_b64 (Scalar 64-bit)
-  regs.setSgpr64(0, 0xABCD1234FFFF0000);
-  tryExecute(regs, "s_mov_b64 s[2:3], s[0:1]");
-  EXPECT_EQ(regs.getSgpr64(2), 0xABCD1234FFFF0000);
+  wave.setSgpr64(0, 0xABCD1234FFFF0000);
+  tryExecute(wave, "s_mov_b64 s[2:3], s[0:1]");
+  EXPECT_EQ(wave.getSgpr64(2), 0xABCD1234FFFF0000);
 }
 
 TEST(Instructions, S_LSHR_B64) {
   Workgroup wg({.vgprCount = 1, .sgprCount = 8, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
-  regs.setSgpr64(0, 0x800000000ULL); // bit 35 set
-  regs.setSgpr(4, 35);
-  tryExecute(regs, "s_lshr_b64 s[2:3], s[0:1], s4");
-  EXPECT_EQ(regs.getSgpr64(2), 1ULL);
-  EXPECT_EQ(regs.getScc(), 1);
+  auto &wave = wg.getWave(0);
+  wave.setSgpr64(0, 0x800000000ULL); // bit 35 set
+  wave.setSgpr(4, 35);
+  tryExecute(wave, "s_lshr_b64 s[2:3], s[0:1], s4");
+  EXPECT_EQ(wave.getSgpr64(2), 1ULL);
+  EXPECT_EQ(wave.getScc(), 1);
 
   // Shift to zero.
-  regs.setSgpr64(0, 0xF);
-  regs.setSgpr(4, 4);
-  tryExecute(regs, "s_lshr_b64 s[2:3], s[0:1], s4");
-  EXPECT_EQ(regs.getSgpr64(2), 0ULL);
-  EXPECT_EQ(regs.getScc(), 0);
+  wave.setSgpr64(0, 0xF);
+  wave.setSgpr(4, 4);
+  tryExecute(wave, "s_lshr_b64 s[2:3], s[0:1], s4");
+  EXPECT_EQ(wave.getSgpr64(2), 0ULL);
+  EXPECT_EQ(wave.getScc(), 0);
 }
 
 TEST(Instructions, S_MIN_U32) {
   Workgroup wg({.vgprCount = 1, .sgprCount = 4, .waveSize = WaveSize{1}});
-  auto &regs = wg.getWave(0);
-  regs.setSgpr(0, 10);
-  regs.setSgpr(1, 20);
-  tryExecute(regs, "s_min_u32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 10u);
-  EXPECT_EQ(regs.getScc(), 1); // SCC=1 when s0 < s1
+  auto &wave = wg.getWave(0);
+  wave.setSgpr(0, 10);
+  wave.setSgpr(1, 20);
+  tryExecute(wave, "s_min_u32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 10u);
+  EXPECT_EQ(wave.getScc(), 1); // SCC=1 when s0 < s1
 
-  regs.setSgpr(0, 20);
-  regs.setSgpr(1, 10);
-  tryExecute(regs, "s_min_u32 s2, s0, s1");
-  EXPECT_EQ(regs.getSgpr(2), 10u);
-  EXPECT_EQ(regs.getScc(), 0); // SCC=0 when s0 >= s1
+  wave.setSgpr(0, 20);
+  wave.setSgpr(1, 10);
+  tryExecute(wave, "s_min_u32 s2, s0, s1");
+  EXPECT_EQ(wave.getSgpr(2), 10u);
+  EXPECT_EQ(wave.getScc(), 0); // SCC=0 when s0 >= s1
 }

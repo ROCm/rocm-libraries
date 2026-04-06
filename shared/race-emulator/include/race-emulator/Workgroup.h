@@ -32,6 +32,7 @@ struct WorkgroupConfig {
   WaveSchedule waveSchedule = WaveSchedule::Sequential;
   Dim3d workgroupId{0, 0, 0};
   std::function<void(RaceViolation)> raceHandler = {};
+  Profiler *profiler = nullptr;
   const std::map<std::string, int> *labels = nullptr;
   const std::map<std::string, Macro> *macros = nullptr;
 };
@@ -94,8 +95,6 @@ public:
   const Wave &getWave(int waveId) const { return waves.at(waveId); }
   Wave &getWave(int waveId) { return waves.at(waveId); }
   int getNumWaves() const { return static_cast<int>(waves.size()); }
-
-  void setProfiler(Profiler *p);
 
   Dim3d getWorkgroupId() const { return workgroupId; }
 

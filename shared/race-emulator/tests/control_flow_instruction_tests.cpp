@@ -8,9 +8,9 @@
 
 using namespace raceemulator;
 
-void tryExecute(Wave &regs, const std::string &line) {
-  regs.tryExecute(line, false);
-  regs.getWorkgroup().dispatchPendingRaceEvents(regs.getWaveId());
+void tryExecute(Wave &wave, const std::string &line) {
+  wave.tryExecute(line, false);
+  wave.getWorkgroup().dispatchPendingRaceEvents(wave.getWaveId());
 }
 
 // TODO(newling) add tests of control flow instructions
@@ -18,7 +18,7 @@ void tryExecute(Wave &regs, const std::string &line) {
 TEST(Instructions, SAndSaveExecB64) {
 
   Workgroup wg({.vgprCount = 1, .sgprCount = 10, .waveSize = WaveSize{64}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // populate vcc first 33 bits to 1.
   // populate exec final 33 bits with 1.
@@ -37,13 +37,13 @@ TEST(Instructions, SAndSaveExecB64) {
   auto expected = uint64_t(3) << 31;
   EXPECT_EQ(observed, expected);
 
-  regs.setExecU64(exec);
-  regs.setVccU64(vcc);
-  tryExecute(regs, "s_and_saveexec_b64 s[2:3], vcc");
+  wave.setExecU64(exec);
+  wave.setVccU64(vcc);
+  tryExecute(wave, "s_and_saveexec_b64 s[2:3], vcc");
   // The checks:
-  EXPECT_EQ(regs.getExecU64(), expected);
-  EXPECT_EQ(regs.getSgpr64(2), exec); // old exec saved
-  EXPECT_TRUE(regs.getScc());         // new exec non-zero
+  EXPECT_EQ(wave.getExecU64(), expected);
+  EXPECT_EQ(wave.getSgpr64(2), exec); // old exec saved
+  EXPECT_TRUE(wave.getScc());         // new exec non-zero
 }
 
 // s_swappc_b64 is a no-op in the emulator.  On real HW it saves the
@@ -58,31 +58,31 @@ TEST(Instructions, SAndSaveExecB64) {
 //      assumes the subroutine runs and returns, which our no-op skips).
 TEST(Instructions, S_SwapPc_B64_NoOp) {
   Workgroup wg({.vgprCount = 4, .sgprCount = 16, .waveSize = WaveSize{32}});
-  auto &regs = wg.getWave(0);
+  auto &wave = wg.getWave(0);
 
   // Set up operands as the kernel does:
   //   s_swappc_b64 s[4:5], s[12:13]
   // Pre-fill both dst and src with sentinel values.
-  regs.setSgpr(4, 0xAAAAAAAA);
-  regs.setSgpr(5, 0xBBBBBBBB);
-  regs.setSgpr(12, 0x12345678);
-  regs.setSgpr(13, 0x9ABCDEF0);
+  wave.setSgpr(4, 0xAAAAAAAA);
+  wave.setSgpr(5, 0xBBBBBBBB);
+  wave.setSgpr(12, 0x12345678);
+  wave.setSgpr(13, 0x9ABCDEF0);
 
   // Also set a VGPR to check it isn't touched.
-  regs.setVgpr(0, 0, 42);
+  wave.setVgpr(0, 0, 42);
 
-  int pcBefore = regs.getPc();
-  tryExecute(regs, "s_swappc_b64 s[4:5], s[12:13]");
-  EXPECT_EQ(regs.getPc(), pcBefore + 1);
+  int pcBefore = wave.getPc();
+  tryExecute(wave, "s_swappc_b64 s[4:5], s[12:13]");
+  EXPECT_EQ(wave.getPc(), pcBefore + 1);
 
   // SGPRs should be untouched (no-op does not write return address).
-  EXPECT_EQ(regs.getSgpr(4), 0xAAAAAAAAu);
-  EXPECT_EQ(regs.getSgpr(5), 0xBBBBBBBBu);
-  EXPECT_EQ(regs.getSgpr(12), 0x12345678u);
-  EXPECT_EQ(regs.getSgpr(13), 0x9ABCDEF0u);
+  EXPECT_EQ(wave.getSgpr(4), 0xAAAAAAAAu);
+  EXPECT_EQ(wave.getSgpr(5), 0xBBBBBBBBu);
+  EXPECT_EQ(wave.getSgpr(12), 0x12345678u);
+  EXPECT_EQ(wave.getSgpr(13), 0x9ABCDEF0u);
 
   // VGPR untouched.
-  EXPECT_EQ(regs.getVgpr(0, 0), 42u);
+  EXPECT_EQ(wave.getVgpr(0, 0), 42u);
 }
 
 // s_sendmsg is a no-op in the emulator (hardware sends a message to the
@@ -90,10 +90,10 @@ TEST(Instructions, S_SwapPc_B64_NoOp) {
 // throwing and leaves registers unchanged.
 TEST(Instructions, S_SENDMSG) {
   Workgroup wg({.vgprCount = 0, .sgprCount = 4, .waveSize = WaveSize{64}});
-  auto &regs = wg.getWave(0);
-  regs.setSgpr(2, 0xDEADBEEF);
-  tryExecute(regs, "s_sendmsg sendmsg(MSG_INTERRUPT)");
-  EXPECT_EQ(regs.getSgpr(2), 0xDEADBEEFu); // unchanged
+  auto &wave = wg.getWave(0);
+  wave.setSgpr(2, 0xDEADBEEF);
+  tryExecute(wave, "s_sendmsg sendmsg(MSG_INTERRUPT)");
+  EXPECT_EQ(wave.getSgpr(2), 0xDEADBEEFu); // unchanged
 }
 
 // Verify that instruction caching works: when enableLineCaching is true,

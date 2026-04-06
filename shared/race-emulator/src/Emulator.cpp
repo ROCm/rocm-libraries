@@ -302,12 +302,12 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
       try {
         auto perWgConfig = wgConfig;
         perWgConfig.workgroupId = wgIds[i];
+        perWgConfig.profiler = &wgProfilers[i];
         Workgroup workgroup(perWgConfig);
         {
           auto sw = wgProfilers[i].scopedStopwatch("initializeWaveState");
           initializeWaveState(workgroup, wgIds[i], blockDim, nWaves);
         }
-        workgroup.setProfiler(&wgProfilers[i]);
         try {
           workgroup.run(tokens);
         } catch (RaceConditionException &e) {

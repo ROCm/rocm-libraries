@@ -21,7 +21,7 @@ Workgroup::Workgroup(Workgroup &&) noexcept = default;
 Workgroup &Workgroup::operator=(Workgroup &&) noexcept = default;
 
 Workgroup::Workgroup(const WorkgroupConfig &config)
-    : waveSchedule(config.waveSchedule),
+    : profiler(config.profiler), waveSchedule(config.waveSchedule),
       completeEmulation(config.completeEmulation),
       workgroupId(config.workgroupId) {
   if (config.ldsSize > 0) {
@@ -32,6 +32,9 @@ Workgroup::Workgroup(const WorkgroupConfig &config)
     raceDetector = std::make_unique<RaceDetector>(
         lds.getSize(), config.nWaves, config.vgprCount, config.workgroupId,
         config.raceHandler);
+    if (profiler) {
+      raceDetector->setProfiler(profiler);
+    }
   }
 
   int agprOffset = config.agprOffset < 0 ? config.vgprCount : config.agprOffset;
@@ -44,13 +47,6 @@ Workgroup::Workgroup(const WorkgroupConfig &config)
     if (raceDetector) {
       waves.back().raceState = &raceDetector->getWaveRaceState(i);
     }
-  }
-}
-
-void Workgroup::setProfiler(Profiler *p) {
-  profiler = p;
-  if (raceDetector) {
-    raceDetector->setProfiler(p);
   }
 }
 
