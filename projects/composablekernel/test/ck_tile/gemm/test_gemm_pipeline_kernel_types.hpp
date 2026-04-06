@@ -22,6 +22,8 @@ using CompV3    = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType:
 using CompV4    = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV4>;
 using CompV6    = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompV6>;
 using CompAsync = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsync>;
+using CompAsyncEightWaves =
+    ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsyncEightWaves>;
 
 using Persistent    = std::true_type;
 using NonPersistent = std::false_type;
@@ -30,6 +32,7 @@ using I16  = ck_tile::number<16>;
 using I32  = ck_tile::number<32>;
 using I64  = ck_tile::number<64>;
 using I128 = ck_tile::number<128>;
+using I192 = ck_tile::number<192>;
 using I256 = ck_tile::number<256>;
 
 // clang-format off
@@ -242,6 +245,23 @@ using CompAsyncConfig16x16x128 = std::tuple<ALayout,
                                             Intrawave,
                                             CompAsync>;
 
+template <typename ALayout, typename BLayout, typename CLayout, typename InputType>
+using CompAsyncEightWavesConfig = std::tuple<ALayout,
+                                             BLayout,
+                                             CLayout,
+                                             InputType, // AType
+                                             InputType, // BType
+                                             F32,       // AccType
+                                             F16,       // OutputType
+                                             I192,      // MBlockTileSize
+                                             I256,      // NBlockTileSize
+                                             I128,      // KBlockTileSize
+                                             I16,       // MWarpTileSize
+                                             I16,       // NWarpTileSize
+                                             I128,      // KWarpTileSize
+                                             Intrawave,
+                                             CompAsyncEightWaves>;
+
 using KernelTypesCompAsync = ::testing::Types<CompAsyncConfig<Row, Row, Row, F16>,
                                               CompAsyncConfig<Row, Col, Row, F16>,
                                               CompAsyncConfig<Col, Row, Row, F16>,
@@ -254,8 +274,10 @@ using KernelTypesCompAsync = ::testing::Types<CompAsyncConfig<Row, Row, Row, F16
 using KernelTypesCompAsync16x16x128 = ::testing::Types<CompAsyncConfig16x16x128<Row, Col, Row, F4>,
                                                        CompAsyncConfig16x16x128<Row, Col, Row, F8>>;
 
-// clang-format off
+using KernelTypesCompAsyncEightWaves =
+    ::testing::Types<CompAsyncEightWavesConfig<Row, Col, Row, F8>>;
 
+// clang-format off
 using KernelTypesCompV6 = ::testing::Types<
     std::tuple<    Row,     Row,     Row,       F16,       F16,         F32,       F16,        I256,        I256,         I64,        I32,        I32,        I16, Intrawave,        CompV6>,
     std::tuple<    Col,     Row,     Row,       F16,       F16,         F32,       F16,        I256,        I256,         I64,        I32,        I32,        I16, Intrawave,        CompV6>,
@@ -296,6 +318,16 @@ using KernelTypesPersistent = ::testing::Types<
 using KernelTypesPersistentWmma = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16,        I16, Intrawave,        CompV3,    Persistent>,
     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16,        I16, Intrawave,        CompV3, NonPersistent>
+>;
+
+// TF32 (gfx950 only): 3x bf16 MFMA emulation, uses float buffers with tf32_t compute type
+// Tile: 128x128x64, Warp tile: 32x32x16
+using KernelTypesTf32Mem = ::testing::Types<
+    //         ALayout, BLayout, CLayout, ADataType, BDataType, AccDataType, CDataType, M_BlockSize, N_BlockSize, K_BlockSize, M_TileSize, N_TileSize, K_TileSize, Scheduler, PipelineType
+    std::tuple<    Row,     Row,     Row,      TF32,      TF32,         F32,       F32,        I128,        I128,         I64,        I32,        I32,        I16, Intrawave,         Mem>,
+    std::tuple<    Row,     Row,     Row,      TF32,      TF32,         F32,       F32,        I128,        I128,         I64,        I32,        I32,        I16, Interwave,         Mem>,
+    std::tuple<    Row,     Col,     Row,      TF32,      TF32,         F32,       F32,        I128,        I128,         I64,        I32,        I32,        I16, Intrawave,         Mem>,
+    std::tuple<    Row,     Col,     Row,      TF32,      TF32,         F32,       F32,        I128,        I128,         I64,        I32,        I32,        I16, Interwave,         Mem>
 >;
 
 // clang-format on

@@ -354,7 +354,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
         << "O tensor UID " << sdpa->o_tensor_uid << " not found in graph tensors";
 
     // All four required tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> nodeUids
+    const std::unordered_set<int64_t> nodeUids
         = {sdpa->q_tensor_uid, sdpa->k_tensor_uid, sdpa->v_tensor_uid, sdpa->o_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 4u) << "SDPA node tensor UIDs are not distinct";
 }
@@ -474,7 +474,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropWithOptionalTensorsAndSc
 
     SdpaAttributes sdpaAttrs;
     sdpaAttrs.set_name("sdpa_with_optionals");
-    sdpaAttrs.set_attn_mask(attnMask);
+    sdpaAttrs.set_bias(attnMask);
     sdpaAttrs.set_dropout(0.1f, seed, offset);
     sdpaAttrs.set_dropout_mask(dropoutMask);
     sdpaAttrs.set_generate_stats(true);

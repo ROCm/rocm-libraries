@@ -97,6 +97,18 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_TENSOR_VALUE_EXT:
         getTensorValue(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT:
+    {
+        const bool isByValue = _data.value.type != hipdnn_data_sdk::data_objects::TensorValue::NONE;
+        getScalar(isByValue,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "TensorDescriptor::getAttribute()");
+        break;
+    }
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "TensorDescriptor::getAttribute: attributeName not supported");
@@ -167,19 +179,11 @@ void TensorDescriptor::setName(hipdnnBackendAttributeType_t attributeType,
                                int64_t elementCount,
                                const void* arrayOfElements)
 {
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "TensorDescriptor::setAttribute(): attributeType is not HIPDNN_TYPE_CHAR");
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "TensorDescriptor::setAttribute(): arrayOfElements is null");
-    THROW_IF_LT(elementCount,
-                static_cast<int64_t>(0),
-                HIPDNN_STATUS_BAD_PARAM,
-                "TensorDescriptor::setAttribute(): elementCount is negative");
-
-    _data.name
-        = std::string(static_cast<const char*>(arrayOfElements), static_cast<size_t>(elementCount));
+    setString(_data.name,
+              attributeType,
+              elementCount,
+              arrayOfElements,
+              "TensorDescriptor::setAttribute()");
 }
 
 void TensorDescriptor::getName(hipdnnBackendAttributeType_t attributeType,
@@ -187,32 +191,12 @@ void TensorDescriptor::getName(hipdnnBackendAttributeType_t attributeType,
                                int64_t* elementCount,
                                void* arrayOfElements) const
 {
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "TensorDescriptor::getAttribute(): attributeType is not HIPDNN_TYPE_CHAR");
-
-    if(arrayOfElements == nullptr || requestedElementCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "TensorDescriptor::getAttribute(): elementCount is null");
-        *elementCount = static_cast<int64_t>(_data.name.size() + 1);
-        return;
-    }
-
-    THROW_IF_LT(requestedElementCount,
-                static_cast<int64_t>(0),
-                HIPDNN_STATUS_BAD_PARAM,
-                "TensorDescriptor::getAttribute(): requestedElementCount is negative");
-
-    auto maxSize = static_cast<size_t>(requestedElementCount);
-    hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
-        static_cast<char*>(arrayOfElements), _data.name.c_str(), maxSize);
-
-    if(elementCount != nullptr)
-    {
-        *elementCount = static_cast<int64_t>(std::min(_data.name.size() + 1, maxSize));
-    }
+    getString(_data.name,
+              attributeType,
+              requestedElementCount,
+              elementCount,
+              arrayOfElements,
+              "TensorDescriptor::getAttribute()");
 }
 
 void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType,
@@ -278,16 +262,15 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
         _data.value.Set(Int32Value(val));
         break;
     }
+    case DataType::INT64:
+    {
+        int64_t val;
+        std::memcpy(&val, bytes, sizeof(int64_t));
+        _data.value.Set(Int64Value(val));
+        break;
+    }
     case DataType::UINT8:
-    {
-        _data.value.Set(Float8Value(bytes[0]));
-        break;
-    }
     case DataType::INT8:
-    {
-        _data.value.Set(Float8Value(bytes[0]));
-        break;
-    }
     case DataType::FP8_E4M3:
     case DataType::FP8_E5M2:
     {
@@ -390,6 +373,16 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
         std::memcpy(output, &nativeVal, sizeof(int32_t));
         break;
     }
+    case DataType::INT64:
+    {
+        const auto* val = _data.value.AsInt64Value();
+        THROW_IF_TRUE(val == nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        auto nativeVal = val->value();
+        std::memcpy(output, &nativeVal, sizeof(int64_t));
+        break;
+    }
     case DataType::UINT8:
     case DataType::INT8:
     {
@@ -482,6 +475,9 @@ std::string TensorDescriptor::toString() const
             break;
         case TensorValue::Int32Value:
             str += std::to_string(_data.value.AsInt32Value()->value());
+            break;
+        case TensorValue::Int64Value:
+            str += std::to_string(_data.value.AsInt64Value()->value());
             break;
         case TensorValue::Float8Value:
             str += std::to_string(_data.value.AsFloat8Value()->value());

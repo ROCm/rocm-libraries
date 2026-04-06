@@ -48,7 +48,7 @@ TEST(TestTensorAttributesWrapper, EnsureTheTensorAttributesIsWrappedCorrectly)
     EXPECT_EQ(wrapper.strides(), strides);
     EXPECT_EQ(wrapper.isVirtual(), isVirtual);
     EXPECT_EQ(wrapper.valueType(), valueType);
-    EXPECT_EQ(wrapper.dataClassType(), typeid(Float32Value));
+    EXPECT_EQ(wrapper.valueType(), TensorValue::Float32Value);
     EXPECT_NO_THROW(wrapper.valueAs<Float32Value>());
     EXPECT_EQ(wrapper.valueAs<Float32Value>().value(), value);
     EXPECT_THROW(wrapper.valueAs<Float64Value>(), std::invalid_argument);
