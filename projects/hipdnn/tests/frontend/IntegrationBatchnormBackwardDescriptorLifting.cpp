@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -29,7 +30,7 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -623,5 +624,81 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardAutoAssig
     EXPECT_EQ(tensorMap[dxUid]->get_dim(), toVec(K_BN_BWD_AUTO_DATA_DIMS));
     EXPECT_EQ(tensorMap[dxUid]->get_stride(), toVec(K_BN_BWD_AUTO_DATA_STRIDES));
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization).
+TEST_F(IntegrationBatchnormBackwardDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildBatchnormBackwardGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    // dy, x, scale, mean, invVar, dx, dscale, dbias = 8
+    ASSERT_EQ(tensorMap.size(), 8u) << "Expected 8 tensors in lifted graph";
+
+    // Verify key tensor dims and names
+    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DY_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DY_UID]->get_dim(), toVec(K_BN_BWD_INTEG_DATA_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DY_UID]->get_stride(),
+              toVec(K_BN_BWD_INTEG_DATA_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DY_UID]->get_name(), "DY");
+
+    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_X_UID]->get_dim(), toVec(K_BN_BWD_INTEG_DATA_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_X_UID]->get_name(), "X");
+
+    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_SCALE_UID]->get_dim(),
+              toVec(K_BN_BWD_INTEG_PARAM_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_SCALE_UID]->get_name(), "Scale");
+
+    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_MEAN_UID]->get_name(), "Mean");
+
+    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_INV_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_INV_VARIANCE_UID]->get_name(), "InvVariance");
+
+    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DX_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DX_UID]->get_name(), "DX");
+
+    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DSCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DSCALE_UID]->get_name(), "DScale");
+
+    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DBIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DBIAS_UID]->get_name(), "DBias");
+
+    // Verify 1 sub-node of the correct type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* bnBwdNode = dynamic_cast<BatchnormBackwardNode*>(subNodes[0].get());
+    ASSERT_NE(bnBwdNode, nullptr) << "Expected a BatchnormBackwardNode";
+
+    // Verify operation name and compute data type
+    EXPECT_EQ(bnBwdNode->attributes.get_name(), "bn_bwd_op");
+    EXPECT_EQ(bnBwdNode->attributes.compute_data_type, DataType::FLOAT);
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

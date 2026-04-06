@@ -39,8 +39,8 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
                                                              DataType::FLOAT,
                                                              dims,
                                                              TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto serializedGraph = graph->toBinary();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     BatchnormFwdWithVarianceTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     BatchnormFwdWithVarianceTensorBundle directTensorBundle(
@@ -104,8 +104,8 @@ TEST(TestBatchnormFwdWithVariancePlanBuilder, PlanConstruction)
                                                              DataType::FLOAT,
                                                              dims,
                                                              TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto serializedGraph = graph->toBinary();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
                                                        DataType::FLOAT,
@@ -132,8 +132,8 @@ TEST(TestBatchnormFwdWithVariancePlanBuilder, IsApplicable)
                                                              DataType::FLOAT,
                                                              dims,
                                                              TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto serializedGraph = graph->toBinary();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const BatchnormFwdInferenceWithVariancePlanBuilder<DataType::FLOAT,
                                                        DataType::FLOAT,

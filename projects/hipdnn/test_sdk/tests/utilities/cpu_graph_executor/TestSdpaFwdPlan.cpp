@@ -32,9 +32,9 @@ TEST(TestSdpaFwdPlan, ExecutePlan)
 
     auto graphTuple = buildSdpaFwdGraph(planTensorBundle, DataType::FLOAT);
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto serializedGraph = graph->toBinary();
 
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const auto* nodeAttributes = graphWrapper.getNode(0).attributes_as_SdpaAttributes();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
@@ -78,9 +78,9 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithCausalMask)
 
     auto graphTuple = buildSdpaFwdGraph(planTensorBundle, DataType::FLOAT, /*causalMask=*/true);
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto serializedGraph = graph->toBinary();
 
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const auto* nodeAttributes = graphWrapper.getNode(0).attributes_as_SdpaAttributes();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
@@ -125,9 +125,9 @@ TEST(TestSdpaFwdPlanBuilder, PlanConstruction)
 
     auto graphTuple = buildSdpaFwdGraph(tensorBundle, DataType::FLOAT);
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto serializedGraph = graph->toBinary();
 
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
@@ -148,9 +148,9 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicable)
 
     auto graphTuple = buildSdpaFwdGraph(tensorBundle, DataType::FLOAT);
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto serializedGraph = graph->toBinary();
 
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     // Correct data types: applicable
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>

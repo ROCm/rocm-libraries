@@ -68,8 +68,8 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        auto graphWrap = GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        auto serializedGraph = graph->toBinary();
+        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
         const auto& nodeWrap = graphWrap.getNodeWrapper(0);
         const auto& attributes = nodeWrap.attributesAs<PointwiseAttributes>();
 
@@ -77,7 +77,7 @@ public:
             params.in0TensorValue);
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
 
         const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
 
@@ -106,8 +106,8 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        auto graphWrap = GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        auto serializedGraph = graph->toBinary();
+        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
         const auto& nodeWrap = graphWrap.getNodeWrapper(0);
         const auto& attributes = nodeWrap.attributesAs<PointwiseAttributes>();
 
@@ -117,7 +117,7 @@ public:
             params.in1TensorValue);
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
 
         const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
 

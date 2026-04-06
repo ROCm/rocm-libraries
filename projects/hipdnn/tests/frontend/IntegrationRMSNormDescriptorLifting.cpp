@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -29,7 +30,7 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -389,7 +390,7 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormLiftWithoutFinalization)
     EXPECT_FLOAT_EQ(liftedEpsilon->get_pass_by_value<float>().value(), 1e-5f);
 }
 
-// Exercises the deserialize_via_backend() path with a handle for an rmsnorm graph.
+// Exercises the deserialize() path with a handle for an rmsnorm graph.
 TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormDeserializeViaBackendWithHandle)
 {
     auto graph = buildTrainingGraph();
@@ -401,9 +402,9 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormDeserializeViaBackendWithHand
     auto data = graph->toBinary();
     ASSERT_FALSE(data.empty());
 
-    // Create a new graph and use deserialize_via_backend with handle
+    // Create a new graph and use deserialize with handle
     auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->deserialize_via_backend(_handle, data);
+    result = liftedGraph->deserialize(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Verify graph-level data types
@@ -604,5 +605,98 @@ TEST_F(IntegrationRMSNormDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip
                                                   rmsNode->attributes.get_inv_rms()->get_uid()};
     EXPECT_EQ(nodeUids.size(), 5u) << "RMSNorm node tensor UIDs are not distinct";
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization)
+// for a training rmsnorm graph.
+TEST_F(IntegrationRMSNormDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildTrainingGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID (5 tensors: x, scale, epsilon, y, inv_rms)
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 5u);
+
+    ASSERT_NE(tensorMap.count(rms_constants::K_RMSNORM_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_X_UID]->get_name(), "X");
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_X_UID]->get_dim(),
+              toVec(rms_constants::K_RMSNORM_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_X_UID]->get_stride(),
+              toVec(rms_constants::K_RMSNORM_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_X_UID]->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(rms_constants::K_RMSNORM_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_SCALE_UID]->get_name(), "SCALE");
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_SCALE_UID]->get_dim(),
+              toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_SCALE_UID]->get_stride(),
+              toVec(rms_constants::K_RMSNORM_TENSOR_SCALE_STRIDES));
+
+    ASSERT_NE(tensorMap.count(rms_constants::K_RMSNORM_TENSOR_EPSILON_UID), 0u);
+    auto liftedEpsilon = tensorMap[rms_constants::K_RMSNORM_TENSOR_EPSILON_UID];
+    EXPECT_EQ(liftedEpsilon->get_name(), "EPSILON");
+    EXPECT_EQ(liftedEpsilon->get_dim(), toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_DIMS));
+    EXPECT_EQ(liftedEpsilon->get_stride(), toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_STRIDES));
+    EXPECT_EQ(liftedEpsilon->get_data_type(), DataType::FLOAT);
+    EXPECT_TRUE(liftedEpsilon->get_pass_by_value());
+    ASSERT_TRUE(liftedEpsilon->get_pass_by_value<float>().has_value());
+    EXPECT_FLOAT_EQ(liftedEpsilon->get_pass_by_value<float>().value(), 1e-5f);
+
+    ASSERT_NE(tensorMap.count(rms_constants::K_RMSNORM_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_Y_UID]->get_name(), "Y");
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_Y_UID]->get_dim(),
+              toVec(rms_constants::K_RMSNORM_TENSOR_Y_DIMS));
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_Y_UID]->get_stride(),
+              toVec(rms_constants::K_RMSNORM_TENSOR_Y_STRIDES));
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_Y_UID]->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(rms_constants::K_RMSNORM_TENSOR_INV_RMS_UID), 0u);
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_INV_RMS_UID]->get_name(), "INV_RMS");
+    EXPECT_EQ(tensorMap[rms_constants::K_RMSNORM_TENSOR_INV_RMS_UID]->get_dim(),
+              toVec(rms_constants::K_RMSNORM_TENSOR_INV_RMS_DIMS));
+
+    // Verify the lifted graph has 1 rmsnorm sub-node
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* rmsNode = dynamic_cast<RMSNormNode*>(subNodes[0].get());
+    ASSERT_NE(rmsNode, nullptr);
+
+    EXPECT_EQ(rmsNode->attributes.get_forward_phase(), NormFwdPhase::TRAINING);
+    EXPECT_EQ(rmsNode->attributes.get_name(), "rmsnorm_op");
+
+    // Verify tensor references on the node
+    EXPECT_EQ(rmsNode->attributes.get_x()->get_uid(), rms_constants::K_RMSNORM_TENSOR_X_UID);
+    EXPECT_EQ(rmsNode->attributes.get_scale()->get_uid(),
+              rms_constants::K_RMSNORM_TENSOR_SCALE_UID);
+    EXPECT_EQ(rmsNode->attributes.get_epsilon()->get_uid(),
+              rms_constants::K_RMSNORM_TENSOR_EPSILON_UID);
+    EXPECT_EQ(rmsNode->attributes.get_y()->get_uid(), rms_constants::K_RMSNORM_TENSOR_Y_UID);
+    ASSERT_NE(rmsNode->attributes.get_inv_rms(), nullptr);
+    EXPECT_EQ(rmsNode->attributes.get_inv_rms()->get_uid(),
+              rms_constants::K_RMSNORM_TENSOR_INV_RMS_UID);
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

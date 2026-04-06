@@ -32,14 +32,14 @@ protected:
                                                      dims,
                                                      TensorLayout::NCHW);
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        _flatbufferData = std::move(flatbufferGraph);
+        auto serializedGraph = graph->toBinary();
+        _serializedData = std::move(serializedGraph);
 
-        return std::make_unique<GraphWrapper>(_flatbufferData.data(), _flatbufferData.size());
+        return std::make_unique<GraphWrapper>(_serializedData.data(), _serializedData.size());
     }
 
 private:
-    flatbuffers::DetachedBuffer _flatbufferData;
+    std::vector<uint8_t> _serializedData;
 };
 
 TEST_F(TestGraphTensorBundle, ConstructorCreatesAllNonVirtualTensors)
@@ -69,8 +69,8 @@ TEST_F(TestGraphTensorBundle, ConstructorSkipsVirtualTensors)
                                                  TensorLayout::NCHW,
                                                  true);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto serializedGraph = graph->toBinary();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     auto& tensorMap = graphWrapper.getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);

@@ -103,10 +103,10 @@ TEST(TestConvolutionBwdPlanBuilder, PlanConstruction)
     auto graphTuple = buildConvolutionBwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto serializedGraph = graph->toBinary();
 
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
+                                                                         serializedGraph.size());
 
     const ConvolutionBwdPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,
@@ -132,10 +132,10 @@ TEST(TestConvolutionBwdPlanBuilder, IsApplicable)
     auto graphTuple = buildConvolutionBwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto serializedGraph = graph->toBinary();
 
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
+                                                                         serializedGraph.size());
 
     const ConvolutionBwdPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,

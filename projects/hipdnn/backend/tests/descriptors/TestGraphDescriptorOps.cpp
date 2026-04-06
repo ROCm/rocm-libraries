@@ -1192,7 +1192,7 @@ public:
 
         auto flatbufferBuffer
             = buildGraphViaFlatBuffer(xTensor, wTensor, yTensor, convAttrs, sdkComputeDt);
-        auto flatbufferGraphT = UnPackGraph(flatbufferBuffer.data());
+        auto serializedGraphT = UnPackGraph(flatbufferBuffer.data());
 
         // Build via descriptor path
         auto descriptorGraphT = buildGraphViaDescriptors(p.xUid,
@@ -1212,12 +1212,12 @@ public:
                                                          p.computeDataType);
 
         // Verify structural equivalence
-        ASSERT_EQ(flatbufferGraphT->tensors.size(), descriptorGraphT->tensors.size());
-        ASSERT_EQ(flatbufferGraphT->nodes.size(), descriptorGraphT->nodes.size());
+        ASSERT_EQ(serializedGraphT->tensors.size(), descriptorGraphT->tensors.size());
+        ASSERT_EQ(serializedGraphT->nodes.size(), descriptorGraphT->nodes.size());
 
         // Compare tensors (order may differ, so compare by UID)
         std::map<int64_t, const TensorAttributesT*> fbTensors;
-        for(const auto& t : flatbufferGraphT->tensors)
+        for(const auto& t : serializedGraphT->tensors)
         {
             fbTensors[t->uid] = t.get();
         }
@@ -1236,10 +1236,10 @@ public:
         }
 
         // Compare nodes
-        ASSERT_EQ(flatbufferGraphT->nodes.size(), 1);
+        ASSERT_EQ(serializedGraphT->nodes.size(), 1);
         ASSERT_EQ(descriptorGraphT->nodes.size(), 1);
 
-        const auto& fbNode = flatbufferGraphT->nodes[0];
+        const auto& fbNode = serializedGraphT->nodes[0];
         const auto& descNode = descriptorGraphT->nodes[0];
 
         EXPECT_EQ(fbNode->compute_data_type, descNode->compute_data_type);

@@ -10,7 +10,9 @@
 #include "HipdnnException.hpp"
 #include "NodeFactory.hpp"
 
+#include <hipdnn_data_sdk/utilities/json/Graph.hpp>
 #include <logging/GraphLogger.hpp>
+#include <nlohmann/json.hpp>
 #include <unordered_map>
 
 namespace hipdnn_backend
@@ -33,6 +35,7 @@ void GraphDescriptor::finalize()
         flatbuffers::FlatBufferBuilder builder;
         builder.Finish(hipdnn_data_sdk::data_objects::Graph::Pack(builder, graph.get()));
         _graphSerializedBuffer = builder.Release();
+        _cachedJsonGraph.clear();
     }
     else
     {
@@ -57,7 +60,8 @@ void GraphDescriptor::finalize()
     }
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> GraphDescriptor::buildGraphFromOperations()
+std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT>
+    GraphDescriptor::buildGraphFromOperations() const
 {
     auto graph = std::make_unique<hipdnn_data_sdk::data_objects::GraphT>();
 
@@ -378,6 +382,7 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     if(invalidate)
     {
         _graphSerializedBuffer = flatbuffers::DetachedBuffer();
+        _cachedJsonGraph.clear();
     }
 }
 
@@ -393,6 +398,8 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
                    HIPDNN_STATUS_NOT_SUPPORTED,
                    "GraphDescriptor::deserializeGraph: cannot deserialize into a graph with "
                    "existing operations. The FlatBuffer and C-API flows are mutually exclusive.");
+
+    _cachedJsonGraph.clear();
 
     // Parse FlatBuffer into a local GraphT to extract attributes, then re-serialize into
     // _graphSerializedBuffer. When getOperations() is called, the buffer is re-parsed on demand.
@@ -414,25 +421,62 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
 
 hipdnnPluginConstData_t GraphDescriptor::getSerializedGraph() const
 {
-    // For the FlatBuffer flow, the serialized buffer is populated during deserializeGraph()
-    // and can be returned without requiring finalize(). This enables lazy serialization for
-    // graphs that were deserialized and not modified.
     if(_graphSerializedBuffer.size() > 0)
     {
         return {_graphSerializedBuffer.data(), _graphSerializedBuffer.size()};
     }
 
-    THROW_IF_FALSE(isFinalized(),
-                   HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
-                   "GraphDescriptor::getSerializedGraph: graph is not finalized");
+    // Build and cache the serialized buffer on demand from operations.
+    // This supports serialization of unfinalized graphs (e.g. for the
+    // frontend's toBinary() path which lowers without a handle).
+    THROW_IF_TRUE(_operations.empty(),
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "GraphDescriptor::getSerializedGraph: no operations set and no graph "
+                  "deserialized");
 
-    // After finalization, the buffer should always be populated
-    THROW_IF_TRUE(_graphSerializedBuffer.size() == 0,
-                  HIPDNN_STATUS_INTERNAL_ERROR,
-                  "GraphDescriptor::getSerializedGraph: serialized buffer is empty after "
-                  "finalization");
+    auto graph = buildGraphFromOperations();
+    THROW_IF_NULL(
+        graph, HIPDNN_STATUS_INTERNAL_ERROR, "GraphDescriptor::getSerializedGraph: graph is null");
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_data_sdk::data_objects::Graph::Pack(builder, graph.get()));
+    _graphSerializedBuffer = builder.Release();
 
     return {_graphSerializedBuffer.data(), _graphSerializedBuffer.size()};
+}
+
+std::string GraphDescriptor::getSerializedJsonGraph() const
+{
+    if(!_cachedJsonGraph.empty())
+    {
+        return _cachedJsonGraph;
+    }
+
+    auto data = getSerializedGraph();
+    auto* graph = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Graph>(data.ptr);
+    const nlohmann::json j = *graph;
+    _cachedJsonGraph = j.dump();
+    return _cachedJsonGraph;
+}
+
+void GraphDescriptor::createFromJsonGraph(GraphDescriptor& desc,
+                                          const char* jsonGraph,
+                                          size_t jsonByteSize)
+{
+    THROW_IF_NULL(jsonGraph,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "GraphDescriptor::createFromJsonGraph: jsonGraph is null");
+    THROW_IF_TRUE(jsonByteSize == 0,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "GraphDescriptor::createFromJsonGraph: jsonByteSize is 0");
+
+    auto j = nlohmann::json::parse(jsonGraph, jsonGraph + jsonByteSize);
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_data_sdk::json::to<hipdnn_data_sdk::data_objects::Graph>(builder, j));
+
+    auto buf = builder.Release();
+    desc.deserializeGraph(buf.data(), buf.size());
 }
 
 hipdnnBackendDescriptorType_t GraphDescriptor::getStaticType()

@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -29,7 +30,7 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -540,7 +541,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropDeserializeViaBackendWith
     ASSERT_FALSE(data.empty());
 
     auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->deserialize_via_backend(_handle, data);
+    result = liftedGraph->deserialize(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Verify graph-level data types and name
@@ -571,5 +572,75 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropDeserializeViaBackendWith
     EXPECT_EQ(sdpaNode->attributes.get_q()->get_uid(), K_SDPA_TENSOR_Q_UID);
     EXPECT_EQ(sdpaNode->attributes.get_o()->get_uid(), K_SDPA_TENSOR_O_UID);
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization)
+// for an SDPA forward graph.
+TEST_F(IntegrationSdpaFpropDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 4u);
+
+    // Verify q tensor
+    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_Q_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID]->get_uid(), K_SDPA_TENSOR_Q_UID);
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID]->get_name(), "q");
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID]->get_dim(), toVec(K_SDPA_TENSOR_Q_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID]->get_stride(), toVec(K_SDPA_TENSOR_Q_STRIDES));
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID]->get_data_type(), DataType::FLOAT);
+
+    // Verify k tensor
+    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_K_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_K_UID]->get_dim(), toVec(K_SDPA_TENSOR_K_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_K_UID]->get_stride(), toVec(K_SDPA_TENSOR_K_STRIDES));
+
+    // Verify v tensor
+    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_V_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_V_UID]->get_dim(), toVec(K_SDPA_TENSOR_V_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_V_UID]->get_stride(), toVec(K_SDPA_TENSOR_V_STRIDES));
+
+    // Verify o tensor
+    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_O_UID), 0u);
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_O_UID]->get_dim(), toVec(K_SDPA_TENSOR_O_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_O_UID]->get_stride(), toVec(K_SDPA_TENSOR_O_STRIDES));
+
+    // Verify sub-node count and type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* opNode = dynamic_cast<SdpaFpropNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr) << "Expected a SdpaFpropNode";
+
+    // Verify diagonal alignment
+    EXPECT_EQ(opNode->attributes.diagonal_alignment, DiagonalAlignment::TOP_LEFT);
+
+    // Verify operation name
+    EXPECT_EQ(opNode->attributes.get_name(), "test_op");
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

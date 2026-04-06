@@ -44,8 +44,6 @@ add_executable(
     TestFrontendLogging.cpp
     TestGraph.cpp
     TestGraphAttributes.cpp
-    TestGraphGenerated.cpp
-    TestGraphSerialization.cpp
     TestHandle.cpp
     TestIncompatibleBackendWrapper.cpp
     TestINode.cpp

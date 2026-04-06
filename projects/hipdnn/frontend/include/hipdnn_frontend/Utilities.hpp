@@ -135,6 +135,58 @@ inline TensorAttributes makeTensorAttributes(const std::string& name, const T va
 }
 
 /**
+ * @brief Convert frontend DataType to Data SDK DataType
+ *
+ * Maps the frontend DataType enum to the data_sdk DataType enum for tensor
+ * allocation. The two enums have different numeric values, so an explicit
+ * mapping is required.
+ *
+ * @param dt The frontend DataType value
+ * @return The corresponding data_sdk DataType value, or UNSET if not mapped
+ */
+// Note: hipdnn_test_sdk::utilities::SdkFrontendTypeConversions.hpp has a
+// parallel implementation. If new data types are added, update both.
+inline hipdnn_data_sdk::data_objects::DataType frontendToSdkDataType(DataType dt)
+{
+    namespace data_objects = hipdnn_data_sdk::data_objects;
+    switch(dt)
+    {
+    case DataType::FLOAT:
+        return data_objects::DataType::FLOAT;
+    case DataType::HALF:
+        return data_objects::DataType::HALF;
+    case DataType::BFLOAT16:
+        return data_objects::DataType::BFLOAT16;
+    case DataType::DOUBLE:
+        return data_objects::DataType::DOUBLE;
+    case DataType::UINT8:
+        return data_objects::DataType::UINT8;
+    case DataType::INT32:
+        return data_objects::DataType::INT32;
+    case DataType::INT8:
+        return data_objects::DataType::INT8;
+    case DataType::FP8_E4M3:
+        return data_objects::DataType::FP8_E4M3;
+    case DataType::FP8_E5M2:
+        return data_objects::DataType::FP8_E5M2;
+    case DataType::INT64:
+        return data_objects::DataType::INT64;
+    case DataType::FP8_E8M0:
+        return data_objects::DataType::FP8_E8M0;
+    case DataType::FP4_E2M1:
+        return data_objects::DataType::FP4_E2M1;
+    case DataType::INT4:
+        return data_objects::DataType::INT4;
+    case DataType::FP6_E2M3:
+        return data_objects::DataType::FP6_E2M3;
+    case DataType::FP6_E3M2:
+        return data_objects::DataType::FP6_E3M2;
+    default:
+        return data_objects::DataType::UNSET;
+    }
+}
+
+/**
  * @brief Allocate a Data SDK ITensor that matches the given attributes
  *
  * Creates an actual tensor object from a descriptor. Host memory is
@@ -149,8 +201,9 @@ inline TensorAttributes makeTensorAttributes(const std::string& name, const T va
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     createTensorFromAttribute(const TensorAttributes& attribute)
 {
+    auto sdkType = frontendToSdkDataType(attribute.get_data_type());
     return hipdnn_data_sdk::utilities::createTensor(
-        toSdkType(attribute.get_data_type()), attribute.get_dim(), attribute.get_stride());
+        sdkType, attribute.get_dim(), attribute.get_stride());
 }
 
 } // namespace graph

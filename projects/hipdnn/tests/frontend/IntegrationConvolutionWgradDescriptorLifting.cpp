@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -29,7 +30,7 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -423,5 +424,71 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, AsymmetricPaddingPreservedI
     EXPECT_EQ(opNode->attributes.get_stride(), std::vector<int64_t>({1, 1}));
     EXPECT_EQ(opNode->attributes.get_dilation(), std::vector<int64_t>({1, 1}));
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization).
+TEST_F(IntegrationConvolutionWgradDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u);
+
+    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_name(), "x");
+    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_dim(), toVec(K_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_stride(), toVec(K_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(K_TENSOR_DY_UID), 0u);
+    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_name(), "dy");
+    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_dim(), toVec(K_TENSOR_DY_DIMS));
+    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_stride(), toVec(K_TENSOR_DY_STRIDES));
+    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(K_TENSOR_DW_UID), 0u);
+    EXPECT_EQ(tensorMap[K_TENSOR_DW_UID]->get_name(), "dw");
+    EXPECT_EQ(tensorMap[K_TENSOR_DW_UID]->get_dim(), toVec(K_TENSOR_DW_DIMS));
+    EXPECT_EQ(tensorMap[K_TENSOR_DW_UID]->get_stride(), toVec(K_TENSOR_DW_STRIDES));
+    EXPECT_EQ(tensorMap[K_TENSOR_DW_UID]->get_data_type(), DataType::FLOAT);
+
+    // Verify sub-node count and type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* opNode = dynamic_cast<ConvolutionWgradNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr) << "Expected a ConvolutionWgradNode";
+
+    // Verify convolution parameters
+    EXPECT_EQ(opNode->attributes.get_convolution_mode(), ConvolutionMode::CONVOLUTION);
+    EXPECT_EQ(opNode->attributes.get_pre_padding(), toVec(K_CONV_PADDING));
+    EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_CONV_PADDING));
+    EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
+    EXPECT_EQ(opNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+    EXPECT_EQ(opNode->attributes.get_name(), "test_op");
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

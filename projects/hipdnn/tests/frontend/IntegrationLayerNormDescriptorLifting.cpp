@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -28,7 +29,7 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -421,7 +422,7 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormLiftWithoutFinalization)
               toVec(ln_constants::K_LAYERNORM_TENSOR_Y_STRIDES));
 }
 
-// Exercises the deserialize_via_backend() path with a handle for a layernorm graph.
+// Exercises the deserialize() path with a handle for a layernorm graph.
 TEST_F(IntegrationLayerNormDescriptorLifting, LayernormDeserializeViaBackendWithHandle)
 {
     auto graph = buildTrainingGraph();
@@ -433,9 +434,9 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormDeserializeViaBackendWith
     auto data = graph->toBinary();
     ASSERT_FALSE(data.empty());
 
-    // Create a new graph and use deserialize_via_backend with handle
+    // Create a new graph and use deserialize with handle
     auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->deserialize_via_backend(_handle, data);
+    result = liftedGraph->deserialize(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Verify graph-level data types
@@ -461,5 +462,103 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormDeserializeViaBackendWith
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_SCALE_UID]->get_dim(),
               toVec(ln_constants::K_LAYERNORM_TENSOR_SCALE_DIMS));
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization).
+TEST_F(IntegrationLayerNormDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildTrainingGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID (7 tensors: x, scale, bias, epsilon, y, mean, inv_variance)
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 7u);
+
+    ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_X_UID]->get_name(), "X");
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_X_UID]->get_dim(),
+              toVec(ln_constants::K_LAYERNORM_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_X_UID]->get_stride(),
+              toVec(ln_constants::K_LAYERNORM_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_X_UID]->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_SCALE_UID]->get_name(), "SCALE");
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_SCALE_UID]->get_dim(),
+              toVec(ln_constants::K_LAYERNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_SCALE_UID]->get_stride(),
+              toVec(ln_constants::K_LAYERNORM_TENSOR_SCALE_STRIDES));
+
+    ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_BIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_BIAS_UID]->get_name(), "BIAS");
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_BIAS_UID]->get_dim(),
+              toVec(ln_constants::K_LAYERNORM_TENSOR_BIAS_DIMS));
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_BIAS_UID]->get_stride(),
+              toVec(ln_constants::K_LAYERNORM_TENSOR_BIAS_STRIDES));
+
+    ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_EPSILON_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_EPSILON_UID]->get_name(), "EPSILON");
+
+    ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_Y_UID]->get_name(), "Y");
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_Y_UID]->get_dim(),
+              toVec(ln_constants::K_LAYERNORM_TENSOR_Y_DIMS));
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_Y_UID]->get_stride(),
+              toVec(ln_constants::K_LAYERNORM_TENSOR_Y_STRIDES));
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_Y_UID]->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_MEAN_UID]->get_name(), "MEAN");
+
+    ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_INV_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_INV_VARIANCE_UID]->get_name(),
+              "INV_VARIANCE");
+
+    // Verify the lifted graph has 1 layernorm sub-node
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* lnNode = dynamic_cast<LayerNormNode*>(subNodes[0].get());
+    ASSERT_NE(lnNode, nullptr);
+
+    EXPECT_EQ(lnNode->attributes.get_forward_phase(), NormFwdPhase::TRAINING);
+    EXPECT_EQ(lnNode->attributes.get_name(), "layernorm_op");
+    EXPECT_EQ(lnNode->attributes.get_normalized_dim_count(), 3);
+
+    // Verify tensor references on the node
+    EXPECT_EQ(lnNode->attributes.get_x()->get_uid(), ln_constants::K_LAYERNORM_TENSOR_X_UID);
+    EXPECT_EQ(lnNode->attributes.get_scale()->get_uid(),
+              ln_constants::K_LAYERNORM_TENSOR_SCALE_UID);
+    EXPECT_EQ(lnNode->attributes.get_bias()->get_uid(), ln_constants::K_LAYERNORM_TENSOR_BIAS_UID);
+    EXPECT_EQ(lnNode->attributes.get_epsilon()->get_uid(),
+              ln_constants::K_LAYERNORM_TENSOR_EPSILON_UID);
+    EXPECT_EQ(lnNode->attributes.get_y()->get_uid(), ln_constants::K_LAYERNORM_TENSOR_Y_UID);
+    ASSERT_NE(lnNode->attributes.get_mean(), nullptr);
+    EXPECT_EQ(lnNode->attributes.get_mean()->get_uid(), ln_constants::K_LAYERNORM_TENSOR_MEAN_UID);
+    ASSERT_NE(lnNode->attributes.get_inv_variance(), nullptr);
+    EXPECT_EQ(lnNode->attributes.get_inv_variance()->get_uid(),
+              ln_constants::K_LAYERNORM_TENSOR_INV_VARIANCE_UID);
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

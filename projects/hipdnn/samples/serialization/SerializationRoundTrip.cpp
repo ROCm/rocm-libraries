@@ -50,12 +50,12 @@ bool testJsonSerialization(const graph::Graph& originalGraph,
 {
     std::cout << "\n--- Testing JSON serialization/deserialization ---\n";
 
-    nlohmann::json jsonData;
+    std::string jsonData;
     HIPDNN_FE_CHECK(originalGraph.serialize(jsonData));
-    std::cout << "Serialized to JSON (" << jsonData.dump().size() << " bytes)\n";
+    std::cout << "Serialized to JSON (" << jsonData.size() << " bytes)\n";
 
     graph::Graph jsonGraph;
-    HIPDNN_FE_CHECK(jsonGraph.deserialize(jsonData));
+    HIPDNN_FE_CHECK(jsonGraph.deserialize(handle, jsonData));
     std::cout << "Deserialized from JSON.\n";
 
     HIPDNN_FE_CHECK(jsonGraph.validate());

@@ -6,6 +6,7 @@
 #include <hip/hip_runtime.h>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -30,7 +31,7 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -487,5 +488,84 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     EXPECT_EQ(opNode->attributes.get_epsilon()->get_stride(),
               toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization).
+TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 7u);
+
+    // Verify tensor dims and names
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_X_UID]->get_dim(), toVec(K_BN_INF_VAR_EXT_X_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_X_UID]->get_stride(), toVec(K_BN_INF_VAR_EXT_X_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_X_UID]->get_name(), "x");
+
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_MEAN_UID]->get_dim(), toVec(K_BN_INF_VAR_EXT_MEAN_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_MEAN_UID]->get_name(), "mean");
+
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_VARIANCE_UID]->get_dim(),
+              toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_VARIANCE_UID]->get_name(), "variance");
+
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_SCALE_UID]->get_dim(), toVec(K_BN_INF_VAR_EXT_SCALE_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_SCALE_UID]->get_name(), "scale");
+
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_BIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_BIAS_UID]->get_dim(), toVec(K_BN_INF_VAR_EXT_BIAS_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_BIAS_UID]->get_name(), "bias");
+
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_Y_UID]->get_dim(), toVec(K_BN_INF_VAR_EXT_Y_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_Y_UID]->get_name(), "y");
+
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_EPSILON_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_dim(),
+              toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_name(), "epsilon");
+    EXPECT_TRUE(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_pass_by_value());
+    ASSERT_TRUE(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_pass_by_value<float>().has_value());
+    EXPECT_FLOAT_EQ(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_pass_by_value<float>().value(),
+                    1e-5f);
+
+    // Verify sub-node count and type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* opNode = dynamic_cast<BatchnormInferenceNodeVarianceExt*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr) << "Expected a BatchnormInferenceNodeVarianceExt";
+
+    // Verify operation name
+    EXPECT_EQ(opNode->attributes.get_name(), "test_op");
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

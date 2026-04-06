@@ -27,7 +27,7 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -322,8 +322,8 @@ TEST_F(IntegrationGraphLifting, ConvFpropLiftWithoutFinalization)
     EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_stride(), toVec(K_TENSOR_W_STRIDES));
 }
 
-// Exercises the deserialize_via_backend() path with a handle (full finalization).
-// Builds a conv fprop graph, serializes to binary, then uses deserialize_via_backend()
+// Exercises the deserialize() path with a handle (full finalization).
+// Builds a conv fprop graph, serializes to binary, then uses deserialize()
 // with a handle and verifies the reconstructed graph.
 TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithHandle)
 {
@@ -335,9 +335,9 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithHandle)
     auto data = originalGraph->toBinary();
     ASSERT_FALSE(data.empty());
 
-    // Create a new graph and use deserialize_via_backend with handle
+    // Create a new graph and use deserialize with handle
     auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->deserialize_via_backend(_handle, data);
+    result = liftedGraph->deserialize(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Verify graph-level data types
@@ -365,7 +365,7 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithHandle)
     EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_dim(), toVec(K_TENSOR_W_DIMS));
 }
 
-// Exercises the deserialize_via_backend() path without a handle (no finalization).
+// Exercises the deserialize() path without a handle (no finalization).
 // Verifies that the graph can be reconstructed from binary data without
 // requiring a hipdnnHandle_t.
 TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithoutHandle)
@@ -378,9 +378,9 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithoutHandle)
     auto data = originalGraph->toBinary();
     ASSERT_FALSE(data.empty());
 
-    // Create a new graph and use deserialize_via_backend without handle
+    // Create a new graph and use deserialize without handle
     auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->deserialize_via_backend(nullptr, data);
+    result = liftedGraph->deserialize(nullptr, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Verify graph-level data types
@@ -428,26 +428,26 @@ TEST_F(IntegrationGraphLifting, EmptyGraphDescriptorReturnsError)
     hipdnnBackendDestroyDescriptor(desc);
 }
 
-// Verifies that deserialize_via_backend returns an error (not a crash) when
+// Verifies that deserialize returns an error (not a crash) when
 // given corrupt (garbage) bytes.
 TEST_F(IntegrationGraphLifting, DeserializeViaBackendCorruptDataReturnsError)
 {
     const std::vector<uint8_t> garbage = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03};
 
     auto graph = std::make_shared<TestableGraph>();
-    auto result = graph->deserialize_via_backend(_handle, garbage);
-    EXPECT_NE(result.code, ErrorCode::OK) << "deserialize_via_backend should fail on corrupt data";
+    auto result = graph->deserialize(_handle, garbage);
+    EXPECT_NE(result.code, ErrorCode::OK) << "deserialize should fail on corrupt data";
 }
 
-// Verifies that deserialize_via_backend returns an error (not a crash) when
+// Verifies that deserialize returns an error (not a crash) when
 // given an empty data vector.
 TEST_F(IntegrationGraphLifting, DeserializeViaBackendEmptyDataReturnsError)
 {
     const std::vector<uint8_t> empty;
 
     auto graph = std::make_shared<TestableGraph>();
-    auto result = graph->deserialize_via_backend(_handle, empty);
-    EXPECT_NE(result.code, ErrorCode::OK) << "deserialize_via_backend should fail on empty data";
+    auto result = graph->deserialize(_handle, empty);
+    EXPECT_NE(result.code, ErrorCode::OK) << "deserialize should fail on empty data";
 }
 
 // Verifies that the graph name survives the C-API round-trip (lower -> lift).
@@ -471,8 +471,8 @@ TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughCApi)
     EXPECT_EQ(liftedGraph->get_name(), "LiftingTestGraph");
 }
 
-// Exercises the deserialize_via_backend() path and verifies the graph name
-// is preserved through the FlatBuffer-direct deserialization path.
+// Exercises the deserialize() path and verifies the graph name
+// is preserved through the binary deserialization path.
 TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughDeserializeViaBackend)
 {
     auto originalGraph = buildConvFpropGraph();
@@ -483,12 +483,61 @@ TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughDeserializeViaBackend)
     auto data = originalGraph->toBinary();
     ASSERT_FALSE(data.empty());
 
-    // Create a new graph and use deserialize_via_backend without handle
+    // Create a new graph and use deserialize without handle
     auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->deserialize_via_backend(nullptr, data);
+    result = liftedGraph->deserialize(nullptr, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     EXPECT_EQ(liftedGraph->get_name(), "LiftingTestGraph");
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization).
+TEST_F(IntegrationGraphLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildConvFpropGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify the lifted graph has 1 operation node
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
+    ASSERT_NE(convNode, nullptr);
+
+    // Verify convolution parameters
+    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
+    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_CONV_POST_PADDING));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+    EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
+
+    // Verify tensor dims
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u);
+    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_dim(), toVec(K_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_dim(), toVec(K_TENSOR_W_DIMS));
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

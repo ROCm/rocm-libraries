@@ -55,8 +55,8 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        auto serializedGraph = graph->toBinary();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
         BatchnormFwdTensorBundle tensorBundle(
             graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
@@ -64,7 +64,7 @@ public:
         auto variantPack = tensorBundle.toHostVariantPack();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     template <typename InputType,
@@ -91,10 +91,10 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto serializedGraph = graph->toBinary();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     template <typename InputType,
@@ -125,10 +125,10 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto serializedGraph = graph->toBinary();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     template <typename InputType, typename AccumulatorType>
@@ -150,10 +150,10 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto serializedGraph = graph->toBinary();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     template <typename InputType, typename AccumulatorType>
@@ -175,10 +175,10 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto serializedGraph = graph->toBinary();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     template <typename InputType, typename AccumulatorType>
@@ -200,10 +200,10 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto serializedGraph = graph->toBinary();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     template <typename inputType, typename ComputeType>
@@ -223,10 +223,10 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto serializedGraph = graph->toBinary();
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 };
 
@@ -370,7 +370,7 @@ TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)
                                     1,
                                     TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto serializedGraph = graph->toBinary();
     CpuReferenceGraphExecutor().execute(
-        flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 }

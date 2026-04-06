@@ -5,6 +5,7 @@
 #include <hipdnn_frontend.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
+#include <string>
 #include <unordered_set>
 
 using namespace hipdnn_frontend;
@@ -18,7 +19,13 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
+    using Graph::deserialize;
     using Graph::get_knobs_for_engine_via_descriptors;
+
+    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
+    {
+        return _sub_nodes;
+    }
 };
 
 /// Integration tests for the descriptor-based knob lifting path.
@@ -282,5 +289,107 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, FloatConstraintWithZeroMin)
     EXPECT_DOUBLE_EQ(floatConstraint->getMinValue(), 0.0) << "Zero min should be preserved";
     EXPECT_DOUBLE_EQ(floatConstraint->getMaxValue(), 1.0);
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization)
+// for the knob descriptor lifting. Builds a graph, serializes to JSON,
+// deserializes with handle, then queries knobs and verifies they survive.
+TEST_F(IntegrationGraphKnobsDescriptorLifting, JsonRoundTripWithHandle)
+{
+    const auto engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+
+    auto graph = createAndBuildSimpleGraph();
+
+    // Serialize to JSON (graph is already built)
+    std::string jsonData;
+    auto result = graph.serialize(jsonData);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    TestableGraph liftedGraph;
+    result = liftedGraph.deserialize(_handle, jsonData);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph.get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph.get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph.get_io_data_type(), DataType::FLOAT);
+
+    // Verify the lifted graph has 1 operation sub-node
+    auto& subNodes = liftedGraph.getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    // Verify tensors survived the round trip
+    auto tensorMap = liftedGraph.getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 2u) << "Expected 2 tensors (X, Y) in lifted graph";
+
+    // Query knobs on the deserialized graph and verify they survived
+    std::vector<Knob> knobs;
+    result = liftedGraph.get_knobs_for_engine_via_descriptors(engineId, knobs);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+
+    ASSERT_EQ(knobs.size(), 5u);
+
+    {
+        const auto* knob = findKnob(knobs, "test.int_knob");
+        ASSERT_NE(knob, nullptr);
+        EXPECT_EQ(knob->valueType(), KnobValueType::INT64);
+        EXPECT_EQ(std::get<int64_t>(knob->defaultValue()), 50);
+        EXPECT_EQ(knob->description(), "Test integer knob with range 0-100");
+        EXPECT_FALSE(knob->isDeprecated());
+
+        auto* constraint = dynamic_cast<const IntConstraint*>(knob->constraint());
+        ASSERT_NE(constraint, nullptr);
+        EXPECT_EQ(constraint->getMinValue(), 0);
+        EXPECT_EQ(constraint->getMaxValue(), 100);
+        EXPECT_EQ(constraint->getStep(), 10);
+    }
+
+    {
+        const auto* knob = findKnob(knobs, "test.float_knob");
+        ASSERT_NE(knob, nullptr);
+        EXPECT_EQ(knob->valueType(), KnobValueType::FLOAT64);
+        EXPECT_DOUBLE_EQ(std::get<double>(knob->defaultValue()), 0.5);
+        EXPECT_FALSE(knob->isDeprecated());
+
+        auto* constraint = dynamic_cast<const FloatConstraint*>(knob->constraint());
+        ASSERT_NE(constraint, nullptr);
+        EXPECT_DOUBLE_EQ(constraint->getMinValue(), 0.0);
+        EXPECT_DOUBLE_EQ(constraint->getMaxValue(), 1.0);
+    }
+
+    {
+        const auto* knob = findKnob(knobs, "test.string_knob");
+        ASSERT_NE(knob, nullptr);
+        EXPECT_EQ(knob->valueType(), KnobValueType::STRING);
+        EXPECT_EQ(std::get<std::string>(knob->defaultValue()), "fast");
+        EXPECT_FALSE(knob->isDeprecated());
+
+        auto* constraint = dynamic_cast<const StringConstraint*>(knob->constraint());
+        ASSERT_NE(constraint, nullptr);
+        EXPECT_EQ(constraint->getValidValues(),
+                  (std::unordered_set<std::string>{"fast", "accurate", "balanced"}));
+    }
+
+    {
+        const auto* knob = findKnob(knobs, "test.deprecated_knob");
+        ASSERT_NE(knob, nullptr);
+        EXPECT_EQ(knob->valueType(), KnobValueType::INT64);
+        EXPECT_EQ(std::get<int64_t>(knob->defaultValue()), 0);
+        EXPECT_TRUE(knob->isDeprecated());
+    }
+
+    {
+        const auto* knob = findKnob(knobs, "test.shared.deterministic");
+        ASSERT_NE(knob, nullptr);
+        EXPECT_EQ(knob->valueType(), KnobValueType::INT64);
+        EXPECT_EQ(std::get<int64_t>(knob->defaultValue()), 0);
+        EXPECT_FALSE(knob->isDeprecated());
+    }
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

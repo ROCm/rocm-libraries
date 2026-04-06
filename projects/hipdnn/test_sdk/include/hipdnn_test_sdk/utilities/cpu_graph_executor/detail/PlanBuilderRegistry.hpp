@@ -67,6 +67,7 @@ private:
         }
     }
 
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     void initializePlanBuilders()
     {
         registerBuildersForVariant(PlanRegistrySignatureKey{});

@@ -137,7 +137,7 @@ When requested to build/test:
 - **Avoid implicit casts** — use explicit `static_cast<>`. The codebase compiles with `-Wconversion` and `-Wsign-conversion`
 - Always use braces for if/for/while bodies, even single-line
 - Use CMake for managing C/C++ dependencies
-- Use Flatbuffers for serialization needs
+- Use Flatbuffers for serialization needs (backend/data_sdk only; frontend uses the backend C API)
 
 ### RAII & Resource Management
 

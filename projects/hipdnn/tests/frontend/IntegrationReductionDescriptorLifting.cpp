@@ -6,6 +6,7 @@
 #include <hip/hip_runtime.h>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -30,7 +31,7 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -367,5 +368,70 @@ TEST_F(IntegrationReductionDescriptorLifting, AutoAssignedUidsPreservedInLifting
     EXPECT_EQ(opNode->attributes.get_y()->get_dim(), toVec(K_REDUCTION_TENSOR_Y_DIMS));
     EXPECT_EQ(opNode->attributes.get_y()->get_stride(), toVec(K_REDUCTION_TENSOR_Y_STRIDES));
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization)
+// for a reduction graph.
+TEST_F(IntegrationReductionDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 2u);
+
+    // Verify x tensor
+    ASSERT_NE(tensorMap.count(K_REDUCTION_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->get_uid(), K_REDUCTION_TENSOR_X_UID);
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->get_dim(), toVec(K_REDUCTION_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->get_stride(),
+              toVec(K_REDUCTION_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_X_UID]->get_name(), "x");
+
+    // Verify y tensor
+    ASSERT_NE(tensorMap.count(K_REDUCTION_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_Y_UID]->get_uid(), K_REDUCTION_TENSOR_Y_UID);
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_Y_UID]->get_dim(), toVec(K_REDUCTION_TENSOR_Y_DIMS));
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_Y_UID]->get_stride(),
+              toVec(K_REDUCTION_TENSOR_Y_STRIDES));
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_Y_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_REDUCTION_TENSOR_Y_UID]->get_name(), "y");
+
+    // Verify sub-node count and type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* opNode = dynamic_cast<ReductionNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr) << "Expected a ReductionNode";
+
+    // Verify mode
+    EXPECT_EQ(opNode->attributes.get_mode(), ReductionMode::ADD);
+
+    // Verify operation name
+    EXPECT_EQ(opNode->attributes.get_name(), "test_op");
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

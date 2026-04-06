@@ -15,9 +15,6 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-#include <nlohmann/json.hpp>
-#endif
 
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
@@ -29,7 +26,6 @@ void graph_bindings(nb::module_& m)
         .def("validate", &graph::Graph::validate)
         .def("checkNoDuplicateTensorIds", &graph::Graph::checkNoDuplicateTensorIds)
         .def("topologicallySortGraph", &graph::Graph::topologicallySortGraph)
-        .def("buildFlatbufferOperationGraph", &graph::Graph::buildFlatbufferOperationGraph)
         .def(
             "build_operation_graph",
             [](graph::Graph& g, nb::object handle) {
@@ -139,20 +135,16 @@ void graph_bindings(nb::module_& m)
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
         .def(
             "to_json",
-            [](graph::Graph& g) {
-                // toJson() is non-const, assigns UIDs if not set
-                nlohmann::json j = g.toJson();
-                return j.dump(); // Convert to JSON string
-            },
+            [](graph::Graph& g) { return g.toJson(); },
             "Serialize the graph to a JSON string")
         .def(
             "from_json",
             [](graph::Graph& g, const std::string& jsonStr) {
-                nlohmann::json j = nlohmann::json::parse(jsonStr);
-                return g.deserialize(j);
+                return g.deserialize(nullptr, jsonStr);
             },
             nb::arg("json_string"),
-            "Deserialize a graph from a JSON string")
+            "Deserialize a graph from a JSON string. "
+            "Call build_operation_graph(handle) after to finalize for execution.")
 #endif
         ;
 }

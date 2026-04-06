@@ -11,6 +11,7 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
@@ -121,7 +122,9 @@ protected:
             _tensorIdToValidatorMap.insert(
                 {attr->get_uid(),
                  hipdnn_test_sdk::utilities::createAllCloseValidator(
-                     toSdkType(attr->get_data_type()), absoluteTolerance, relativeTolerance)});
+                     hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type()),
+                     absoluteTolerance,
+                     relativeTolerance)});
             _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
         });
     }
@@ -175,10 +178,10 @@ private:
     void executeCpuGraph(hipdnn_frontend::graph::Graph& graph,
                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
-        auto flatbufferGraph = graph.buildFlatbufferOperationGraph();
+        auto serializedGraph = graph.toBinary();
 
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), bundle.toHostVariantPack());
+            serializedGraph.data(), serializedGraph.size(), bundle.toHostVariantPack());
     }
 
     bool tryAddTensorToBundles(

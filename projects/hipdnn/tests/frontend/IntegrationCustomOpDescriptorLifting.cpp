@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -27,7 +28,7 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -531,5 +532,74 @@ TEST_F(IntegrationCustomOpDescriptorLifting, ZeroOutputCustomOpRoundTrip)
     ASSERT_EQ(customOpNode->attributes.get_inputs().size(), 2u);
     ASSERT_EQ(customOpNode->attributes.get_outputs().size(), 0u);
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization).
+TEST_F(IntegrationCustomOpDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildCustomOpGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors in lifted graph";
+
+    ASSERT_NE(tensorMap.count(K_CUSTOM_OP_INPUT_UID_0), 0u);
+    EXPECT_EQ(tensorMap[K_CUSTOM_OP_INPUT_UID_0]->get_name(), "input0");
+    EXPECT_EQ(tensorMap[K_CUSTOM_OP_INPUT_UID_0]->get_dim(), (std::vector<int64_t>{2, 3}));
+    EXPECT_EQ(tensorMap[K_CUSTOM_OP_INPUT_UID_0]->get_stride(), (std::vector<int64_t>{3, 1}));
+    EXPECT_EQ(tensorMap[K_CUSTOM_OP_INPUT_UID_0]->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(K_CUSTOM_OP_INPUT_UID_1), 0u);
+    EXPECT_EQ(tensorMap[K_CUSTOM_OP_INPUT_UID_1]->get_name(), "input1");
+    EXPECT_EQ(tensorMap[K_CUSTOM_OP_INPUT_UID_1]->get_dim(), (std::vector<int64_t>{2, 3}));
+    EXPECT_EQ(tensorMap[K_CUSTOM_OP_INPUT_UID_1]->get_stride(), (std::vector<int64_t>{3, 1}));
+
+    ASSERT_NE(tensorMap.count(K_CUSTOM_OP_OUTPUT_UID_0), 0u);
+    EXPECT_EQ(tensorMap[K_CUSTOM_OP_OUTPUT_UID_0]->get_name(), "output0");
+    EXPECT_EQ(tensorMap[K_CUSTOM_OP_OUTPUT_UID_0]->get_dim(), (std::vector<int64_t>{2, 3}));
+    EXPECT_EQ(tensorMap[K_CUSTOM_OP_OUTPUT_UID_0]->get_stride(), (std::vector<int64_t>{3, 1}));
+
+    // Verify 1 sub-node of the correct type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* customOpNode = dynamic_cast<CustomOpNode*>(subNodes[0].get());
+    ASSERT_NE(customOpNode, nullptr) << "Expected a CustomOpNode";
+
+    // Verify custom op parameters
+    EXPECT_EQ(customOpNode->attributes.get_custom_op_id(), K_CUSTOM_OP_ID);
+    EXPECT_EQ(customOpNode->attributes.get_data(), K_CUSTOM_OP_OPAQUE_DATA);
+    EXPECT_EQ(customOpNode->attributes.get_name(), "custom_op_test");
+    EXPECT_EQ(customOpNode->attributes.get_compute_data_type(), DataType::FLOAT);
+
+    // Verify tensor UIDs on the node
+    ASSERT_EQ(customOpNode->attributes.get_inputs().size(), 2u);
+    EXPECT_EQ(customOpNode->attributes.get_inputs()[0]->get_uid(), K_CUSTOM_OP_INPUT_UID_0);
+    EXPECT_EQ(customOpNode->attributes.get_inputs()[1]->get_uid(), K_CUSTOM_OP_INPUT_UID_1);
+    ASSERT_EQ(customOpNode->attributes.get_outputs().size(), 1u);
+    EXPECT_EQ(customOpNode->attributes.get_outputs()[0]->get_uid(), K_CUSTOM_OP_OUTPUT_UID_0);
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

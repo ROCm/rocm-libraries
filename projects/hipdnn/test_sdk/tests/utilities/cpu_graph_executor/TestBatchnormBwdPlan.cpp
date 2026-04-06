@@ -93,17 +93,17 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 
 TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
 {
-    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {2, 1, 1, 1};
     BatchnormBwdTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormBwdGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto serializedGraph = graph->toBinary();
 
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
+                                                                         serializedGraph.size());
 
     const BatchnormBwdPlanBuilder<DataType::FLOAT,
                                   DataType::FLOAT,
@@ -170,17 +170,17 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlanNoStats)
 
 TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
 {
-    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {2, 1, 1, 1};
     BatchnormBwdTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormBwdGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto serializedGraph = graph->toBinary();
 
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
+                                                                         serializedGraph.size());
 
     const BatchnormBwdPlanBuilder<DataType::FLOAT,
                                   DataType::FLOAT,

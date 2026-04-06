@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -29,7 +30,7 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -384,5 +385,65 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BsqLiftWithoutFinalizatio
     ASSERT_NE(tensorMap.count(K_BSQ_TENSOR_SCALE_UID), 0u);
     EXPECT_EQ(tensorMap[K_BSQ_TENSOR_SCALE_UID]->get_name(), "Scale");
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization).
+TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildBsqGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors (X, Y, Scale) in lifted graph";
+
+    // Verify tensor dims and names
+    ASSERT_NE(tensorMap.count(K_BSQ_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BSQ_TENSOR_X_UID]->get_dim(), toVec(K_BSQ_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_BSQ_TENSOR_X_UID]->get_stride(), toVec(K_BSQ_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[K_BSQ_TENSOR_X_UID]->get_name(), "X");
+
+    ASSERT_NE(tensorMap.count(K_BSQ_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BSQ_TENSOR_Y_UID]->get_dim(), toVec(K_BSQ_TENSOR_Y_DIMS));
+    EXPECT_EQ(tensorMap[K_BSQ_TENSOR_Y_UID]->get_stride(), toVec(K_BSQ_TENSOR_Y_STRIDES));
+    EXPECT_EQ(tensorMap[K_BSQ_TENSOR_Y_UID]->get_name(), "Y");
+
+    ASSERT_NE(tensorMap.count(K_BSQ_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BSQ_TENSOR_SCALE_UID]->get_name(), "Scale");
+
+    // Verify 1 sub-node of the correct type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* bsqNode = dynamic_cast<BlockScaleQuantizeNode*>(subNodes[0].get());
+    ASSERT_NE(bsqNode, nullptr) << "Expected a BlockScaleQuantizeNode";
+
+    // Verify BSQ parameters
+    EXPECT_EQ(bsqNode->attributes.get_block_size(), K_BSQ_BLOCK_SIZE);
+    EXPECT_FALSE(bsqNode->attributes.get_axis().has_value());
+    EXPECT_FALSE(bsqNode->attributes.get_transpose());
+    EXPECT_EQ(bsqNode->attributes.get_name(), "bsq_op");
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

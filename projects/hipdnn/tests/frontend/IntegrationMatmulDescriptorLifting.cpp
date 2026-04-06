@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -29,7 +30,7 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -332,5 +333,75 @@ TEST_F(IntegrationMatmulDescriptorLifting, MatmulLiftWithoutFinalization)
     EXPECT_EQ(tensorMap[K_MATMUL_TENSOR_C_UID]->get_stride(), toVec(K_MATMUL_TENSOR_C_STRIDES));
     EXPECT_EQ(tensorMap[K_MATMUL_TENSOR_C_UID]->get_name(), "C");
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization).
+TEST_F(IntegrationMatmulDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildMatmulGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors (A, B, C) in lifted graph";
+
+    // Verify A tensor
+    ASSERT_NE(tensorMap.count(K_MATMUL_TENSOR_A_UID), 0u);
+    auto liftedA = tensorMap[K_MATMUL_TENSOR_A_UID];
+    EXPECT_EQ(liftedA->get_uid(), K_MATMUL_TENSOR_A_UID);
+    EXPECT_EQ(liftedA->get_name(), "A");
+    EXPECT_EQ(liftedA->get_dim(), toVec(K_MATMUL_TENSOR_A_DIMS));
+    EXPECT_EQ(liftedA->get_stride(), toVec(K_MATMUL_TENSOR_A_STRIDES));
+    EXPECT_EQ(liftedA->get_data_type(), DataType::FLOAT);
+
+    // Verify B tensor
+    ASSERT_NE(tensorMap.count(K_MATMUL_TENSOR_B_UID), 0u);
+    auto liftedB = tensorMap[K_MATMUL_TENSOR_B_UID];
+    EXPECT_EQ(liftedB->get_uid(), K_MATMUL_TENSOR_B_UID);
+    EXPECT_EQ(liftedB->get_name(), "B");
+    EXPECT_EQ(liftedB->get_dim(), toVec(K_MATMUL_TENSOR_B_DIMS));
+    EXPECT_EQ(liftedB->get_stride(), toVec(K_MATMUL_TENSOR_B_STRIDES));
+    EXPECT_EQ(liftedB->get_data_type(), DataType::FLOAT);
+
+    // Verify C tensor
+    ASSERT_NE(tensorMap.count(K_MATMUL_TENSOR_C_UID), 0u);
+    auto liftedC = tensorMap[K_MATMUL_TENSOR_C_UID];
+    EXPECT_EQ(liftedC->get_uid(), K_MATMUL_TENSOR_C_UID);
+    EXPECT_EQ(liftedC->get_name(), "C");
+    EXPECT_EQ(liftedC->get_dim(), toVec(K_MATMUL_TENSOR_C_DIMS));
+    EXPECT_EQ(liftedC->get_stride(), toVec(K_MATMUL_TENSOR_C_STRIDES));
+    EXPECT_EQ(liftedC->get_data_type(), DataType::FLOAT);
+
+    // Verify 1 sub-node of the correct type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* matmulNode = dynamic_cast<MatmulNode*>(subNodes[0].get());
+    ASSERT_NE(matmulNode, nullptr) << "Expected a MatmulNode";
+
+    // Verify operation name
+    EXPECT_EQ(matmulNode->attributes.get_name(), "matmul_op");
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

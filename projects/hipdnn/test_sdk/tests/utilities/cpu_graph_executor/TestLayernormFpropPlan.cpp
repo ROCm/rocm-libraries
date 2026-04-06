@@ -39,8 +39,8 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
                                           dims,
                                           normalizedDimCount,
                                           TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto serializedGraph = graph->toBinary();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     LayernormFpropTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     LayernormFpropTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
@@ -99,8 +99,8 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
                                           TensorLayout::NHWC,
                                           false,
                                           true);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto serializedGraph = graph->toBinary();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     LayernormFpropTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     LayernormFpropTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
@@ -158,8 +158,8 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
                                           normalizedDimCount,
                                           TensorLayout::NHWC,
                                           true);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto serializedGraph = graph->toBinary();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     LayernormFpropTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     LayernormFpropTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
@@ -265,8 +265,8 @@ TEST(TestLayernormFpropPlanBuilder, PlanConstruction)
                                           dims,
                                           normalizedDimCount,
                                           TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto serializedGraph = graph->toBinary();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const LayernormFpropPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,
@@ -294,8 +294,8 @@ TEST(TestLayernormFpropPlanBuilder, IsApplicable)
                                           dims,
                                           normalizedDimCount,
                                           TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto serializedGraph = graph->toBinary();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const LayernormFpropPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,
@@ -333,8 +333,8 @@ TEST(TestLayernormFpropPlanBuilder, PlanConstructionTrainingPhase)
                                           normalizedDimCount,
                                           TensorLayout::NHWC,
                                           true);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto serializedGraph = graph->toBinary();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const LayernormFpropPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,
@@ -363,8 +363,8 @@ TEST(TestLayernormFpropPlanBuilder, IsApplicableTrainingPhase)
                                           normalizedDimCount,
                                           TensorLayout::NHWC,
                                           true);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto serializedGraph = graph->toBinary();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const LayernormFpropPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,

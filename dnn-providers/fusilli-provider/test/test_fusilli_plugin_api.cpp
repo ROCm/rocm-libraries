@@ -20,6 +20,7 @@
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
 #include <chrono>
 #include <condition_variable>
@@ -106,7 +107,7 @@ buildMatmulActivGraph(const std::vector<int64_t> &aDims,
                              result.get_message());
   }
 
-  return graph.buildFlatbufferOperationGraph();
+  return graph.toBinary();
 }
 
 TEST(TestFusilliPluginApi, Logging) {
@@ -442,7 +443,7 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsMatmulPointwise) {
               HIPDNN_PLUGIN_STATUS_SUCCESS);
 
     // Graph supported if pointwise mode translates to fusilli.
-    auto sdkMode = hipdnn_frontend::toSdkType(mode);
+    auto sdkMode = hipdnn_test_sdk::utilities::frontendToSdkPointwiseMode(mode);
     bool modeSupported =
         !fusilli::isError(hipDnnPointwiseModeToFusilliMode(sdkMode));
     uint32_t expectedEngines = modeSupported ? 1 : 0;

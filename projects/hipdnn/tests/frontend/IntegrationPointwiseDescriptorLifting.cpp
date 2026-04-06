@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -29,7 +30,7 @@ class TestableGraph : public Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -659,5 +660,86 @@ TEST_F(IntegrationPointwiseDescriptorLifting, ConvFpropReluFusionRoundTrip)
     EXPECT_NE(tensorMap.count(K_TENSOR_W_UID), 0u) << "W tensor not found";
     EXPECT_NE(tensorMap.count(K_PW_RELU_OUT_UID), 0u) << "relu_out tensor not found";
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization)
+// for a binary pointwise (ADD) graph.
+TEST_F(IntegrationPointwiseDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("PointwiseAddLiftingTest")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
+    in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
+
+    auto in1 = std::make_shared<TensorAttributes>();
+    in1->set_uid(K_PW_TENSOR_IN1_UID).set_name("IN1").set_data_type(DataType::FLOAT);
+    in1->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("add_op");
+    pwAttrs.set_mode(PointwiseMode::ADD);
+
+    auto out0 = graph->pointwise(in0, in1, pwAttrs);
+    out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = graph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID (in0, in1, out0)
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u);
+
+    ASSERT_NE(tensorMap.count(K_PW_TENSOR_IN0_UID), 0u);
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN0_UID]->get_dim(), toVec(K_PW_TENSOR_DIMS));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN0_UID]->get_stride(), toVec(K_PW_TENSOR_STRIDES));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN0_UID]->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(K_PW_TENSOR_IN1_UID), 0u);
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN1_UID]->get_dim(), toVec(K_PW_TENSOR_DIMS));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN1_UID]->get_stride(), toVec(K_PW_TENSOR_STRIDES));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN1_UID]->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(K_PW_TENSOR_OUT0_UID), 0u);
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_OUT0_UID]->get_dim(), toVec(K_PW_TENSOR_DIMS));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_OUT0_UID]->get_stride(), toVec(K_PW_TENSOR_STRIDES));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_OUT0_UID]->get_data_type(), DataType::FLOAT);
+
+    // Verify the lifted graph has 1 pointwise sub-node
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
+    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+
+    EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::ADD);
+    EXPECT_EQ(pwNode->attributes.get_name(), "add_op");
+    EXPECT_EQ(pwNode->attributes.get_input_0()->get_uid(), K_PW_TENSOR_IN0_UID);
+    EXPECT_EQ(pwNode->attributes.get_input_1()->get_uid(), K_PW_TENSOR_IN1_UID);
+    EXPECT_EQ(pwNode->attributes.get_output_0()->get_uid(), K_PW_TENSOR_OUT0_UID);
+}
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace

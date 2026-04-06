@@ -113,9 +113,9 @@ TEST(TestLayernormFpropSignatureKey, CreateFromNodeAndTensorMap)
                                           dims,
                                           normalizedDimCount,
                                           TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto serializedGraph = graph->toBinary();
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
+                                                                         serializedGraph.size());
 
     const LayernormFpropSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 

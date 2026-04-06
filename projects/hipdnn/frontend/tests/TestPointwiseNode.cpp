@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
@@ -18,14 +17,17 @@ namespace
 {
 namespace
 {
+// Update this constant if new PointwiseMode values are added.
+constexpr auto K_LAST_POINTWISE_MODE = PointwiseMode::TANH_FWD;
+
 // Generic helper function to generate vectors of pointwise modes based on a checker function
 template <typename CheckerFunc>
 std::vector<PointwiseMode> getPointwiseModesByChecker(CheckerFunc checker)
 {
     std::vector<PointwiseMode> modes;
     // Iterate through all possible PointwiseMode values and check if they match the criteria
-    for(int i = static_cast<int>(hipdnn_data_sdk::data_objects::PointwiseMode::MIN);
-        i <= static_cast<int>(hipdnn_data_sdk::data_objects::PointwiseMode::MAX);
+    for(int i = static_cast<int>(PointwiseMode::NOT_SET);
+        i <= static_cast<int>(K_LAST_POINTWISE_MODE);
         ++i)
     {
         auto mode = static_cast<PointwiseMode>(i);

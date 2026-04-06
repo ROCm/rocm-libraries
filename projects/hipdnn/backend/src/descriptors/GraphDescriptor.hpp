@@ -10,6 +10,7 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace hipdnn_backend
@@ -36,9 +37,17 @@ private:
 
     hipdnnHandle_t _handle = nullptr;
 
+    // Thread safety: These mutable caches are NOT thread-safe. getSerializedGraph()
+    // and getSerializedJsonGraph() write to these members from const methods.
+    // External synchronization is required for concurrent access. In practice,
+    // graph descriptors are built and consumed sequentially within a single thread.
+
     // Mutable because finalize() may populate this from a const-observable perspective
     // (the serialized buffer is a cache of the logical graph state).
     mutable flatbuffers::DetachedBuffer _graphSerializedBuffer;
+
+    // Cached JSON serialization of the graph (populated on first getSerializedJsonGraph() call).
+    mutable std::string _cachedJsonGraph;
 
     // Populated via setOperations() (C-API flow) or lazily from _graphSerializedBuffer (FlatBuffer flow).
     // Stored as IBackendDescriptor so getOperations() can pack them without cross-casting.
@@ -89,7 +98,7 @@ private:
                               void* arrayOfElements) const;
 
     // Build GraphT from operation descriptors and return it (C-API flow)
-    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> buildGraphFromOperations();
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> buildGraphFromOperations() const;
 
 public:
     void finalize() override;
@@ -117,6 +126,16 @@ public:
     void deserializeGraph(const uint8_t* serializedGraph, size_t graphByteSize);
 
     virtual hipdnnPluginConstData_t getSerializedGraph() const;
+
+    /// Returns the graph serialized as a JSON string.
+    /// Requires operations to be set or a serialized buffer to exist.
+    virtual std::string getSerializedJsonGraph() const;
+
+    /// Creates a GraphDescriptor from a JSON graph string.
+    /// The JSON is converted to FlatBuffer binary and deserialized.
+    static void
+        createFromJsonGraph(GraphDescriptor& desc, const char* jsonGraph, size_t jsonByteSize);
+
     virtual hipdnnHandle_t getHandle() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();

@@ -286,6 +286,69 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     });
 }
 
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendGetSerializedJsonGraph_ext(hipdnnBackendDescriptor_t descriptor,
+                                            size_t requestedByteSize,
+                                            size_t* graphByteSize,
+                                            char* serializedJsonGraph)
+{
+    LOG_API_ENTRY("descriptor={}, requestedByteSize={}, graphByteSize_ptr={:p}, "
+                  "serializedJsonGraph_ptr={:p}",
+                  logPtr(descriptor),
+                  requestedByteSize,
+                  static_cast<void*>(graphByteSize),
+                  static_cast<void*>(serializedJsonGraph));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfInvalidDescriptor(descriptor);
+        throwIfNull(graphByteSize);
+
+        auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        auto jsonStr = graphDesc->getSerializedJsonGraph();
+
+        *graphByteSize = jsonStr.size() + 1;
+
+        if(serializedJsonGraph != nullptr)
+        {
+            THROW_IF_LT(requestedByteSize,
+                        jsonStr.size() + 1,
+                        HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT,
+                        "Requested buffer size (" + std::to_string(requestedByteSize)
+                            + ") is smaller than the JSON graph size ("
+                            + std::to_string(jsonStr.size() + 1) + ")");
+            std::memcpy(serializedJsonGraph, jsonStr.c_str(), jsonStr.size() + 1);
+        }
+
+        LOG_API_SUCCESS(apiName, "graphByteSize={}", *graphByteSize);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeJsonGraph_ext(
+    hipdnnBackendDescriptor_t* descriptor, const char* jsonGraph, size_t jsonByteSize)
+{
+    LOG_API_ENTRY("descriptor_ptr={:p}, jsonGraph_ptr={:p}, jsonByteSize={}",
+                  static_cast<void*>(descriptor),
+                  static_cast<const void*>(jsonGraph),
+                  jsonByteSize);
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfNull(descriptor);
+        throwIfNull(jsonGraph);
+
+        if(jsonByteSize == 0)
+        {
+            throw hipdnn_backend::HipdnnException(HIPDNN_STATUS_BAD_PARAM, "jsonByteSize is 0");
+        }
+
+        auto graphDescriptor = std::make_shared<hipdnn_backend::GraphDescriptor>();
+        hipdnn_backend::GraphDescriptor::createFromJsonGraph(
+            *graphDescriptor, jsonGraph, jsonByteSize);
+        *descriptor = HipdnnBackendDescriptor::packDescriptor(graphDescriptor);
+
+        LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
+    });
+}
+
 HIPDNN_BACKEND_EXPORT const char* hipdnnGetErrorString(hipdnnStatus_t status)
 {
     LOG_API_ENTRY("status={}", status);
