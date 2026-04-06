@@ -198,7 +198,7 @@ inline Error
     auto diagonalAlignment = toBackendDiagonalAlignment(attributes.diagonal_alignment);
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
-                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                                diagonalAlignment,
                                                "SDPA bprop diagonal_alignment"));
 

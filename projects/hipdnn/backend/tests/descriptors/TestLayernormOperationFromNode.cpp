@@ -370,7 +370,7 @@ TEST_F(TestLayernormOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &fwdCount,
                        &fwdPhase);
-    ASSERT_EQ(fwdPhase, HIPDNN_NORM_FWD_PHASE_TRAINING);
+    ASSERT_EQ(fwdPhase, HIPDNN_NORM_FWD_TRAINING);
 
     // Verify normalized dim count
     int64_t normalizedDimCount = 0;

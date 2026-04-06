@@ -39,7 +39,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                              HipdnnBackendDescriptor* biasDesc,
                              HipdnnBackendDescriptor* invRmsDesc,
                              hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
-                             hipdnnNormFwdPhase_t forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING,
+                             hipdnnNormFwdPhase_t forwardPhase = HIPDNN_NORM_FWD_TRAINING,
                              const std::string& name = "")
 {
     auto wrapper = createDescriptor<RMSNormOperationDescriptor>();
@@ -319,7 +319,7 @@ TEST_F(TestGraphDescriptorRMSNorm, BuildFromOperationWithoutOptionalTensors)
                                               nullptr,
                                               nullptr,
                                               HIPDNN_DATA_FLOAT,
-                                              HIPDNN_NORM_FWD_PHASE_INFERENCE);
+                                              HIPDNN_NORM_FWD_INFERENCE);
 
     auto desc = getDescriptor();
     setHandle();
@@ -378,7 +378,7 @@ TEST_F(TestGraphDescriptorRMSNorm, NamePreservedInFlatBuffer)
                                               nullptr,
                                               invRmsDesc.get(),
                                               HIPDNN_DATA_FLOAT,
-                                              HIPDNN_NORM_FWD_PHASE_TRAINING,
+                                              HIPDNN_NORM_FWD_TRAINING,
                                               opName);
 
     auto desc = getDescriptor();

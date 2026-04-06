@@ -338,7 +338,7 @@ TEST_F(TestConvolutionBwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &convModeCount,
                        &convMode);
-    ASSERT_EQ(convMode, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    ASSERT_EQ(convMode, HIPDNN_CROSS_CORRELATION);
 
     // Verify dy tensor
     hipdnn_backend::ScopedDescriptor dyScoped;

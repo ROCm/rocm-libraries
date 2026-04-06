@@ -61,7 +61,7 @@ public:
         if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT)
            == skip.end())
         {
-            auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
+            auto forwardPhase = HIPDNN_NORM_FWD_TRAINING;
             desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT,
                                HIPDNN_TYPE_NORM_FWD_PHASE,
                                1,
@@ -298,7 +298,7 @@ TEST_F(TestRMSNormOperationDescriptor, SetTensorFailsNullPointer)
 TEST_F(TestRMSNormOperationDescriptor, SetForwardPhase)
 {
     auto desc = getDescriptor();
-    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    auto forwardPhase = HIPDNN_NORM_FWD_TRAINING;
 
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT, HIPDNN_TYPE_NORM_FWD_PHASE, 1, &forwardPhase));
@@ -310,7 +310,7 @@ TEST_F(TestRMSNormOperationDescriptor, SetForwardPhaseWrongElementCount)
 {
     auto desc = getDescriptor();
     // Value is irrelevant — this test exercises the elementCount != 1 error path.
-    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    auto forwardPhase = HIPDNN_NORM_FWD_TRAINING;
 
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT,
                                                   HIPDNN_TYPE_NORM_FWD_PHASE,
@@ -409,7 +409,7 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeForwardPhase)
                                        &forwardPhaseCount,
                                        &forwardPhase));
     ASSERT_EQ(forwardPhaseCount, 1);
-    EXPECT_EQ(forwardPhase, HIPDNN_NORM_FWD_PHASE_TRAINING);
+    EXPECT_EQ(forwardPhase, HIPDNN_NORM_FWD_TRAINING);
 }
 
 // =============================================================================

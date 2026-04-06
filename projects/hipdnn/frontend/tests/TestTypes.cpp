@@ -370,11 +370,11 @@ TEST(TestTypes, FromHipdnnConvModeValidModes)
 {
     using namespace hipdnn_frontend;
 
-    auto [xcorr, xcorrErr] = fromHipdnnConvMode(HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    auto [xcorr, xcorrErr] = fromHipdnnConvMode(HIPDNN_CROSS_CORRELATION);
     EXPECT_TRUE(xcorrErr.is_good());
     EXPECT_EQ(xcorr, ConvolutionMode::CROSS_CORRELATION);
 
-    auto [conv, convErr] = fromHipdnnConvMode(HIPDNN_CONVOLUTION_MODE_CONVOLUTION);
+    auto [conv, convErr] = fromHipdnnConvMode(HIPDNN_CONVOLUTION);
     EXPECT_TRUE(convErr.is_good());
     EXPECT_EQ(conv, ConvolutionMode::CONVOLUTION);
 }
@@ -553,11 +553,11 @@ TEST(TestTypes, FromHipdnnNormFwdPhaseValidPhases)
 {
     using namespace hipdnn_frontend;
 
-    auto [inference, inferenceErr] = fromHipdnnNormFwdPhase(HIPDNN_NORM_FWD_PHASE_INFERENCE);
+    auto [inference, inferenceErr] = fromHipdnnNormFwdPhase(HIPDNN_NORM_FWD_INFERENCE);
     EXPECT_TRUE(inferenceErr.is_good());
     EXPECT_EQ(inference, NormFwdPhase::INFERENCE);
 
-    auto [training, trainingErr] = fromHipdnnNormFwdPhase(HIPDNN_NORM_FWD_PHASE_TRAINING);
+    auto [training, trainingErr] = fromHipdnnNormFwdPhase(HIPDNN_NORM_FWD_TRAINING);
     EXPECT_TRUE(trainingErr.is_good());
     EXPECT_EQ(training, NormFwdPhase::TRAINING);
 }

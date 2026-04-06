@@ -440,7 +440,7 @@ namespace hipdnn_frontend::detail
     hipdnnDiagonalAlignment_t diagonalAlignment{};
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
                                                HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT,
-                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                                diagonalAlignment,
                                                "sdpa diagonal_alignment"));
     auto [diagonalAlignmentResult, diagonalAlignmentErr]
@@ -455,7 +455,7 @@ namespace hipdnn_frontend::detail
     hipdnnAttentionImplementation_t implementation{};
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
                                                HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT,
-                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                                implementation,
                                                "sdpa implementation"));
     auto [implementationResult, implementationErr]

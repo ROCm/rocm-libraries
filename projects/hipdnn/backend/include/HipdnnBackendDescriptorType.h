@@ -27,7 +27,7 @@
 typedef enum
 {
     /** @brief Invalid descriptor type - used for error detection */
-    HIPDNN_INVALID_TYPE = 0,
+    HIPDNN_INVALID_TYPE_EXT = 0,
 
     /**
      * @brief Engine descriptor

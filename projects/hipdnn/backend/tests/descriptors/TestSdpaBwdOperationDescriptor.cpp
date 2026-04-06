@@ -492,7 +492,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetDiagonalAlignment)
     auto desc = getDescriptor();
     auto val = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1, &val));
+        HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, 1, &val));
     ASSERT_EQ(desc->getData().diagonal_alignment, DiagonalAlignment::BOTTOM_RIGHT);
 }
 
@@ -625,10 +625,11 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetDiagonalAlignmentWrongElementCount)
 {
     auto desc = getDescriptor();
     auto val = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
-    ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(
-            HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 2, &val),
-        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
+                                                  HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                                  2,
+                                                  &val),
+                               HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestSdpaBwdOperationDescriptor, SetComputeDataTypeWrongElementCount)
@@ -1070,14 +1071,16 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetAndGetDiagonalAlignment)
     auto desc = getDescriptor();
     setAllAttributesExcept({});
     auto diagAlign = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
-    desc->setAttribute(
-        HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1, &diagAlign);
+    desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                       1,
+                       &diagAlign);
     desc->finalize();
 
     hipdnnDiagonalAlignment_t result = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
-                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                        1,
                        &count,
                        &result);
@@ -1092,7 +1095,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, GetDiagonalAlignmentDefault)
     auto result = static_cast<hipdnnDiagonalAlignment_t>(-1);
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
-                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                        1,
                        &count,
                        &result);
@@ -1190,8 +1193,10 @@ TEST_F(TestSdpaBwdOperationDescriptor, BuildNodeWithNonDefaultScalars)
 
     // Set non-default scalar/enum attributes
     auto diagAlign = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
-    desc->setAttribute(
-        HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1, &diagAlign);
+    desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                       1,
+                       &diagAlign);
 
     bool trueVal = true;
     desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_CAUSAL_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trueVal);

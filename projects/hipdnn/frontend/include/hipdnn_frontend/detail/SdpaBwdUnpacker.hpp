@@ -248,7 +248,7 @@ namespace hipdnn_frontend::detail
     hipdnnDiagonalAlignment_t diagAlign{};
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
                                                HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
-                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                                diagAlign,
                                                "SDPA bprop diagonal_alignment"));
     auto [alignVal, alignErr] = fromHipdnnDiagonalAlignment(diagAlign);

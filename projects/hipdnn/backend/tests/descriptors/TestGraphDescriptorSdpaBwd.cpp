@@ -607,8 +607,10 @@ TEST_F(TestGraphDescriptorSdpaBwd, NonDefaultScalarsPreservedInSerialization)
 
     // Set non-default diagonal alignment
     auto diagAlign = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
-    desc->setAttribute(
-        HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1, &diagAlign);
+    desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                       1,
+                       &diagAlign);
 
     desc->finalize();
 

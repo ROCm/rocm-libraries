@@ -371,9 +371,9 @@ inline std::optional<hipdnnConvolutionMode_t> toBackendConvMode(const Convolutio
     switch(type)
     {
     case ConvolutionMode::CROSS_CORRELATION:
-        return HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+        return HIPDNN_CROSS_CORRELATION;
     case ConvolutionMode::CONVOLUTION:
-        return HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+        return HIPDNN_CONVOLUTION;
     default:
         return std::nullopt;
     }
@@ -391,9 +391,9 @@ inline std::pair<ConvolutionMode, Error> fromHipdnnConvMode(hipdnnConvolutionMod
 {
     switch(mode)
     {
-    case HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION:
+    case HIPDNN_CROSS_CORRELATION:
         return {ConvolutionMode::CROSS_CORRELATION, {}};
-    case HIPDNN_CONVOLUTION_MODE_CONVOLUTION:
+    case HIPDNN_CONVOLUTION:
         return {ConvolutionMode::CONVOLUTION, {}};
     default:
         return {
@@ -407,7 +407,7 @@ inline std::pair<ConvolutionMode, Error> fromHipdnnConvMode(hipdnnConvolutionMod
  * @brief Convert frontend DiagonalAlignment to backend hipdnnDiagonalAlignment_t
  *
  * Maps frontend diagonal alignment enum directly to the backend C API enum type
- * for use with HIPDNN_TYPE_DIAGONAL_ALIGNMENT attributes.
+ * for use with HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT attributes.
  *
  * @param type The frontend DiagonalAlignment value
  * @return The corresponding hipdnnDiagonalAlignment_t value
@@ -429,7 +429,7 @@ inline hipdnnDiagonalAlignment_t toBackendDiagonalAlignment(const DiagonalAlignm
  * @brief Convert frontend AttentionImplementation to backend hipdnnAttentionImplementation_t
  *
  * Maps frontend attention implementation enum directly to the backend C API enum type
- * for use with HIPDNN_TYPE_ATTENTION_IMPLEMENTATION attributes.
+ * for use with HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT attributes.
  *
  * @param type The frontend AttentionImplementation value
  * @return The corresponding hipdnnAttentionImplementation_t value
@@ -517,9 +517,9 @@ inline std::optional<hipdnnNormFwdPhase_t> toBackendNormFwdPhase(const NormFwdPh
     switch(type)
     {
     case NormFwdPhase::INFERENCE:
-        return HIPDNN_NORM_FWD_PHASE_INFERENCE;
+        return HIPDNN_NORM_FWD_INFERENCE;
     case NormFwdPhase::TRAINING:
-        return HIPDNN_NORM_FWD_PHASE_TRAINING;
+        return HIPDNN_NORM_FWD_TRAINING;
     default:
         return std::nullopt;
     }
@@ -537,9 +537,9 @@ inline std::pair<NormFwdPhase, Error> fromHipdnnNormFwdPhase(hipdnnNormFwdPhase_
 {
     switch(phase)
     {
-    case HIPDNN_NORM_FWD_PHASE_INFERENCE:
+    case HIPDNN_NORM_FWD_INFERENCE:
         return {NormFwdPhase::INFERENCE, {}};
-    case HIPDNN_NORM_FWD_PHASE_TRAINING:
+    case HIPDNN_NORM_FWD_TRAINING:
         return {NormFwdPhase::TRAINING, {}};
     default:
         return {NormFwdPhase::NOT_SET,

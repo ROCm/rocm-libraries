@@ -88,7 +88,7 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_ENGINE_GLOBAL_INDEX:
         getGlobalId(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT:
+    case HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE:
         getKnobInfo(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINE_KNOB_INFO:

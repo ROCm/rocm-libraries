@@ -261,7 +261,7 @@ inline Error
     auto diagonalAlignment = toBackendDiagonalAlignment(attributes.diagonal_alignment);
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT,
-                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                                diagonalAlignment,
                                                "SDPA fprop diagonal_alignment"));
 
@@ -276,7 +276,7 @@ inline Error
     auto implementationVal = toBackendAttentionImplementation(attributes.implementation);
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT,
-                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                                implementationVal,
                                                "SDPA fprop implementation"));
 

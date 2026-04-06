@@ -100,10 +100,10 @@ typedef enum
     HIPDNN_TYPE_POINTWISE_MODE = 25,
 
     /** @brief Diagonal alignment mode enumeration (hipdnnDiagonalAlignment_t) */
-    HIPDNN_TYPE_DIAGONAL_ALIGNMENT = 26,
+    HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT = 26,
 
     /** @brief Attention implementation mode enumeration (hipdnnAttentionImplementation_t) */
-    HIPDNN_TYPE_ATTENTION_IMPLEMENTATION = 27,
+    HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT = 27,
 
     /** @brief Reduce tensor operator enumeration (hipdnnReduceTensorOp_t) */
     HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE = 28,

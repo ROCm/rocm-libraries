@@ -601,7 +601,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, SetDiagonalAlignment)
     auto diagonalAlignment = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT,
-                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                        1,
                                        &diagonalAlignment));
 
@@ -614,7 +614,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, SetDiagonalAlignmentWrongElementCount)
     auto diagonalAlignment = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
 
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT,
-                                                  HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                                                  HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                                   2,
                                                   &diagonalAlignment),
                                HIPDNN_STATUS_BAD_PARAM);
@@ -648,7 +648,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, SetAttentionImplementation)
     auto implementation = HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT,
-                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                        1,
                                        &implementation));
 
@@ -661,7 +661,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, SetAttentionImplementationWrongElementCou
     auto implementation = HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
 
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT,
-                                                  HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                                                  HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                                   2,
                                                   &implementation),
                                HIPDNN_STATUS_BAD_PARAM);
@@ -805,7 +805,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, GetAttributeSdpafpropParams)
     auto diagonalAlignment = static_cast<hipdnnDiagonalAlignment_t>(-1);
     int64_t diagonalAlignmentCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT,
-                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                        1,
                                        &diagonalAlignmentCount,
                                        &diagonalAlignment));
@@ -827,7 +827,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, GetAttributeSdpafpropParams)
     auto implementation = static_cast<hipdnnAttentionImplementation_t>(-1);
     int64_t implementationCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT,
-                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                        1,
                                        &implementationCount,
                                        &implementation));
@@ -995,10 +995,10 @@ INSTANTIATE_TEST_SUITE_P(
         QueryModeParam{
             HIPDNN_ATTR_OPERATION_SDPA_FWD_AMAX_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
         QueryModeParam{
-            HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1},
+            HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, 1},
         QueryModeParam{HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT, HIPDNN_TYPE_DATA_TYPE, 1},
         QueryModeParam{
-            HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, 1},
+            HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, 1},
         QueryModeParam{HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1}));
 
 // =============================================================================
@@ -1192,13 +1192,13 @@ TEST_F(TestSdpaFwdOperationDescriptor, BuildNodeProducesCorrectNodeTNonDefaults)
     // Set non-default scalar/enum attributes before finalizing
     auto diagonalAlignment = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
     desc->setAttribute(HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT,
-                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                        1,
                        &diagonalAlignment);
 
     auto implementation = HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
     desc->setAttribute(HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT,
-                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                        1,
                        &implementation);
 
@@ -1481,13 +1481,13 @@ TEST_F(TestSdpaFwdOperationDescriptor, SetAndGetNonDefaultEnumAttributes)
 
     auto diagonalAlignment = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
     desc->setAttribute(HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT,
-                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                        1,
                        &diagonalAlignment);
 
     auto implementation = HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
     desc->setAttribute(HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT,
-                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                        1,
                        &implementation);
 
@@ -1503,7 +1503,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, SetAndGetNonDefaultEnumAttributes)
     int64_t elementCount = 0;
 
     desc->getAttribute(HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT,
-                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                        1,
                        &elementCount,
                        &retrievedAlignment);
@@ -1511,7 +1511,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, SetAndGetNonDefaultEnumAttributes)
     EXPECT_EQ(retrievedAlignment, HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT);
 
     desc->getAttribute(HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT,
-                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                        1,
                        &elementCount,
                        &retrievedImpl);

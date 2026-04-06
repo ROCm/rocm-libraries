@@ -63,7 +63,7 @@ public:
         if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT)
            == skip.end())
         {
-            auto forwardPhase = HIPDNN_NORM_FWD_PHASE_INFERENCE;
+            auto forwardPhase = HIPDNN_NORM_FWD_INFERENCE;
             desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
                                HIPDNN_TYPE_NORM_FWD_PHASE,
                                1,
@@ -359,7 +359,7 @@ TEST_F(TestLayernormOperationDescriptor, SetNormalizedDimCount)
 TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhase)
 {
     auto desc = getDescriptor();
-    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_INFERENCE;
+    auto forwardPhase = HIPDNN_NORM_FWD_INFERENCE;
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
                                        HIPDNN_TYPE_NORM_FWD_PHASE,
@@ -372,7 +372,7 @@ TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhase)
 TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhaseTraining)
 {
     auto desc = getDescriptor();
-    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    auto forwardPhase = HIPDNN_NORM_FWD_TRAINING;
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
                                        HIPDNN_TYPE_NORM_FWD_PHASE,
@@ -385,7 +385,7 @@ TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhaseTraining)
 TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhaseWrongElementCount)
 {
     auto desc = getDescriptor();
-    hipdnnNormFwdPhase_t forwardPhase = HIPDNN_NORM_FWD_PHASE_INFERENCE;
+    hipdnnNormFwdPhase_t forwardPhase = HIPDNN_NORM_FWD_INFERENCE;
 
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
                                                   HIPDNN_TYPE_NORM_FWD_PHASE,
@@ -553,7 +553,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeLayernormParams)
                                        &forwardPhaseCount,
                                        &forwardPhase));
     ASSERT_EQ(forwardPhaseCount, 1);
-    EXPECT_EQ(forwardPhase, HIPDNN_NORM_FWD_PHASE_INFERENCE);
+    EXPECT_EQ(forwardPhase, HIPDNN_NORM_FWD_INFERENCE);
 }
 
 TEST_F(TestLayernormOperationDescriptor, GetAttributeComputeType)

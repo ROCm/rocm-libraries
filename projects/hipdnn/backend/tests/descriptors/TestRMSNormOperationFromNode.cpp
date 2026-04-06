@@ -423,7 +423,7 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &forwardPhaseCount,
                        &forwardPhase);
-    ASSERT_EQ(forwardPhase, HIPDNN_NORM_FWD_PHASE_TRAINING);
+    ASSERT_EQ(forwardPhase, HIPDNN_NORM_FWD_TRAINING);
 
     // Verify x tensor
     hipdnn_backend::ScopedDescriptor xScoped;

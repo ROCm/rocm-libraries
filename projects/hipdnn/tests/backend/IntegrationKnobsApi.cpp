@@ -67,7 +67,7 @@ protected:
 };
 
 // =============================================================================
-// Engine Knob Info Tests (via HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT)
+// Engine Knob Info Tests (via HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE)
 // =============================================================================
 
 TEST_F(IntegrationKnobsApi, GetKnobInfoCountFromEngine)
@@ -76,7 +76,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoCountFromEngine)
 
     int64_t knobCount = -1;
     EXPECT_EQ(hipdnnBackendGetAttribute(_engine,
-                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         0,
                                         &knobCount,
@@ -94,7 +94,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoDataFromEngine)
     // First get the count
     int64_t knobCount = 0;
     ASSERT_EQ(hipdnnBackendGetAttribute(_engine,
-                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         0,
                                         &knobCount,
@@ -106,7 +106,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoDataFromEngine)
     std::vector<hipdnnBackendFlatbufferData_t> knobData(static_cast<size_t>(knobCount));
     int64_t returnedCount = 0;
     EXPECT_EQ(hipdnnBackendGetAttribute(_engine,
-                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         knobCount,
                                         &returnedCount,
@@ -128,7 +128,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateIntKnob)
 
     int64_t knobCount = 0;
     ASSERT_EQ(hipdnnBackendGetAttribute(_engine,
-                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         0,
                                         &knobCount,
@@ -139,7 +139,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateIntKnob)
     std::vector<hipdnnBackendFlatbufferData_t> knobData(static_cast<size_t>(knobCount));
     int64_t returnedCount = 0;
     ASSERT_EQ(hipdnnBackendGetAttribute(_engine,
-                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         knobCount,
                                         &returnedCount,
@@ -194,7 +194,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateFloatKnob)
 
     int64_t knobCount = 0;
     ASSERT_EQ(hipdnnBackendGetAttribute(_engine,
-                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         0,
                                         &knobCount,
@@ -204,7 +204,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateFloatKnob)
     std::vector<hipdnnBackendFlatbufferData_t> knobData(static_cast<size_t>(knobCount));
     int64_t returnedCount = 0;
     ASSERT_EQ(hipdnnBackendGetAttribute(_engine,
-                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         knobCount,
                                         &returnedCount,
@@ -254,7 +254,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateStringKnob)
 
     int64_t knobCount = 0;
     ASSERT_EQ(hipdnnBackendGetAttribute(_engine,
-                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         0,
                                         &knobCount,
@@ -264,7 +264,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateStringKnob)
     std::vector<hipdnnBackendFlatbufferData_t> knobData(static_cast<size_t>(knobCount));
     int64_t returnedCount = 0;
     ASSERT_EQ(hipdnnBackendGetAttribute(_engine,
-                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         knobCount,
                                         &returnedCount,
@@ -324,7 +324,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateDeprecatedKnob)
 
     int64_t knobCount = 0;
     ASSERT_EQ(hipdnnBackendGetAttribute(_engine,
-                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         0,
                                         &knobCount,
@@ -334,7 +334,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateDeprecatedKnob)
     std::vector<hipdnnBackendFlatbufferData_t> knobData(static_cast<size_t>(knobCount));
     int64_t returnedCount = 0;
     ASSERT_EQ(hipdnnBackendGetAttribute(_engine,
-                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         knobCount,
                                         &returnedCount,
@@ -382,7 +382,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoNotFinalizedEngine)
 
     int64_t knobCount = 0;
     EXPECT_EQ(hipdnnBackendGetAttribute(_engine,
-                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         0,
                                         &knobCount,
@@ -391,7 +391,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoNotFinalizedEngine)
 }
 
 // =============================================================================
-// EngineConfig Knob Choice Tests (via HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT)
+// EngineConfig Knob Choice Tests (via HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE)
 // =============================================================================
 
 using hipdnn_plugin_sdk::KnobSettingFactory;
@@ -416,7 +416,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceIntValue)
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         &knobData),
@@ -446,7 +446,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceFloatValue)
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         &knobData),
@@ -476,7 +476,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceStringValue)
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         &knobData),
@@ -513,7 +513,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceMultipleKnobs)
            {stringKnobBuffer.data(), stringKnobBuffer.size()}};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         3,
                                         knobDataArray.data()),
@@ -548,7 +548,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceNullPointer)
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         nullptr),
@@ -575,7 +575,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceInvalidType)
 
     // Wrong attribute type
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_INT64,
                                         1,
                                         &knobData),
@@ -591,7 +591,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceOnFinalizedConfig)
 
     // Cannot set knob choice on already finalized engine config
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         &knobData),
@@ -618,7 +618,7 @@ TEST_F(IntegrationKnobsApi, GetMaxWorkspaceSizeWithKnobs)
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     ASSERT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         &knobData),
@@ -708,7 +708,7 @@ TEST_F(IntegrationConstraintValidationApi, IntValueToFloatConstraint)
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         &knobData),
@@ -752,7 +752,7 @@ TEST_F(IntegrationConstraintValidationApi, FloatValueToIntConstraint)
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         &knobData),
@@ -796,7 +796,7 @@ TEST_F(IntegrationConstraintValidationApi, StringValueToIntConstraint)
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         &knobData),
@@ -840,7 +840,7 @@ TEST_F(IntegrationConstraintValidationApi, IntValueToStringConstraint)
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         &knobData),
@@ -884,7 +884,7 @@ TEST_F(IntegrationConstraintValidationApi, FloatValueToStringConstraint)
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         &knobData),
@@ -928,7 +928,7 @@ TEST_F(IntegrationConstraintValidationApi, StringValueToFloatConstraint)
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         &knobData),
@@ -980,7 +980,7 @@ TEST_F(IntegrationConstraintValidationApi, CorrectTypesSucceed)
            {stringKnobBuffer.data(), stringKnobBuffer.size()}};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         3,
                                         knobDataArray.data()),
@@ -1024,7 +1024,7 @@ TEST_F(IntegrationConstraintValidationApi, UnknownKnobIsIgnored)
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         1,
                                         &knobData),
@@ -1073,7 +1073,7 @@ TEST_F(IntegrationConstraintValidationApi, MixedValidAndInvalidKnobs)
            {invalidKnobBuffer.data(), invalidKnobBuffer.size()}};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
-                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                         2,
                                         knobDataArray.data()),

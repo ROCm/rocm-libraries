@@ -164,10 +164,10 @@ typedef enum
      */
 
     /** @brief Type of the knob */
-    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT = 500,
+    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE = 500,
 
     /** @brief Selected value for the knob */
-    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT = 501,
+    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE = 501,
 
     /** @} */
 
@@ -247,45 +247,45 @@ typedef enum
      */
 
     /** @brief Type identifier of the knob */
-    HIPDNN_ATTR_KNOB_INFO_TYPE_EXT = 900,
+    HIPDNN_ATTR_KNOB_INFO_TYPE = 900,
 
     /** @brief Maximum allowed value for the knob */
-    HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT = 901,
+    HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE = 901,
 
     /** @brief Minimum allowed value for the knob */
-    HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT = 902,
+    HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE = 902,
 
     /** @brief Step size for valid knob values */
-    HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT = 903,
+    HIPDNN_ATTR_KNOB_INFO_STRIDE = 903,
 
     /** @brief Human-readable description of the knob */
-    HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT = 904,
+    HIPDNN_ATTR_KNOB_INFO_DESCRIPTION = 904,
 
     /** @brief Default value for the knob (INT64, DOUBLE, or CHAR) */
-    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT = 905,
+    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE = 905,
 
     /** @brief Whether this knob is deprecated */
-    HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT = 906,
+    HIPDNN_ATTR_KNOB_INFO_DEPRECATED = 906,
 
     /** @brief Explicit list of valid integer values (INT64 array) */
-    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT = 907,
+    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT = 907,
 
     /** @brief Explicit list of valid string values (CHAR, flat null-separated buffer) */
-    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT = 908,
+    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING = 908,
 
     /** @brief Maximum string length for string knobs (INT32) */
-    HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT = 909,
+    HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH = 909,
 
     /**
      * @brief Type discriminator for the default value attribute (read-only, INT64)
      *
      * Returns the hipdnnBackendAttributeType_t value that should be used when
-     * calling getAttribute() for HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT.
+     * calling getAttribute() for HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE.
      * Possible values: HIPDNN_TYPE_INT64, HIPDNN_TYPE_DOUBLE, HIPDNN_TYPE_CHAR.
      * This eliminates the need to probe multiple types to discover the default
      * value type after reading a KnobDescriptor.
      */
-    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT = 910,
+    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE = 910,
 
     /** @} */
 
@@ -377,7 +377,7 @@ typedef enum
     HIPDNN_ATTR_TENSOR_VALUE_EXT = 1306,
 
     /** @brief Read-only: whether a pass-by-value scalar is set on this tensor (extension) */
-    HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT = 1307,
+    HIPDNN_ATTR_TENSOR_IS_BY_VALUE = 1307,
 
     /** @} */
 
@@ -1104,7 +1104,7 @@ typedef enum
      * Used to retrieve knob information in serialized FlatBuffer format.
      * Type: HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT
      */
-    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT = 60000,
+    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE = 60000,
 
     /**
      * @brief Serialized knob choice as FlatBuffer (extension)
@@ -1112,7 +1112,7 @@ typedef enum
      * Used to set knob values in serialized FlatBuffer format.
      * Type: HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT
      */
-    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT = 60100,
+    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE = 60100,
 
     /**
      * @brief Operation type of an operation descriptor (read-only extension)

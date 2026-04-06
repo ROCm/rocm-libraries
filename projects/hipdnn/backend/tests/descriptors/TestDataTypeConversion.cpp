@@ -172,13 +172,12 @@ TEST(TestDataTypeConversion, GetDataTypeByteSizeThrowsOnUnset)
 
 TEST(TestDataTypeConversion, ToSdkConvModeConvertsConvolution)
 {
-    ASSERT_EQ(toSdkConvMode(HIPDNN_CONVOLUTION_MODE_CONVOLUTION), ConvMode::CONVOLUTION);
+    ASSERT_EQ(toSdkConvMode(HIPDNN_CONVOLUTION), ConvMode::CONVOLUTION);
 }
 
 TEST(TestDataTypeConversion, ToSdkConvModeConvertsCrossCorrelation)
 {
-    ASSERT_EQ(toSdkConvMode(HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION),
-              ConvMode::CROSS_CORRELATION);
+    ASSERT_EQ(toSdkConvMode(HIPDNN_CROSS_CORRELATION), ConvMode::CROSS_CORRELATION);
 }
 
 TEST(TestDataTypeConversion, ToSdkConvModeThrowsOnInvalidEnum)
@@ -193,13 +192,12 @@ TEST(TestDataTypeConversion, ToSdkConvModeThrowsOnInvalidEnum)
 
 TEST(TestDataTypeConversion, FromSdkConvModeConvertsConvolution)
 {
-    ASSERT_EQ(fromSdkConvMode(ConvMode::CONVOLUTION), HIPDNN_CONVOLUTION_MODE_CONVOLUTION);
+    ASSERT_EQ(fromSdkConvMode(ConvMode::CONVOLUTION), HIPDNN_CONVOLUTION);
 }
 
 TEST(TestDataTypeConversion, FromSdkConvModeConvertsCrossCorrelation)
 {
-    ASSERT_EQ(fromSdkConvMode(ConvMode::CROSS_CORRELATION),
-              HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    ASSERT_EQ(fromSdkConvMode(ConvMode::CROSS_CORRELATION), HIPDNN_CROSS_CORRELATION);
 }
 
 TEST(TestDataTypeConversion, FromSdkConvModeThrowsOnUnset)

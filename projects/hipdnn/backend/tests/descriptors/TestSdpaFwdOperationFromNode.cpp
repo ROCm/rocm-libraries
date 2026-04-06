@@ -1049,7 +1049,7 @@ TEST_F(TestSdpaFwdOperationFromNode, GetAttributeWorksAfterFromNode)
     hipdnnDiagonalAlignment_t diagonalAlignment = {};
     int64_t diagonalAlignmentCount = 0;
     desc->getAttribute(HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT,
-                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                        1,
                        &diagonalAlignmentCount,
                        &diagonalAlignment);
@@ -1059,7 +1059,7 @@ TEST_F(TestSdpaFwdOperationFromNode, GetAttributeWorksAfterFromNode)
     hipdnnAttentionImplementation_t implementation = {};
     int64_t implementationCount = 0;
     desc->getAttribute(HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT,
-                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                        1,
                        &implementationCount,
                        &implementation);

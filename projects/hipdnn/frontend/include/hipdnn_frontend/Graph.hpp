@@ -230,7 +230,7 @@ private:
 
         HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
                                              _engineConfigDesc->get(),
-                                             HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                             HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                              HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                              static_cast<int64_t>(flatbufferDataArray.size()),
                                              flatbufferDataArray.data()),
