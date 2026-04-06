@@ -105,10 +105,7 @@ __device__ uint getWaveId()
 #endif
 }
 
-__device__ uint getWaveLocalId()
-{
-    return (uint)(threadIdx.x & ((1u << MLO_LG2_WAVE_SZ) - 1u));
-}
+__device__ uint getWaveLocalId() { return (uint)(threadIdx.x & ((1u << MLO_LG2_WAVE_SZ) - 1u)); }
 
 // ---------------------------------------------------------------------------
 // fetchWeights – cooperative load of weight rows into shared memory
@@ -125,14 +122,13 @@ __device__ void fetchWeights(uint c,
 {
     for(uint w = lcl_id; w < (wei_read / MLO_FILTER_SIZE0) * MLO_N_LCL_OUT_MAPS; w += MLO_GRP_SZ)
     {
-        uint k        = iDiv_legacy(w, (wei_read / MLO_FILTER_SIZE0));
-        uint j        = iMod(w, k, (wei_read / MLO_FILTER_SIZE0));
-        int wei_off   = ((j * MLO_FILTER_STRIDE1 + f_s) < MLO_FILTER_SIZE1 &&
-                        k_idx + k < MLO_N_OUTPUTS)
-                            ? (int)(gbl_wei_off + k * MLO_WEI_BATCH_STRIDE +
-                                    c * MLO_WEI_CHANNEL_STRIDE +
-                                    (j * MLO_FILTER_STRIDE1 + f_s) * MLO_FILTER_SIZE0)
-                            : 0;
+        uint k = iDiv_legacy(w, (wei_read / MLO_FILTER_SIZE0));
+        uint j = iMod(w, k, (wei_read / MLO_FILTER_SIZE0));
+        int wei_off =
+            ((j * MLO_FILTER_STRIDE1 + f_s) < MLO_FILTER_SIZE1 && k_idx + k < MLO_N_OUTPUTS)
+                ? (int)(gbl_wei_off + k * MLO_WEI_BATCH_STRIDE + c * MLO_WEI_CHANNEL_STRIDE +
+                        (j * MLO_FILTER_STRIDE1 + f_s) * MLO_FILTER_SIZE0)
+                : 0;
         const _FLOAT* wei_p = &weights[wei_off];
 
         for(uint i = 0; i < MLO_FILTER_SIZE0; ++i)
@@ -157,8 +153,7 @@ __device__ void fetchData(uint f_s,
 {
     _FLOAT in_rd_data[MLO_READ_UNIT];
 
-    for(uint p4 = lcl_id, c_scan = 0;
-        p4 < MLO_N_IN_HORIZ_READS * n_reads * MLO_N_LCL_BATCHS;
+    for(uint p4 = lcl_id, c_scan = 0; p4 < MLO_N_IN_HORIZ_READS * n_reads * MLO_N_LCL_BATCHS;
         p4 += MLO_GRP_SZ)
     {
         uint b  = 0;
@@ -182,8 +177,7 @@ __device__ void fetchData(uint f_s,
         if(0 <= in_y + in_scan && in_y + in_scan < MLO_IN_HEIGHT)
         {
             int gbl_off = (int)(gbl_in_scan_off + b * MLO_IN_BATCH_STRIDE) +
-                          in_scan * (int)MLO_IN_STRIDE +
-                          (int)(c_pix4 * MLO_READ_UNIT);
+                          in_scan * (int)MLO_IN_STRIDE + (int)(c_pix4 * MLO_READ_UNIT);
             const _FLOAT* bot_p = &bot[gbl_off];
 
 #if MLO_IN_N_PIXS_OFF > 0
@@ -235,8 +229,8 @@ __device__ void Convolve(uint ex_row,
 
     for(uint i = 0; i < bot_h; ++i)
     {
-        in_vals[i] = bot_mem[(ex_row + m) * MLO_IN_LCL_WIDTH +
-                             ex_pix * MLO_FILTER_STRIDE0 + i * MLO_FILTER_STRIDE0 + l];
+        in_vals[i] = bot_mem[(ex_row + m) * MLO_IN_LCL_WIDTH + ex_pix * MLO_FILTER_STRIDE0 +
+                             i * MLO_FILTER_STRIDE0 + l];
     }
 
     for(uint k = 0; k < MLO_N_LCL_OUT_MAPS; ++k)
@@ -257,17 +251,17 @@ __device__ void Convolve(uint ex_row,
 // MIOpenCvFwd11x11 – pass-1 forward kernel
 // ---------------------------------------------------------------------------
 
-#define MLO_ACCUM_SZ (MLO_OUT_PIX_TILE1 * MLO_OUT_PIX_TILE0 * MLO_N_LCL_OUT_MAPS * MLO_N_LCL_IN_MAPS)
+#define MLO_ACCUM_SZ \
+    (MLO_OUT_PIX_TILE1 * MLO_OUT_PIX_TILE0 * MLO_N_LCL_OUT_MAPS * MLO_N_LCL_IN_MAPS)
 
-extern "C" __global__
-__launch_bounds__(MLO_GRP_SZ0* MLO_GRP_SZ1* MLO_GRP_SZ2) void MIOpenCvFwd11x11(
-    const _FLOAT* __restrict__ bot,
-    const _FLOAT* __restrict__ weights,
+extern "C" __global__ __launch_bounds__(
+    MLO_GRP_SZ0* MLO_GRP_SZ1* MLO_GRP_SZ2) void MIOpenCvFwd11x11(const _FLOAT* __restrict__ bot,
+                                                                 const _FLOAT* __restrict__ weights,
 #if MLO_CONV_BIAS == 1
-    const _FLOAT* __restrict__ bias,
+                                                                 const _FLOAT* __restrict__ bias,
 #endif
-    _FLOAT* __restrict__ top,
-    _FLOAT /*padding_val*/)
+                                                                 _FLOAT* __restrict__ top,
+                                                                 _FLOAT /*padding_val*/)
 {
     __shared__ _FLOAT lcl_mem[MLO_LCL_MEM_SZ];
     _FLOAT* bot_mem = lcl_mem;
@@ -275,10 +269,10 @@ __launch_bounds__(MLO_GRP_SZ0* MLO_GRP_SZ1* MLO_GRP_SZ2) void MIOpenCvFwd11x11(
 
     uint lcl_id = threadIdx.x;
 
-    uint ob      = blockIdx.x;
-    uint k_idx   = blockIdx.y * (MLO_N_LCL_OUT_MAPS);
-    uint ib_idx  = blockIdx.z * MLO_N_LCL_BATCHS;
-    uint ib      = ib_idx;
+    uint ob     = blockIdx.x;
+    uint k_idx  = blockIdx.y * (MLO_N_LCL_OUT_MAPS);
+    uint ib_idx = blockIdx.z * MLO_N_LCL_BATCHS;
+    uint ib     = ib_idx;
 
     int gbl_in_off   = (int)(ib * MLO_IN_BATCH_STRIDE);
     uint gbl_wei_off = k_idx * MLO_WEI_BATCH_STRIDE;
@@ -360,8 +354,7 @@ __launch_bounds__(MLO_GRP_SZ0* MLO_GRP_SZ1* MLO_GRP_SZ2) void MIOpenCvFwd11x11(
                 __syncthreads();
 
 #define MLO_WEI_READ ((MLO_N_FILTER_SPLITS1 - 1) * MLO_WEI_LCL_WIDTH)
-                fetchWeights(
-                    c, k_idx, f_s, lcl_id, MLO_WEI_READ, gbl_wei_off, wei_mem, weights);
+                fetchWeights(c, k_idx, f_s, lcl_id, MLO_WEI_READ, gbl_wei_off, wei_mem, weights);
                 fetchData(
                     f_s, lcl_id, 0, MLO_IN_LCL_HEIGHT - 1, in_y, gbl_in_scan_off, bot_mem, bot);
                 __syncthreads();
@@ -399,8 +392,7 @@ __launch_bounds__(MLO_GRP_SZ0* MLO_GRP_SZ1* MLO_GRP_SZ2) void MIOpenCvFwd11x11(
         // Write output tile
         for(uint k = 0; k < MLO_N_LCL_OUT_MAPS; ++k)
         {
-            uint out_off = (ib + b) * MLO_OUT_BATCH_STRIDE +
-                           (k_idx + k) * MLO_OUT_CHANNEL_STRIDE +
+            uint out_off = (ib + b) * MLO_OUT_BATCH_STRIDE + (k_idx + k) * MLO_OUT_CHANNEL_STRIDE +
                            (out_y + ex_row) * MLO_OUT_STRIDE + ex_pix;
             _FLOAT* top_p = &top[out_off];
             for(uint i = 0; i < MLO_OUT_PIX_TILE0; ++i)
@@ -452,8 +444,7 @@ __device__ void fetchData2(uint ib,
 {
     _FLOAT in_rd_data[MLO_READ_UNIT];
 
-    for(uint p4 = lcl_id, c_scan = 0;
-        p4 < MLO_N_IN_HORIZ_READS * n_reads * MLO_N_LCL_BATCHS;
+    for(uint p4 = lcl_id, c_scan = 0; p4 < MLO_N_IN_HORIZ_READS * n_reads * MLO_N_LCL_BATCHS;
         p4 += MLO_GRP_SZ)
     {
         uint b  = 0;
@@ -556,7 +547,8 @@ __device__ void Convolve2(uint b,
 // MIOpenCvFwd11x11_2 – pass-2 kernel for remainder output rows
 // ---------------------------------------------------------------------------
 
-#define MLO_ACCUM_SZ (MLO_OUT_PIX_TILE1 * MLO_OUT_PIX_TILE0 * MLO_N_LCL_OUT_MAPS * MLO_N_LCL_IN_MAPS)
+#define MLO_ACCUM_SZ \
+    (MLO_OUT_PIX_TILE1 * MLO_OUT_PIX_TILE0 * MLO_N_LCL_OUT_MAPS * MLO_N_LCL_IN_MAPS)
 
 extern "C" __global__
 __launch_bounds__(MLO_GRP_SZ0* MLO_GRP_SZ1* MLO_GRP_SZ2) void MIOpenCvFwd11x11_2(
@@ -597,10 +589,10 @@ __launch_bounds__(MLO_GRP_SZ0* MLO_GRP_SZ1* MLO_GRP_SZ2) void MIOpenCvFwd11x11_2
     uint bb = iDiv_legacy(lcl_id, (MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1));
     uint t0 = iMod(lcl_id, bb, (MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1));
 #elif(MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1) != 0
-    uint bb = lcl_id / (MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1);
-    uint t0 = lcl_id & ((MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1) - 1);
+    uint bb     = lcl_id / (MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1);
+    uint t0     = lcl_id & ((MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1) - 1);
 #if(MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1) >= 64
-    bb      = uniform(bb);
+    bb          = uniform(bb);
 #endif
 #else
     uint bb = lcl_id;
@@ -634,8 +626,15 @@ __launch_bounds__(MLO_GRP_SZ0* MLO_GRP_SZ1* MLO_GRP_SZ2) void MIOpenCvFwd11x11_2
             {
                 __syncthreads();
                 fetchWeights(c, k_idx, f_s, lcl_id, MLO_WEI_SZ, gbl_wei_off, wei_mem, weights);
-                fetchData2(
-                    (ib + b), f_s, lcl_id, 0, MLO_IN_LCL_HEIGHT, in_y, gbl_in_scan_off, bot_mem, bot);
+                fetchData2((ib + b),
+                           f_s,
+                           lcl_id,
+                           0,
+                           MLO_IN_LCL_HEIGHT,
+                           in_y,
+                           gbl_in_scan_off,
+                           bot_mem,
+                           bot);
                 __syncthreads();
 
 #pragma unroll
@@ -673,8 +672,7 @@ __launch_bounds__(MLO_GRP_SZ0* MLO_GRP_SZ1* MLO_GRP_SZ2) void MIOpenCvFwd11x11_2
                 __syncthreads();
 
 #define MLO_WEI_READ ((MLO_N_FILTER_SPLITS1 - 1) * MLO_WEI_LCL_WIDTH)
-                fetchWeights(
-                    c, k_idx, f_s, lcl_id, MLO_WEI_READ, gbl_wei_off, wei_mem, weights);
+                fetchWeights(c, k_idx, f_s, lcl_id, MLO_WEI_READ, gbl_wei_off, wei_mem, weights);
                 fetchData2((ib + b),
                            f_s,
                            lcl_id,

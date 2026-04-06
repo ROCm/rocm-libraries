@@ -81,11 +81,11 @@ ConvSolution ConvHipDirectFwd11x11::GetSolution(const ExecutionContext& /*ctx*/,
     const int wei_bstride = static_cast<int>(problem.GetInChannels()) * wei_cstride;
 
     // Number of batch iterations per workgroup
-    result.n_stacks = std::min(problem.GetBatchSize(), static_cast<std::size_t>(1));
+    result.n_stacks                 = std::min(problem.GetBatchSize(), static_cast<std::size_t>(1));
     const std::size_t N_BATCH_LOOPS = 1;
-    const int n_batch_blks = static_cast<int>((problem.GetBatchSize() +
-                                               N_BATCH_LOOPS * result.n_stacks - 1) /
-                                              (N_BATCH_LOOPS * result.n_stacks));
+    const int n_batch_blks =
+        static_cast<int>((problem.GetBatchSize() + N_BATCH_LOOPS * result.n_stacks - 1) /
+                         (N_BATCH_LOOPS * result.n_stacks));
 
     const int N_FILTER_SPLITS0 = static_cast<int>(
         (problem.GetWeightsWidth() + problem.GetKernelStrideW() - 1) / problem.GetKernelStrideW());
@@ -98,16 +98,16 @@ ConvSolution ConvHipDirectFwd11x11::GetSolution(const ExecutionContext& /*ctx*/,
     result.in_tile0 = 1;
     result.in_tile1 = 1;
 
-    const int n_waves     = 4;
-    const int GRP_SZ      = hw_wave_sz * n_waves;
-    const int lg2_n_waves = mloLg2(n_waves);
+    const int n_waves      = 4;
+    const int GRP_SZ       = hw_wave_sz * n_waves;
+    const int lg2_n_waves  = mloLg2(n_waves);
     const int N_WAVES_MASK = (1 << lg2_n_waves) - 1;
 
     const int PROCESING_WIDTH =
         static_cast<int>((problem.GetOutWidth() + result.out_pix_tile0 - 1) / result.out_pix_tile0);
 
-    const int OUT_EXTENT1 = std::min(static_cast<int>(problem.GetOutHeight()),
-                                     GRP_SZ / PROCESING_WIDTH);
+    const int OUT_EXTENT1 =
+        std::min(static_cast<int>(problem.GetOutHeight()), GRP_SZ / PROCESING_WIDTH);
 
     const int read_unit = 10;
     const std::string READ_TYPE =
@@ -117,15 +117,14 @@ ConvSolution ConvHipDirectFwd11x11::GetSolution(const ExecutionContext& /*ctx*/,
     int n_in_stacks        = 1;
     n_in_stacks            = std::min(static_cast<int>(problem.GetInChannels()), n_in_stacks);
 
-    result.n_out_pix_tiles = static_cast<std::size_t>(
-        std::min(static_cast<std::size_t>(6),
-                 (problem.GetOutChannels() + n_out_stacks - 1) / n_out_stacks));
+    result.n_out_pix_tiles = static_cast<std::size_t>(std::min(
+        static_cast<std::size_t>(6), (problem.GetOutChannels() + n_out_stacks - 1) / n_out_stacks));
     result.n_in_data_tiles = 1;
 
     const int total_out_maps = static_cast<int>(result.n_out_pix_tiles) * n_out_stacks;
 
-    result.grp_tile0 = GRP_SZ;
-    result.grp_tile1 = 1;
+    result.grp_tile0    = GRP_SZ;
+    result.grp_tile1    = 1;
     const int grp_tile2 = 1;
 
     // Determine whether a second pass is needed for remainder rows
@@ -134,11 +133,10 @@ ConvSolution ConvHipDirectFwd11x11::GetSolution(const ExecutionContext& /*ctx*/,
     const int n_output_map_blocks =
         static_cast<int>((problem.GetOutChannels() + total_out_maps - 1) / total_out_maps);
 
-    int last_out_extent1 =
-        static_cast<int>(problem.GetOutHeight()) -
-        static_cast<int>(std::max(static_cast<std::size_t>(1),
-                                  problem.GetOutHeight() / OUT_EXTENT1)) *
-            OUT_EXTENT1;
+    int last_out_extent1 = static_cast<int>(problem.GetOutHeight()) -
+                           static_cast<int>(std::max(static_cast<std::size_t>(1),
+                                                     problem.GetOutHeight() / OUT_EXTENT1)) *
+                               OUT_EXTENT1;
     last_out_extent1 = (last_out_extent1 < 0) ? 0 : last_out_extent1;
 
     int n_extents_pass1 = n_extents;
@@ -146,9 +144,8 @@ ConvSolution ConvHipDirectFwd11x11::GetSolution(const ExecutionContext& /*ctx*/,
     bool second_pass    = false;
     if(0 < last_out_extent1 && last_out_extent1 <= OUT_EXTENT1 / 2)
     {
-        n_extents_pass1 =
-            static_cast<int>(std::max(static_cast<std::size_t>(1),
-                                      problem.GetOutHeight() / OUT_EXTENT1));
+        n_extents_pass1 = static_cast<int>(
+            std::max(static_cast<std::size_t>(1), problem.GetOutHeight() / OUT_EXTENT1));
         n_batches_pass2 = std::max(1, GRP_SZ / (PROCESING_WIDTH * last_out_extent1));
         second_pass     = true;
     }

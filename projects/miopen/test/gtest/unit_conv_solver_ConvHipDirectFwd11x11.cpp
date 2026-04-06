@@ -48,9 +48,9 @@ const auto& GetTestParams()
         // ConvHipDirectFwd11x11 has no GPU architecture restriction (HIP is
         // supported on all targets).  List every device family that MIOpen
         // currently tests so that the test exercises the full hardware matrix.
-        Gpu supported_gpus = Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A |
-                             Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx103X | Gpu::gfx110X |
-                             Gpu::gfx115X | Gpu::gfx120X;
+        Gpu supported_gpus = Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X |
+                             Gpu::gfx950 | Gpu::gfx103X | Gpu::gfx110X | Gpu::gfx115X |
+                             Gpu::gfx120X;
         auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
         return p;
     }();
