@@ -96,15 +96,13 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<ConvolutionBwdOperationDescriptor>();
-        namespace dgrad = hipdnn_tests::constants::dgrad;
-        _dyDesc = createFinalizedTensor(dgrad::K_TENSOR_DY_UID,
-                                        toVec(dgrad::K_TENSOR_DY_DIMS),
-                                        toVec(dgrad::K_TENSOR_DY_STRIDES));
+        using namespace hipdnn_tests::constants;
+        _dyDesc = createFinalizedTensor(
+            K_DGRAD_TENSOR_DY_UID, toVec(K_DGRAD_TENSOR_DY_DIMS), toVec(K_DGRAD_TENSOR_DY_STRIDES));
         _wDesc = createFinalizedTensor(
-            dgrad::K_TENSOR_W_UID, toVec(dgrad::K_TENSOR_W_DIMS), toVec(dgrad::K_TENSOR_W_STRIDES));
-        _dxDesc = createFinalizedTensor(dgrad::K_TENSOR_DX_UID,
-                                        toVec(dgrad::K_TENSOR_DX_DIMS),
-                                        toVec(dgrad::K_TENSOR_DX_STRIDES));
+            K_DGRAD_TENSOR_W_UID, toVec(K_DGRAD_TENSOR_W_DIMS), toVec(K_DGRAD_TENSOR_W_STRIDES));
+        _dxDesc = createFinalizedTensor(
+            K_DGRAD_TENSOR_DX_UID, toVec(K_DGRAD_TENSOR_DX_DIMS), toVec(K_DGRAD_TENSOR_DX_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
