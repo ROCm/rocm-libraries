@@ -125,7 +125,7 @@ TEST(TestJson, GraphToJsonAndBack)
         case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
-            context = "(valid sdpa fprop graph)";
+            context = "(valid sdpa fwd graph)";
             break;
         case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();

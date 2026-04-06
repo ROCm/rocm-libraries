@@ -1146,19 +1146,19 @@ TEST_F(TestSdpaFwdOperationFromNode, OperationTypeIsCorrectAfterFromNode)
 TEST_F(TestSdpaFwdOperationFromNode, NamePreservedFromNode)
 {
     auto node = createStandardNode();
-    node.name = "test_sdpafprop_1";
+    node.name = "test_sdpa_fwd_1";
 
     auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
-    ASSERT_EQ(count, static_cast<int64_t>(std::string("test_sdpafprop_1").size() + 1));
+    ASSERT_EQ(count, static_cast<int64_t>(std::string("test_sdpa_fwd_1").size() + 1));
 
     std::vector<char> buffer(static_cast<size_t>(count));
     int64_t actualCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, count, &actualCount, buffer.data());
-    EXPECT_STREQ(buffer.data(), "test_sdpafprop_1");
+    EXPECT_STREQ(buffer.data(), "test_sdpa_fwd_1");
 }
 
 TEST_F(TestSdpaFwdOperationFromNode, EmptyNamePreservedFromNode)

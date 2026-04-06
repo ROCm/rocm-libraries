@@ -405,7 +405,7 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT),
                  "HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT");
 
-    // SDPA fprop operation attributes
+    // SDPA fwd operation attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_FWD_QDESC),
                  "HIPDNN_ATTR_OPERATION_SDPA_FWD_QDESC");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_FWD_KDESC),
@@ -491,7 +491,7 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT),
                  "HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT");
 
-    // SDPA bprop operation attributes
+    // SDPA bwd operation attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT),
                  "HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_BWD_K_EXT),

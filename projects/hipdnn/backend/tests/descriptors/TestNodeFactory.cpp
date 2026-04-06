@@ -152,7 +152,7 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeLayernorm)
 
 TEST_F(TestNodeFactory, CreateOperationFromNodeSdpaBwd)
 {
-    // Set up tensor map with 9 required SDPA bprop tensors
+    // Set up tensor map with 9 required SDPA bwd tensors
     auto makeTensor =
         [](int64_t uid, const std::array<int64_t, 4>& dims, const std::array<int64_t, 4>& strides) {
             TensorAttributesT t;

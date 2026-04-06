@@ -790,7 +790,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, GetAttributeTensorDescriptor)
 // GetAttribute Tests - Data Fields
 // =============================================================================
 
-TEST_F(TestSdpaFwdOperationDescriptor, GetAttributeSdpafpropParams)
+TEST_F(TestSdpaFwdOperationDescriptor, GetAttributeSdpaFwdParams)
 {
     auto desc = getDescriptor();
     setAllAttributesExcept({});

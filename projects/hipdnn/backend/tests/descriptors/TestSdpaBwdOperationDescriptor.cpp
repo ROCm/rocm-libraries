@@ -499,7 +499,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, SetDiagonalAlignment)
 TEST_F(TestSdpaBwdOperationDescriptor, SetOperationName)
 {
     auto desc = getDescriptor();
-    const std::string name = "my_bprop_op";
+    const std::string name = "my_bwd_op";
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                                        HIPDNN_TYPE_CHAR,
                                        static_cast<int64_t>(name.size()),
@@ -1239,7 +1239,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, BuildNodePreservesName)
 {
     auto desc = getDescriptor();
     setAllAttributesExcept({});
-    const std::string name = "bprop_node_name";
+    const std::string name = "bwd_node_name";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
                        static_cast<int64_t>(name.size()),
@@ -1248,7 +1248,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, BuildNodePreservesName)
 
     auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
-    EXPECT_EQ(node->name, "bprop_node_name");
+    EXPECT_EQ(node->name, "bwd_node_name");
 }
 
 // =============================================================================
