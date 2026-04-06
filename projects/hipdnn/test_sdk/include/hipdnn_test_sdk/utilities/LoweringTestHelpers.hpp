@@ -23,34 +23,53 @@ inline hipdnn_data_sdk::data_objects::GraphT lowerAndDeserialize(TestableGraphLo
 {
     using hipdnn_frontend::ErrorCode;
 
+    hipdnn_data_sdk::data_objects::GraphT graphT;
+
     auto result = graph.validate();
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    if(result.code != ErrorCode::OK)
+    {
+        return graphT;
+    }
 
     result = graph.build_operation_graph_via_descriptors(handle);
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    if(result.code != ErrorCode::OK)
+    {
+        return graphT;
+    }
 
     auto rawDesc = graph.get_raw_graph_descriptor();
-    EXPECT_NE(rawDesc, nullptr);
+    EXPECT_NE(rawDesc, nullptr); // NOLINT(readability-implicit-bool-conversion)
+    if(rawDesc == nullptr)
+    {
+        return graphT;
+    }
 
     size_t serializedSize = 0;
-    EXPECT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
+    auto status = hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr);
+    EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
+    if(status != HIPDNN_STATUS_SUCCESS || serializedSize == 0)
+    {
+        return graphT;
+    }
 
     std::vector<uint8_t> serializedData(serializedSize);
-    EXPECT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    if(!serializedData.empty())
+    status = hipdnnBackendGetSerializedBinaryGraph_ext(
+        rawDesc, serializedSize, &serializedSize, serializedData.data());
+    EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
+    if(status != HIPDNN_STATUS_SUCCESS)
     {
-        auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
-        EXPECT_NE(graphFb, nullptr);
-        if(graphFb != nullptr)
-        {
-            graphFb->UnPackTo(&graphT);
-        }
+        return graphT;
     }
+
+    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
+    EXPECT_NE(graphFb, nullptr); // NOLINT(readability-implicit-bool-conversion)
+    if(graphFb != nullptr)
+    {
+        graphFb->UnPackTo(&graphT);
+    }
+
     return graphT;
 }
 

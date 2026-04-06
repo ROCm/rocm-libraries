@@ -1,12 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
-#include <array>
 #include <string>
 #include <vector>
 
