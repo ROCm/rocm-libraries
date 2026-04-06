@@ -3,7 +3,6 @@
 
 #include "pooling_common.hpp"
 
-#define WORKAROUND_ISSUE_1670 1
 #define TEST_GET_INPUT_TENSOR 0
 
 namespace {
