@@ -155,7 +155,7 @@ namespace rocRoller::KernelGraph
          *
          * @param graph The kernel graph to modify
          * @param params Index computation parameters
-         * @param target Target coordinate (must have a User coordinate)
+         * @param target Target coordinate (must have a User coordinate with size set)
          * @param buffer Buffer coordinate to connect the Assign to
          * @param context GPU context
          * @param command Command containing argument info
