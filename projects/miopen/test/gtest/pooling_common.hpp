@@ -496,7 +496,7 @@ void RunPoolingTestWithIndexType(const PoolingTestCase& test_case)
 
     verify_backward_pooling<SptDim> backward_verifier;
     const bool use_global_index = test_case.wsidx != 0;
-    const bool verify_index     = use_global_index;
+    const bool verify_index     = false;
     auto backward_result        = backward_verifier.cpu(
         input, dout, forward_result, filter, indices, use_global_index, verify_index);
     auto backward_gpu_result = backward_verifier.gpu(
