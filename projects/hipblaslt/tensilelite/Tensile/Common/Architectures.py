@@ -104,7 +104,7 @@ SUPPORTED_ISA = [
 # Source-of-truth chip IDs used to generate build predicates.
 GFX_CHIP_IDS = {
     "gfx942": ["74a0", "74a1", "74a2", "74a3", "74a5", "74a9"],
-    "gfx950": ["75a0", "75a2", "75a3"],
+    "gfx950": ["75a0", "75b0", "75a2", "75b2", "75a3", "75b3", "75a8", "75b8"],
 }
 
 # Source-of-truth CU counts used to generate build predicates.
@@ -122,7 +122,11 @@ SUPPORTED_BUILD_CU_COUNTS = {
 
 SUPPORTED_CHIP_ID_FALLBACKS = {
     "id=75a2": ["id=75a0"],
+    "id=75b2": ["id=75a0"],
     "id=75a3": ["id=75a0"],
+    "id=75b3": ["id=75a0"],
+    "id=75a8": ["id=75a0"],
+    "id=75b8": ["id=75a0"],
 }
 
 # `None` refers to an unspecified CU count.

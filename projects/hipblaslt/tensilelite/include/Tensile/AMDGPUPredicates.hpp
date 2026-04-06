@@ -60,6 +60,8 @@ namespace TensileLite
                 // gfx950 variants
                 {0x75a0, AMDGPU::Processor::gfx950}, // mi350
                 {0x75b0, AMDGPU::Processor::gfx950}, // mi350
+                {0x75a2, AMDGPU::Processor::gfx950}, // mi350
+                {0x75b2, AMDGPU::Processor::gfx950}, // mi350
                 {0x75a3, AMDGPU::Processor::gfx950}, // mi355x
                 {0x75b3, AMDGPU::Processor::gfx950}, // mi355x
                 {0x75a8, AMDGPU::Processor::gfx950}, // mi350-unknown1
@@ -73,6 +75,8 @@ namespace TensileLite
         {
             static const std::map<int, std::vector<int>> fallbacks = {
                 // mi355 chip IDs fall back to mi350
+                {0x75a2, {0x75a0}},  // mi350 -> mi350
+                {0x75b2, {0x75a0}},  // mi350 -> mi350
                 {0x75a3, {0x75a0}},  // mi355x -> mi350
                 {0x75b3, {0x75a0}},  // mi355x -> mi350
                 {0x75a8, {0x75a0}},  // mi350-unknown1 -> mi350
