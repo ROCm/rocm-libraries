@@ -116,7 +116,7 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
         }
         std::stringstream ss;
         ss << "Problem size (" << byte_size_to_str(vram_footprint)
-           << " GiB) exceeds usable memory on device (" << byte_size_to_str(vram_avail) << ")";
+           << ") exceeds usable memory on device (" << byte_size_to_str(vram_avail) << ")";
         throw ROCFFT_SKIP{ss.str()};
     }
 }
@@ -718,14 +718,14 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
             std::stringstream ss;
             if(hip_status == hipErrorOutOfMemory)
             {
-                ss << "Input buffer size (" << bytes_to_GiB(ibuffer_sizes[i])
-                   << " GiB) raw data too large for device";
+                ss << "Input buffer size (" << byte_size_to_str(ibuffer_sizes[i])
+                   << ") raw data too large for device";
             }
             else
             {
                 ss << "hipMalloc failure for input buffer " << i << " size " << ibuffer_sizes[i]
-                   << "(" << bytes_to_GiB(ibuffer_sizes[i]) << " GiB)"
-                   << " with code " << hipError_to_string(hip_status);
+                   << "(" << byte_size_to_str(ibuffer_sizes[i]) << ") with code "
+                   << hipError_to_string(hip_status);
             }
             ++n_hip_failures;
             if(skip_runtime_fails)
@@ -1126,8 +1126,8 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                 ++n_hip_failures;
                 std::stringstream ss;
                 ss << "hipMalloc failure for output buffer " << i << " size " << obuffer_sizes[i]
-                   << "(" << bytes_to_GiB(obuffer_sizes[i]) << " GiB)"
-                   << " with code " << hipError_to_string(hip_status);
+                   << "(" << byte_size_to_str(obuffer_sizes[i]) << ") with code "
+                   << hipError_to_string(hip_status);
                 if(skip_runtime_fails)
                 {
                     throw ROCFFT_SKIP{ss.str()};
