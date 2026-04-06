@@ -381,10 +381,7 @@ struct NodeMetaData
     rocfft_array_type       inArrayType       = rocfft_array_type_unset;
     rocfft_array_type       outArrayType      = rocfft_array_type_unset;
     rocfft_transform_type   rootTransformType = rocfft_transform_type_complex_forward;
-    bool                    rootInStrideUnit  = false;
-    bool                    rootOutStrideUnit = false;
     hipDeviceProp_t         deviceProp        = {};
-    bool                    rootIsC2C;
     BufferPtr               input_buffer, output_buffer;
 
     // TODO: `batch`, `dimension`, `length`, `outputLength` `inStride`,
@@ -402,6 +399,13 @@ struct NodeMetaData
             throw std::invalid_argument("Unknown io data label given to "
                                         + ROCFFT_CURRENT_FUNCTION);
         }
+    };
+
+    inline bool is_using_default_contiguous_layout_for(io_data_label io) const
+    {
+        return layout_for(io)
+               == data_layout_t::default_full_layout(
+                   io == io_data_label::INPUT ? length : outputLength, batch);
     };
 
     explicit NodeMetaData(TreeNode* refNode);

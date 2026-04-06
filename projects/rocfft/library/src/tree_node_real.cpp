@@ -983,7 +983,8 @@ void Real3DEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 // The check is based on the input/output length and strides, precision
 // and kernel availability in the pool.
 bool Real3DEvenNode::use_real_2D_single_SBCC(const NodeMetaData&  nodeData,
-                                             const function_pool& pool)
+                                             const function_pool& pool,
+                                             const bool&          is_default_contiguous_layout)
 {
     auto nodeDataCpy = nodeData;
 
@@ -999,7 +1000,7 @@ bool Real3DEvenNode::use_real_2D_single_SBCC(const NodeMetaData&  nodeData,
         if(NodeFactory::use_CS_2D_SINGLE(
                pool, nodeDataCpy, nodeDataCpy.inArrayType, nodeDataCpy.outArrayType)
            && SBCC_dim_available(pool, lengthCpy, 2, nodeDataCpy.precision)
-           && (nodeDataCpy.rootInStrideUnit && nodeDataCpy.rootOutStrideUnit))
+           && is_default_contiguous_layout)
             return true;
     }
     else
@@ -1008,7 +1009,7 @@ bool Real3DEvenNode::use_real_2D_single_SBCC(const NodeMetaData&  nodeData,
         if(NodeFactory::use_CS_2D_SINGLE(
                pool, nodeDataCpy, nodeDataCpy.inArrayType, nodeDataCpy.outArrayType)
            && SBCC_dim_available(pool, nodeDataCpy.outputLength, 2, nodeDataCpy.precision)
-           && (nodeDataCpy.rootInStrideUnit && nodeDataCpy.rootOutStrideUnit))
+           && is_default_contiguous_layout)
             return true;
     }
 
@@ -1031,15 +1032,15 @@ void Real3DEvenNode::Build_solution()
     // NB: use the check function in NodeFactory to make sure lds limit
     // TODO- this part should be done in offline-tuning
     NodeMetaData nodeData(this);
-    nodeData.length            = length;
-    nodeData.outputLength      = outputLength;
-    nodeData.inArrayType       = inArrayType;
-    nodeData.outArrayType      = outArrayType;
-    nodeData.precision         = precision;
-    nodeData.rootInStrideUnit  = this->GetPlanRoot()->inStrideUnit;
-    nodeData.rootOutStrideUnit = this->GetPlanRoot()->outStrideUnit;
+    nodeData.length       = length;
+    nodeData.outputLength = outputLength;
+    nodeData.inArrayType  = inArrayType;
+    nodeData.outArrayType = outArrayType;
+    nodeData.precision    = precision;
 
-    if(use_real_2D_single_SBCC(nodeData, pool))
+    const bool is_default_contiguous_layout
+        = this->GetPlanRoot()->inStrideUnit && this->GetPlanRoot()->outStrideUnit;
+    if(use_real_2D_single_SBCC(nodeData, pool, is_default_contiguous_layout))
     {
         solution = REAL_2D_SINGLE_SBCC;
         return;
@@ -1800,8 +1801,8 @@ void Real3DEvenNode::AssignParams_internal_TR_pairs()
         {
             auto& ccplan      = childNodes[1];
             ccplan->inStride  = {childNodes[0]->outStride[1],
-                                 childNodes[0]->outStride[0],
-                                 childNodes[0]->outStride[2]};
+                                childNodes[0]->outStride[0],
+                                childNodes[0]->outStride[2]};
             ccplan->iDist     = childNodes[0]->oDist;
             ccplan->outStride = ccplan->inStride;
             ccplan->oDist     = ccplan->iDist;
@@ -1823,8 +1824,8 @@ void Real3DEvenNode::AssignParams_internal_TR_pairs()
         {
             auto& ccplan      = childNodes[3];
             ccplan->inStride  = {childNodes[2]->outStride[1],
-                                 childNodes[2]->outStride[0],
-                                 childNodes[2]->outStride[2]};
+                                childNodes[2]->outStride[0],
+                                childNodes[2]->outStride[2]};
             ccplan->iDist     = childNodes[2]->oDist;
             ccplan->outStride = ccplan->inStride;
             ccplan->oDist     = ccplan->iDist;
@@ -1898,10 +1899,7 @@ void Real3DPPNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     }
     case 1: // work along y will be split between x and z
     {
-        if(inArrayType != rocfft_array_type_real)
-            throw std::runtime_error("Real3DPPNode: c2r transform not yet implemented");
-
-        if(direction == -1)
+        if(inArrayType != rocfft_array_type_real || direction != -1)
             throw std::runtime_error("Real3DPPNode: c2r transform not yet implemented");
 
         // use explicit SBRR partial-pass kernel

@@ -802,17 +802,16 @@ NodeMetaData
                                                      const rocfft_location_t& exec_plan_location)
 {
     NodeMetaData root_plan(nullptr);
-    root_plan.dimension    = desc.rank();
-    root_plan.batch        = desc.batch();
-    root_plan.precision    = precision;
-    root_plan.direction    = ((transformType == rocfft_transform_type_complex_forward)
+    root_plan.dimension         = desc.rank();
+    root_plan.batch             = desc.batch();
+    root_plan.precision         = precision;
+    root_plan.direction         = ((transformType == rocfft_transform_type_complex_forward)
                            || (transformType == rocfft_transform_type_real_forward))
-                                 ? -1
-                                 : 1;
-    root_plan.inArrayType  = desc.inArrayType;
-    root_plan.outArrayType = desc.outArrayType;
-    root_plan.rootIsC2C    = (root_plan.inArrayType != rocfft_array_type_real)
-                          && (root_plan.outArrayType != rocfft_array_type_real);
+                                      ? -1
+                                      : 1;
+    root_plan.inArrayType       = desc.inArrayType;
+    root_plan.outArrayType      = desc.outArrayType;
+    root_plan.rootTransformType = transformType;
     // root plan's data layouts and placement may be different than the calling plan's
     std::optional<data_layout_t> root_plan_input_layout, root_plan_output_layout;
     if(desc.has_undistributed_io_on_current_location()
@@ -2187,12 +2186,13 @@ static size_t C2CBrickOneDimension(rocfft_plan_t&                 plan,
                                  : 1;
     rootPlanData.placement
         = input == output ? rocfft_placement_inplace : rocfft_placement_notinplace;
-    rootPlanData.precision     = plan.precision;
-    rootPlanData.inArrayType   = rocfft_array_type_complex_interleaved;
-    rootPlanData.outArrayType  = rocfft_array_type_complex_interleaved;
-    rootPlanData.deviceProp    = get_curr_device_prop();
-    rootPlanData.input_buffer  = input;
-    rootPlanData.output_buffer = output;
+    rootPlanData.precision         = plan.precision;
+    rootPlanData.inArrayType       = rocfft_array_type_complex_interleaved;
+    rootPlanData.outArrayType      = rocfft_array_type_complex_interleaved;
+    rootPlanData.rootTransformType = plan.transformType;
+    rootPlanData.deviceProp        = get_curr_device_prop();
+    rootPlanData.input_buffer      = input;
+    rootPlanData.output_buffer     = output;
 
     auto singlePlan = BuildSingleDevicePlan(rootPlanData,
                                             plan.desc.get_local_comm_rank(),
@@ -3984,19 +3984,18 @@ bool BufferIsUnitStride(ExecPlan& execPlan, OperatingBuffer buf)
     if(execPlan.isUnitStride.find(buf) != execPlan.isUnitStride.end())
         return execPlan.isUnitStride.at(buf);
 
-    auto         isInput      = (buf == OB_USER_IN);
-    bool         isUnitStride = false;
-    size_t       curStride    = 0;
-    size_t       dist         = 0;
-    NodeMetaData rootPlanData(execPlan.rootPlan.get());
-    rootPlanData.inStride     = execPlan.rootPlan->inStride;
-    rootPlanData.outStride    = execPlan.rootPlan->outStride;
-    rootPlanData.length       = execPlan.iLength;
-    rootPlanData.outputLength = execPlan.oLength;
-    dist                      = isInput ? execPlan.rootPlan->iDist : execPlan.rootPlan->oDist;
-    rootPlanData.CheckUnitStride(isInput, isUnitStride, curStride);
-    if(!isUnitStride)
-        return false;
+    auto stride = (buf == OB_USER_IN) ? execPlan.rootPlan->inStride : execPlan.rootPlan->outStride;
+    auto length = (buf == OB_USER_IN) ? execPlan.iLength : execPlan.oLength;
+    auto dist   = (buf == OB_USER_IN) ? execPlan.rootPlan->iDist : execPlan.rootPlan->oDist;
+    size_t curStride = 1;
+    do
+    {
+        if(stride.front() != curStride)
+            return false;
+        curStride *= length.front();
+        stride.erase(stride.begin());
+        length.erase(length.begin());
+    } while(!stride.empty());
 
     // NB: users may input incorrect i/o-dist value for inplace transform
     //     however, when the batch-size is 1, we can simply make it permissive
@@ -4708,7 +4707,7 @@ bool TreeNode::IsRootPlanC2RTransform() const
 
 rocfft_transform_type TreeNode::GetRootPlanTransformType() const
 {
-    auto root = GetPlanRoot();
+    const auto root = GetPlanRoot();
 
     if(IsRootPlanC2CTransform() && root->direction == -1)
         return rocfft_transform_type_complex_forward;

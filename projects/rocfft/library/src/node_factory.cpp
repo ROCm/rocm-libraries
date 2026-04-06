@@ -1145,15 +1145,12 @@ bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nod
 {
     const auto& realLength = nodeData.direction == -1 ? nodeData.length : nodeData.outputLength;
 
-    size_t curStride    = 0;
-    bool   isUnitStride = false;
-    nodeData.CheckUnitStride(true, isUnitStride, curStride);
-    nodeData.rootInStrideUnit = isUnitStride && (curStride == nodeData.iDist);
-    nodeData.CheckUnitStride(false, isUnitStride, curStride);
-    nodeData.rootOutStrideUnit = isUnitStride && (curStride == nodeData.oDist);
+    const bool is_default_contiguous_layout
+        = nodeData.is_using_default_contiguous_layout_for(io_data_label::INPUT)
+          && nodeData.is_using_default_contiguous_layout_for(io_data_label::OUTPUT);
 
     // First check if we can use 2D_SINGLE + 1D kernel, prefer that over partial-pass
-    if(Real3DEvenNode::use_real_2D_single_SBCC(nodeData, pool))
+    if(Real3DEvenNode::use_real_2D_single_SBCC(nodeData, pool, is_default_contiguous_layout))
         return false;
 
     // Now check if we have the kernels for partial-pass
