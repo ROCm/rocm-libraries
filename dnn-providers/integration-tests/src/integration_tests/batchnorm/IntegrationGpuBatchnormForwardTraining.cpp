@@ -251,27 +251,19 @@ protected:
         auto [graphObj, outputs] = buildGraph(getSharedHandle(), testCase);
 
         // Register validators for all output tensors
-        this->registerValidator(
-            outputs.y, this->getTolerance(TestConfig::get().getEngineId(), graphObj, outputs.y));
-        this->registerValidator(
-            outputs.mean,
-            this->getTolerance(TestConfig::get().getEngineId(), graphObj, outputs.mean));
-        this->registerValidator(
-            outputs.invVariance,
-            this->getTolerance(TestConfig::get().getEngineId(), graphObj, outputs.invVariance));
+        this->registerValidator(outputs.y, this->getTolerance(graphObj, outputs.y));
+        this->registerValidator(outputs.mean, this->getTolerance(graphObj, outputs.mean));
+        this->registerValidator(outputs.invVariance,
+                                this->getTolerance(graphObj, outputs.invVariance));
         if(outputs.nextRunningMean)
         {
             this->registerValidator(outputs.nextRunningMean,
-                                    this->getTolerance(TestConfig::get().getEngineId(),
-                                                       graphObj,
-                                                       outputs.nextRunningMean));
+                                    this->getTolerance(graphObj, outputs.nextRunningMean));
         }
         if(outputs.nextRunningVariance)
         {
             this->registerValidator(outputs.nextRunningVariance,
-                                    this->getTolerance(TestConfig::get().getEngineId(),
-                                                       graphObj,
-                                                       outputs.nextRunningVariance));
+                                    this->getTolerance(graphObj, outputs.nextRunningVariance));
         }
 
         // Force execution on the specific engine that claimed capability

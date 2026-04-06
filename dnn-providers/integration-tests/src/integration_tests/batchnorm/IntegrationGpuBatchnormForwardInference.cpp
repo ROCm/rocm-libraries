@@ -106,8 +106,7 @@ protected:
 
         auto [graphObj, outputs] = buildGraph(getSharedHandle(), testCase);
 
-        this->registerValidator(
-            outputs.y, this->getTolerance(TestConfig::get().getEngineId(), graphObj, outputs.y));
+        this->registerValidator(outputs.y, this->getTolerance(graphObj, outputs.y));
 
         // Force execution on the specific engine that claimed capability
         graphObj.set_preferred_engine_id_ext(TestConfig::get().getEngineId());
