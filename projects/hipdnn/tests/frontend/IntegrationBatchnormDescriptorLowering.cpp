@@ -286,7 +286,8 @@ TEST_F(IntegrationBatchnormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 7u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 7u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The batchnorm forward operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -295,24 +296,31 @@ TEST_F(IntegrationBatchnormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(bnFwd->x_tensor_uid) > 0)
-        << "X tensor UID " << bnFwd->x_tensor_uid << " not found in graph tensors";
+        << "X tensor UID " << bnFwd->x_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnFwd->scale_tensor_uid) > 0)
-        << "Scale tensor UID " << bnFwd->scale_tensor_uid << " not found in graph tensors";
+        << "Scale tensor UID " << bnFwd->scale_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnFwd->bias_tensor_uid) > 0)
-        << "Bias tensor UID " << bnFwd->bias_tensor_uid << " not found in graph tensors";
+        << "Bias tensor UID " << bnFwd->bias_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnFwd->epsilon_tensor_uid) > 0)
-        << "Epsilon tensor UID " << bnFwd->epsilon_tensor_uid << " not found in graph tensors";
+        << "Epsilon tensor UID " << bnFwd->epsilon_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnFwd->y_tensor_uid) > 0)
-        << "Y tensor UID " << bnFwd->y_tensor_uid << " not found in graph tensors";
+        << "Y tensor UID " << bnFwd->y_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // Mean and inv_variance should be set with valid UIDs
     ASSERT_TRUE(bnFwd->mean_tensor_uid.has_value());
     EXPECT_TRUE(uids.count(bnFwd->mean_tensor_uid.value()) > 0)
-        << "Mean tensor UID " << bnFwd->mean_tensor_uid.value() << " not found in graph tensors";
+        << "Mean tensor UID " << bnFwd->mean_tensor_uid.value()
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     ASSERT_TRUE(bnFwd->inv_variance_tensor_uid.has_value());
     EXPECT_TRUE(uids.count(bnFwd->inv_variance_tensor_uid.value()) > 0)
-        << "InvVariance tensor UID " << bnFwd->inv_variance_tensor_uid.value()
-        << " not found in graph tensors";
+        << "InvVariance tensor UID "
+        << bnFwd->inv_variance_tensor_uid.value() // NOLINT(readability-implicit-bool-conversion)
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All seven tensor UIDs referenced by the node should be distinct
     const std::unordered_set<int64_t> nodeUids = {bnFwd->x_tensor_uid,
@@ -322,7 +330,8 @@ TEST_F(IntegrationBatchnormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
                                                   bnFwd->y_tensor_uid,
                                                   bnFwd->mean_tensor_uid.value(),
                                                   bnFwd->inv_variance_tensor_uid.value()};
-    EXPECT_EQ(nodeUids.size(), 7u) << "Batchnorm forward node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 7u)
+        << "Batchnorm forward node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 TEST_F(IntegrationBatchnormDescriptorLowering, MinimalRequiredOnlyRoundTrip)

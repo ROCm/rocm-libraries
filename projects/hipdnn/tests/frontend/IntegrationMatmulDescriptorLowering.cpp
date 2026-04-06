@@ -151,7 +151,8 @@ TEST_F(IntegrationMatmulDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 3u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 3u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The matmul operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -160,16 +161,20 @@ TEST_F(IntegrationMatmulDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(matmul->a_tensor_uid) > 0)
-        << "A tensor UID " << matmul->a_tensor_uid << " not found in graph tensors";
+        << "A tensor UID " << matmul->a_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(matmul->b_tensor_uid) > 0)
-        << "B tensor UID " << matmul->b_tensor_uid << " not found in graph tensors";
+        << "B tensor UID " << matmul->b_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(matmul->c_tensor_uid) > 0)
-        << "C tensor UID " << matmul->c_tensor_uid << " not found in graph tensors";
+        << "C tensor UID " << matmul->c_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All three tensor UIDs referenced by the node should be distinct
     const std::unordered_set<int64_t> nodeUids
         = {matmul->a_tensor_uid, matmul->b_tensor_uid, matmul->c_tensor_uid};
-    EXPECT_EQ(nodeUids.size(), 3u) << "Matmul node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 3u)
+        << "Matmul node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 } // namespace

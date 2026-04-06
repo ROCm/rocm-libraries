@@ -104,7 +104,8 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropRoundTripViaCApi)
 
     // Verify tensors by UID — 9 required tensors
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 9u) << "Expected 9 tensors in lifted SDPA backward graph";
+    ASSERT_EQ(tensorMap.size(), 9u)
+        << "Expected 9 tensors in lifted SDPA backward graph"; // NOLINT(readability-implicit-bool-conversion)
 
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_Q_UID), 0u);
     EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_Q_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_Q_DIMS));
@@ -155,10 +156,12 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropRoundTripViaCApi)
 
     // Verify the lifted graph has 1 SDPA backward operation node with the correct name
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* sdpaNode = dynamic_cast<SdpaBpropNode*>(subNodes[0].get());
-    ASSERT_NE(sdpaNode, nullptr) << "Expected a SdpaBpropNode";
+    ASSERT_NE(sdpaNode, nullptr)
+        << "Expected a SdpaBpropNode"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_EQ(sdpaNode->attributes.get_name(), "sdpa_bprop_op");
 }
 
@@ -295,7 +298,8 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropWithAllOptionalAttributesViaCApi)
 
     // 9 required + 10 optional (all serialized as tensors through the C-API)
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 19u) << "Expected 9 required + 10 optional tensors";
+    ASSERT_EQ(tensorMap.size(), 19u)
+        << "Expected 9 required + 10 optional tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify all optional tensor UIDs are present and their properties match.
     const auto scalarDims = toVec(K_SDPA_BPROP_TENSOR_SCALAR_DIMS);
@@ -463,14 +467,16 @@ TEST_F(IntegrationSdpaBpropLifting, AutoAssignedUidsPreservedInRoundTrip)
 
     // All 9 auto-assigned UIDs should be unique
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 9u) << "Expected 9 tensors with auto-assigned UIDs";
+    ASSERT_EQ(tensorMap.size(), 9u)
+        << "Expected 9 tensors with auto-assigned UIDs"; // NOLINT(readability-implicit-bool-conversion)
 
     std::unordered_set<int64_t> uids;
     for(const auto& [uid, tensor] : tensorMap)
     {
         uids.insert(uid);
     }
-    EXPECT_EQ(uids.size(), 9u) << "Auto-assigned tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 9u)
+        << "Auto-assigned tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references resolve to tensors in the map
     auto& subNodes = liftedGraph->getSubNodes();
@@ -509,7 +515,8 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropLiftWithoutFinalization)
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* sdpaNode = dynamic_cast<SdpaBpropNode*>(subNodes[0].get());
-    ASSERT_NE(sdpaNode, nullptr) << "Expected a SdpaBpropNode";
+    ASSERT_NE(sdpaNode, nullptr)
+        << "Expected a SdpaBpropNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify tensor dims survive the serialization round-trip
     auto tensorMap = liftedGraph->getTensorsByUid();

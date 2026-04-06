@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hipdnn.h>
+#include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 

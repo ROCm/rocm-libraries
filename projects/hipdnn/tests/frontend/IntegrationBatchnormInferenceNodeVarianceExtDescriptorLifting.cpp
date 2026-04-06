@@ -177,10 +177,12 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* opNode = dynamic_cast<BatchnormInferenceNodeVarianceExt*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a BatchnormInferenceNodeVarianceExt";
+    ASSERT_NE(opNode, nullptr)
+        << "Expected a BatchnormInferenceNodeVarianceExt"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
@@ -363,7 +365,7 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     }
     std::sort(uids.begin(), uids.end());
     ASSERT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "All auto-assigned UIDs must be distinct";
+        << "All auto-assigned UIDs must be distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify sub-node tensor UIDs are distinct via the node attributes
     auto& subNodes = liftedGraph->getSubNodes();
@@ -387,7 +389,8 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     nodeUids.insert(opNode->attributes.get_y()->get_uid());
     ASSERT_NE(opNode->attributes.get_epsilon(), nullptr);
     nodeUids.insert(opNode->attributes.get_epsilon()->get_uid());
-    ASSERT_EQ(nodeUids.size(), 7u) << "Node tensor UIDs are not all distinct";
+    ASSERT_EQ(nodeUids.size(), 7u)
+        << "Node tensor UIDs are not all distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify tensor dims survived the round trip
     EXPECT_EQ(opNode->attributes.get_x()->get_dim(), toVec(K_BN_INF_VAR_EXT_X_DIMS));

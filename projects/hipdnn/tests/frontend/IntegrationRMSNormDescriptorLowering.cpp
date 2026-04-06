@@ -186,7 +186,8 @@ TEST_F(IntegrationRMSNormDescriptorLowering, AutoAssignedUidsPreservedInRoundTri
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 5u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 5u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The rmsnorm operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -195,18 +196,23 @@ TEST_F(IntegrationRMSNormDescriptorLowering, AutoAssignedUidsPreservedInRoundTri
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(rmsnorm->x_tensor_uid) > 0)
-        << "X tensor UID " << rmsnorm->x_tensor_uid << " not found in graph tensors";
+        << "X tensor UID " << rmsnorm->x_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(rmsnorm->scale_tensor_uid) > 0)
-        << "Scale tensor UID " << rmsnorm->scale_tensor_uid << " not found in graph tensors";
+        << "Scale tensor UID " << rmsnorm->scale_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(rmsnorm->epsilon_tensor_uid) > 0)
-        << "Epsilon tensor UID " << rmsnorm->epsilon_tensor_uid << " not found in graph tensors";
+        << "Epsilon tensor UID " << rmsnorm->epsilon_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(rmsnorm->y_tensor_uid) > 0)
-        << "Y tensor UID " << rmsnorm->y_tensor_uid << " not found in graph tensors";
+        << "Y tensor UID " << rmsnorm->y_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     if(rmsnorm->inv_rms_tensor_uid.has_value())
     {
         EXPECT_TRUE(uids.count(*rmsnorm->inv_rms_tensor_uid) > 0)
-            << "InvRms tensor UID " << *rmsnorm->inv_rms_tensor_uid
-            << " not found in graph tensors";
+            << "InvRms tensor UID "
+            << *rmsnorm->inv_rms_tensor_uid // NOLINT(readability-implicit-bool-conversion)
+            << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     }
 
     // All required tensor UIDs referenced by the node should be distinct
@@ -218,7 +224,8 @@ TEST_F(IntegrationRMSNormDescriptorLowering, AutoAssignedUidsPreservedInRoundTri
     {
         nodeUids.insert(*rmsnorm->inv_rms_tensor_uid);
     }
-    EXPECT_EQ(nodeUids.size(), 5u) << "RMSNorm node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 5u)
+        << "RMSNorm node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 // Roundtrip with optional bias tensor set, verifying it appears in the serialized graph.

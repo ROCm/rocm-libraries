@@ -214,7 +214,8 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 4u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 4u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The SDPA operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -223,18 +224,23 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(sdpa->q_tensor_uid) > 0)
-        << "Q tensor UID " << sdpa->q_tensor_uid << " not found in graph tensors";
+        << "Q tensor UID " << sdpa->q_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(sdpa->k_tensor_uid) > 0)
-        << "K tensor UID " << sdpa->k_tensor_uid << " not found in graph tensors";
+        << "K tensor UID " << sdpa->k_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(sdpa->v_tensor_uid) > 0)
-        << "V tensor UID " << sdpa->v_tensor_uid << " not found in graph tensors";
+        << "V tensor UID " << sdpa->v_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(sdpa->o_tensor_uid) > 0)
-        << "O tensor UID " << sdpa->o_tensor_uid << " not found in graph tensors";
+        << "O tensor UID " << sdpa->o_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All four required tensor UIDs referenced by the node should be distinct
     const std::unordered_set<int64_t> nodeUids
         = {sdpa->q_tensor_uid, sdpa->k_tensor_uid, sdpa->v_tensor_uid, sdpa->o_tensor_uid};
-    EXPECT_EQ(nodeUids.size(), 4u) << "SDPA node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 4u)
+        << "SDPA node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 // Verifies that an SDPA graph with stats output generates and preserves
@@ -265,7 +271,8 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropWithStatsRoundTrip)
 
     auto [o, stats] = graph->sdpa(q, k, v, std::move(sdpaAttrs));
     o->set_uid(K_SDPA_TENSOR_O_UID).set_output(true).set_name("O");
-    ASSERT_NE(stats, nullptr) << "Stats tensor should be created when generate_stats is true";
+    ASSERT_NE(stats, nullptr)
+        << "Stats tensor should be created when generate_stats is true"; // NOLINT(readability-implicit-bool-conversion)
     stats->set_uid(K_SDPA_TENSOR_STATS_UID).set_output(true).set_name("STATS");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);

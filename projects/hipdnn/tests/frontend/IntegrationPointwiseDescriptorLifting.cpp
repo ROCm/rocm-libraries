@@ -89,7 +89,8 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseBinaryAddRoundTripViaCApi
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
-    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+    ASSERT_NE(pwNode, nullptr)
+        << "Expected a PointwiseNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::ADD);
     EXPECT_EQ(pwNode->attributes.get_name(), "add_op");
@@ -133,7 +134,8 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseUnaryReluScalarsPreserved
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
-    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+    ASSERT_NE(pwNode, nullptr)
+        << "Expected a PointwiseNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::RELU_FWD);
 
@@ -212,7 +214,8 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseTernarySelectRoundTrip)
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
-    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+    ASSERT_NE(pwNode, nullptr)
+        << "Expected a PointwiseNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::BINARY_SELECT);
     EXPECT_EQ(pwNode->attributes.get_input_0()->get_uid(), K_PW_TENSOR_IN0_UID);
@@ -256,7 +259,8 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseLiftWithoutFinalization)
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
-    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+    ASSERT_NE(pwNode, nullptr)
+        << "Expected a PointwiseNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::MUL);
     EXPECT_EQ(pwNode->attributes.get_input_0()->get_uid(), K_PW_TENSOR_IN0_UID);
@@ -329,7 +333,8 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseSwishBetaPreserved)
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
-    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+    ASSERT_NE(pwNode, nullptr)
+        << "Expected a PointwiseNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::SWISH_FWD);
     EXPECT_TRUE(pwNode->attributes.get_swish_beta().has_value());
@@ -365,7 +370,8 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseEluAlphaPreserved)
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
-    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+    ASSERT_NE(pwNode, nullptr)
+        << "Expected a PointwiseNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::ELU_FWD);
     EXPECT_TRUE(pwNode->attributes.get_elu_alpha().has_value());
@@ -401,7 +407,8 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseSoftplusBetaPreserved)
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
-    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+    ASSERT_NE(pwNode, nullptr)
+        << "Expected a PointwiseNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::SOFTPLUS_FWD);
     EXPECT_TRUE(pwNode->attributes.get_softplus_beta().has_value());
@@ -437,7 +444,8 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseGenIndexAxisPreserved)
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
-    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+    ASSERT_NE(pwNode, nullptr)
+        << "Expected a PointwiseNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::GEN_INDEX);
     EXPECT_TRUE(pwNode->attributes.get_axis().has_value());
@@ -487,11 +495,13 @@ TEST_F(IntegrationPointwiseDescriptorLifting, ConvFpropReluFusionRoundTrip)
 
     // Verify 2 operation nodes
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 2u) << "Expected 2 operation nodes (conv + relu)";
+    ASSERT_EQ(subNodes.size(), 2u)
+        << "Expected 2 operation nodes (conv + relu)"; // NOLINT(readability-implicit-bool-conversion)
 
     // First node: ConvolutionFpropNode
     auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
-    ASSERT_NE(convNode, nullptr) << "Expected first node to be ConvolutionFpropNode";
+    ASSERT_NE(convNode, nullptr)
+        << "Expected first node to be ConvolutionFpropNode"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
     EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_CONV_POST_PADDING));
     EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
@@ -501,7 +511,8 @@ TEST_F(IntegrationPointwiseDescriptorLifting, ConvFpropReluFusionRoundTrip)
 
     // Second node: PointwiseNode with RELU_FWD
     auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[1].get());
-    ASSERT_NE(pwNode, nullptr) << "Expected second node to be PointwiseNode";
+    ASSERT_NE(pwNode, nullptr)
+        << "Expected second node to be PointwiseNode"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::RELU_FWD);
     EXPECT_EQ(pwNode->attributes.get_name(), "relu_activation");
 
@@ -509,13 +520,17 @@ TEST_F(IntegrationPointwiseDescriptorLifting, ConvFpropReluFusionRoundTrip)
     auto convY = convNode->attributes.get_y();
     auto reluIn0 = pwNode->attributes.get_input_0();
     EXPECT_EQ(convY.get(), reluIn0.get())
-        << "Conv output and relu input should share the same TensorAttributes object";
+        << "Conv output and relu input should share the same "
+           "TensorAttributes object"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify tensor map contains external tensors (X, W, relu_out) plus the virtual intermediate
     auto tensorMap = liftedGraph->getTensorsByUid();
-    EXPECT_NE(tensorMap.count(K_TENSOR_X_UID), 0u) << "X tensor not found";
-    EXPECT_NE(tensorMap.count(K_TENSOR_W_UID), 0u) << "W tensor not found";
-    EXPECT_NE(tensorMap.count(K_PW_RELU_OUT_UID), 0u) << "relu_out tensor not found";
+    EXPECT_NE(tensorMap.count(K_TENSOR_X_UID), 0u)
+        << "X tensor not found"; // NOLINT(readability-implicit-bool-conversion)
+    EXPECT_NE(tensorMap.count(K_TENSOR_W_UID), 0u)
+        << "W tensor not found"; // NOLINT(readability-implicit-bool-conversion)
+    EXPECT_NE(tensorMap.count(K_PW_RELU_OUT_UID), 0u)
+        << "relu_out tensor not found"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 } // namespace

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include <hipdnn.h>
+#include <hipdnn_backend.h>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
@@ -42,9 +42,8 @@ protected:
         {
             pathPtrs.push_back(p.c_str());
         }
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(static_cast<int64_t>(pathPtrs.size()),
-                                                 pathPtrs.data(),
-                                                 HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
+                      pathPtrs.size(), pathPtrs.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
                   HIPDNN_STATUS_SUCCESS);
 
         ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);

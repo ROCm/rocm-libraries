@@ -72,7 +72,8 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BasicBsqRoundTrip)
 
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors (X, Y, Scale) in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 3u)
+        << "Expected 3 tensors (X, Y, Scale) in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify X tensor
     ASSERT_NE(tensorMap.count(K_BSQ_TENSOR_X_UID), 0u);
@@ -100,10 +101,12 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BasicBsqRoundTrip)
 
     // Verify 1 sub-node of the correct type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* bsqNode = dynamic_cast<BlockScaleQuantizeNode*>(subNodes[0].get());
-    ASSERT_NE(bsqNode, nullptr) << "Expected a BlockScaleQuantizeNode";
+    ASSERT_NE(bsqNode, nullptr)
+        << "Expected a BlockScaleQuantizeNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify BSQ parameters
     EXPECT_EQ(bsqNode->attributes.get_block_size(), K_BSQ_BLOCK_SIZE);
@@ -149,7 +152,8 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BsqWithAxisAndTransposePr
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* bsqNode = dynamic_cast<BlockScaleQuantizeNode*>(subNodes[0].get());
-    ASSERT_NE(bsqNode, nullptr) << "Expected a BlockScaleQuantizeNode";
+    ASSERT_NE(bsqNode, nullptr)
+        << "Expected a BlockScaleQuantizeNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(bsqNode->attributes.get_block_size(), BLOCK_SIZE);
     EXPECT_TRUE(bsqNode->attributes.get_axis().has_value());
@@ -216,7 +220,8 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, AutoAssignedUidsPreserved
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 3u)
+        << "Expected 3 tensors in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Collect all UIDs and verify they are distinct
     std::vector<int64_t> uids;
@@ -227,7 +232,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, AutoAssignedUidsPreserved
     }
     std::sort(uids.begin(), uids.end());
     EXPECT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "All auto-assigned UIDs must be distinct";
+        << "All auto-assigned UIDs must be distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references tensors with auto-assigned UIDs
     auto& subNodes = liftedGraph->getSubNodes();

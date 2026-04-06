@@ -74,7 +74,8 @@ TEST_F(IntegrationMatmulDescriptorLifting, BasicMatmulRoundTrip)
 
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors (A, B, C) in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 3u)
+        << "Expected 3 tensors (A, B, C) in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify A tensor
     ASSERT_NE(tensorMap.count(K_MATMUL_TENSOR_A_UID), 0u);
@@ -105,10 +106,12 @@ TEST_F(IntegrationMatmulDescriptorLifting, BasicMatmulRoundTrip)
 
     // Verify 1 sub-node of the correct type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* matmulNode = dynamic_cast<MatmulNode*>(subNodes[0].get());
-    ASSERT_NE(matmulNode, nullptr) << "Expected a MatmulNode";
+    ASSERT_NE(matmulNode, nullptr)
+        << "Expected a MatmulNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify operation name
     EXPECT_EQ(matmulNode->attributes.get_name(), "matmul_op");
@@ -175,7 +178,8 @@ TEST_F(IntegrationMatmulDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 3u)
+        << "Expected 3 tensors in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Collect all UIDs and verify they are distinct
     std::vector<int64_t> uids;
@@ -186,7 +190,7 @@ TEST_F(IntegrationMatmulDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
     }
     std::sort(uids.begin(), uids.end());
     EXPECT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "All auto-assigned UIDs must be distinct";
+        << "All auto-assigned UIDs must be distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references tensors with auto-assigned UIDs
     auto& subNodes = liftedGraph->getSubNodes();

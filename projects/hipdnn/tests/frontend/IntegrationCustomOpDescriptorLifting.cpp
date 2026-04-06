@@ -139,7 +139,8 @@ TEST_F(IntegrationCustomOpDescriptorLifting, BasicCustomOpRoundTrip)
 
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 3u)
+        << "Expected 3 tensors in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify input0 tensor
     ASSERT_NE(tensorMap.count(K_CUSTOM_OP_INPUT_UID_0), 0u);
@@ -168,10 +169,12 @@ TEST_F(IntegrationCustomOpDescriptorLifting, BasicCustomOpRoundTrip)
 
     // Verify 1 sub-node of the correct type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* customOpNode = dynamic_cast<CustomOpNode*>(subNodes[0].get());
-    ASSERT_NE(customOpNode, nullptr) << "Expected a CustomOpNode";
+    ASSERT_NE(customOpNode, nullptr)
+        << "Expected a CustomOpNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify custom op parameters
     EXPECT_EQ(customOpNode->attributes.get_custom_op_id(), K_CUSTOM_OP_ID);
@@ -246,7 +249,8 @@ TEST_F(IntegrationCustomOpDescriptorLifting, AutoAssignedUidsPreservedInRoundTri
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 3u)
+        << "Expected 3 tensors in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Collect all UIDs and verify they are distinct
     std::vector<int64_t> uids;
@@ -257,7 +261,7 @@ TEST_F(IntegrationCustomOpDescriptorLifting, AutoAssignedUidsPreservedInRoundTri
     }
     std::sort(uids.begin(), uids.end());
     EXPECT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "All auto-assigned UIDs must be distinct";
+        << "All auto-assigned UIDs must be distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references tensors with auto-assigned UIDs
     auto& subNodes = liftedGraph->getSubNodes();
@@ -276,7 +280,8 @@ TEST_F(IntegrationCustomOpDescriptorLifting, AutoAssignedUidsPreservedInRoundTri
     {
         nodeUids.insert(tensor->get_uid());
     }
-    EXPECT_EQ(nodeUids.size(), 3u) << "CustomOp node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 3u)
+        << "CustomOp node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 // Builds a custom op graph, serializes to binary, creates a backend descriptor

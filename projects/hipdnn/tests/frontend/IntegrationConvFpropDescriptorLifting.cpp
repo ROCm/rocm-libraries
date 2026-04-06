@@ -81,7 +81,8 @@ TEST_F(IntegrationConvFpropDescriptorLifting, BasicConvFpropRoundTrip)
 
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors (X, W, Y) in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 3u)
+        << "Expected 3 tensors (X, W, Y) in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify X tensor
     ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
@@ -112,10 +113,12 @@ TEST_F(IntegrationConvFpropDescriptorLifting, BasicConvFpropRoundTrip)
 
     // Verify 1 sub-node of the correct type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
-    ASSERT_NE(convNode, nullptr) << "Expected a ConvolutionFpropNode";
+    ASSERT_NE(convNode, nullptr)
+        << "Expected a ConvolutionFpropNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify convolution parameters
     EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
@@ -166,7 +169,8 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAsymmetricPaddingPreserve
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
-    ASSERT_NE(convNode, nullptr) << "Expected a ConvolutionFpropNode";
+    ASSERT_NE(convNode, nullptr)
+        << "Expected a ConvolutionFpropNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_ASYM_PRE_PADDING));
     EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_ASYM_POST_PADDING));
@@ -255,7 +259,8 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAutoAssignedUidsPreserved
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 3u)
+        << "Expected 3 tensors in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Collect all UIDs and verify they are distinct
     std::vector<int64_t> uids;
@@ -266,7 +271,7 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAutoAssignedUidsPreserved
     }
     std::sort(uids.begin(), uids.end());
     EXPECT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "All auto-assigned UIDs must be distinct";
+        << "All auto-assigned UIDs must be distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references tensors with auto-assigned UIDs
     auto& subNodes = liftedGraph->getSubNodes();

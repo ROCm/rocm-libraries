@@ -474,7 +474,8 @@ TEST_F(IntegrationRMSNormDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip
     {
         uids.insert(uid);
     }
-    EXPECT_EQ(uids.size(), 5u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 5u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the lifted node references UIDs that exist in the tensor map
     auto& subNodes = liftedGraph->getSubNodes();
@@ -499,7 +500,8 @@ TEST_F(IntegrationRMSNormDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip
                                                   rmsNode->attributes.get_epsilon()->get_uid(),
                                                   rmsNode->attributes.get_y()->get_uid(),
                                                   rmsNode->attributes.get_inv_rms()->get_uid()};
-    EXPECT_EQ(nodeUids.size(), 5u) << "RMSNorm node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 5u)
+        << "RMSNorm node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 } // namespace

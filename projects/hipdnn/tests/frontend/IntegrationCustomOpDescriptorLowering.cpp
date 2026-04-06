@@ -183,7 +183,8 @@ TEST_F(IntegrationCustomOpDescriptorLowering, AutoAssignedUidsPreservedInRoundTr
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 3u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 3u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The custom op node should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -194,19 +195,22 @@ TEST_F(IntegrationCustomOpDescriptorLowering, AutoAssignedUidsPreservedInRoundTr
     for(auto inputUid : customOp->input_tensor_uids)
     {
         EXPECT_TRUE(uids.count(inputUid) > 0)
-            << "Input tensor UID " << inputUid << " not found in graph tensors";
+            << "Input tensor UID " << inputUid
+            << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     }
     for(auto outputUid : customOp->output_tensor_uids)
     {
         EXPECT_TRUE(uids.count(outputUid) > 0)
-            << "Output tensor UID " << outputUid << " not found in graph tensors";
+            << "Output tensor UID " << outputUid
+            << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     }
 
     // All tensor UIDs referenced by the node should be distinct
     std::unordered_set<int64_t> nodeUids;
     nodeUids.insert(customOp->input_tensor_uids.begin(), customOp->input_tensor_uids.end());
     nodeUids.insert(customOp->output_tensor_uids.begin(), customOp->output_tensor_uids.end());
-    EXPECT_EQ(nodeUids.size(), 3u) << "CustomOp node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 3u)
+        << "CustomOp node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 // Verifies that a custom op with zero inputs and zero outputs can be lowered

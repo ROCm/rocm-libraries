@@ -175,7 +175,8 @@ TEST_F(IntegrationConvolutionWgradDescriptorLowering, AutoAssignedUidsPreservedI
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 3u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 3u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The conv wrw operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -184,16 +185,20 @@ TEST_F(IntegrationConvolutionWgradDescriptorLowering, AutoAssignedUidsPreservedI
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(convWrw->x_tensor_uid) > 0)
-        << "X tensor UID " << convWrw->x_tensor_uid << " not found in graph tensors";
+        << "X tensor UID " << convWrw->x_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(convWrw->dy_tensor_uid) > 0)
-        << "DY tensor UID " << convWrw->dy_tensor_uid << " not found in graph tensors";
+        << "DY tensor UID " << convWrw->dy_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(convWrw->dw_tensor_uid) > 0)
-        << "DW tensor UID " << convWrw->dw_tensor_uid << " not found in graph tensors";
+        << "DW tensor UID " << convWrw->dw_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All three tensor UIDs referenced by the node should be distinct
     const std::unordered_set<int64_t> nodeUids
         = {convWrw->x_tensor_uid, convWrw->dy_tensor_uid, convWrw->dw_tensor_uid};
-    EXPECT_EQ(nodeUids.size(), 3u) << "Conv wrw node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 3u)
+        << "Conv wrw node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 } // namespace

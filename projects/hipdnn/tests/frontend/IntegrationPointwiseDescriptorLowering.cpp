@@ -265,7 +265,8 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 3u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 3u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The pointwise operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -274,17 +275,22 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(pwNode->in_0_tensor_uid) > 0)
-        << "IN_0 tensor UID " << pwNode->in_0_tensor_uid << " not found in graph tensors";
-    ASSERT_TRUE(pwNode->in_1_tensor_uid.has_value()) << "IN_1 tensor UID should be set";
+        << "IN_0 tensor UID " << pwNode->in_0_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
+    ASSERT_TRUE(pwNode->in_1_tensor_uid.has_value())
+        << "IN_1 tensor UID should be set"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(pwNode->in_1_tensor_uid.value()) > 0)
-        << "IN_1 tensor UID " << pwNode->in_1_tensor_uid.value() << " not found in graph tensors";
+        << "IN_1 tensor UID " << pwNode->in_1_tensor_uid.value()
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(pwNode->out_0_tensor_uid) > 0)
-        << "OUT_0 tensor UID " << pwNode->out_0_tensor_uid << " not found in graph tensors";
+        << "OUT_0 tensor UID " << pwNode->out_0_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All three tensor UIDs referenced by the node should be distinct
     const std::unordered_set<int64_t> nodeUids
         = {pwNode->in_0_tensor_uid, pwNode->in_1_tensor_uid.value(), pwNode->out_0_tensor_uid};
-    EXPECT_EQ(nodeUids.size(), 3u) << "Pointwise node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 3u)
+        << "Pointwise node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 // Additional activation scalars (swish_beta, elu_alpha, softplus_beta) round-trip

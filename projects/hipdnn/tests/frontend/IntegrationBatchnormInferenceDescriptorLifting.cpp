@@ -144,10 +144,12 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, BasicBatchnormInferenceRo
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* opNode = dynamic_cast<BatchnormInferenceNode*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a BatchnormInferenceNode";
+    ASSERT_NE(opNode, nullptr)
+        << "Expected a BatchnormInferenceNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
@@ -286,7 +288,8 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, AutoAssignedUidsPreserved
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 6u) << "Expected 6 tensors in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 6u)
+        << "Expected 6 tensors in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Collect all UIDs and verify they are distinct
     std::vector<int64_t> uids;
@@ -297,7 +300,7 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, AutoAssignedUidsPreserved
     }
     std::sort(uids.begin(), uids.end());
     EXPECT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "All auto-assigned UIDs must be distinct";
+        << "All auto-assigned UIDs must be distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references tensors with auto-assigned UIDs
     auto& subNodes = liftedGraph->getSubNodes();
@@ -315,7 +318,8 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, AutoAssignedUidsPreserved
     auto yUid = opNode->attributes.get_y()->get_uid();
 
     const std::set<int64_t> uidSet = {xUid, meanUid, invVarianceUid, scaleUid, biasUid, yUid};
-    EXPECT_EQ(uidSet.size(), 6u) << "All 6 tensor UIDs must be distinct";
+    EXPECT_EQ(uidSet.size(), 6u)
+        << "All 6 tensor UIDs must be distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify tensor dims survived the round trip
     EXPECT_EQ(tensorMap[xUid]->get_dim(), toVec(K_SPATIAL_DIMS));

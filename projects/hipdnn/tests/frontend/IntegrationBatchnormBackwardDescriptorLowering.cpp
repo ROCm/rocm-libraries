@@ -193,7 +193,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, AutoAssignedUidsPreserved
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 6u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 6u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The batchnorm backward operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -202,17 +203,23 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, AutoAssignedUidsPreserved
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(bnBwd->dy_tensor_uid) > 0)
-        << "DY tensor UID " << bnBwd->dy_tensor_uid << " not found in graph tensors";
+        << "DY tensor UID " << bnBwd->dy_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnBwd->x_tensor_uid) > 0)
-        << "X tensor UID " << bnBwd->x_tensor_uid << " not found in graph tensors";
+        << "X tensor UID " << bnBwd->x_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnBwd->scale_tensor_uid) > 0)
-        << "Scale tensor UID " << bnBwd->scale_tensor_uid << " not found in graph tensors";
+        << "Scale tensor UID " << bnBwd->scale_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnBwd->dx_tensor_uid) > 0)
-        << "DX tensor UID " << bnBwd->dx_tensor_uid << " not found in graph tensors";
+        << "DX tensor UID " << bnBwd->dx_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnBwd->dscale_tensor_uid) > 0)
-        << "DScale tensor UID " << bnBwd->dscale_tensor_uid << " not found in graph tensors";
+        << "DScale tensor UID " << bnBwd->dscale_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnBwd->dbias_tensor_uid) > 0)
-        << "DBias tensor UID " << bnBwd->dbias_tensor_uid << " not found in graph tensors";
+        << "DBias tensor UID " << bnBwd->dbias_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All six tensor UIDs referenced by the node should be distinct
     const std::unordered_set<int64_t> nodeUids = {bnBwd->dy_tensor_uid,
@@ -221,7 +228,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, AutoAssignedUidsPreserved
                                                   bnBwd->dx_tensor_uid,
                                                   bnBwd->dscale_tensor_uid,
                                                   bnBwd->dbias_tensor_uid};
-    EXPECT_EQ(nodeUids.size(), 6u) << "BatchnormBackward node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 6u)
+        << "BatchnormBackward node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 } // namespace

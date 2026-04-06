@@ -214,7 +214,8 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, EngineWithNoKnobs)
     auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
-    EXPECT_TRUE(knobs.empty()) << "GoodPlugin should have no knobs";
+    EXPECT_TRUE(knobs.empty())
+        << "GoodPlugin should have no knobs"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 TEST_F(IntegrationGraphKnobsDescriptorLifting, IntConstraintWithZeroMin)
@@ -234,7 +235,8 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, IntConstraintWithZeroMin)
 
     auto* intConstraint = dynamic_cast<const IntConstraint*>(it->constraint());
     ASSERT_NE(intConstraint, nullptr);
-    EXPECT_EQ(intConstraint->getMinValue(), 0) << "Zero min should be preserved";
+    EXPECT_EQ(intConstraint->getMinValue(), 0)
+        << "Zero min should be preserved"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_EQ(intConstraint->getMaxValue(), 100);
     EXPECT_EQ(intConstraint->getStep(), 10);
 }
@@ -256,7 +258,8 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, FloatConstraintWithZeroMin)
 
     auto* floatConstraint = dynamic_cast<const FloatConstraint*>(it->constraint());
     ASSERT_NE(floatConstraint, nullptr);
-    EXPECT_DOUBLE_EQ(floatConstraint->getMinValue(), 0.0) << "Zero min should be preserved";
+    EXPECT_DOUBLE_EQ(floatConstraint->getMinValue(), 0.0)
+        << "Zero min should be preserved"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_DOUBLE_EQ(floatConstraint->getMaxValue(), 1.0);
 }
 

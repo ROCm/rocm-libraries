@@ -99,10 +99,12 @@ TEST_F(IntegrationReductionDescriptorLifting, BasicReductionRoundTrip)
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* opNode = dynamic_cast<ReductionNode*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a ReductionNode";
+    ASSERT_NE(opNode, nullptr)
+        << "Expected a ReductionNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify mode
     EXPECT_EQ(opNode->attributes.get_mode(), ReductionMode::ADD);
@@ -211,7 +213,8 @@ TEST_F(IntegrationReductionDescriptorLifting, IsDeterministicPreservedInLiftingR
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* opNode = dynamic_cast<ReductionNode*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a ReductionNode";
+    ASSERT_NE(opNode, nullptr)
+        << "Expected a ReductionNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_TRUE(opNode->attributes.get_is_deterministic());
 }
@@ -255,7 +258,7 @@ TEST_F(IntegrationReductionDescriptorLifting, AutoAssignedUidsPreservedInLifting
     }
     std::sort(uids.begin(), uids.end());
     ASSERT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "Found duplicate auto-assigned UIDs";
+        << "Found duplicate auto-assigned UIDs"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify sub-node tensor UIDs are distinct via the node attributes
     auto& subNodes = liftedGraph->getSubNodes();
@@ -269,7 +272,8 @@ TEST_F(IntegrationReductionDescriptorLifting, AutoAssignedUidsPreservedInLifting
     nodeUids.insert(opNode->attributes.get_x()->get_uid());
     ASSERT_NE(opNode->attributes.get_y(), nullptr);
     nodeUids.insert(opNode->attributes.get_y()->get_uid());
-    ASSERT_EQ(nodeUids.size(), 2u) << "Node tensor UIDs are not all distinct";
+    ASSERT_EQ(nodeUids.size(), 2u)
+        << "Node tensor UIDs are not all distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify tensor dims survived the round trip
     EXPECT_EQ(opNode->attributes.get_x()->get_dim(), toVec(K_REDUCTION_TENSOR_X_DIMS));

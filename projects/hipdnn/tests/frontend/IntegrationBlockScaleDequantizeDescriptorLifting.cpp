@@ -107,10 +107,12 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, BasicBlockScaleDequanti
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* opNode = dynamic_cast<BlockScaleDequantizeNode*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a BlockScaleDequantizeNode";
+    ASSERT_NE(opNode, nullptr)
+        << "Expected a BlockScaleDequantizeNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify block_size
     ASSERT_EQ(opNode->attributes.get_block_size().size(), 1u);
@@ -234,7 +236,8 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, IsNegativeScalePreserve
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* opNode = dynamic_cast<BlockScaleDequantizeNode*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a BlockScaleDequantizeNode";
+    ASSERT_NE(opNode, nullptr)
+        << "Expected a BlockScaleDequantizeNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(opNode->attributes.get_is_negative_scale(), true);
 }
@@ -275,7 +278,8 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, AutoAssignedUidsPreserv
     {
         uids.insert(uid);
     }
-    EXPECT_EQ(uids.size(), 3u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 3u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references tensors from the map
     auto& subNodes = liftedGraph->getSubNodes();
@@ -289,14 +293,20 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, AutoAssignedUidsPreserv
     auto scaleUid = opNode->attributes.get_scale()->get_uid();
     auto yUid = opNode->attributes.get_y()->get_uid();
 
-    EXPECT_TRUE(uids.count(xUid) > 0) << "X tensor UID " << xUid << " not found in lifted graph";
+    EXPECT_TRUE(uids.count(xUid) > 0)
+        << "X tensor UID " << xUid
+        << " not found in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(scaleUid) > 0)
-        << "Scale tensor UID " << scaleUid << " not found in lifted graph";
-    EXPECT_TRUE(uids.count(yUid) > 0) << "Y tensor UID " << yUid << " not found in lifted graph";
+        << "Scale tensor UID " << scaleUid
+        << " not found in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
+    EXPECT_TRUE(uids.count(yUid) > 0)
+        << "Y tensor UID " << yUid
+        << " not found in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // All three tensor UIDs should be distinct
     const std::unordered_set<int64_t> nodeUids = {xUid, scaleUid, yUid};
-    EXPECT_EQ(nodeUids.size(), 3u) << "Block scale dequantize node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 3u)
+        << "Block scale dequantize node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 } // namespace

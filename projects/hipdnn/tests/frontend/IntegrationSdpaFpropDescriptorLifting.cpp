@@ -121,10 +121,12 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, BasicSdpaFpropRoundTrip)
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* opNode = dynamic_cast<SdpaFpropNode*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a SdpaFpropNode";
+    ASSERT_NE(opNode, nullptr)
+        << "Expected a SdpaFpropNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify diagonal alignment (direct member access, no getter)
     EXPECT_EQ(opNode->attributes.diagonal_alignment, DiagonalAlignment::TOP_LEFT);
@@ -416,14 +418,16 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, AutoAssignedUidsPreservedInRoundTr
 
     // All auto-assigned UIDs should be unique
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 4u) << "Expected exactly 4 tensors with auto-assigned UIDs";
+    ASSERT_EQ(tensorMap.size(), 4u)
+        << "Expected exactly 4 tensors with auto-assigned UIDs"; // NOLINT(readability-implicit-bool-conversion)
 
     std::unordered_set<int64_t> uids;
     for(const auto& [uid, tensor] : tensorMap)
     {
         uids.insert(uid);
     }
-    EXPECT_EQ(uids.size(), tensorMap.size()) << "Auto-assigned tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), tensorMap.size())
+        << "Auto-assigned tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references resolve to tensors in the map
     auto& subNodes = liftedGraph->getSubNodes();

@@ -164,10 +164,10 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BasicBatchnormRoundTrip)
 
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 12u)
-        << "Expected 12 tensors in lifted graph (x, scale, bias, epsilon, "
-           "prevRunMean, prevRunVar, momentum, y, mean, invVariance, "
-           "nextRunMean, nextRunVar)";
+    ASSERT_EQ(tensorMap.size(), 12u) << "Expected 12 tensors in lifted graph (x, scale, bias, "
+                                        "epsilon, " // NOLINT(readability-implicit-bool-conversion)
+                                        "prevRunMean, prevRunVar, momentum, y, mean, invVariance, "
+                                        "nextRunMean, nextRunVar)";
 
     // Verify X tensor
     ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_X_UID), 0u);
@@ -281,10 +281,12 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BasicBatchnormRoundTrip)
 
     // Verify 1 sub-node of the correct type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* bnNode = dynamic_cast<BatchnormNode*>(subNodes[0].get());
-    ASSERT_NE(bnNode, nullptr) << "Expected a BatchnormNode";
+    ASSERT_NE(bnNode, nullptr)
+        << "Expected a BatchnormNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify operation name and compute data type
     EXPECT_EQ(bnNode->attributes.get_name(), "bn_fwd_op");
@@ -350,7 +352,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormLiftWithoutFinalization)
 
     // Verify tensor count
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 12u) << "Expected 12 tensors in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 12u)
+        << "Expected 12 tensors in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the lifted graph has 1 operation node
     auto& subNodes = liftedGraph->getSubNodes();
@@ -435,7 +438,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormMinimalRequiredTensorsRou
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 7u)
-        << "Expected 7 tensors (x, scale, bias, epsilon, y, mean, invVariance)";
+        << "Expected 7 tensors (x, scale, bias, epsilon, y, mean, "
+           "invVariance)"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify required tensor UIDs, names, dims, strides
     ASSERT_NE(tensorMap.count(K_BATCHNORM_MINIMAL_TENSOR_X_UID), 0u);
@@ -484,7 +488,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormMinimalRequiredTensorsRou
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* bnNode = dynamic_cast<BatchnormNode*>(subNodes[0].get());
-    ASSERT_NE(bnNode, nullptr) << "Expected a BatchnormNode";
+    ASSERT_NE(bnNode, nullptr)
+        << "Expected a BatchnormNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(bnNode->attributes.get_name(), "minimal_bn_op");
 
@@ -509,11 +514,13 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormRunningStatsPreserved)
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* bnNode = dynamic_cast<BatchnormNode*>(subNodes[0].get());
-    ASSERT_NE(bnNode, nullptr) << "Expected a BatchnormNode";
+    ASSERT_NE(bnNode, nullptr)
+        << "Expected a BatchnormNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify prev_running_mean
     auto prevRunMean = bnNode->attributes.get_prev_running_mean();
-    ASSERT_NE(prevRunMean, nullptr) << "prev_running_mean should not be null";
+    ASSERT_NE(prevRunMean, nullptr)
+        << "prev_running_mean should not be null"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_EQ(prevRunMean->get_uid(), K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID);
     EXPECT_EQ(prevRunMean->get_name(), "PrevRunMean");
     EXPECT_EQ(prevRunMean->get_dim(), toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
@@ -521,7 +528,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormRunningStatsPreserved)
 
     // Verify prev_running_variance
     auto prevRunVar = bnNode->attributes.get_prev_running_variance();
-    ASSERT_NE(prevRunVar, nullptr) << "prev_running_variance should not be null";
+    ASSERT_NE(prevRunVar, nullptr)
+        << "prev_running_variance should not be null"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_EQ(prevRunVar->get_uid(), K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID);
     EXPECT_EQ(prevRunVar->get_name(), "PrevRunVar");
     EXPECT_EQ(prevRunVar->get_dim(), toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
@@ -529,13 +537,15 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormRunningStatsPreserved)
 
     // Verify momentum (scalar)
     auto momentumTensor = bnNode->attributes.get_momentum();
-    ASSERT_NE(momentumTensor, nullptr) << "momentum should not be null";
+    ASSERT_NE(momentumTensor, nullptr)
+        << "momentum should not be null"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_EQ(momentumTensor->get_uid(), K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID);
     EXPECT_EQ(momentumTensor->get_name(), "Momentum");
 
     // Verify next_running_mean (inferred dims)
     auto nextRunMean = bnNode->attributes.get_next_running_mean();
-    ASSERT_NE(nextRunMean, nullptr) << "next_running_mean should not be null";
+    ASSERT_NE(nextRunMean, nullptr)
+        << "next_running_mean should not be null"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_EQ(nextRunMean->get_uid(), K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID);
     EXPECT_EQ(nextRunMean->get_name(), "NextRunMean");
     EXPECT_FALSE(nextRunMean->get_dim().empty());
@@ -543,7 +553,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormRunningStatsPreserved)
 
     // Verify next_running_variance (inferred dims)
     auto nextRunVar = bnNode->attributes.get_next_running_variance();
-    ASSERT_NE(nextRunVar, nullptr) << "next_running_variance should not be null";
+    ASSERT_NE(nextRunVar, nullptr)
+        << "next_running_variance should not be null"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_EQ(nextRunVar->get_uid(), K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID);
     EXPECT_EQ(nextRunVar->get_name(), "NextRunVar");
     EXPECT_FALSE(nextRunVar->get_dim().empty());
@@ -592,7 +603,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormAutoAssignedUidsPreserved
 
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 7u)
-        << "Expected 7 tensors (x, scale, bias, epsilon, y, mean, invVariance)";
+        << "Expected 7 tensors (x, scale, bias, epsilon, y, mean, "
+           "invVariance)"; // NOLINT(readability-implicit-bool-conversion)
 
     // Collect all UIDs and verify they are distinct
     std::vector<int64_t> uids;
@@ -603,7 +615,7 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormAutoAssignedUidsPreserved
     }
     std::sort(uids.begin(), uids.end());
     EXPECT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "All auto-assigned UIDs must be distinct";
+        << "All auto-assigned UIDs must be distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references tensors with auto-assigned UIDs
     auto& subNodes = liftedGraph->getSubNodes();
@@ -724,7 +736,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormPeerStatsPreserved)
 
     // Verify tensor map includes the 2 peer_stats tensors (12 base + 2 peer = 14)
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 14u) << "Expected 14 tensors (12 base + 2 peer_stats)";
+    ASSERT_EQ(tensorMap.size(), 14u)
+        << "Expected 14 tensors (12 base + 2 peer_stats)"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify peer_stats tensors appear in the tensor map with correct UIDs and names
     ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PEER_STAT_0_UID), 0u);
@@ -751,7 +764,8 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormPeerStatsPreserved)
     ASSERT_NE(bnNode, nullptr);
 
     const auto& liftedPeerStats = bnNode->attributes.get_peer_stats();
-    ASSERT_EQ(liftedPeerStats.size(), 2u) << "Expected 2 peer_stats tensors in lifted node";
+    ASSERT_EQ(liftedPeerStats.size(), 2u)
+        << "Expected 2 peer_stats tensors in lifted node"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(liftedPeerStats[0]->get_uid(), K_BATCHNORM_INTEG_TENSOR_PEER_STAT_0_UID);
     EXPECT_EQ(liftedPeerStats[0]->get_name(), "PeerStat0");

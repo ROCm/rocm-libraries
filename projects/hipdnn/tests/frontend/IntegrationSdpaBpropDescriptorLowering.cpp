@@ -79,7 +79,7 @@ TEST_F(IntegrationSdpaBpropDescriptorLowering, SdpaBpropGraphRoundTrip)
     stats->set_dim(toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS))
         .set_stride(toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES));
 
-    SdpaBackwardAttributes sdpaAttrs;
+    SdpaBackwardAttributes sdpaAttrs; // NOLINT(misc-const-correctness)
     sdpaAttrs.set_name("sdpa_bprop_op");
 
     auto [dq, dk, dv] = graph->sdpa_backward(q, k, v, o, dO, stats, std::move(sdpaAttrs));
@@ -552,7 +552,7 @@ TEST_F(IntegrationSdpaBpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     stats->set_dim(toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS))
         .set_stride(toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES));
 
-    SdpaBackwardAttributes sdpaAttrs;
+    SdpaBackwardAttributes sdpaAttrs; // NOLINT(misc-const-correctness)
 
     auto [dq, dk, dv] = graph->sdpa_backward(q, k, v, o, dO, stats, std::move(sdpaAttrs));
     dq->set_output(true);
@@ -570,7 +570,8 @@ TEST_F(IntegrationSdpaBpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 9u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 9u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The SDPA bprop operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -579,23 +580,32 @@ TEST_F(IntegrationSdpaBpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 
     // All tensor UIDs referenced by the node should exist in the graph tensors
     EXPECT_TRUE(uids.count(sdpa->q_tensor_uid) > 0)
-        << "Q tensor UID " << sdpa->q_tensor_uid << " not found in graph tensors";
+        << "Q tensor UID " << sdpa->q_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(sdpa->k_tensor_uid) > 0)
-        << "K tensor UID " << sdpa->k_tensor_uid << " not found in graph tensors";
+        << "K tensor UID " << sdpa->k_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(sdpa->v_tensor_uid) > 0)
-        << "V tensor UID " << sdpa->v_tensor_uid << " not found in graph tensors";
+        << "V tensor UID " << sdpa->v_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(sdpa->o_tensor_uid) > 0)
-        << "O tensor UID " << sdpa->o_tensor_uid << " not found in graph tensors";
+        << "O tensor UID " << sdpa->o_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(sdpa->do_tensor_uid) > 0)
-        << "dO tensor UID " << sdpa->do_tensor_uid << " not found in graph tensors";
+        << "dO tensor UID " << sdpa->do_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(sdpa->stats_tensor_uid) > 0)
-        << "Stats tensor UID " << sdpa->stats_tensor_uid << " not found in graph tensors";
+        << "Stats tensor UID " << sdpa->stats_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(sdpa->dq_tensor_uid) > 0)
-        << "dQ tensor UID " << sdpa->dq_tensor_uid << " not found in graph tensors";
+        << "dQ tensor UID " << sdpa->dq_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(sdpa->dk_tensor_uid) > 0)
-        << "dK tensor UID " << sdpa->dk_tensor_uid << " not found in graph tensors";
+        << "dK tensor UID " << sdpa->dk_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(sdpa->dv_tensor_uid) > 0)
-        << "dV tensor UID " << sdpa->dv_tensor_uid << " not found in graph tensors";
+        << "dV tensor UID " << sdpa->dv_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All nine required tensor UIDs referenced by the node should be distinct
     const std::unordered_set<int64_t> nodeUids = {sdpa->q_tensor_uid,
@@ -607,7 +617,8 @@ TEST_F(IntegrationSdpaBpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
                                                   sdpa->dq_tensor_uid,
                                                   sdpa->dk_tensor_uid,
                                                   sdpa->dv_tensor_uid};
-    EXPECT_EQ(nodeUids.size(), 9u) << "SDPA bprop node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 9u)
+        << "SDPA bprop node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 } // namespace

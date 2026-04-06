@@ -83,7 +83,8 @@ TEST_F(IntegrationGraphLifting, ConvFpropRoundTripViaCApi)
 
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors (X, W, Y) in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 3u)
+        << "Expected 3 tensors (X, W, Y) in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify X tensor
     ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
@@ -108,11 +109,13 @@ TEST_F(IntegrationGraphLifting, ConvFpropRoundTripViaCApi)
 
     // Verify the lifted graph has the correct number of sub-nodes
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Access the conv fprop node and verify convolution parameters
     auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
-    ASSERT_NE(convNode, nullptr) << "Expected a ConvolutionFpropNode";
+    ASSERT_NE(convNode, nullptr)
+        << "Expected a ConvolutionFpropNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
     EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_CONV_POST_PADDING));
@@ -133,9 +136,12 @@ TEST_F(IntegrationGraphLifting, ConvFpropTensorSharingPreserved)
 
     // All tensors should be accessible by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    EXPECT_NE(tensorMap.count(K_TENSOR_X_UID), 0u) << "X tensor not found by UID";
-    EXPECT_NE(tensorMap.count(K_TENSOR_W_UID), 0u) << "W tensor not found by UID";
-    EXPECT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u) << "Y tensor not found by UID";
+    EXPECT_NE(tensorMap.count(K_TENSOR_X_UID), 0u)
+        << "X tensor not found by UID"; // NOLINT(readability-implicit-bool-conversion)
+    EXPECT_NE(tensorMap.count(K_TENSOR_W_UID), 0u)
+        << "W tensor not found by UID"; // NOLINT(readability-implicit-bool-conversion)
+    EXPECT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u)
+        << "Y tensor not found by UID"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references the same tensor objects via UID
     auto& subNodes = liftedGraph->getSubNodes();
@@ -166,7 +172,8 @@ TEST_F(IntegrationGraphLifting, PreferredEngineIdPreservedThroughCApi)
     ASSERT_NE(liftedGraph, nullptr);
 
     auto liftedEngineId = liftedGraph->get_preferred_engine_id_ext();
-    ASSERT_TRUE(liftedEngineId.has_value()) << "Preferred engine ID should be set after lifting";
+    ASSERT_TRUE(liftedEngineId.has_value())
+        << "Preferred engine ID should be set after lifting"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_EQ(liftedEngineId.value(), K_PREFERRED_ENGINE_ID);
 }
 
@@ -176,7 +183,7 @@ TEST_F(IntegrationGraphLifting, NullDescriptorReturnsError)
     auto graph = std::make_shared<TestableGraphLifting>();
     auto result = graph->fromBackendDescriptor(nullptr);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
-        << "fromBackendDescriptor(nullptr) should return INVALID_VALUE";
+        << "fromBackendDescriptor(nullptr) should return INVALID_VALUE"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 // Builds a graph with FLOAT compute, HALF intermediate, and BFLOAT16 io data types,
@@ -332,7 +339,8 @@ TEST_F(IntegrationGraphLifting, EmptyGraphDescriptorReturnsError)
     auto graph = std::make_shared<TestableGraphLifting>();
     auto result = graph->fromBackendDescriptor(desc);
     EXPECT_NE(result.code, ErrorCode::OK)
-        << "fromBackendDescriptor should fail on a descriptor with no operations";
+        << "fromBackendDescriptor should fail on a descriptor "
+           "with no operations"; // NOLINT(readability-implicit-bool-conversion)
 
     hipdnnBackendDestroyDescriptor(desc);
 }
@@ -345,7 +353,8 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendCorruptDataReturnsError)
 
     auto graph = std::make_shared<TestableGraphLifting>();
     auto result = graph->deserialize_via_backend(_handle, garbage);
-    EXPECT_NE(result.code, ErrorCode::OK) << "deserialize_via_backend should fail on corrupt data";
+    EXPECT_NE(result.code, ErrorCode::OK)
+        << "deserialize_via_backend should fail on corrupt data"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 // Verifies that deserialize_via_backend returns an error (not a crash) when
@@ -356,7 +365,8 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendEmptyDataReturnsError)
 
     auto graph = std::make_shared<TestableGraphLifting>();
     auto result = graph->deserialize_via_backend(_handle, empty);
-    EXPECT_NE(result.code, ErrorCode::OK) << "deserialize_via_backend should fail on empty data";
+    EXPECT_NE(result.code, ErrorCode::OK)
+        << "deserialize_via_backend should fail on empty data"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 // Verifies that the graph name survives the C-API round-trip (lower -> lift).

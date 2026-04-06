@@ -220,7 +220,8 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLowering, AutoAssignedUidsPreserve
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 6u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 6u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The batchnorm inference operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -229,18 +230,24 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLowering, AutoAssignedUidsPreserve
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(bnInf->x_tensor_uid) > 0)
-        << "X tensor UID " << bnInf->x_tensor_uid << " not found in graph tensors";
+        << "X tensor UID " << bnInf->x_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnInf->mean_tensor_uid) > 0)
-        << "Mean tensor UID " << bnInf->mean_tensor_uid << " not found in graph tensors";
+        << "Mean tensor UID " << bnInf->mean_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnInf->inv_variance_tensor_uid) > 0)
-        << "InvVariance tensor UID " << bnInf->inv_variance_tensor_uid
-        << " not found in graph tensors";
+        << "InvVariance tensor UID "
+        << bnInf->inv_variance_tensor_uid // NOLINT(readability-implicit-bool-conversion)
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnInf->scale_tensor_uid) > 0)
-        << "Scale tensor UID " << bnInf->scale_tensor_uid << " not found in graph tensors";
+        << "Scale tensor UID " << bnInf->scale_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnInf->bias_tensor_uid) > 0)
-        << "Bias tensor UID " << bnInf->bias_tensor_uid << " not found in graph tensors";
+        << "Bias tensor UID " << bnInf->bias_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnInf->y_tensor_uid) > 0)
-        << "Y tensor UID " << bnInf->y_tensor_uid << " not found in graph tensors";
+        << "Y tensor UID " << bnInf->y_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All six tensor UIDs referenced by the node should be distinct
     const std::unordered_set<int64_t> nodeUids = {bnInf->x_tensor_uid,
@@ -249,7 +256,8 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLowering, AutoAssignedUidsPreserve
                                                   bnInf->scale_tensor_uid,
                                                   bnInf->bias_tensor_uid,
                                                   bnInf->y_tensor_uid};
-    EXPECT_EQ(nodeUids.size(), 6u) << "Batchnorm inference node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 6u)
+        << "Batchnorm inference node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 } // namespace

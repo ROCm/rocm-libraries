@@ -109,10 +109,12 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, BasicConvolutionWrwRoundTri
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* opNode = dynamic_cast<ConvolutionWgradNode*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a ConvolutionWgradNode";
+    ASSERT_NE(opNode, nullptr)
+        << "Expected a ConvolutionWgradNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify mode
     EXPECT_EQ(opNode->attributes.get_convolution_mode(), ConvolutionMode::CONVOLUTION);
@@ -253,7 +255,8 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, AutoAssignedUidsPreservedIn
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 3u)
+        << "Expected 3 tensors in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Collect all UIDs and verify they are distinct
     std::vector<int64_t> uids;
@@ -264,7 +267,7 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, AutoAssignedUidsPreservedIn
     }
     std::sort(uids.begin(), uids.end());
     EXPECT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "All auto-assigned UIDs must be distinct";
+        << "All auto-assigned UIDs must be distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references tensors with auto-assigned UIDs
     auto& subNodes = liftedGraph->getSubNodes();
@@ -326,7 +329,8 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, AsymmetricPaddingPreservedI
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* opNode = dynamic_cast<ConvolutionWgradNode*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a ConvolutionWgradNode";
+    ASSERT_NE(opNode, nullptr)
+        << "Expected a ConvolutionWgradNode"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(opNode->attributes.get_pre_padding(), toVec(K_ASYM_PRE_PADDING));
     EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_ASYM_POST_PADDING));

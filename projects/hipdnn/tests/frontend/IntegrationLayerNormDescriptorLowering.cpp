@@ -235,7 +235,8 @@ TEST_F(IntegrationLayerNormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 7u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 7u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The layernorm operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -244,23 +245,31 @@ TEST_F(IntegrationLayerNormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(layernorm->x_tensor_uid) > 0)
-        << "X tensor UID " << layernorm->x_tensor_uid << " not found in graph tensors";
+        << "X tensor UID " << layernorm->x_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(layernorm->scale_tensor_uid) > 0)
-        << "Scale tensor UID " << layernorm->scale_tensor_uid << " not found in graph tensors";
+        << "Scale tensor UID " << layernorm->scale_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(layernorm->bias_tensor_uid) > 0)
-        << "Bias tensor UID " << layernorm->bias_tensor_uid << " not found in graph tensors";
+        << "Bias tensor UID " << layernorm->bias_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(layernorm->epsilon_tensor_uid) > 0)
-        << "Epsilon tensor UID " << layernorm->epsilon_tensor_uid << " not found in graph tensors";
+        << "Epsilon tensor UID " << layernorm->epsilon_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(layernorm->y_tensor_uid) > 0)
-        << "Y tensor UID " << layernorm->y_tensor_uid << " not found in graph tensors";
+        << "Y tensor UID " << layernorm->y_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(layernorm->mean_tensor_uid.has_value());
     EXPECT_TRUE(uids.count(layernorm->mean_tensor_uid.value()) > 0)
-        << "Mean tensor UID " << layernorm->mean_tensor_uid.value()
-        << " not found in graph tensors";
+        << "Mean tensor UID "
+        << layernorm->mean_tensor_uid.value() // NOLINT(readability-implicit-bool-conversion)
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(layernorm->inv_variance_tensor_uid.has_value());
     EXPECT_TRUE(uids.count(layernorm->inv_variance_tensor_uid.value()) > 0)
-        << "InvVariance tensor UID " << layernorm->inv_variance_tensor_uid.value()
-        << " not found in graph tensors";
+        << "InvVariance tensor UID "
+        << layernorm->inv_variance_tensor_uid
+               .value() // NOLINT(readability-implicit-bool-conversion)
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All tensor UIDs referenced by the node should be distinct
     const std::unordered_set<int64_t> nodeUids = {layernorm->x_tensor_uid,
@@ -270,7 +279,8 @@ TEST_F(IntegrationLayerNormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
                                                   layernorm->y_tensor_uid,
                                                   layernorm->mean_tensor_uid.value(),
                                                   layernorm->inv_variance_tensor_uid.value()};
-    EXPECT_EQ(nodeUids.size(), 7u) << "LayerNorm node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 7u)
+        << "LayerNorm node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 // Inference mode: mean and inv_variance should not appear in the serialized graph.

@@ -199,7 +199,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
     // dy, x, scale, mean, invVar, dx, dscale, dbias = 8
-    ASSERT_EQ(tensorMap.size(), 8u) << "Expected 8 tensors in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 8u)
+        << "Expected 8 tensors in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // DY tensor
     ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DY_UID), 0u);
@@ -272,10 +273,12 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
 
     // Verify 1 sub-node of the correct type
     auto& subNodes = liftedGraph->getSubNodes();
-    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+    ASSERT_EQ(subNodes.size(), 1u)
+        << "Expected 1 operation node in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto* bnBwdNode = dynamic_cast<BatchnormBackwardNode*>(subNodes[0].get());
-    ASSERT_NE(bnBwdNode, nullptr) << "Expected a BatchnormBackwardNode";
+    ASSERT_NE(bnBwdNode, nullptr)
+        << "Expected a BatchnormBackwardNode"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify operation name and compute data type
     EXPECT_EQ(bnBwdNode->attributes.get_name(), "bn_bwd_op");
@@ -326,7 +329,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardLiftWitho
     EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 8u) << "Expected 8 tensors in lifted graph";
+    ASSERT_EQ(tensorMap.size(), 8u)
+        << "Expected 8 tensors in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
@@ -386,7 +390,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting,
     auto tensorMap = liftedGraph->getTensorsByUid();
     // dy, x, scale, dx, dscale, dbias = 6 (no mean/invVariance)
     ASSERT_EQ(tensorMap.size(), 6u)
-        << "Expected 6 tensors in minimal lifted graph (no mean/invVariance)";
+        << "Expected 6 tensors in minimal lifted graph (no "
+           "mean/invVariance)"; // NOLINT(readability-implicit-bool-conversion)
 
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
@@ -416,7 +421,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardPeerStats
 
     // Verify tensor map includes the 2 peer_stats tensors (8 base + 2 peer = 10)
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 10u) << "Expected 10 tensors (8 base + 2 peer_stats)";
+    ASSERT_EQ(tensorMap.size(), 10u)
+        << "Expected 10 tensors (8 base + 2 peer_stats)"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify peer_stats tensors appear in the tensor map with correct UIDs, names, dims, strides
     ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_PEER_STAT_0_UID), 0u);
@@ -443,7 +449,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardPeerStats
     ASSERT_NE(bnBwdNode, nullptr);
 
     const auto& liftedPeerStats = bnBwdNode->attributes.get_peer_stats();
-    ASSERT_EQ(liftedPeerStats.size(), 2u) << "Expected 2 peer_stats tensors in lifted node";
+    ASSERT_EQ(liftedPeerStats.size(), 2u)
+        << "Expected 2 peer_stats tensors in lifted node"; // NOLINT(readability-implicit-bool-conversion)
 
     EXPECT_EQ(liftedPeerStats[0]->get_uid(), K_BN_BWD_INTEG_TENSOR_PEER_STAT_0_UID);
     EXPECT_EQ(liftedPeerStats[0]->get_name(), "PeerStat0");
@@ -491,7 +498,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardAutoAssig
 
     auto tensorMap = liftedGraph->getTensorsByUid();
     // dy, x, scale, dx, dscale, dbias = 6 tensors (no optional mean/invVariance)
-    ASSERT_EQ(tensorMap.size(), 6u) << "Expected 6 tensors (dy, x, scale, dx, dscale, dbias)";
+    ASSERT_EQ(tensorMap.size(), 6u)
+        << "Expected 6 tensors (dy, x, scale, dx, dscale, dbias)"; // NOLINT(readability-implicit-bool-conversion)
 
     // Collect all UIDs and verify they are distinct
     std::vector<int64_t> uids;
@@ -502,7 +510,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardAutoAssig
     }
     std::sort(uids.begin(), uids.end());
     EXPECT_EQ(std::adjacent_find(uids.begin(), uids.end()), uids.end())
-        << "All auto-assigned UIDs must be distinct";
+        << "All auto-assigned UIDs must be distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify the node references tensors with auto-assigned UIDs
     auto& subNodes = liftedGraph->getSubNodes();

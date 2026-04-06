@@ -92,7 +92,8 @@ protected:
         auto it = std::find_if(loadedPaths.begin(), loadedPaths.end(), [](const auto& path) {
             return path.string().find(TEST_KNOBS_PLUGIN_NAME) != std::string::npos;
         });
-        ASSERT_NE(it, loadedPaths.end()) << "TestKnobsPlugin not found in loaded plugins";
+        ASSERT_NE(it, loadedPaths.end())
+            << "TestKnobsPlugin not found in loaded plugins"; // NOLINT(readability-implicit-bool-conversion)
 
         _knobRecorder = std::make_unique<hipdnn_tests::TestPluginKnobRecorder>(*it);
         _knobRecorder->reset();
