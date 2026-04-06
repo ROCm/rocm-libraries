@@ -4,25 +4,19 @@
 
 .. _hip-execution-policies:
 
-******************************************
-rocThrust execution policies
-******************************************
+*********************************************************
+rocThrust parallel non-deterministic execution policies
+*********************************************************
 
-rocThrust provides five different execution policies:
-
-* ``thrust::host``:  Algorithms run in parallel on the host CPU backend. 
-
-* ``thrust::device``:  Algorithms run on the device backend. When the HIP backend is used, ``thrust::device`` defaults to ``thrust::hip::par``.
-
-* ``thrust::seq``: Algorithms run sequentially in the current thread. 
+rocThrust provides two parallel non-deterministic execution policies:
 
 * ``hip_rocprim::par``: Algorithms run in parallel on the device. The host blocks on each algorithm running on the GPU, waiting for each to finish before launching the next.
 
-* ``hip_rocprim::par_nosync``: Algorithms run in parallel on the device. The host doesn't block on the algorithms running on the GPU and can perform other work while waiting for the GPU to finish running the algorithms. The host and device must be explicitly synchronized before the host-side results can be accessed.
+* ``hip_rocprim::par_nosync``: Algorithms run in parallel on the device. The host doesn't block on the algorithms running on the GPU and can perform other work while waiting for the GPU to finish running the algorithms. The host and device must be explicitly synchronized if results are left on the device.
 
 For example, when using the ``hip_rocprim::par`` policy, ``thrust::count`` and ``thrust::reduce`` are both blocking with respect to the host, and their results on the host are available without any explicit synchronization:
 
-.. code-block:: cpp
+.. code:: cpp
 
   auto par_policy = thrust::hip_rocprim::par;
   int count = thrust::count(par_policy, d_vec1.begin(), d_vec1.end(), 50);
@@ -32,7 +26,7 @@ For example, when using the ``hip_rocprim::par`` policy, ``thrust::count`` and `
   std::cout << "count: " << count << std::endl;
   std::cout << "reduction: " << reduction << std::endl;
 
-When using the ``hip_rocprim::par_nosync`` policy, ``thrust::count`` and ``thrust::reduce`` are asynchronous with respect to the host. The host can do other work while the algorithms are running on the device. ``hipDeviceSynchronize()`` must be called to synchronize the host and the device before results can be accessed:
+When using the ``hip_rocprim::par_nosync`` policy, ``thrust::count`` and ``thrust::reduce`` are asynchronous with respect to the host. The host can do other work while the algorithms are running on the device. ``hipDeviceSynchronize()`` should be called to ensure synchronization before accessing results:
 
 .. code:: cpp
 
