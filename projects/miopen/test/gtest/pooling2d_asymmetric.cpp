@@ -3,6 +3,8 @@
 
 #include "pooling_common.hpp"
 
+#define WORKAROUND_ISSUE_1670 0
+
 namespace {
 
 using PoolingTestCase = pooling_gtest::PoolingTestCase;
@@ -23,7 +25,11 @@ std::vector<PoolingTestCase> GetAsymPooling2dTestCases()
     std::vector<std::vector<int>> dataset1_inputs  = {{1, 4, 4, 4}};
     std::vector<std::vector<int>> dataset1_lens    = {{2, 2}, {1, 2}, {2, 1}};
     std::vector<std::vector<int>> dataset1_strides = {{1, 1}, {2, 1}, {1, 2}, {2, 2}};
-    std::vector<std::vector<int>> dataset1_pads    = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
+#if WORKAROUND_ISSUE_1670
+    std::vector<std::vector<int>> dataset1_pads = {{0, 0}};
+#else
+    std::vector<std::vector<int>> dataset1_pads = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
+#endif
 
     std::vector<miopenIndexType_t> index_types = {
         miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
