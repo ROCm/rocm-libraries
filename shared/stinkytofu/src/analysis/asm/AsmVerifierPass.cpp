@@ -25,6 +25,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <sstream>
 
@@ -142,6 +143,65 @@ namespace stinkytofu
     }
 
     // ===========================================================================
+    // Read-write operand validation
+    // ===========================================================================
+
+    static std::string checkReadWriteOperands(const StinkyInstruction* inst)
+    {
+        const HwInstDesc* hwDesc = inst->getHwInstDesc();
+        if(!hwDesc || !hwDesc->mnemonic)
+            return "";
+
+        if(hwDesc->operandFields.empty())
+            return "";
+
+        const auto& destRegs = inst->getDestRegs();
+        const auto& srcRegs  = inst->getSrcRegs();
+
+        std::stringstream errors;
+        unsigned          destIdx = 0, srcIdx = 0;
+
+        for(const auto& field : hwDesc->operandFields)
+        {
+            if(!field.isReadWrite)
+            {
+                if(field.isDest)
+                    destIdx++;
+                else
+                    srcIdx++;
+                continue;
+            }
+
+            const StinkyRegister* reg = nullptr;
+            if(field.isDest && destIdx < destRegs.size())
+            {
+                reg = &destRegs[destIdx];
+                destIdx++;
+            }
+            else if(srcIdx < srcRegs.size())
+            {
+                reg = &srcRegs[srcIdx];
+                srcIdx++;
+            }
+
+            if(!reg || reg->dataType != StinkyRegister::Type::Register)
+                continue;
+
+            bool inDest = std::find(destRegs.begin(), destRegs.end(), *reg) != destRegs.end();
+            bool inSrc  = std::find(srcRegs.begin(), srcRegs.end(), *reg) != srcRegs.end();
+
+            if(!inDest || !inSrc)
+            {
+                errors << "Instruction '" << hwDesc->mnemonic << "' has read-write field '"
+                       << static_cast<int>(field.encodeField) << "' with register that is missing "
+                       << "from " << (!inDest ? "destRegs" : "srcRegs") << "\n";
+            }
+        }
+
+        return errors.str();
+    }
+
+    // ===========================================================================
     // StinkyTofu Assembly IR validation (ASM pipeline only)
     // ===========================================================================
 
@@ -163,6 +223,7 @@ namespace stinkytofu
         size_t            totalBlocks   = 0;
         size_t            invalidHwDesc = 0;
         std::stringstream widthErrors;
+        std::stringstream rwErrors;
 
         for(BasicBlock& bb : func)
         {
@@ -184,11 +245,20 @@ namespace stinkytofu
                     {
                         invalidHwDesc++;
                     }
-                    else if(config.checkRegisterWidths)
+                    else
                     {
-                        std::string widthError = checkRegisterWidths(stinkyInst, config);
-                        if(!widthError.empty())
-                            widthErrors << widthError;
+                        if(config.checkRegisterWidths)
+                        {
+                            std::string widthError = checkRegisterWidths(stinkyInst, config);
+                            if(!widthError.empty())
+                                widthErrors << widthError;
+                        }
+                        if(config.checkReadWriteOperands)
+                        {
+                            std::string rwError = checkReadWriteOperands(stinkyInst);
+                            if(!rwError.empty())
+                                rwErrors << rwError;
+                        }
                     }
                 }
             }
@@ -218,6 +288,14 @@ namespace stinkytofu
         {
             std::stringstream ss;
             ss << "Register width validation failed:\n" << widthErrorStr;
+            return ss.str();
+        }
+
+        std::string rwErrorStr = rwErrors.str();
+        if(!rwErrorStr.empty())
+        {
+            std::stringstream ss;
+            ss << "Read-write operand validation failed:\n" << rwErrorStr;
             return ss.str();
         }
 

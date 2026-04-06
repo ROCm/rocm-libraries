@@ -321,10 +321,10 @@ namespace
             MemoryOperationState currentBlockState;
             WaitInsertionList    instructionsNeedWait;
 
-            int lastDSWaitCount     = WaitCntInstruction::kUnused;
-            int lastDSCount         = -1;
-            int lastBufferWaitCount = WaitCntInstruction::kUnused;
-            int lastBufferCount     = -1;
+            int lastDSWaitCount                   = WaitCntInstruction::kUnused;
+            int incrementDSCountAfterLastWait     = 0;
+            int lastBufferWaitCount               = WaitCntInstruction::kUnused;
+            int incrementBufferCountAfterLastWait = 0;
             for(auto it = bb.begin(); it != bb.end(); ++it)
             {
                 StinkyInstruction* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -333,8 +333,15 @@ namespace
                     continue;
                 }
 
-                currentBlockState.recordDSOperation(inst);
-                currentBlockState.recordBufferOperation(inst);
+                if(currentBlockState.recordDSOperation(inst))
+                {
+                    incrementDSCountAfterLastWait += 1;
+                }
+
+                if(currentBlockState.recordBufferOperation(inst))
+                {
+                    incrementBufferCountAfterLastWait += 1;
+                }
 
                 // if barrier has memTokens, check if currentBlockState has any token in barrier memTokens
                 // if yes, insert ds wait 0 and clear currentBlockState.dsMemTokens and currentBlockState.dsQueue
@@ -357,8 +364,8 @@ namespace
                             // insert ds wait 0
                             instructionsNeedWait.emplace_back(
                                 inst, WaitCntInstruction(0, WaitCntInstruction::kUnused));
-                            lastDSWaitCount = 0;
-                            lastDSCount     = 0;
+                            lastDSWaitCount               = 0;
+                            incrementDSCountAfterLastWait = 0;
                             currentBlockState.dsMemTokens.clear();
                             currentBlockState.dsQueue.clear();
                             continue;
@@ -426,14 +433,14 @@ namespace
                                                                dsCountFromPredecessor.end());
                     }
 
-                    if(dsCountBeforeInst != lastDSWaitCount
-                       || lastDSCount != currentBlockState.getDSCountToComplete())
+                    if(lastDSWaitCount == WaitCntInstruction::kUnused
+                       || lastDSWaitCount + incrementDSCountAfterLastWait > dsCountBeforeInst)
                     {
                         instructionsNeedWait.emplace_back(
                             inst,
                             WaitCntInstruction(dsCountBeforeInst, WaitCntInstruction::kUnused));
-                        lastDSWaitCount = dsCountBeforeInst;
-                        lastDSCount     = currentBlockState.getDSCountToComplete();
+                        lastDSWaitCount               = dsCountBeforeInst;
+                        incrementDSCountAfterLastWait = 0;
                     }
                 }
 
@@ -445,14 +452,15 @@ namespace
                             bufferCountFromPredecessor.begin(), bufferCountFromPredecessor.end());
                     }
 
-                    if(bufferCountBeforeInst != lastBufferWaitCount
-                       || lastBufferCount != currentBlockState.getBufferCountToComplete())
+                    if(lastBufferWaitCount == WaitCntInstruction::kUnused
+                       || lastBufferWaitCount + incrementBufferCountAfterLastWait
+                              > bufferCountBeforeInst)
                     {
                         instructionsNeedWait.emplace_back(
                             inst,
                             WaitCntInstruction(WaitCntInstruction::kUnused, bufferCountBeforeInst));
-                        lastBufferWaitCount = bufferCountBeforeInst;
-                        lastBufferCount     = currentBlockState.getBufferCountToComplete();
+                        lastBufferWaitCount               = bufferCountBeforeInst;
+                        incrementBufferCountAfterLastWait = 0;
                     }
                 }
             }
@@ -541,21 +549,10 @@ namespace
             std::unordered_set<std::string> processedLabels
                 = {"label_LoopBeginL", "label_LoopEndL"};
 
-            std::deque<StinkyInstruction*> tensorLoads;
             traverseCFGInRPO(func, [&](BasicBlock* bb) {
                 if(!passCtx.shouldProcessBasicBlock(*bb))
                 {
                     return;
-                }
-
-                // collect tensor_load
-                for(auto it = bb->begin(); it != bb->end(); ++it)
-                {
-                    auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                    if(inst && isTensorLoad(*inst) && inst->getModifier<MemTokenData>() != nullptr)
-                    {
-                        tensorLoads.push_back(inst);
-                    }
                 }
 
                 if(processedLabels.find(bb->getLabel()) == processedLabels.end())
@@ -577,6 +574,7 @@ namespace
                 }
             });
 
+            std::deque<StinkyInstruction*> tensorLoads;
             traverseCFGInRPO(func, [&](BasicBlock* bb) {
                 if(!passCtx.shouldProcessBasicBlock(*bb))
                 {
@@ -587,6 +585,11 @@ namespace
                 for(auto it = bb->begin(); it != bb->end(); ++it)
                 {
                     auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                    if(inst && isTensorLoad(*inst) && inst->getModifier<MemTokenData>() != nullptr)
+                    {
+                        tensorLoads.push_back(inst);
+                    }
+
                     if(inst && isBarrier(*inst))
                     {
                         if(tensorLoads.empty())
@@ -615,7 +618,7 @@ namespace
                                     inst,
                                     WaitCntInstruction(WaitCntInstruction::kUnused,
                                                        WaitCntInstruction::kUnused,
-                                                       0));
+                                                       tensorLoads.size()));
                             }
                         }
                     }
@@ -800,19 +803,18 @@ namespace
                 {
                     return;
                 }
-                while(!bb->empty())
+
+                for(auto it = bb->begin(); it != bb->end();)
                 {
-                    IRBase& ir = *bb->begin();
-                    if(ir.getType() != IRBase::IRType::StinkyTofu)
+                    auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                    if(inst && inst->getUnifiedOpcode() == GFX::PHI)
                     {
-                        break;
+                        it = bb->eraseIR(it);
                     }
-                    auto* inst = cast<StinkyInstruction>(&ir);
-                    if(inst->getUnifiedOpcode() != GFX::PHI)
+                    else
                     {
-                        break;
+                        ++it;
                     }
-                    ir.erase();
                 }
             });
         }
