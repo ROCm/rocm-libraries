@@ -48,6 +48,22 @@ examples are:
    their relative order. The LDS address is subsequently read and used
    by a third thread.
 
+## Architecture: race and emulator separation
+
+The race detection logic and the instruction emulator are kept as
+separate as possible. The emulator (instruction executors, Wave, parsing)
+does not depend on any race detection classes (RaceDetector,
+WaveRaceState). Communication between the two layers happens through
+plain data types (PendingMemoryEvent, PendingWaitCount) that the
+emulator writes and the Workgroup dispatches to the race detector.
+
+This separation has a practical goal: the race detection layer should be
+reusable with a different emulator backend without carrying instruction
+emulation as a dependency. The current long-term plan is to integrate
+the race detection as a sanitizer in
+[rocjitsu](https://github.com/ROCm/rocm-systems/pull/4335), an
+LLVM-based GPU JIT and emulation framework.
+
 ## Maybe goals
 
 - Make the analysis value sensitive. For example in case (2) above if
