@@ -226,8 +226,10 @@ namespace rocsparse
         const double tolerance
             = (tolerance_datatype == rocsparse_datatype_f64_r) ? tolerance_64 : tolerance_32;
 
-        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(boost_enable, is_tol_host_mode, boost_tol_32);
-        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(boost_enable, is_tol_host_mode, boost_tol_64);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
+            boost_enable && (boost_tol_size == sizeof(float)), is_tol_host_mode, boost_tol_32);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
+            boost_enable && (boost_tol_size == sizeof(double)), is_tol_host_mode, boost_tol_64);
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(boost_enable, is_val_host_mode, boost_val);
 
         const double boost_tol = (boost_tol_size == sizeof(double)) ? boost_tol_64 : boost_tol_32;
@@ -279,8 +281,12 @@ namespace rocsparse
         const auto boost_tol_pointer_mode = boost->get_tol_pointer_mode();
         const auto boost_val_pointer_mode = boost->get_val_pointer_mode();
 
-        const float*  boost_tol_32 = reinterpret_cast<const float*>(boost->get_tol());
-        const double* boost_tol_64 = reinterpret_cast<const double*>(boost->get_tol());
+        const float*  boost_tol_32 = (boost_tol_size == sizeof(float))
+                                         ? reinterpret_cast<const float*>(boost->get_tol())
+                                         : nullptr;
+        const double* boost_tol_64 = (boost_tol_size == sizeof(double))
+                                         ? reinterpret_cast<const double*>(boost->get_tol())
+                                         : nullptr;
         const T*      boost_val    = reinterpret_cast<const T*>(boost->get_val());
 
         dim3 csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1, A->batch_count);

@@ -72,6 +72,11 @@ public:
     {
     }
 
+    std::vector<int64_t> getOutputTensorIds() const override
+    {
+        return {_params.out0Tensor.uid};
+    }
+
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
         if(_params.reluLowerClip.has_value() || _params.reluUpperClip.has_value()
