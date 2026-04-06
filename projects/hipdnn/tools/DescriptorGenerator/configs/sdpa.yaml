@@ -517,6 +517,7 @@ operation:
 
   test_data:
     constants_include: "SdpaFpropConstants"
+    tensor_const_prefix: "K_SDPA_"
     tensor_uids:
       q: 1800
       k: 1801

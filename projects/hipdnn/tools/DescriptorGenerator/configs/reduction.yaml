@@ -104,6 +104,8 @@ operation:
   operation_type_enum: "HIPDNN_OPERATION_TYPE_REDUCTION"
 
   test_data:
+    constants_include: "ReductionConstants"
+    tensor_const_prefix: "K_REDUCTION_"
     tensor_uids: { x: 1700, y: 1701 }
     tensor_configs:
       x: { dims: [2, 3, 4, 4], strides: [48, 16, 4, 1] }

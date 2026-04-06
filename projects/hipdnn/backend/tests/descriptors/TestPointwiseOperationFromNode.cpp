@@ -14,6 +14,7 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/PointwiseConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <memory>
 #include <optional>
@@ -21,6 +22,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_data_sdk::data_objects;
+using hipdnn_tests::toVec;
 using namespace hipdnn_tests::constants;
 
 // =============================================================================
@@ -37,15 +39,15 @@ protected:
         TensorAttributesT in0Attrs;
         in0Attrs.uid = K_PW_TENSOR_IN0_UID;
         in0Attrs.data_type = DataType::FLOAT;
-        in0Attrs.dims = {1, 64, 32, 32};
-        in0Attrs.strides = {65536, 1024, 32, 1};
+        in0Attrs.dims = toVec(K_PW_TENSOR_DIMS);
+        in0Attrs.strides = toVec(K_PW_TENSOR_STRIDES);
 
         _tensorMap[K_PW_TENSOR_IN0_UID] = TensorDescriptor::fromFlatBuffer(in0Attrs);
         TensorAttributesT out0Attrs;
         out0Attrs.uid = K_PW_TENSOR_OUT0_UID;
         out0Attrs.data_type = DataType::FLOAT;
-        out0Attrs.dims = {1, 64, 32, 32};
-        out0Attrs.strides = {65536, 1024, 32, 1};
+        out0Attrs.dims = toVec(K_PW_TENSOR_DIMS);
+        out0Attrs.strides = toVec(K_PW_TENSOR_STRIDES);
 
         _tensorMap[K_PW_TENSOR_OUT0_UID] = TensorDescriptor::fromFlatBuffer(out0Attrs);
         TensorAttributesT in1Attrs;

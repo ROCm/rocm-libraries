@@ -365,6 +365,7 @@ class TestData:
     tensor_configs: dict[str, TensorConfig] = field(default_factory=dict)
     field_values: dict[str, list] = field(default_factory=dict)
     constants_include: str = ""
+    tensor_const_prefix: Optional[str] = None
 
 
 @dataclass
@@ -896,9 +897,12 @@ class OperationConfig:
     def tensor_const_prefix(self) -> str:
         """Prefix for tensor constant names.
 
-        Returns 'K_' for pre-existing constants headers (backward compatible),
+        Returns the explicit override from test_data if set, otherwise
+        'K_' for pre-existing constants headers (backward compatible),
         'K_{NAME}_' for new operations (avoids collisions).
         """
+        if self.test_data and self.test_data.tensor_const_prefix:
+            return self.test_data.tensor_const_prefix
         if self.test_data and self.test_data.constants_include:
             return "K_"
         return f"K_{self.name.upper()}_"

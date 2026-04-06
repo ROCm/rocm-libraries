@@ -80,7 +80,7 @@ protected:
 
         auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_BN_BWD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-        x->set_dim(toVec(K_BN_BWD_TENSOR_DY_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_DY_STRIDES));
+        x->set_dim(toVec(K_BN_BWD_TENSOR_X_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_X_STRIDES));
 
         auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_BN_BWD_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
@@ -126,7 +126,7 @@ protected:
 
         auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_BN_BWD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-        x->set_dim(toVec(K_BN_BWD_TENSOR_DY_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_DY_STRIDES));
+        x->set_dim(toVec(K_BN_BWD_TENSOR_X_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_X_STRIDES));
 
         auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_BN_BWD_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
@@ -187,7 +187,7 @@ protected:
 
         auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_BN_BWD_MINIMAL_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-        x->set_dim(toVec(K_BN_BWD_TENSOR_DY_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_DY_STRIDES));
+        x->set_dim(toVec(K_BN_BWD_TENSOR_X_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_X_STRIDES));
 
         auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_BN_BWD_MINIMAL_TENSOR_SCALE_UID)
@@ -254,8 +254,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
     auto liftedX = tensorMap[K_BN_BWD_TENSOR_X_UID];
     EXPECT_EQ(liftedX->get_uid(), K_BN_BWD_TENSOR_X_UID);
     EXPECT_EQ(liftedX->get_name(), "X");
-    EXPECT_EQ(liftedX->get_dim(), toVec(K_BN_BWD_TENSOR_DY_DIMS));
-    EXPECT_EQ(liftedX->get_stride(), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
+    EXPECT_EQ(liftedX->get_dim(), toVec(K_BN_BWD_TENSOR_X_DIMS));
+    EXPECT_EQ(liftedX->get_stride(), toVec(K_BN_BWD_TENSOR_X_STRIDES));
     EXPECT_EQ(liftedX->get_data_type(), DataType::FLOAT);
 
     // Scale tensor
@@ -400,8 +400,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardLiftWitho
     EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_DY_UID]->get_name(), "DY");
 
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_X_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_X_UID]->get_dim(), toVec(K_BN_BWD_TENSOR_DY_DIMS));
-    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_X_UID]->get_stride(), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_X_UID]->get_dim(), toVec(K_BN_BWD_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_X_UID]->get_stride(), toVec(K_BN_BWD_TENSOR_X_STRIDES));
     EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_X_UID]->get_name(), "X");
 
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_SCALE_UID), 0u);

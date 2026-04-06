@@ -209,6 +209,7 @@ operation:
 
   test_data:
     constants_include: "PointwiseConstants"
+    tensor_const_prefix: "K_PW_"
     tensor_uids: { in_0: 1300, out_0: 1301, in_1: 1302, in_2: 1303 }
     tensor_configs:
       in_0: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }

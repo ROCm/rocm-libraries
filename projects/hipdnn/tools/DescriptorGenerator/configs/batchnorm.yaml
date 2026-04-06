@@ -140,6 +140,7 @@ operation:
 
   test_data:
     constants_include: "BatchnormConstants"
+    tensor_const_prefix: "K_BATCHNORM_"
     tensor_uids: { x: 500, scale: 501, bias: 502, epsilon: 503, y: 504, prev_running_mean: 507, prev_running_variance: 508, momentum: 509, mean: 505, inv_variance: 506, next_running_mean: 510, next_running_variance: 511 }
     tensor_configs:
       x: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
