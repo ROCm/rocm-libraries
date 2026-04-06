@@ -22,7 +22,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::toVec;
-using namespace hipdnn_tests::constants::batchnorm_inference::integration;
+using namespace hipdnn_tests::constants::batchnorm_inference;
 
 namespace
 {

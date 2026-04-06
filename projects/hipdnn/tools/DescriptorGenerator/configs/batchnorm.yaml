@@ -130,7 +130,7 @@ operation:
       attr_name: "HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT"
       frontend_getter: "get_peer_stats()"
       required: false
-      test_uids: [100, 101]
+      test_uids: [515, 516]
       test_label: "PeerStats"
 
   has_compute_data_type: true

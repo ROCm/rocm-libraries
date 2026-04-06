@@ -31,22 +31,4 @@ constexpr std::array<int64_t, 2> K_DGRAD_CONV_PADDING = {1, 1};
 constexpr std::array<int64_t, 2> K_DGRAD_CONV_STRIDE = {1, 1};
 constexpr std::array<int64_t, 2> K_DGRAD_CONV_DILATION = {1, 1};
 
-// Integration test constants: backward data gradient of the fprop integration constants.
-// Uses stride={2,2} to produce different spatial dims between dy and dx.
-
-constexpr int64_t K_DGRAD_INTEG_TENSOR_DY_UID = 1150;
-constexpr std::array<int64_t, 4> K_DGRAD_INTEG_TENSOR_DY_DIMS = {2, 8, 7, 7};
-constexpr std::array<int64_t, 4> K_DGRAD_INTEG_TENSOR_DY_STRIDES = {392, 49, 7, 1};
-
-constexpr int64_t K_DGRAD_INTEG_TENSOR_W_UID = 1151;
-constexpr std::array<int64_t, 4> K_DGRAD_INTEG_TENSOR_W_DIMS = {8, 3, 3, 3};
-constexpr std::array<int64_t, 4> K_DGRAD_INTEG_TENSOR_W_STRIDES = {27, 9, 3, 1};
-
-constexpr int64_t K_DGRAD_INTEG_TENSOR_DX_UID = 1152;
-
-constexpr std::array<int64_t, 2> K_DGRAD_INTEG_CONV_PRE_PADDING = {1, 1};
-constexpr std::array<int64_t, 2> K_DGRAD_INTEG_CONV_POST_PADDING = {1, 1};
-constexpr std::array<int64_t, 2> K_DGRAD_INTEG_CONV_STRIDE = {2, 2};
-constexpr std::array<int64_t, 2> K_DGRAD_INTEG_CONV_DILATION = {1, 1};
-
 } // namespace hipdnn_tests::constants

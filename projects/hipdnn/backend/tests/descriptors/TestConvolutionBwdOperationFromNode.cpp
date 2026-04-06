@@ -23,6 +23,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_tests::constants;
 
 // =============================================================================
 // ConvolutionBwdOperationDescriptor::fromNode() Tests
@@ -35,8 +36,6 @@ protected:
 
     void SetUp() override
     {
-        using namespace hipdnn_tests::constants;
-
         TensorAttributesT dyAttrs;
         dyAttrs.uid = K_DGRAD_TENSOR_DY_UID;
         dyAttrs.data_type = DataType::FLOAT;
@@ -65,7 +64,6 @@ protected:
     static hipdnn_data_sdk::data_objects::ConvolutionBwdAttributesT
         createStandardConvolutionBwdAttrs()
     {
-        using namespace hipdnn_tests::constants;
         hipdnn_data_sdk::data_objects::ConvolutionBwdAttributesT attrs;
         attrs.dy_tensor_uid = K_DGRAD_TENSOR_DY_UID;
         attrs.w_tensor_uid = K_DGRAD_TENSOR_W_UID;
@@ -117,7 +115,6 @@ TEST_F(TestConvolutionBwdOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
-    using namespace hipdnn_tests::constants;
     EXPECT_EQ(desc->getData().dy_tensor_uid, K_DGRAD_TENSOR_DY_UID);
     EXPECT_EQ(desc->getData().w_tensor_uid, K_DGRAD_TENSOR_W_UID);
     EXPECT_EQ(desc->getData().dx_tensor_uid, K_DGRAD_TENSOR_DX_UID);
@@ -153,7 +150,6 @@ TEST_F(TestConvolutionBwdOperationFromNode, PreservesConvMode)
 
 TEST_F(TestConvolutionBwdOperationFromNode, PreservesDataFields)
 {
-    using namespace hipdnn_tests::constants;
     auto node = createStandardNode();
     auto desc = ConvolutionBwdOperationDescriptor::fromNode(node, _tensorMap);
 
@@ -169,7 +165,6 @@ TEST_F(TestConvolutionBwdOperationFromNode, SetsTensorReferences)
     auto node = createStandardNode();
     auto desc = ConvolutionBwdOperationDescriptor::fromNode(node, _tensorMap);
 
-    using namespace hipdnn_tests::constants;
     ASSERT_NE(desc->getDyDesc(), nullptr);
     EXPECT_EQ(desc->getDyDesc()->getData().uid, K_DGRAD_TENSOR_DY_UID);
     ASSERT_NE(desc->getWDesc(), nullptr);
@@ -183,7 +178,6 @@ TEST_F(TestConvolutionBwdOperationFromNode, TensorReferencesMatchTensorMap)
     auto node = createStandardNode();
     auto desc = ConvolutionBwdOperationDescriptor::fromNode(node, _tensorMap);
 
-    using namespace hipdnn_tests::constants;
     EXPECT_EQ(desc->getDyDesc(), _tensorMap[K_DGRAD_TENSOR_DY_UID]);
     EXPECT_EQ(desc->getWDesc(), _tensorMap[K_DGRAD_TENSOR_W_UID]);
     EXPECT_EQ(desc->getDxDesc(), _tensorMap[K_DGRAD_TENSOR_DX_UID]);
@@ -194,7 +188,6 @@ TEST_F(TestConvolutionBwdOperationFromNode, SetsTensorReferencesWithFullValues)
     auto node = createStandardNode();
     auto desc = ConvolutionBwdOperationDescriptor::fromNode(node, _tensorMap);
 
-    using namespace hipdnn_tests::constants;
     ASSERT_NE(desc->getDyDesc(), nullptr);
     EXPECT_EQ(desc->getDyDesc()->getData().uid, K_DGRAD_TENSOR_DY_UID);
     EXPECT_EQ(desc->getDyDesc()->getData().data_type, DataType::FLOAT);
@@ -246,7 +239,6 @@ TEST_F(TestConvolutionBwdOperationFromNode, GetTensorDescriptorsReturnsAllTensor
     auto node = createStandardNode();
     auto desc = ConvolutionBwdOperationDescriptor::fromNode(node, _tensorMap);
 
-    using namespace hipdnn_tests::constants;
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
     EXPECT_EQ(tensors[0]->getData().uid, K_DGRAD_TENSOR_DY_UID);
@@ -264,7 +256,6 @@ TEST_F(TestConvolutionBwdOperationFromNode, BuildNodeRoundTrip)
     ASSERT_EQ(rebuiltNode->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionBwdAttributes);
 
-    using namespace hipdnn_tests::constants;
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsConvolutionBwdAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     EXPECT_EQ(rebuiltAttrs->dy_tensor_uid, K_DGRAD_TENSOR_DY_UID);
@@ -290,7 +281,6 @@ TEST_F(TestConvolutionBwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        2,
                        &prePaddingCount,
                        prePadding.data());
-    using namespace hipdnn_tests::constants;
     ASSERT_EQ(prePaddingCount, 2);
     EXPECT_EQ(prePadding, hipdnn_tests::toVec(K_DGRAD_CONV_PADDING));
 

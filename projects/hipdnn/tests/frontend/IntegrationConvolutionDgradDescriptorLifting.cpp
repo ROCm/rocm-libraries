@@ -165,13 +165,13 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, BasicConvolutionBwdRoundTrip)
     EXPECT_EQ(opNode->attributes.get_convolution_mode(), ConvolutionMode::CONVOLUTION);
 
     // Verify pre_padding
-    EXPECT_EQ(opNode->attributes.get_pre_padding(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_pre_padding(), toVec(K_DGRAD_CONV_PADDING));
     // Verify post_padding
-    EXPECT_EQ(opNode->attributes.get_post_padding(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_DGRAD_CONV_PADDING));
     // Verify stride
-    EXPECT_EQ(opNode->attributes.get_stride(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_DGRAD_CONV_STRIDE));
     // Verify dilation
-    EXPECT_EQ(opNode->attributes.get_dilation(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_dilation(), toVec(K_DGRAD_CONV_DILATION));
 
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
@@ -254,13 +254,13 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, ConvolutionBwdLiftWithoutFina
     EXPECT_EQ(opNode->attributes.get_convolution_mode(), ConvolutionMode::CONVOLUTION);
 
     // Verify pre_padding
-    EXPECT_EQ(opNode->attributes.get_pre_padding(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_pre_padding(), toVec(K_DGRAD_CONV_PADDING));
     // Verify post_padding
-    EXPECT_EQ(opNode->attributes.get_post_padding(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_DGRAD_CONV_PADDING));
     // Verify stride
-    EXPECT_EQ(opNode->attributes.get_stride(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_DGRAD_CONV_STRIDE));
     // Verify dilation
-    EXPECT_EQ(opNode->attributes.get_dilation(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_dilation(), toVec(K_DGRAD_CONV_DILATION));
 
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
@@ -415,8 +415,8 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AsymmetricPaddingPreservedInL
 
     EXPECT_EQ(opNode->attributes.get_pre_padding(), toVec(K_ASYM_PRE_PADDING));
     EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_ASYM_POST_PADDING));
-    EXPECT_EQ(opNode->attributes.get_stride(), std::vector<int64_t>({1, 1}));
-    EXPECT_EQ(opNode->attributes.get_dilation(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_DGRAD_CONV_STRIDE));
+    EXPECT_EQ(opNode->attributes.get_dilation(), toVec(K_DGRAD_CONV_DILATION));
 }
 
 } // namespace
