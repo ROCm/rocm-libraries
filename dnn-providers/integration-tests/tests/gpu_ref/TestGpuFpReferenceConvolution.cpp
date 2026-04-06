@@ -310,9 +310,9 @@ using Vec = std::vector<int64_t>;
 
 TEST(TestConvolutionValidation, AcceptsValidParams)
 {
-    Tensor<float> x({1, 1, 4, 4});
-    Tensor<float> w({1, 1, 3, 3});
-    Tensor<float> y({1, 1, 2, 2});
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3, 3});
+    const Tensor<float> y({1, 1, 2, 2});
 
     EXPECT_NO_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
         x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}));
@@ -320,9 +320,9 @@ TEST(TestConvolutionValidation, AcceptsValidParams)
 
 TEST(TestConvolutionValidation, ThrowsOnWeightDimMismatch)
 {
-    Tensor<float> x({1, 1, 4, 4});
-    Tensor<float> w({1, 1, 3});
-    Tensor<float> y({1, 1, 2, 2});
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3});
+    const Tensor<float> y({1, 1, 2, 2});
 
     EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
                      x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
@@ -331,9 +331,9 @@ TEST(TestConvolutionValidation, ThrowsOnWeightDimMismatch)
 
 TEST(TestConvolutionValidation, ThrowsOnOutputDimMismatch)
 {
-    Tensor<float> x({1, 1, 4, 4});
-    Tensor<float> w({1, 1, 3, 3});
-    Tensor<float> y({1, 1, 2});
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3, 3});
+    const Tensor<float> y({1, 1, 2});
 
     EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
                      x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
@@ -342,9 +342,9 @@ TEST(TestConvolutionValidation, ThrowsOnOutputDimMismatch)
 
 TEST(TestConvolutionValidation, ThrowsOnStridesSizeMismatch)
 {
-    Tensor<float> x({1, 1, 4, 4});
-    Tensor<float> w({1, 1, 3, 3});
-    Tensor<float> y({1, 1, 2, 2});
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3, 3});
+    const Tensor<float> y({1, 1, 2, 2});
 
     EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
                      x, w, y, Vec{1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
@@ -353,9 +353,9 @@ TEST(TestConvolutionValidation, ThrowsOnStridesSizeMismatch)
 
 TEST(TestConvolutionValidation, ThrowsOnDilationsSizeMismatch)
 {
-    Tensor<float> x({1, 1, 4, 4});
-    Tensor<float> w({1, 1, 3, 3});
-    Tensor<float> y({1, 1, 2, 2});
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3, 3});
+    const Tensor<float> y({1, 1, 2, 2});
 
     EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
                      x, w, y, Vec{1, 1}, Vec{1, 1, 1}, Vec{0, 0}, Vec{0, 0}),
@@ -364,9 +364,9 @@ TEST(TestConvolutionValidation, ThrowsOnDilationsSizeMismatch)
 
 TEST(TestConvolutionValidation, ThrowsOnPrePaddingSizeMismatch)
 {
-    Tensor<float> x({1, 1, 4, 4});
-    Tensor<float> w({1, 1, 3, 3});
-    Tensor<float> y({1, 1, 2, 2});
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3, 3});
+    const Tensor<float> y({1, 1, 2, 2});
 
     EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
                      x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0}, Vec{0, 0}),
@@ -375,9 +375,9 @@ TEST(TestConvolutionValidation, ThrowsOnPrePaddingSizeMismatch)
 
 TEST(TestConvolutionValidation, ThrowsOnPostPaddingSizeMismatch)
 {
-    Tensor<float> x({1, 1, 4, 4});
-    Tensor<float> w({1, 1, 3, 3});
-    Tensor<float> y({1, 1, 2, 2});
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3, 3});
+    const Tensor<float> y({1, 1, 2, 2});
 
     EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
                      x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0, 0}),
@@ -386,9 +386,9 @@ TEST(TestConvolutionValidation, ThrowsOnPostPaddingSizeMismatch)
 
 TEST(TestConvolutionValidation, ThrowsOnZeroStride)
 {
-    Tensor<float> x({1, 1, 4, 4});
-    Tensor<float> w({1, 1, 3, 3});
-    Tensor<float> y({1, 1, 2, 2});
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3, 3});
+    const Tensor<float> y({1, 1, 2, 2});
 
     EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
                      x, w, y, Vec{0, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
@@ -397,9 +397,9 @@ TEST(TestConvolutionValidation, ThrowsOnZeroStride)
 
 TEST(TestConvolutionValidation, ThrowsOnNegativeDilation)
 {
-    Tensor<float> x({1, 1, 4, 4});
-    Tensor<float> w({1, 1, 3, 3});
-    Tensor<float> y({1, 1, 2, 2});
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3, 3});
+    const Tensor<float> y({1, 1, 2, 2});
 
     EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
                      x, w, y, Vec{1, 1}, Vec{1, -1}, Vec{0, 0}, Vec{0, 0}),
@@ -408,9 +408,9 @@ TEST(TestConvolutionValidation, ThrowsOnNegativeDilation)
 
 TEST(TestConvolutionValidation, ThrowsOnNegativePrePadding)
 {
-    Tensor<float> x({1, 1, 4, 4});
-    Tensor<float> w({1, 1, 3, 3});
-    Tensor<float> y({1, 1, 2, 2});
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3, 3});
+    const Tensor<float> y({1, 1, 2, 2});
 
     EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
                      x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{-1, 0}, Vec{0, 0}),
@@ -419,9 +419,9 @@ TEST(TestConvolutionValidation, ThrowsOnNegativePrePadding)
 
 TEST(TestConvolutionValidation, ThrowsOnNegativePostPadding)
 {
-    Tensor<float> x({1, 1, 4, 4});
-    Tensor<float> w({1, 1, 3, 3});
-    Tensor<float> y({1, 1, 2, 2});
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3, 3});
+    const Tensor<float> y({1, 1, 2, 2});
 
     EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
                      x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, -1}),
@@ -432,9 +432,9 @@ TEST(TestConvolutionValidation, ThrowsOnOutputDimValueMismatch)
 {
     // Input [1,1,4,4], kernel [1,1,3,3], no padding, stride 1 → expected output [1,1,2,2]
     // Provide wrong output dims [1,1,3,3]
-    Tensor<float> x({1, 1, 4, 4});
-    Tensor<float> w({1, 1, 3, 3});
-    Tensor<float> y({1, 1, 3, 3});
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3, 3});
+    const Tensor<float> y({1, 1, 3, 3});
 
     EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
                      x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
