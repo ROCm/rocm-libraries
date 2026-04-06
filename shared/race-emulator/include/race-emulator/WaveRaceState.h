@@ -25,7 +25,8 @@ class RaceDetector;
 /// Emulator, or any instruction code.
 class WaveRaceState {
 public:
-  WaveRaceState(int vgprCount, WaveId waveId, RaceDetector *detector);
+  WaveRaceState(int vgprCount, int sgprCount, WaveId waveId,
+                RaceDetector *detector);
 
   /// Register an in-flight global memory event (no LDS intervals).
   void registerEvent(int pc, MemoryEventType type,
@@ -71,6 +72,10 @@ public:
   /// Check all lanes of a VGPR for races (used by getVgprs bulk read).
   void checkVgprReadAllLanes(int reg) const;
 
+  /// Check a scalar register read for races. Calls the RaceHandler on
+  /// violation (outstanding s_load targeting this SGPR).
+  void checkSgprRead(int reg) const;
+
   /// True if any outstanding store reads from the given VGPR lane.
   bool isOutstandingFromVgpr(int lane, int reg) const;
 
@@ -115,6 +120,8 @@ private:
   Profiler::ScopedStopwatch profileScope(std::string_view key);
 
   std::vector<std::vector<EventId>> vgprMemoryEvents;
+  std::vector<std::vector<EventId>> sgprMemoryEvents;
+  std::vector<int> sgprEventCount;
 
   static constexpr int kNumEventTypes = static_cast<int>(MemoryEventType::N);
   std::array<std::vector<int>, kNumEventTypes> regEventCount;

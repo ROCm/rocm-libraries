@@ -77,6 +77,13 @@ struct RaceVerifier {
     return v;
   }
 
+  static RaceVerifier SgprAccess(int regIdx) {
+    RaceVerifier v;
+    v.space = RaceViolation::Space::SGPR;
+    v.address = regIdx;
+    return v;
+  }
+
   RaceVerifier &onWrite() {
     isWrite = true;
     return *this;
@@ -1218,4 +1225,63 @@ TEST_F(RaceTestFixture, MultiWorkgroupRaceReportsWorkgroupIndex) {
     EXPECT_NE(msg.find("LDS race in byte 0"), std::string::npos) << msg;
     EXPECT_NE(msg.find("workgroup ("), std::string::npos) << msg;
   }
+}
+
+// ---------------------------------------------------------------------------
+// SGPR race detection tests.
+// ---------------------------------------------------------------------------
+
+// s_load_dword without s_waitcnt lgkmcnt before reading the SGPR → race.
+TEST_F(RaceTestFixture, SLoadWithoutWaitcnt) {
+  const auto code = R"ASM(
+  s_load_dwordx2 s[0:1], s[0:1], 0x0
+  s_waitcnt lgkmcnt(0)
+  s_load_dword s4, s[0:1], 0x0
+  ; Missing s_waitcnt lgkmcnt(0) for s4
+  v_mov_b32_e32 v1, s4
+  s_endpgm
+  )ASM";
+
+  auto msg = R"MSG(
+SGPR race detected on line 6 (wave 0) in workgroup (0,0,0). Conflicting events:
+
+3     |   s_waitcnt lgkmcnt(0)
+4 --> |   s_load_dword s4, s[0:1], 0x0
+5     |   ; Missing s_waitcnt lgkmcnt(0) for s4
+6 --> |   v_mov_b32_e32 v1, s4
+7     |   s_endpgm
+)MSG";
+
+  ExpectRace(code, msg, 16, 1, RaceVerifier::SgprAccess(4));
+}
+
+// s_load_dword with s_waitcnt lgkmcnt(0) before reading the SGPR → no race.
+TEST_F(RaceTestFixture, SLoadWithWaitcnt) {
+  const auto code = R"ASM(
+  s_load_dwordx2 s[0:1], s[0:1], 0x0
+  s_waitcnt lgkmcnt(0)
+  s_load_dword s4, s[0:1], 0x0
+  s_waitcnt lgkmcnt(0)
+  v_mov_b32_e32 v1, s4
+  s_endpgm
+  )ASM";
+  ExpectSuccess(code, 16, 1);
+}
+
+// Two s_load_dwords, s_waitcnt lgkmcnt(1): oldest retired, newest outstanding.
+// Reading the first (retired) → no race. Reading the second → race.
+TEST_F(RaceTestFixture, SLoadPartialWaitcnt) {
+  const auto code = R"ASM(
+  s_load_dwordx2 s[0:1], s[0:1], 0x0
+  s_waitcnt lgkmcnt(0)
+  s_load_dword s4, s[0:1], 0x0
+  s_load_dword s5, s[0:1], 0x0
+  s_waitcnt lgkmcnt(1)
+  ; s4's load is retired (oldest), s5's is still outstanding.
+  v_mov_b32_e32 v1, s4
+  ; Reading s5 should race:
+  v_mov_b32_e32 v2, s5
+  s_endpgm
+  )ASM";
+  ExpectRace(code, "SGPR race", 16, 1, RaceVerifier::SgprAccess(5));
 }

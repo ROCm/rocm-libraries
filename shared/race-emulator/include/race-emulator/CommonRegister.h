@@ -29,6 +29,8 @@ enum class MemoryEventType {
   /// followed by s_barrier.
   GLOBAL_TO_LDS,
 
+  GLOBAL_TO_SGPR, ///< s_load_dword: scalar load to SGPR (counted by lgkmcnt).
+
   N
 };
 
@@ -42,6 +44,10 @@ inline bool isToVgpr(MemoryEventType t) {
 inline bool isToLds(MemoryEventType t) {
   return t == MemoryEventType::VGPR_TO_LDS ||
          t == MemoryEventType::GLOBAL_TO_LDS;
+}
+
+inline bool isToSgpr(MemoryEventType t) {
+  return t == MemoryEventType::GLOBAL_TO_SGPR;
 }
 
 inline bool isFromVgpr(MemoryEventType t) {

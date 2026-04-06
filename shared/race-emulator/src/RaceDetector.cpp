@@ -9,13 +9,13 @@
 namespace raceemulator {
 
 RaceDetector::RaceDetector(int ldsSize, int nWaves, int vgprCount,
-                           Dim3d workgroupId,
+                           int sgprCount, Dim3d workgroupId,
                            std::function<void(RaceViolation)> raceHandler)
     : byteWriteCounts(ldsSize, 0), byteReadCounts(ldsSize, 0),
       workgroupId(workgroupId), raceHandler(std::move(raceHandler)) {
   waveRaceStates.reserve(nWaves);
   for (int i = 0; i < nWaves; ++i) {
-    waveRaceStates.emplace_back(vgprCount, WaveId{i}, this);
+    waveRaceStates.emplace_back(vgprCount, sgprCount, WaveId{i}, this);
   }
 }
 
@@ -155,6 +155,32 @@ std::string RaceDetector::decorateException(
   constexpr int nBefore = 1;
   constexpr int nAfter = 1;
 
+  auto printCodeBlocks = [&](std::ostringstream &oss,
+                             std::vector<int> eventPcs) {
+    std::sort(eventPcs.begin(), eventPcs.end());
+    if (eventPcs.empty()) {
+      return;
+    }
+    int blockStart = eventPcs[0] - nBefore;
+    int blockEnd = eventPcs[0] + nAfter;
+    std::vector<int> arrows = {eventPcs[0]};
+
+    for (size_t i = 1; i < eventPcs.size(); ++i) {
+      if (eventPcs[i] - nBefore <= blockEnd + 1) {
+        blockEnd = std::max(blockEnd, eventPcs[i] + nAfter);
+        arrows.push_back(eventPcs[i]);
+      } else {
+        printCodeBlock(oss, blockStart, blockEnd, arrows);
+        oss << "\n";
+        blockStart = eventPcs[i] - nBefore;
+        blockEnd = eventPcs[i] + nAfter;
+        arrows = {eventPcs[i]};
+      }
+    }
+    printCodeBlock(oss, blockStart, blockEnd, arrows);
+    oss << "\n";
+  };
+
   if (e.space == RaceViolation::Space::VGPR) {
     std::ostringstream oss;
     oss << "\nVGPR race detected on line " << wavePc << " (wave " << e.wave
@@ -168,28 +194,30 @@ std::string RaceDetector::decorateException(
         eventPcs.push_back(getEventPc(evtId));
       }
     }
-    std::sort(eventPcs.begin(), eventPcs.end());
+    printCodeBlocks(oss, std::move(eventPcs));
+    return oss.str();
+  }
 
-    if (!eventPcs.empty()) {
-      int blockStart = eventPcs[0] - nBefore;
-      int blockEnd = eventPcs[0] + nAfter;
-      std::vector<int> arrows = {eventPcs[0]};
+  if (e.space == RaceViolation::Space::SGPR) {
+    std::ostringstream oss;
+    oss << "\nSGPR race detected on line " << wavePc << " (wave " << e.wave
+        << ") in workgroup (" << workgroupId.x << "," << workgroupId.y << ","
+        << workgroupId.z << "). Conflicting events:\n\n";
 
-      for (size_t i = 1; i < eventPcs.size(); ++i) {
-        if (eventPcs[i] - nBefore <= blockEnd + 1) {
-          blockEnd = std::max(blockEnd, eventPcs[i] + nAfter);
-          arrows.push_back(eventPcs[i]);
-        } else {
-          printCodeBlock(oss, blockStart, blockEnd, arrows);
-          oss << "\n";
-          blockStart = eventPcs[i] - nBefore;
-          blockEnd = eventPcs[i] + nAfter;
-          arrows = {eventPcs[i]};
+    std::vector<int> eventPcs{wavePc};
+    if (waveRaceState) {
+      for (EventId evtId : waveRaceState->getWaveMemoryEvents()) {
+        if (isToSgpr(getEventType(evtId))) {
+          for (uint32_t reg : getEventRegisters(evtId)) {
+            if (reg == static_cast<uint32_t>(e.index)) {
+              eventPcs.push_back(getEventPc(evtId));
+              break;
+            }
+          }
         }
       }
-      printCodeBlock(oss, blockStart, blockEnd, arrows);
-      oss << "\n";
     }
+    printCodeBlocks(oss, std::move(eventPcs));
     return oss.str();
   }
 
@@ -234,7 +262,7 @@ std::string RaceDetector::decorateException(
     return oss.str();
   }
 
-  return "\nRace detector for SGPR coming soon\n";
+  return "\nUnknown race space\n";
 }
 
 } // namespace raceemulator

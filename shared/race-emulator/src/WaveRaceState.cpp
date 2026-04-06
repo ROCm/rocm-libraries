@@ -10,10 +10,12 @@
 
 namespace raceemulator {
 
-WaveRaceState::WaveRaceState(int vgprCount, WaveId waveId,
+WaveRaceState::WaveRaceState(int vgprCount, int sgprCount, WaveId waveId,
                              RaceDetector *detector)
     : waveId(waveId), detector(detector) {
   vgprMemoryEvents.resize(vgprCount);
+  sgprMemoryEvents.resize(sgprCount);
+  sgprEventCount.resize(sgprCount, 0);
   for (auto &counts : regEventCount) {
     counts.resize(vgprCount, 0);
   }
@@ -56,14 +58,22 @@ void WaveRaceState::registerEventWithIntervals(int pc, MemoryEventType type,
                                                uint8_t byteMask,
                                                IntervalSet ldsIntervals) {
   auto sw = profileScope("registerEvent");
-  for (auto reg : regIds) {
-    regEventCountInc(type, reg);
+  bool toSgpr = isToSgpr(type);
+  if (!toSgpr) {
+    for (auto reg : regIds) {
+      regEventCountInc(type, reg);
+    }
   }
   auto eventId =
       detector->allocateEventId(waveId, pc, type, std::move(regIds), execMask,
                                 byteMask, std::move(ldsIntervals));
   for (uint32_t reg : detector->getEventRegisters(eventId)) {
-    vgprMemoryEvents[reg].push_back(eventId);
+    if (toSgpr) {
+      sgprMemoryEvents[reg].push_back(eventId);
+      sgprEventCount[reg]++;
+    } else {
+      vgprMemoryEvents[reg].push_back(eventId);
+    }
   }
   waveMemoryEvents.push_back(eventId);
 }
@@ -104,10 +114,15 @@ void WaveRaceState::registerDualOffsetLdsEvent(
 void WaveRaceState::retireEventRegisters(EventId eventId) {
   auto sw = profileScope("retireEventRegisters");
   auto eventType = detector->getEventType(eventId);
+  bool toSgpr = isToSgpr(eventType);
   for (uint32_t regId : detector->getEventRegisters(eventId)) {
-    auto &eventsForReg = getVgprMemoryEvents(regId);
-    removeFromUnorderedList(eventsForReg, eventId);
-    regEventCountDec(eventType, regId);
+    if (toSgpr) {
+      removeFromUnorderedList(sgprMemoryEvents[regId], eventId);
+      sgprEventCount[regId]--;
+    } else {
+      removeFromUnorderedList(getVgprMemoryEvents(regId), eventId);
+      regEventCountDec(eventType, regId);
+    }
   }
 }
 
@@ -146,7 +161,8 @@ void WaveRaceState::sWaitCntVmcnt(int vmcnt) {
 void WaveRaceState::sWaitCntLgkmcnt(int lgkmcnt) {
   resolveWaitCnt(lgkmcnt, [](MemoryEventType type) {
     return type == MemoryEventType::LDS_TO_VGPR ||
-           type == MemoryEventType::VGPR_TO_LDS;
+           type == MemoryEventType::VGPR_TO_LDS ||
+           type == MemoryEventType::GLOBAL_TO_SGPR;
   });
 }
 
@@ -192,6 +208,18 @@ bool WaveRaceState::isOutstandingFromVgpr(int lane, int reg) const {
     }
   }
   return false;
+}
+
+void WaveRaceState::checkSgprRead(int reg) const {
+  if (sgprEventCount[reg] == 0) {
+    return;
+  }
+  for (EventId eid : sgprMemoryEvents[reg]) {
+    if (isToSgpr(detector->getEventType(eid))) {
+      detector->getRaceHandler()({RaceViolation::Space::SGPR, reg, waveId.value,
+                                  -1, false, detector->getWorkgroupId()});
+    }
+  }
 }
 
 Profiler::ScopedStopwatch WaveRaceState::profileScope(std::string_view key) {

@@ -119,12 +119,16 @@ void Wave::setVgprHalf(int reg, int lane, bool hi, uint16_t value) {
 }
 
 uint32_t Wave::getSgpr(int id) const {
-  id = id < 0 ? id + sgprs.size() : id;
-  if (id >= static_cast<int64_t>(sgprs.size())) {
-    throw std::runtime_error("SGPR index out of range: " + std::to_string(id) +
-                             ". Max SGPRs: " + std::to_string(sgprs.size()));
+  int remapped = id < 0 ? id + sgprs.size() : id;
+  if (remapped >= static_cast<int64_t>(sgprs.size())) {
+    throw std::runtime_error(
+        "SGPR index out of range: " + std::to_string(remapped) +
+        ". Max SGPRs: " + std::to_string(sgprs.size()));
   }
-  return sgprs[id];
+  if (raceState && id >= 0 && id < sgprCount) {
+    raceState->checkSgprRead(id);
+  }
+  return sgprs[remapped];
 }
 
 void Wave::setSgpr(int id, uint32_t value) {

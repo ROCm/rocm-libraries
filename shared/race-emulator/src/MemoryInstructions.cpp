@@ -579,6 +579,7 @@ public:
     int n = numDwords;
 
     return [&wave, dst, src, offset, n]() {
+      auto pc = wave.getPc();
       uint64_t base = wave.getSgpr64(src.index);
       uint32_t *ptr;
       auto offsetVal = wave.getSgprOrLiteralValue(offset);
@@ -586,7 +587,15 @@ public:
       for (int i = 0; i < n; ++i) {
         wave.setSgpr(dst.index + i, ptr[i]);
       }
-      return wave.getPc() + 1;
+      wave.setPendingMemoryEvent({pc,
+                                  MemoryEventType::GLOBAL_TO_SGPR,
+                                  registerIndexRange(dst.index, n),
+                                  wave.getExecU64(),
+                                  wave.getWaveSize(),
+                                  0xF,
+                                  {},
+                                  0});
+      return pc + 1;
     };
   }
 };

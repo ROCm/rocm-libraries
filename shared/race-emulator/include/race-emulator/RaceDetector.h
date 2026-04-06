@@ -48,7 +48,8 @@ class RaceDetector {
   };
 
 public:
-  RaceDetector(int ldsSize, int nWaves, int vgprCount, Dim3d workgroupId,
+  RaceDetector(int ldsSize, int nWaves, int vgprCount, int sgprCount,
+               Dim3d workgroupId,
                std::function<void(RaceViolation)> raceHandler);
 
   /// Allocate a workgroup-global event ID and record its metadata.

@@ -30,8 +30,8 @@ Workgroup::Workgroup(const WorkgroupConfig &config)
 
   if (config.raceChecks) {
     raceDetector = std::make_unique<RaceDetector>(
-        lds.getSize(), config.nWaves, config.vgprCount, config.workgroupId,
-        config.raceHandler);
+        lds.getSize(), config.nWaves, config.vgprCount, config.sgprCount,
+        config.workgroupId, config.raceHandler);
     if (profiler) {
       raceDetector->setProfiler(profiler);
     }

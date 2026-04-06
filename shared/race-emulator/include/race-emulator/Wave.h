@@ -97,7 +97,6 @@ public:
   /// Matches ISA d16 semantics.
   void setVgprHalf(int id, int lane, bool hi, uint16_t value);
 
-  // TODO(newling) implement race checks for scalar registers.
   uint32_t getSgpr(int id) const;
 
   void setVgpr(int reg, int lane, uint32_t value) {

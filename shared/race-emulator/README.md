@@ -214,8 +214,6 @@ owning wave but still visible to other waves). Events are only fully
 retired when ALL waves reach an `s_barrier`, ensuring that cross-wave
 races are detected regardless of wave scheduling order.
 
-Note: detecting race conditions in scalar registers is not yet
-implemented.
 
 ## Performance
 
