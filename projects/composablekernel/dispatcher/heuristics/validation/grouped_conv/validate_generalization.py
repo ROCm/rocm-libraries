@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python"))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "heuristics"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # heuristics
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "tile_engine" / "ops" / "grouped_conv" / "problems"))
 
 import pandas as pd
