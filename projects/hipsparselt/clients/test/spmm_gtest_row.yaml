@@ -37,7 +37,7 @@ Definitions:
 
 Tests:
 - name: spmm_bad_arg
-  category: pre_checkin
+  category: smoke
   function:
     - spmm_bad_arg: *real_precisions_2b
   transA: N
