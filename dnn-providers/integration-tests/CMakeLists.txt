@@ -50,6 +50,7 @@ include(ClangTidy)
 include(ClangCheck)
 include(Sanitizers)
 include(Tests)
+include(HipdnnIntegrationTestHelpers)
 
 list(
     PREPEND
@@ -81,8 +82,15 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(hip REQUIRED)
-find_package(hipdnn_test_sdk REQUIRED)
-find_package(hipdnn_plugin_sdk REQUIRED)
+
+if(NOT TARGET hipdnn_test_sdk)
+    find_package(hipdnn_test_sdk REQUIRED)
+endif()
+
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk REQUIRED)
+endif()
+
 find_package(Threads REQUIRED)
 
 include(Dependencies)
