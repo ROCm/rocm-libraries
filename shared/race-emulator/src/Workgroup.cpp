@@ -52,7 +52,7 @@ Workgroup::Workgroup(const WorkgroupConfig &config)
 
 void Workgroup::dispatchPendingRaceEvents(WaveId waveId) {
   auto &wave = waves.at(waveId.value);
-  if (auto *rs = wave.getRaceState()) {
+  if (auto *rs = wave.raceState) {
     if (wave.pendingWaitCount) {
       rs->dispatch(*wave.pendingWaitCount);
     }

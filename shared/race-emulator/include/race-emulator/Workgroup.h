@@ -105,6 +105,11 @@ public:
   /// tryExecute directly must call this explicitly.
   void dispatchPendingRaceEvents(WaveId waveId);
 
+  WaveRaceState *getRaceState(int waveId) { return waves.at(waveId).raceState; }
+  const WaveRaceState *getRaceState(int waveId) const {
+    return waves.at(waveId).raceState;
+  }
+
   RaceDetector *getRaceDetector() { return raceDetector.get(); }
   const RaceDetector *getRaceDetector() const { return raceDetector.get(); }
 

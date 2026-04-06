@@ -314,7 +314,8 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
           auto &wave = workgroup.getWave(e.violation.wave);
           auto *detector = workgroup.getRaceDetector();
           auto msg = detector->decorateException(
-              e.violation, wave.getPc(), wave.getRaceState(),
+              e.violation, wave.getPc(),
+              workgroup.getRaceState(e.violation.wave),
               static_cast<int>(parsedAsm->tokens.size()),
               [&](int j) -> std::string_view {
                 return parsedAsm->tokens[j].originalLine;

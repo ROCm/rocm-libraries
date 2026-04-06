@@ -1143,12 +1143,8 @@ TEST(GlobalToLds, CrossWaveRace) {
                 .raceHandler = [](RaceViolation v) {
                   throw RaceConditionException(v);
                 }});
-  auto &wave0 = wg.getWave(0);
-  auto &wave1 = wg.getWave(1);
-  (void)wave1;
-
   std::vector<uint32_t> ldsAddresses = {0};
-  auto *rs0 = wave0.getRaceState();
+  auto *rs0 = wg.getRaceState(0);
   rs0->registerLdsEvent(/*pc=*/10, MemoryEventType::GLOBAL_TO_LDS, {},
                         /*execMask=*/1, /*waveSize=*/1, ldsAddresses,
                         /*bytesPerLane=*/64);
@@ -1173,19 +1169,15 @@ TEST(GlobalToLds, CrossWaveSafeAfterBarrier) {
                 .raceHandler = [](RaceViolation v) {
                   throw RaceConditionException(v);
                 }});
-  auto &wave0 = wg.getWave(0);
-  auto &wave1 = wg.getWave(1);
-  (void)wave1;
-
   std::vector<uint32_t> ldsAddresses = {0};
-  auto *rs0 = wave0.getRaceState();
+  auto *rs0 = wg.getRaceState(0);
   rs0->registerLdsEvent(/*pc=*/10, MemoryEventType::GLOBAL_TO_LDS, {},
                         /*execMask=*/1, /*waveSize=*/1, ldsAddresses,
                         /*bytesPerLane=*/64);
   rs0->sWaitCntVmcnt(0);
 
   // Simulate barrier: flush all wave-complete events.
-  wave0.flushWaveCompleteMemoryEvents();
+  wg.getWave(0).flushWaveCompleteMemoryEvents();
 
   // Now wave 1 can safely read.
   EXPECT_NO_THROW(wg.readLds<uint32_t>(0, WaveId{1}, 0));

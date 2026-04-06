@@ -982,7 +982,7 @@ TEST(Instructions, BufferLoadD16_ByteLevelRace) {
   tryExecute(wave, "buffer_load_d16_hi_b16 v0, v29, s[4:7], 0 offen");
 
   // Two vmcnt events outstanding. Drain the oldest (lo half).
-  wave.getRaceState()->sWaitCntVmcnt(1);
+  wg.getRaceState(0)->sWaitCntVmcnt(1);
 
   // Reading the lo half via getHalfVgpr should NOT race.
   EXPECT_NO_THROW(wave.getHalfVgpr(0, 0, false));
@@ -995,7 +995,7 @@ TEST(Instructions, BufferLoadD16_ByteLevelRace) {
   EXPECT_THROW(wave.getVgpr(0, 0), RaceConditionException);
 
   // Drain the hi half too.
-  wave.getRaceState()->sWaitCntVmcnt(0);
+  wg.getRaceState(0)->sWaitCntVmcnt(0);
 
   // Now both halves are safe.
   EXPECT_NO_THROW(wave.getVgpr(0, 0));
@@ -1049,15 +1049,15 @@ TEST(Instructions, BufferLoad_Lds_DirectToLds) {
   EXPECT_EQ(lds.read<uint32_t>(92), 0x88888888u);
 
   // Verify GLOBAL_TO_LDS event was registered.
-  EXPECT_EQ(wave.getRaceState()->getWaveMemoryEvents().size(), 1u);
-  EventId eid = wave.getRaceState()->getWaveMemoryEvents()[0];
+  EXPECT_EQ(wg.getRaceState(0)->getWaveMemoryEvents().size(), 1u);
+  EventId eid = wg.getRaceState(0)->getWaveMemoryEvents()[0];
   EXPECT_EQ(wg.getRaceDetector()->getEventType(eid),
             MemoryEventType::GLOBAL_TO_LDS);
   EXPECT_EQ(wg.getRaceDetector()->getLdsWriteEvents().size(), 1u);
 
   // Verify vmcnt retires it.
-  wave.getRaceState()->sWaitCntVmcnt(0);
-  EXPECT_TRUE(wave.getRaceState()->getWaveMemoryEvents().empty());
+  wg.getRaceState(0)->sWaitCntVmcnt(0);
+  EXPECT_TRUE(wg.getRaceState(0)->getWaveMemoryEvents().empty());
   EXPECT_EQ(wg.getRaceDetector()->getEventStatus(eid),
             EventStatus::WAVE_COMPLETE);
 }
@@ -1087,7 +1087,7 @@ TEST(Instructions, BufferLoad_Lds_RaceBeforeVmcnt) {
   EXPECT_THROW(wg.readLds<uint32_t>(0, WaveId{0}, 0), RaceConditionException);
 
   // After vmcnt → safe.
-  wave.getRaceState()->sWaitCntVmcnt(0);
+  wg.getRaceState(0)->sWaitCntVmcnt(0);
   EXPECT_NO_THROW(wg.readLds<uint32_t>(0, WaveId{0}, 0));
   EXPECT_EQ(wg.readLds<uint32_t>(0, WaveId{0}, 0), 0xAAAAAAAAu);
 }

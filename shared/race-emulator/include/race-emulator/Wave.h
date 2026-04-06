@@ -162,11 +162,6 @@ public:
 
   bool isCompleteEmulation() const;
 
-  /// Per-wave race detection state. Returns null when race checks are
-  /// disabled, so callers can use `if (auto *rs = getRaceState()) { ... }`.
-  WaveRaceState *getRaceState() { return raceState; }
-  const WaveRaceState *getRaceState() const { return raceState; }
-
   WaveId getWaveId() const { return waveId; }
 
   Profiler::ScopedStopwatch profileScope(std::string_view key);
