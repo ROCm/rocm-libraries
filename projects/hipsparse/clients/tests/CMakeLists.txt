@@ -280,14 +280,14 @@ else()
   message(STATUS "hipSPARSE: No test_categories.yaml (CTest categories not used)")
 endif()
 
-rocm_install(
-    FILES "${INSTALL_TEST_FILE}"
-    DESTINATION "${CMAKE_INSTALL_BINDIR}"
-    COMPONENT tests
-    RENAME "CTestTestfile.cmake"
-)
-
-
+if(HIPSPARSE_CTEST_INSTALL_FILE)
+    rocm_install(
+      FILES "${HIPSPARSE_CTEST_INSTALL_FILE}"
+      DESTINATION "${CMAKE_INSTALL_BINDIR}/hipsparse"
+      COMPONENT tests
+      RENAME "CTestTestfile.cmake"
+  )
+endif()
 
 # Windows-specific DLL copying
 if(WIN32)
