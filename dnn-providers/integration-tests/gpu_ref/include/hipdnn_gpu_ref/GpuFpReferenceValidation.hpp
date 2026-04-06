@@ -46,7 +46,7 @@ struct ValidatorHipRtcTypeName<hipdnn_data_sdk::types::half>
 template <>
 struct ValidatorHipRtcTypeName<hipdnn_data_sdk::types::bfloat16>
 {
-    static constexpr const char* VALUE = "unsigned short";
+    static constexpr const char* VALUE = "__bf16";
 };
 
 template <>

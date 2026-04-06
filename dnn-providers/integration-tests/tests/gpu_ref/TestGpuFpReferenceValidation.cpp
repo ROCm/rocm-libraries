@@ -28,14 +28,14 @@ namespace
 // ============================================================================
 
 template <typename T>
-class GpuFpValidationTest : public ::testing::Test
+class TestGpuFpValidation : public ::testing::Test
 {
 };
 
 using FpTypes = ::testing::Types<float, half, bfloat16, double>;
-TYPED_TEST_SUITE(GpuFpValidationTest, FpTypes, );
+TYPED_TEST_SUITE(TestGpuFpValidation, FpTypes, );
 
-TYPED_TEST(GpuFpValidationTest, ExactMatchPasses)
+TYPED_TEST(TestGpuFpValidation, ExactMatchPasses)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -56,7 +56,7 @@ TYPED_TEST(GpuFpValidationTest, ExactMatchPasses)
     ASSERT_TRUE(validator.allClose(ref, impl));
 }
 
-TYPED_TEST(GpuFpValidationTest, WithinTolerancePasses)
+TYPED_TEST(TestGpuFpValidation, WithinTolerancePasses)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -78,7 +78,7 @@ TYPED_TEST(GpuFpValidationTest, WithinTolerancePasses)
     ASSERT_TRUE(validator.allClose(ref, impl));
 }
 
-TYPED_TEST(GpuFpValidationTest, BeyondToleranceFails)
+TYPED_TEST(TestGpuFpValidation, BeyondToleranceFails)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -98,7 +98,7 @@ TYPED_TEST(GpuFpValidationTest, BeyondToleranceFails)
     ASSERT_FALSE(validator.allClose(ref, impl));
 }
 
-TYPED_TEST(GpuFpValidationTest, NaNFails)
+TYPED_TEST(TestGpuFpValidation, NaNFails)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -120,7 +120,7 @@ TYPED_TEST(GpuFpValidationTest, NaNFails)
     ASSERT_FALSE(validator.allClose(ref, impl));
 }
 
-TYPED_TEST(GpuFpValidationTest, InfFails)
+TYPED_TEST(TestGpuFpValidation, InfFails)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -142,7 +142,7 @@ TYPED_TEST(GpuFpValidationTest, InfFails)
     ASSERT_FALSE(validator.allClose(ref, impl));
 }
 
-TYPED_TEST(GpuFpValidationTest, SingleElementExactMatchPasses)
+TYPED_TEST(TestGpuFpValidation, SingleElementExactMatchPasses)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -156,7 +156,7 @@ TYPED_TEST(GpuFpValidationTest, SingleElementExactMatchPasses)
     ASSERT_TRUE(validator.allClose(ref, impl));
 }
 
-TYPED_TEST(GpuFpValidationTest, DimensionMismatchFails)
+TYPED_TEST(TestGpuFpValidation, DimensionMismatchFails)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -167,7 +167,7 @@ TYPED_TEST(GpuFpValidationTest, DimensionMismatchFails)
     ASSERT_FALSE(validator.allClose(ref, impl));
 }
 
-TYPED_TEST(GpuFpValidationTest, RelativeToleranceWorks)
+TYPED_TEST(TestGpuFpValidation, RelativeToleranceWorks)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -200,14 +200,14 @@ TYPED_TEST(GpuFpValidationTest, RelativeToleranceWorks)
 // ============================================================================
 
 template <typename T>
-class GpuIntValidationTest : public ::testing::Test
+class TestGpuIntValidation : public ::testing::Test
 {
 };
 
 using IntTypes = ::testing::Types<int8_t, uint8_t, int32_t>;
-TYPED_TEST_SUITE(GpuIntValidationTest, IntTypes, );
+TYPED_TEST_SUITE(TestGpuIntValidation, IntTypes, );
 
-TYPED_TEST(GpuIntValidationTest, ExactMatchPasses)
+TYPED_TEST(TestGpuIntValidation, ExactMatchPasses)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -226,7 +226,7 @@ TYPED_TEST(GpuIntValidationTest, ExactMatchPasses)
     ASSERT_TRUE(validator.allClose(ref, impl));
 }
 
-TYPED_TEST(GpuIntValidationTest, MismatchFails)
+TYPED_TEST(TestGpuIntValidation, MismatchFails)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -248,7 +248,7 @@ TYPED_TEST(GpuIntValidationTest, MismatchFails)
     ASSERT_FALSE(validator.allClose(ref, impl));
 }
 
-TYPED_TEST(GpuIntValidationTest, SingleElementExactMatchPasses)
+TYPED_TEST(TestGpuIntValidation, SingleElementExactMatchPasses)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -262,7 +262,7 @@ TYPED_TEST(GpuIntValidationTest, SingleElementExactMatchPasses)
     ASSERT_TRUE(validator.allClose(ref, impl));
 }
 
-TYPED_TEST(GpuIntValidationTest, DimensionMismatchFails)
+TYPED_TEST(TestGpuIntValidation, DimensionMismatchFails)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -277,68 +277,68 @@ TYPED_TEST(GpuIntValidationTest, DimensionMismatchFails)
 // Factory function tests
 // ============================================================================
 
-TEST(GpuValidatorFactory, CreatesFloatValidator)
+TEST(TestGpuValidatorFactory, CreatesFloatValidator)
 {
     const auto validator
         = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::FLOAT);
     ASSERT_NE(validator, nullptr);
 }
 
-TEST(GpuValidatorFactory, CreatesHalfValidator)
+TEST(TestGpuValidatorFactory, CreatesHalfValidator)
 {
     const auto validator
         = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::HALF);
     ASSERT_NE(validator, nullptr);
 }
 
-TEST(GpuValidatorFactory, CreatesBfloat16Validator)
+TEST(TestGpuValidatorFactory, CreatesBfloat16Validator)
 {
     const auto validator
         = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
     ASSERT_NE(validator, nullptr);
 }
 
-TEST(GpuValidatorFactory, CreatesDoubleValidator)
+TEST(TestGpuValidatorFactory, CreatesDoubleValidator)
 {
     const auto validator
         = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::DOUBLE);
     ASSERT_NE(validator, nullptr);
 }
 
-TEST(GpuValidatorFactory, CreatesInt8Validator)
+TEST(TestGpuValidatorFactory, CreatesInt8Validator)
 {
     const auto validator
         = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::INT8);
     ASSERT_NE(validator, nullptr);
 }
 
-TEST(GpuValidatorFactory, CreatesUint8Validator)
+TEST(TestGpuValidatorFactory, CreatesUint8Validator)
 {
     const auto validator
         = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::UINT8);
     ASSERT_NE(validator, nullptr);
 }
 
-TEST(GpuValidatorFactory, CreatesInt32Validator)
+TEST(TestGpuValidatorFactory, CreatesInt32Validator)
 {
     const auto validator
         = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::INT32);
     ASSERT_NE(validator, nullptr);
 }
 
-TEST(GpuValidatorFactory, ThrowsOnUnsupportedType)
+TEST(TestGpuValidatorFactory, ThrowsOnUnsupportedType)
 {
     ASSERT_THROW(createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::FP8_E4M3),
                  std::runtime_error);
 }
 
-TEST(GpuValidatorFactory, TemplatedCreatesFloat)
+TEST(TestGpuValidatorFactory, TemplatedCreatesFloat)
 {
     const auto validator = createGpuAllCloseValidator<float>();
     ASSERT_NE(validator, nullptr);
 }
 
-TEST(GpuValidatorFactory, TemplatedCreatesInt32)
+TEST(TestGpuValidatorFactory, TemplatedCreatesInt32)
 {
     const auto validator = createGpuAllCloseValidator<int32_t>();
     ASSERT_NE(validator, nullptr);
@@ -348,23 +348,23 @@ TEST(GpuValidatorFactory, TemplatedCreatesInt32)
 // Constructor validation tests
 // ============================================================================
 
-TEST(GpuFpValidationConstruction, NegativeAbsoluteToleranceThrows)
+TEST(TestGpuFpValidationConstruction, NegativeAbsoluteToleranceThrows)
 {
     ASSERT_THROW(GpuFpReferenceValidation<float>(-1.0f, 0.0f), std::invalid_argument);
 }
 
-TEST(GpuFpValidationConstruction, NegativeRelativeToleranceThrows)
+TEST(TestGpuFpValidationConstruction, NegativeRelativeToleranceThrows)
 {
     ASSERT_THROW(GpuFpReferenceValidation<float>(0.0f, -1.0f), std::invalid_argument);
 }
 
-TEST(GpuFpValidationConstruction, NaNToleranceThrows)
+TEST(TestGpuFpValidationConstruction, NaNToleranceThrows)
 {
     ASSERT_THROW(GpuFpReferenceValidation<float>(std::numeric_limits<float>::quiet_NaN(), 0.0f),
                  std::invalid_argument);
 }
 
-TEST(GpuFpValidationConstruction, InfToleranceThrows)
+TEST(TestGpuFpValidationConstruction, InfToleranceThrows)
 {
     ASSERT_THROW(GpuFpReferenceValidation<float>(std::numeric_limits<float>::infinity(), 0.0f),
                  std::invalid_argument);
@@ -375,14 +375,14 @@ TEST(GpuFpValidationConstruction, InfToleranceThrows)
 // ============================================================================
 
 template <typename T>
-class GpuVsCpuValidationTest : public ::testing::Test
+class TestGpuVsCpuValidation : public ::testing::Test
 {
 };
 
 using GpuCpuFpTypes = ::testing::Types<float, half, bfloat16>;
-TYPED_TEST_SUITE(GpuVsCpuValidationTest, GpuCpuFpTypes, );
+TYPED_TEST_SUITE(TestGpuVsCpuValidation, GpuCpuFpTypes, );
 
-TYPED_TEST(GpuVsCpuValidationTest, GpuAndCpuAgreeOnPass)
+TYPED_TEST(TestGpuVsCpuValidation, AgreeOnPass)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -411,7 +411,7 @@ TYPED_TEST(GpuVsCpuValidationTest, GpuAndCpuAgreeOnPass)
         << "GPU and CPU validators disagree: GPU=" << gpuResult << ", CPU=" << cpuResult;
 }
 
-TYPED_TEST(GpuVsCpuValidationTest, GpuAndCpuAgreeOnFail)
+TYPED_TEST(TestGpuVsCpuValidation, AgreeOnFail)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -443,7 +443,7 @@ TYPED_TEST(GpuVsCpuValidationTest, GpuAndCpuAgreeOnFail)
 // Large tensor test
 // ============================================================================
 
-TEST(GpuFpValidationLargeTensor, LargeTensorExactMatch)
+TEST(TestGpuFpValidationLargeTensor, LargeTensorExactMatch)
 {
     SKIP_IF_NO_DEVICES();
 

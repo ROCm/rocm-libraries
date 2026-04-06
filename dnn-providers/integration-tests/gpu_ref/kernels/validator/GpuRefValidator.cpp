@@ -10,6 +10,8 @@
 #include "GpuRefTypes.h"
 #include "GpuRefValidatorArgs.h"
 
+using namespace gpu_ref;
+
 // Floating-point allClose validation kernel.
 // For each element i: passes if |impl[i] - ref[i]| <= atol + rtol * |ref[i]|
 // Fails on NaN or Inf in either tensor.
@@ -28,27 +30,22 @@ extern "C" __global__ void validateAllClose(ValidatorArgs args)
     auto refVal = toAccum(ref[idx]);
     auto implVal = toAccum(impl[idx]);
 
-    // Check for NaN or Inf
-    if(refVal != refVal || implVal != implVal) // NaN check
+    if(isnan(refVal) || isnan(implVal))
     {
         args.resultFlags[idx] = 0;
         return;
     }
 
-    // Inf check: if either is very large (beyond representable range for double)
-    auto absRef = refVal < static_cast<COMPUTE_TYPE>(0) ? -refVal : refVal;
-    auto absImpl = implVal < static_cast<COMPUTE_TYPE>(0) ? -implVal : implVal;
-
-    // Use a large threshold to detect infinity-like values
-    auto infThreshold = static_cast<COMPUTE_TYPE>(1e300);
-    if(absRef > infThreshold || absImpl > infThreshold)
+    if(isinf(refVal) || isinf(implVal))
     {
         args.resultFlags[idx] = 0;
         return;
     }
+
+    auto absRef = fabs(refVal);
 
     auto diff = implVal - refVal;
-    auto absDiff = diff < static_cast<COMPUTE_TYPE>(0) ? -diff : diff;
+    auto absDiff = fabs(diff);
     auto threshold = static_cast<COMPUTE_TYPE>(args.absoluteTolerance)
                      + static_cast<COMPUTE_TYPE>(args.relativeTolerance) * absRef;
 
