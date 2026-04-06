@@ -233,14 +233,15 @@ protected:
             tensorsConfig.acstrides[0], // c_nstride
             tensorsConfig.acstrides[1], // c_cstride
             work_per_wg,
+            num_wg,
+            bitmap,
             alpha0,
             alpha1,
             beta,
             uint64_t(0), // Aoffset
             uint64_t(0), // Boffset
-            uint64_t(0), // Coffset
-            num_wg,
-            bitmap);
+            uint64_t(0)  // Coffset
+        );
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
 
@@ -257,14 +258,14 @@ protected:
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
                     work_per_wg,
+                    num_wg,
+                    bitmap,
                     alpha0,
                     alpha1,
                     beta,
                     uint64_t(0),
                     uint64_t(0),
-                    uint64_t(0),
-                    num_wg,
-                    bitmap);
+                    uint64_t(0));
 #endif
     }
 
@@ -293,14 +294,15 @@ protected:
             tensorsConfig.acstrides[0], // c_nstride
             tensorsConfig.acstrides[1], // c_cstride
             work_per_wg,
+            num_wg,
+            bitmap,
             alpha0,
             alpha1,
             beta,
             uint64_t(0), // Aoffset
             uint64_t(0), // Boffset
             uint64_t(0), // Coffset
-            num_wg,
-            bitmap);
+        );
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
 
@@ -317,14 +319,14 @@ protected:
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
                     work_per_wg,
+                    num_wg,
+                    bitmap,
                     alpha0,
                     alpha1,
                     beta,
                     uint64_t(0),
                     uint64_t(0),
-                    uint64_t(0),
-                    num_wg,
-                    bitmap);
+                    uint64_t(0));
 #endif
     }
 
@@ -407,7 +409,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(float16(1)),
                                           testing::Values(float16(1)),
                                           testing::Values(float16(0), float16(1))));
-/*
+
 using GPU_OpTensorLeadingOnesTest_FP32 = OpTensorLeadingOnesTest<float>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP32, PortTest)
@@ -423,7 +425,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.f),
                                           testing::Values(1.f),
                                           testing::Values(0.f, 1.f)));
-*/
+
 using GPU_OpTensorLeadingOnesTest_FP64 = OpTensorLeadingOnesTest<double>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP64, PortTest)

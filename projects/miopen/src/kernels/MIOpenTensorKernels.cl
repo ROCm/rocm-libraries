@@ -226,14 +226,14 @@ __kernel void OpTensorLeadingOnes(global MIOPEN_TYPE* a,
                                   const int c_nstride,
                                   const int c_cstride,
                                   const int work_per_wg,
+                                  const int num_wg,
+                                  const unsigned int bitmap,
                                   const MIOPEN_TYPE alpha0,
                                   const MIOPEN_TYPE alpha1,
                                   const MIOPEN_TYPE beta,
-                                  const uint64_t Aoffset,
-                                  const uint64_t Boffset,
-                                  const uint64_t Coffset,
-                                  const int num_wg,
-                                  const unsigned int bitmap)
+                                  const ulong Aoffset,
+                                  const ulong Boffset,
+                                  const ulong Coffset)
 {
 
     /* Special case for leading ones where the total no. of threads is the
@@ -328,11 +328,11 @@ __kernel void OpTensorLeadingOnesGeneric(global MIOPEN_TYPE* a,
                                          const MIOPEN_TYPE alpha1,
                                          const MIOPEN_TYPE beta,
                                          const int work_per_wg,
-                                         const uint64_t Aoffset,
-                                         const uint64_t Boffset,
-                                         const uint64_t Coffset,
                                          const int num_wg,
-                                         const unsigned int bitmap)
+                                         const unsigned int bitmap,
+                                         const ulong Aoffset,
+                                         const ulong Boffset,
+                                         const ulong Coffset)
 {
 
     /* Special case for leading ones where the total no. of threads is the
