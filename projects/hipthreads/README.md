@@ -2,8 +2,6 @@
 
 > [!CAUTION]
 > This release is an *early-access* software technology preview. Running production workloads is *not* recommended.
->
-> **hipThreads currently works only with ROCm 7.0.2.** Other ROCm versions (including newer ones) are not supported. **Follow the Prerequisites** section below carefully to install the correct version.
 
 ## Introduction
 
@@ -30,72 +28,35 @@ hipThreads requires the following:
 - Linux OS (Ubuntu 24.04 recommended)
 - CMake 3.21+
 - Build tools (e.g., `make` or `ninja`)
-- **ROCm 7.0.2** (HIP runtime and hipcc) — **hipThreads does not work with other ROCm versions.**
-  To install ROCm 7.0.2 on Ubuntu, follow these steps in order:
-  - Meet the [ROCm installation prerequisites](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/prerequisites.html) (kernel version, permissions, etc.). In particular, add your user to the `video` and `render` groups:
-    ```bash
-    sudo usermod -a -G video,render $LOGNAME
-    ```
-  - Install the [AMDGPU kernel driver](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/package-manager/package-manager-ubuntu.html), then **reboot**.
-  - Install **ROCm 7.0.2** via the [package manager](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/install-methods/package-manager/package-manager-ubuntu.html), but **use the 7.0.2 repository URLs** when registering packages:
-    ```bash
-    sudo mkdir --parents --mode=0755 /etc/apt/keyrings
-    wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | \
-        gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+- **ROCm 7.12+** — hipThreads depends on HIP and libhipcxx. The code samples also use rocThrust utilities. All are included in TheRock builds.
 
-    sudo tee /etc/apt/sources.list.d/rocm.list << EOF
-    deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.0.2/ noble main
-    deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/graphics/7.0.2/ubuntu/ noble main
-    EOF
+### Installing ROCm
+> [!NOTE]
+> ROCm 7.12 is part of a technology preview release stream (starting from 7.9.0) and is separate from the 7.0–7.2 production releases. The last supported ROCm 7 production release is 7.0.2. For ROCm 7.0.2 setup instructions, see the [0.1.0 release prerequisites](https://github.com/ROCm/hipThreads/blob/release/0.1.0/README.md#prerequisites).
 
-    sudo tee /etc/apt/preferences.d/rocm-pin-600 << EOF
-    Package: *
-    Pin: release o=repo.radeon.com
-    Pin-Priority: 600
-    EOF
+1. Follow the [ROCm 7.12 installation guide](https://rocm.docs.amd.com/en/7.12.0-preview/install/rocm.html) for your GPU and distribution. Install at least the **core-dev** package for your GPU architecture (e.g., `amdrocm-core-dev7.12-gfx120x`). The full **core-sdk** package (e.g., `amdrocm-core-sdk-gfx120x`) also works.
 
-    sudo apt update
-    sudo apt install rocm
-    ```
-  - Complete the [post-installation instructions](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/post-install.html), then **reboot**:
+2. Configure your environment:
+
     ```bash
-    sudo tee --append /etc/ld.so.conf.d/rocm.conf <<EOF
-    /opt/rocm/lib
-    /opt/rocm/lib64
-    EOF
-    sudo ldconfig
-    sudo reboot
+    export ROCM_PATH=/opt/rocm/core
+    export PATH=$PATH:$ROCM_PATH/bin
+    export LD_LIBRARY_PATH=$ROCM_PATH/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
     ```
-  - Verify the installation:
+
+    To make this persistent across sessions, add the lines above to `~/.bashrc` and run `source ~/.bashrc`.
+
+3. Verify the installation:
+
     ```bash
-    which hipcc             # /opt/rocm/bin/hipcc
     hipcc --version         # Should print the clang/HIP version
-    amd-smi                 # Should show GPU info
+    rocminfo                # Should list detected GPUs and HSA agents
+    amd-smi version         # Should show AMDSMI and ROCm version info
     ```
-    If `amd-smi` does not work, try: `sudo modprobe amdgpu`
-- [libhipcxx v2.7](https://github.com/ROCm/libhipcxx/tree/release/2.7.x?tab=readme-ov-file#installation)
-  ```bash
-  git clone -b release/2.7.x git@github.com:ROCm/libhipcxx.git # clone and checkout the release/2.7.x
-  cd libhipcxx
-  mkdir build && cd build
-  cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm -DLIBCUDACXX_ENABLE_LIBCUDACXX_TESTS=OFF .. # skip tests to avoid installing lit
-  make
-  sudo make install
-  ```
-- The code samples require [rocThrust version **4.2.0**](https://rocm.docs.amd.com/projects/rocThrust/en/latest/install/rocThrust-install-overview.html)
-  ```bash
-  git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
-  cd rocm-libraries
-  git sparse-checkout init --cone
-  git sparse-checkout set projects/rocthrust
-  git checkout release/rocm-rel-7.2
-  cd projects/rocthrust
-  sudo ./install --install
-  ```
 
 ## Build and Installation
 
-By default, hipThreads installs under `/opt/rocm` (matching other ROCm components). You can override this by adding `-DCMAKE_INSTALL_PREFIX=<path>` to the CMake configure command.
+By default, hipThreads installs under `$ROCM_PATH` (matching other ROCm components). You can override this by adding `-DCMAKE_INSTALL_PREFIX=<path>` to the CMake configure command.
 
 ```bash
 git clone https://github.com/ROCm/hipThreads.git
@@ -106,7 +67,7 @@ sudo cmake --install ./build
 ```
 
 > [!NOTE]
->  Installing to `/opt/rocm` usually requires `sudo`.
+> Installing to `$ROCM_PATH` usually requires `sudo`.
 
 ## Usage
 
@@ -120,7 +81,7 @@ find_package(hipthreads REQUIRED)
 target_link_libraries(<your_target> hipthreads::hipthreads)
 ```
 
-If hipThreads is not installed in the default `/opt/rocm` location, add `-DCMAKE_PREFIX_PATH=/path/to/hipThreads` to your CMake configure command.
+If hipThreads is not installed under `$ROCM_PATH`, add `-DCMAKE_PREFIX_PATH=/path/to/hipthreads` to your CMake configure command.
 
 ## Examples
 
