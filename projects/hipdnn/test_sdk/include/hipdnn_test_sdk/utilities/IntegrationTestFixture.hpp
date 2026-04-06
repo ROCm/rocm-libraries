@@ -60,6 +60,7 @@ protected:
     }
 
     /// Override to provide custom plugin paths. Default loads testGoodPluginPath().
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     virtual std::vector<std::string> getPluginPaths() const
     {
         return {hipdnn_tests::plugin_constants::testGoodPluginPath()};

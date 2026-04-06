@@ -24,23 +24,31 @@ inline std::shared_ptr<TestableGraphLifting> liftGraph(TestableGraphLifting& gra
     auto result = graph.validate();
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     if(result.code != ErrorCode::OK)
+    {
         return nullptr;
+    }
 
     result = graph.build_operation_graph(handle);
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     if(result.code != ErrorCode::OK)
+    {
         return nullptr;
+    }
 
     auto rawDesc = graph.get_raw_graph_descriptor();
-    EXPECT_NE(rawDesc, nullptr);
+    EXPECT_NE(rawDesc, nullptr); // NOLINT(readability-implicit-bool-conversion)
     if(rawDesc == nullptr)
+    {
         return nullptr;
+    }
 
     auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     if(result.code != ErrorCode::OK)
+    {
         return nullptr;
+    }
 
     return liftedGraph;
 }
@@ -56,24 +64,33 @@ inline std::shared_ptr<TestableGraphLifting>
     auto result = graph.validate();
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     if(result.code != ErrorCode::OK)
+    {
         return nullptr;
+    }
 
     auto data = graph.toBinary();
     EXPECT_FALSE(data.empty());
     if(data.empty())
+    {
         return nullptr;
+    }
 
     const hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(),
                                                                            data.size());
-    EXPECT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
+    EXPECT_TRUE(graphDesc.valid()) // NOLINT(readability-implicit-bool-conversion)
+        << "Failed to create backend graph descriptor"; // NOLINT(readability-implicit-bool-conversion)
     if(!graphDesc.valid())
+    {
         return nullptr;
+    }
 
     auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->fromBackendDescriptor(graphDesc.get());
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     if(result.code != ErrorCode::OK)
+    {
         return nullptr;
+    }
 
     return liftedGraph;
 }
