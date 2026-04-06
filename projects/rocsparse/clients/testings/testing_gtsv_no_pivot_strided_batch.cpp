@@ -56,8 +56,8 @@ void testing_gtsv_no_pivot_strided_batch_bad_arg(const Arguments& arg)
                             args_to_exclude_solve,
                             PARAMS_SOLVE);
 
-    // m > 512
-    batch_stride = m = 513;
+    // m > 1024
+    batch_stride = m = 1025;
     temp_buffer      = (void*)nullptr;
     EXPECT_ROCSPARSE_STATUS(rocsparse_gtsv_no_pivot_strided_batch<T>(PARAMS_SOLVE),
                             rocsparse_status_invalid_pointer);
@@ -91,7 +91,7 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
 {
     rocsparse_int m            = arg.M;
     rocsparse_int batch_count  = arg.N;
-    rocsparse_int batch_stride = arg.denseld;
+    rocsparse_int batch_stride = arg.M; //arg.denseld;
 
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);

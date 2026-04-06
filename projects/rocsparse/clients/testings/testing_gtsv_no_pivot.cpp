@@ -87,7 +87,7 @@ void testing_gtsv_no_pivot(const Arguments& arg)
 {
     rocsparse_int m   = arg.M;
     rocsparse_int n   = arg.N;
-    int64_t       ldb = arg.denseld;
+    int64_t       ldb = arg.M;//arg.denseld;
 
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);

@@ -90,6 +90,15 @@ Tests:
 - name: gtsv_no_pivot_strided_batch
   category: pre_checkin
   function: gtsv_no_pivot_strided_batch
+  precision: *single_double_precisions
+  M: [511, 512, 513, 514, 515, 600, 700, 850, 934, 1023, 1024]
+  N: [32, 45]
+  denseld: [1024]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot_strided_batch
+  category: pre_checkin
+  function: gtsv_no_pivot_strided_batch
   precision: *single_double_precisions_complex_real
   M: [2000]
   N: [25, 34]
