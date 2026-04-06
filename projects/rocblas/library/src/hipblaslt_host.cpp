@@ -138,11 +138,11 @@ namespace
         return rocblas_status_success;
     }
 #define EXPECT_HIPBLAS_STATUS hipblaslt_expect_status
-#define CHECK_SOLUTION_FOUND(SOL_COUNT)                                                            \
-    do                                                                                             \
-    {                                                                                              \
-        if(SOL_COUNT == 0)                                                                         \
-            return rocblas_status_internal_error;                                                  \
+#define CHECK_SOLUTION_FOUND(SOL_COUNT)           \
+    do                                            \
+    {                                             \
+        if(SOL_COUNT == 0)                        \
+            return rocblas_status_internal_error; \
     } while(0)
 #define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)               \
     do                                                                                  \
