@@ -506,12 +506,15 @@ else()
   message(STATUS "rocSPARSE: No test_categories.yaml (CTest categories not used)")
 endif()
 
-rocm_install(
-    FILES "${INSTALL_TEST_FILE}"
-    DESTINATION "${CMAKE_INSTALL_BINDIR}"
-    COMPONENT tests
-    RENAME "CTestTestfile.cmake"
-)
+# Install CTestTestfile.cmake to bin/rocsparse/ for TheRock (relocatable tests; run ctest from that dir)
+if(ROCSPARSE_CTEST_INSTALL_FILE)
+  rocm_install(
+      FILES "${ROCSPARSE_CTEST_INSTALL_FILE}"
+      DESTINATION "${CMAKE_INSTALL_BINDIR}/rocsparse"
+      COMPONENT tests
+      RENAME "CTestTestfile.cmake"
+  )
+endif()
 
 if (WIN32)
   # for now adding in all .dll as dependency chain is not cmake based on win32
