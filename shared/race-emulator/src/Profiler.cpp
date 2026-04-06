@@ -210,8 +210,7 @@ void Profiler::report(std::ostream &os, double minPercentage) const {
     double avgUs = otherCount > 0
                        ? (otherSeconds / static_cast<double>(otherCount)) * 1e6
                        : 0.0;
-    double pct =
-        accounted > 0.0 ? (otherSeconds / accounted) * 100.0 : 0.0;
+    double pct = accounted > 0.0 ? (otherSeconds / accounted) * 100.0 : 0.0;
 
     os << std::left << std::setw(static_cast<int>(maxNameLen + 2)) << otherLabel
        << std::right << std::fixed << std::setprecision(6) << std::setw(12)

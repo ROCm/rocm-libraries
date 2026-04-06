@@ -112,9 +112,14 @@ public:
     return [&wave, emulationFunction, dst, n]() {
       emulationFunction();
       auto pc = wave.getPc();
-      wave.setPendingMemoryEvent({pc, MemoryEventType::GLOBAL_TO_VGPR,
+      wave.setPendingMemoryEvent({pc,
+                                  MemoryEventType::GLOBAL_TO_VGPR,
                                   registerIndexRange(dst.index, n),
-                                  wave.getExecU64(), wave.getWaveSize()});
+                                  wave.getExecU64(),
+                                  wave.getWaveSize(),
+                                  0xF,
+                                  {},
+                                  0});
       return pc + 1;
     };
   }
@@ -197,9 +202,14 @@ public:
     return [&wave, emulationFunction, dataSrc, n]() {
       emulationFunction();
       auto pc = wave.getPc();
-      wave.setPendingMemoryEvent({pc, MemoryEventType::VGPR_TO_GLOBAL,
+      wave.setPendingMemoryEvent({pc,
+                                  MemoryEventType::VGPR_TO_GLOBAL,
                                   registerIndexRange(dataSrc.index, n),
-                                  wave.getExecU64(), wave.getWaveSize()});
+                                  wave.getExecU64(),
+                                  wave.getWaveSize(),
+                                  0xF,
+                                  {},
+                                  0});
       return pc + 1;
     };
   }
@@ -486,9 +496,14 @@ public:
     return [&wave, emulationFunction, dstReg, n]() {
       emulationFunction();
       auto pc = wave.getPc();
-      wave.setPendingMemoryEvent({pc, MemoryEventType::GLOBAL_TO_VGPR,
+      wave.setPendingMemoryEvent({pc,
+                                  MemoryEventType::GLOBAL_TO_VGPR,
                                   registerIndexRange(dstReg.index, n),
-                                  wave.getExecU64(), wave.getWaveSize()});
+                                  wave.getExecU64(),
+                                  wave.getWaveSize(),
+                                  0xF,
+                                  {},
+                                  0});
       return pc + 1;
     };
   }
@@ -536,9 +551,14 @@ public:
     return [&wave, emulationFunction, srcReg, n]() {
       emulationFunction();
       auto pc = wave.getPc();
-      wave.setPendingMemoryEvent({pc, MemoryEventType::VGPR_TO_GLOBAL,
+      wave.setPendingMemoryEvent({pc,
+                                  MemoryEventType::VGPR_TO_GLOBAL,
                                   registerIndexRange(srcReg.index, n),
-                                  wave.getExecU64(), wave.getWaveSize()});
+                                  wave.getExecU64(),
+                                  wave.getWaveSize(),
+                                  0xF,
+                                  {},
+                                  0});
       return pc + 1;
     };
   }
@@ -826,10 +846,14 @@ public:
       emulationFunction();
       auto pc = wave.getPc();
       uint8_t byteMask = hi ? 0xC : 0x3;
-      wave.setPendingMemoryEvent({pc, MemoryEventType::GLOBAL_TO_VGPR,
+      wave.setPendingMemoryEvent({pc,
+                                  MemoryEventType::GLOBAL_TO_VGPR,
                                   registerIndexRange(dstReg.index, 1),
-                                  wave.getExecU64(), wave.getWaveSize(),
-                                  byteMask});
+                                  wave.getExecU64(),
+                                  wave.getWaveSize(),
+                                  byteMask,
+                                  {},
+                                  0});
       return pc + 1;
     };
   }
