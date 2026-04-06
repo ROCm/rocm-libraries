@@ -50,6 +50,7 @@ add_executable(
     TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
     TestKnob.cpp
+    TestKnobUnpacker.cpp
     TestLayernormAttributes.cpp
     TestLayerNormNode.cpp
     TestMatmulAttributes.cpp

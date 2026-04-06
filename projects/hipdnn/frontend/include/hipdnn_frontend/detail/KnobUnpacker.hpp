@@ -106,10 +106,8 @@ namespace hipdnn_frontend::detail
     unpackStringKnobFields(hipdnnBackendDescriptor_t knobDesc, const std::string& knobId)
 {
     std::string strVal;
-    HIPDNN_FE_TRY(getDescriptorAttrString(knobDesc,
-                                          HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE,
-                                          strVal,
-                                          "knob info default value (string)"));
+    HIPDNN_FE_TRY(getDescriptorAttrString(
+        knobDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, strVal, "knob info default value (string)"));
 
     std::optional<int32_t> stringMaxLength;
     HIPDNN_FE_TRY(getDescriptorAttrOptionalScalar(knobDesc,
@@ -142,13 +140,13 @@ namespace hipdnn_frontend::detail
         {
             std::vector<char> buffer(static_cast<size_t>(count));
             int64_t actualCount = 0;
-            auto getStatus = hipdnnBackend()->backendGetAttribute(
-                knobDesc,
-                HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
-                HIPDNN_TYPE_CHAR,
-                count,
-                &actualCount,
-                buffer.data());
+            auto getStatus
+                = hipdnnBackend()->backendGetAttribute(knobDesc,
+                                                       HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
+                                                       HIPDNN_TYPE_CHAR,
+                                                       count,
+                                                       &actualCount,
+                                                       buffer.data());
 
             if(getStatus != HIPDNN_STATUS_SUCCESS)
             {

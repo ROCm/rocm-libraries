@@ -68,7 +68,7 @@
         },
         {
             "name": "hipdnn-integration-tests",
-            "description": "Build hipdnn-integration-tests",
+            "description": "Build hipdnn and hipdnn-integration-tests",
             "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests"
@@ -76,7 +76,7 @@
         },
         {
             "name": "miopen-provider",
-            "description": "Build hipdnn and miopen-provider",
+            "description": "Build hipdnn, miopen-provider and integration tests",
             "inherits": ["default:release"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider"

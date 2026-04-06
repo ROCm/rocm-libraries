@@ -33,11 +33,13 @@ add_executable(
     IntegrationConvolutionDgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
+    IntegrationCustomOpDescriptorLifting.cpp
+    IntegrationCustomOpDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
-    IntegrationCustomOpDescriptorLifting.cpp
-    IntegrationCustomOpDescriptorLowering.cpp
+    IntegrationGraphKnobSettingsDescriptorLowering.cpp
+    IntegrationGraphKnobsDescriptorLifting.cpp
     IntegrationGraphLifting.cpp
     IntegrationGraphSupportCheck.cpp
     IntegrationLayerNormDescriptorLifting.cpp
@@ -69,6 +71,7 @@ target_link_libraries(
     hipdnn_test_sdk
     hipdnn_backend
     hip::host
+    ${CMAKE_DL_LIBS}
 )
 
 target_include_directories(hipdnn_public_frontend_tests PRIVATE ${HIPDNN_TEST_INCLUDE_DIRS})
