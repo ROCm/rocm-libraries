@@ -14,6 +14,7 @@
 #include <hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvWgradConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
@@ -24,6 +25,7 @@ using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 
 class TestConvolutionWrwOperationDescriptor : public ::testing::Test
 {
@@ -96,10 +98,12 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<ConvolutionWrwOperationDescriptor>();
-        _xDesc = createFinalizedTensor(K_WGRAD_TENSOR_X_UID, {1, 3, 32, 32}, {3072, 1024, 32, 1});
-        _dyDesc
-            = createFinalizedTensor(K_WGRAD_TENSOR_DY_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _dwDesc = createFinalizedTensor(K_WGRAD_TENSOR_DW_UID, {64, 3, 3, 3}, {27, 9, 3, 1});
+        _xDesc = createFinalizedTensor(
+            K_WGRAD_TENSOR_X_UID, toVec(K_WGRAD_TENSOR_X_DIMS), toVec(K_WGRAD_TENSOR_X_STRIDES));
+        _dyDesc = createFinalizedTensor(
+            K_WGRAD_TENSOR_DY_UID, toVec(K_WGRAD_TENSOR_DY_DIMS), toVec(K_WGRAD_TENSOR_DY_STRIDES));
+        _dwDesc = createFinalizedTensor(
+            K_WGRAD_TENSOR_DW_UID, toVec(K_WGRAD_TENSOR_DW_DIMS), toVec(K_WGRAD_TENSOR_DW_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 

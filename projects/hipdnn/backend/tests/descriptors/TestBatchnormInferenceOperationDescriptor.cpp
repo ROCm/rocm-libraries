@@ -14,6 +14,7 @@
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/BatchnormInferenceConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
@@ -24,6 +25,7 @@ using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_tests::constants::batchnorm_inference;
+using hipdnn_tests::toVec;
 
 class TestBatchnormInferenceOperationDescriptor : public ::testing::Test
 {
@@ -102,13 +104,18 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<BatchnormInferenceOperationDescriptor>();
-        _xDesc = createFinalizedTensor(K_TENSOR_X_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _meanDesc = createFinalizedTensor(K_TENSOR_MEAN_UID, {1, 64, 1, 1}, {64, 1, 1, 1});
-        _invVarianceDesc
-            = createFinalizedTensor(K_TENSOR_INV_VARIANCE_UID, {1, 64, 1, 1}, {64, 1, 1, 1});
-        _scaleDesc = createFinalizedTensor(K_TENSOR_SCALE_UID, {1, 64, 1, 1}, {64, 1, 1, 1});
-        _biasDesc = createFinalizedTensor(K_TENSOR_BIAS_UID, {1, 64, 1, 1}, {64, 1, 1, 1});
-        _yDesc = createFinalizedTensor(K_TENSOR_Y_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+        _xDesc = createFinalizedTensor(
+            K_TENSOR_X_UID, toVec(K_SPATIAL_DIMS), toVec(K_SPATIAL_STRIDES));
+        _meanDesc = createFinalizedTensor(
+            K_TENSOR_MEAN_UID, toVec(K_CHANNEL_DIMS), toVec(K_CHANNEL_STRIDES));
+        _invVarianceDesc = createFinalizedTensor(
+            K_TENSOR_INV_VARIANCE_UID, toVec(K_CHANNEL_DIMS), toVec(K_CHANNEL_STRIDES));
+        _scaleDesc = createFinalizedTensor(
+            K_TENSOR_SCALE_UID, toVec(K_CHANNEL_DIMS), toVec(K_CHANNEL_STRIDES));
+        _biasDesc = createFinalizedTensor(
+            K_TENSOR_BIAS_UID, toVec(K_CHANNEL_DIMS), toVec(K_CHANNEL_STRIDES));
+        _yDesc = createFinalizedTensor(
+            K_TENSOR_Y_UID, toVec(K_SPATIAL_DIMS), toVec(K_SPATIAL_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 

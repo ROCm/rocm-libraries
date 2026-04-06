@@ -14,6 +14,7 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/PointwiseConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
@@ -25,6 +26,7 @@ using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 
 class TestPointwiseOperationDescriptor : public ::testing::Test
 {
@@ -93,10 +95,10 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<PointwiseOperationDescriptor>();
-        _in0Desc
-            = createFinalizedTensor(K_PW_TENSOR_IN0_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _out0Desc
-            = createFinalizedTensor(K_PW_TENSOR_OUT0_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+        _in0Desc = createFinalizedTensor(
+            K_PW_TENSOR_IN0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+        _out0Desc = createFinalizedTensor(
+            K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
         _in1Desc = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
         _in2Desc = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
@@ -721,10 +723,10 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<PointwiseOperationDescriptor>();
-        _in0Desc
-            = createFinalizedTensor(K_PW_TENSOR_IN0_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _out0Desc
-            = createFinalizedTensor(K_PW_TENSOR_OUT0_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+        _in0Desc = createFinalizedTensor(
+            K_PW_TENSOR_IN0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+        _out0Desc = createFinalizedTensor(
+            K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
     }
 
     void TearDown() override
