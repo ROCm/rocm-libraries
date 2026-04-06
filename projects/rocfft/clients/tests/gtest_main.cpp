@@ -652,14 +652,20 @@ int main(int argc, char* argv[])
               << byte_size_to_str(system_memory::singleton().get_limit_bytes())
               << " of system memory." << std::endl;
     device_memory_accountant::singleton().set_limit_bytes_for_all_devices(vramgb_limit * ONE_GiB);
-    std::cout << "Refraining from using more than" << std::endl;
+    std::cout << "Refraining from using more than ";
     for(size_t dev_id = 0; dev_id < device_memory_accountant::singleton().num_devices(); dev_id++)
     {
-        std::cout << "\t"
-                  << byte_size_to_str(
-                         device_memory_accountant::singleton().get_limit_bytes_on_device(dev_id))
-                  << " of device memory on device ID " << dev_id << std::endl;
+        if(device_memory_accountant::singleton().num_devices() > 1)
+            std::cout << "\n\t";
+        std::cout << byte_size_to_str(
+            device_memory_accountant::singleton().get_limit_bytes_on_device(dev_id))
+                  << " of device memory";
+        if(device_memory_accountant::singleton().num_devices() > 1)
+            std::cout << " on device ID " << dev_id;
+        std::cout << (dev_id == device_memory_accountant::singleton().num_devices() - 1 ? "."
+                                                                                        : ";");
     }
+    std::cout << std::endl;
 
     if(use_fftw_wisdom)
     {
