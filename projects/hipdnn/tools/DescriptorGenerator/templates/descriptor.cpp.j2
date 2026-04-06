@@ -32,12 +32,12 @@ void {{ op.class_name }}::finalize()
                   "set");
 {% endif %}
 {% for ef in op.enum_fields %}
-    THROW_IF_TRUE(_data.{{ ef.fbs_field }} == {{ ef.cpp_enum }}::UNSET,
+    THROW_IF_TRUE(_data.{{ ef.fbs_field }} == {{ ef.cpp_enum }}::{{ ef.effective_sentinel_value }},
                   HIPDNN_STATUS_BAD_PARAM,
                   "{{ op.class_name }}::finalize() failed: {{ ef.name }} not set");
 {% endfor %}
 {% for cf in op.mode_fields %}
-    THROW_IF_TRUE(_data.{{ cf.fbs_field }} == {{ cf.cpp_enum }}::UNSET,
+    THROW_IF_TRUE(_data.{{ cf.fbs_field }} == {{ cf.cpp_enum }}::{{ cf.effective_sentinel_value }},
                   HIPDNN_STATUS_BAD_PARAM,
                   "{{ op.class_name }}::finalize() failed: {{ cf.name }} not set");
 {% endfor %}
@@ -432,11 +432,13 @@ std::string {{ op.class_name }}::toString() const
 {% if df.is_vector %}
     str += ", {{ df.name }}=" + vecToString(_data.{{ df.fbs_field }});
 {% elif df.is_mode %}
-    str += ", {{ df.name }}=" + std::to_string(static_cast<int>(_data.{{ df.fbs_field }}));
+    str += ", {{ df.name }}=" + std::string({{ op.fbs_namespace }}::EnumName{{ df.enum_short_type }}(_data.{{ df.fbs_field }}));
 {% elif df.is_enum %}
-    str += ", {{ df.name }}=" + std::to_string(static_cast<int>(_data.{{ df.fbs_field }}));
+    str += ", {{ df.name }}=" + std::string({{ op.fbs_namespace }}::EnumName{{ df.enum_short_type }}(_data.{{ df.fbs_field }}));
 {% elif df.is_optional_scalar %}
     str += ", {{ df.name }}=" + (_data.{{ df.fbs_field }} ? std::to_string(*_data.{{ df.fbs_field }}) : "nullopt");
+{% elif df.type == 'bool' %}
+    str += ", {{ df.name }}=" + std::string(_data.{{ df.fbs_field }} ? "true" : "false");
 {% elif df.is_scalar %}
     str += ", {{ df.name }}=" + std::to_string(_data.{{ df.fbs_field }});
 {% endif %}

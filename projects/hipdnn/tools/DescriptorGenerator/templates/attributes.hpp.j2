@@ -40,6 +40,8 @@ namespace hipdnn_frontend::graph
 class {{ op.frontend.attributes_class }} : public Attributes<{{ op.frontend.attributes_class }}>
 {
 public:
+    {{ op.frontend.attributes_class }}() = default;
+
     /// Input tensor identifiers
     enum class InputNames
     {
