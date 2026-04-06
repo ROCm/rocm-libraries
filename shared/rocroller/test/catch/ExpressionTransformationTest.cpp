@@ -4,6 +4,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 #include "CustomMatchers.hpp"
@@ -703,7 +704,10 @@ TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformat
 {
     using namespace rocRoller;
     using Expression::literal;
-    auto context = TestContext::ForDefaultTarget();
+
+    KernelOptions opts;
+    opts->minLaunchTimeExpressionComplexity = 5;
+    auto context                            = TestContext::ForDefaultTarget(opts);
 
     auto command = std::make_shared<Command>();
 
@@ -807,7 +811,7 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
     {
         auto dataTypeInfo = DataTypeInfo::Get(dataType);
 
-        auto arg = command->allocateArgument(dataType, argTag, ArgumentType::Limit);
+        auto arg = command->allocateArgument(dataType, argTag, ArgumentType::Size);
 
         auto argExp = fast(arg->expression());
 
@@ -920,7 +924,7 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
     {
         auto dataTypeInfo = DataTypeInfo::Get(dataType);
 
-        auto arg = command->allocateArgument(dataType, argTag, ArgumentType::Limit);
+        auto arg = command->allocateArgument(dataType, argTag, ArgumentType::Size);
 
         auto argExp = fast(arg->expression());
 
