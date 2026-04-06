@@ -56,7 +56,9 @@ endfunction()
 # List kernel files to embed
 set(GPU_REF_KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/convolution/GpuRefConvFwd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/validator/GpuRefValidator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefConvArgs.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefValidatorArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefTypes.h
 )
 
