@@ -7,7 +7,7 @@ operation:
   descriptor_type:
     enum_name: "HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR"
 
-  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD"
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA"
 
   frontend:
     packer_function: "createConvDgradOperation"
