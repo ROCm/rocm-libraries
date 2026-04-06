@@ -621,8 +621,9 @@ TEST(hipfftTest, RunR2C)
     fftw_complex* ref_out;
 
     ref_out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * (N / 2 + 1));
-    fftw_plan_wrapper<double> ref_p(fftw_plan_dft_r2c_1d(N, ref_in, ref_out, FFTW_ESTIMATE));
-    fftw_execute(ref_p);
+    fftw_plan_wrapper_t<double> ref_p
+        = fftw_trait<double>::make_wrapper(fftw_plan_dft_r2c_1d(N, ref_in, ref_out, FFTW_ESTIMATE));
+    fftw_execute_type<double>(ref_p);
 
     double maxv  = 0;
     double nrmse = 0; // normalized root mean square error
@@ -696,9 +697,10 @@ TEST(hipfftTest, OutplaceOnly)
 
     fftw_complex* ref_out;
 
-    ref_out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * N_out);
-    fftw_plan_wrapper<double> ref_p(fftw_plan_dft_r2c_1d(N_in, ref_in, ref_out, FFTW_ESTIMATE));
-    fftw_execute(ref_p);
+    ref_out                           = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * N_out);
+    fftw_plan_wrapper_t<double> ref_p = fftw_trait<double>::make_wrapper(
+        fftw_plan_dft_r2c_1d(N_in, ref_in, ref_out, FFTW_ESTIMATE));
+    fftw_execute_type<double>(ref_p);
 
     double maxv  = 0;
     double nrmse = 0; // normalized root mean square error
