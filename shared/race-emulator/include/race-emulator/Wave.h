@@ -12,6 +12,7 @@
 #include <functional>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -120,6 +121,13 @@ public:
 
   void tryExecute(const std::string &line, bool enableLineCaching);
 
+  /// Number of times tryExecute has compiled an instruction (as opposed to
+  /// using a cached executor). With caching enabled, each unique PC should
+  /// be compiled at most once. Note: macro-body instructions are never cached
+  /// (recompiled every invocation), and dual instructions (A :: B) count as
+  /// one compilation despite compiling two sub-instructions internally.
+  int getCompileCount() const { return compileCount; }
+
   void setScc(bool value);
   bool getScc() const;
 
@@ -166,6 +174,9 @@ public:
   /// Discard all wave-complete events. Called when all waves have reached
   /// s_barrier (not when individual waves arrive).
   void flushWaveCompleteMemoryEvents();
+
+  void setPendingMemoryEvent(PendingMemoryEvent event);
+  void setPendingWaitCount(PendingWaitCount waitCount);
 
   template <typename T> T getValue(const Operand<T> &operand, int lane) const;
   template <typename T>
@@ -231,9 +242,16 @@ private:
 
   std::vector<std::function<int()>> instructionCache;
 
+  // Tracks the number of instruction compilations (calls to compileLine that
+  // produce an executor). Used for verifying that caching avoids recompilation.
+  int compileCount = 0;
+
   // Per-wave race detection state. Null when race checks are disabled.
   // Owned by RaceDetector (via Workgroup), not by Wave.
   WaveRaceState *raceState = nullptr;
+
+  std::optional<PendingMemoryEvent> pendingMemoryEvent;
+  std::optional<PendingWaitCount> pendingWaitCount;
 
   Wave(int vgprCount, int agprOffset, int sgprCount, WaveSize, WaveId,
        Workgroup &workgroup, const std::map<std::string, int> *labels,

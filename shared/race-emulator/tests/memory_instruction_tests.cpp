@@ -17,6 +17,7 @@ using namespace raceemulator;
 
 void tryExecute(Wave &regs, const std::string &line) {
   regs.tryExecute(line, false);
+  regs.getWorkgroup().dispatchPendingRaceEvents(regs.getWaveId());
 }
 
 // Helper: set up SRD (Shader Resource Descriptor) in s[srdBase:srdBase+3].

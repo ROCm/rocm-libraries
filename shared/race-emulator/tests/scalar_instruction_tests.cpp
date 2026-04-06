@@ -73,6 +73,7 @@ void tryExecute(Wave &regs, const std::string &line) {
   // ++pc;
   // return regs.tryExecute(line, pc, labels, macros);
   regs.tryExecute(line, false);
+  regs.getWorkgroup().dispatchPendingRaceEvents(regs.getWaveId());
 }
 
 } // namespace

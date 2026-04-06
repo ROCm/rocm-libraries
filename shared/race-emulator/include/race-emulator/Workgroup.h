@@ -99,7 +99,12 @@ public:
 
   Dim3d getWorkgroupId() const { return workgroupId; }
 
-  // --- Race detector access ---
+  // --- Race detection ---
+
+  /// Dispatch any pending race events left by the most recent tryExecute call.
+  /// Called by Workgroup::run after each instruction; tests that call
+  /// tryExecute directly must call this explicitly.
+  void dispatchPendingRaceEvents(WaveId waveId);
 
   RaceDetector *getRaceDetector() { return raceDetector.get(); }
   const RaceDetector *getRaceDetector() const { return raceDetector.get(); }

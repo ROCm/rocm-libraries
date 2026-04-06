@@ -74,6 +74,14 @@ void Wave::flushWaveCompleteMemoryEvents() {
   }
 }
 
+void Wave::setPendingMemoryEvent(PendingMemoryEvent event) {
+  pendingMemoryEvent = std::move(event);
+}
+
+void Wave::setPendingWaitCount(PendingWaitCount waitCount) {
+  pendingWaitCount = waitCount;
+}
+
 // --- VGPR access with race checking ---
 
 uint8_t Wave::getVgprByte(int reg, int lane, int byteIdx) const {
@@ -228,79 +236,82 @@ Wave::compileLine(const std::string &line,
 
 void Wave::tryExecute(const std::string &line_, bool enableLineCaching) {
 
+  // Apply macro argument substitution if inside a macro expansion.
   std::string macroReducedLine;
   if (!macroArguments.empty()) {
     macroReducedLine = getSymbolReducedLine(line_, macroArguments);
   }
   const std::string &line = macroArguments.empty() ? line_ : macroReducedLine;
 
-  auto nxt = [&]() {
-    if (pc < static_cast<int>(instructionCache.size()) &&
-        instructionCache[pc] != nullptr) {
-      return instructionCache[pc]();
-    }
+  // Fast path: use cached executor if available.
+  if (pc < static_cast<int>(instructionCache.size()) &&
+      instructionCache[pc] != nullptr) {
+    setPc(instructionCache[pc]());
+    return;
+  }
 
-    std::function<int()> func;
-
-    auto dualPos = line.find("::");
-    if (dualPos != std::string::npos) {
-      auto compileOrThrow = [&](const std::string &s) {
-        auto f = compileLine(s, *macros);
-        if (!f) {
-          throw std::runtime_error("Unimplemented instruction: " + s);
-        }
-        return f;
-      };
-      auto func1 = compileOrThrow(line.substr(0, dualPos));
-      auto func2 = compileOrThrow(line.substr(dualPos + 2));
-      int currentPc = pc;
-      func = [func1, func2, currentPc]() -> int {
-        func1();
-        func2();
-        return currentPc + 1;
-      };
-    }
-    if (!func) {
-      func = compileLine(line, *macros);
-    }
-    if (!func) {
-      auto partitioned = getPartitioned(line);
-      auto iter = macros->find(std::string(partitioned[0]));
-      if (iter != macros->end()) {
-        auto macroStart = iter->second.getStartLine();
-        const auto &argNames = iter->second.getArgNames();
-        macroReturnPc = pc + 1;
-        for (size_t i = 0; i < argNames.size(); ++i) {
-          uint32_t value = 0;
-          if (!parseNumber(partitioned[i + 1], value)) {
-            throw std::runtime_error("Error parsing macro argument: " +
-                                     std::string(partitioned[i + 1]));
-          }
-          macroArguments.insert({"\\" + argNames[i], value});
-        }
-        return macroStart + 1;
+  // Try compiling as a dual instruction (two instructions separated by "::").
+  std::function<int()> executor;
+  auto dualPos = line.find("::");
+  if (dualPos != std::string::npos) {
+    auto compileOrThrow = [&](const std::string &s) {
+      auto f = compileLine(s, *macros);
+      if (!f) {
+        throw std::runtime_error("Unimplemented instruction: " + s);
       }
+      return f;
+    };
+    auto func1 = compileOrThrow(line.substr(0, dualPos));
+    auto func2 = compileOrThrow(line.substr(dualPos + 2));
+    int currentPc = pc;
+    executor = [func1, func2, currentPc]() -> int {
+      func1();
+      func2();
+      return currentPc + 1;
+    };
+  }
+
+  // Try compiling as a regular instruction.
+  if (!executor) {
+    executor = compileLine(line, *macros);
+  }
+
+  // Try interpreting as a macro call.
+  if (!executor) {
+    auto partitioned = getPartitioned(line);
+    auto iter = macros->find(std::string(partitioned[0]));
+    if (iter != macros->end()) {
+      auto macroStart = iter->second.getStartLine();
+      const auto &argNames = iter->second.getArgNames();
+      macroReturnPc = pc + 1;
+      for (size_t i = 0; i < argNames.size(); ++i) {
+        uint32_t value = 0;
+        if (!parseNumber(partitioned[i + 1], value)) {
+          throw std::runtime_error("Error parsing macro argument: " +
+                                   std::string(partitioned[i + 1]));
+        }
+        macroArguments.insert({"\\" + argNames[i], value});
+      }
+      setPc(macroStart + 1);
+      return;
     }
-    if (!func) {
-      throw std::runtime_error("Unimplemented instruction: " + line);
-    }
+  }
+
+  if (!executor) {
+    throw std::runtime_error("Unimplemented instruction: " + line);
+  }
+
+  compileCount++;
+
+  // Cache the executor for future calls at this PC.
+  if (enableLineCaching && macroArguments.empty()) {
     if (pc >= static_cast<int>(instructionCache.size())) {
       instructionCache.resize(pc + 16, nullptr);
     }
-    if (enableLineCaching && macroArguments.empty()) {
-      instructionCache[pc] = func;
-    }
-    return func();
-  }();
-
-  auto firstSpace = line.find(' ');
-  std::string instructionName;
-  if (firstSpace != std::string::npos) {
-    instructionName = line.substr(0, firstSpace);
-  } else {
-    instructionName = line;
+    instructionCache[pc] = executor;
   }
-  setPc(nxt);
+
+  setPc(executor());
 }
 
 void Wave::setScc(bool value) { setSgpr(sccIndex, value); }

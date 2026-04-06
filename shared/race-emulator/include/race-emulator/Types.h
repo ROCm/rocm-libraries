@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include "CommonRegister.h"
 #include "Util.h"
 #include <algorithm>
+#include <cstdint>
 #include <vector>
 
 namespace raceemulator {
@@ -90,6 +92,31 @@ struct RaceViolation {
   int lane;     ///< Lane within the wave, or -1 for scalar.
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
+};
+
+/// Pending memory event data written by instruction executors. Dispatched to
+/// WaveRaceState by Workgroup::run after tryExecute returns.
+struct PendingMemoryEvent {
+  int pc;
+  MemoryEventType type;
+  std::vector<uint32_t> registers;
+  uint64_t execMask;
+  int waveSize;
+  uint8_t byteMask = 0xF;
+  // LDS events:
+  std::vector<uint32_t> laneBaseAddresses;
+  int bytesPerLane = 0;
+  // Dual-offset LDS events:
+  bool isDualOffset = false;
+  int32_t offset0 = 0;
+  int32_t offset1 = 0;
+};
+
+/// Pending wait count data written by the s_waitcnt executor. Dispatched to
+/// WaveRaceState by Workgroup::run after tryExecute returns.
+struct PendingWaitCount {
+  int vmcnt = -1;
+  int lgkmcnt = -1;
 };
 
 } // namespace raceemulator

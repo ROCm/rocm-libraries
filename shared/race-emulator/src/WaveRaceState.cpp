@@ -19,6 +19,30 @@ WaveRaceState::WaveRaceState(int vgprCount, WaveId waveId,
   }
 }
 
+void WaveRaceState::dispatch(PendingMemoryEvent event) {
+  if (event.isDualOffset) {
+    registerDualOffsetLdsEvent(
+        event.pc, event.type, std::move(event.registers), event.execMask,
+        event.waveSize, event.laneBaseAddresses, event.offset0, event.offset1);
+  } else if (!event.laneBaseAddresses.empty()) {
+    registerLdsEvent(event.pc, event.type, std::move(event.registers),
+                     event.execMask, event.waveSize, event.laneBaseAddresses,
+                     event.bytesPerLane, event.byteMask);
+  } else {
+    registerEvent(event.pc, event.type, std::move(event.registers),
+                  event.execMask, event.byteMask);
+  }
+}
+
+void WaveRaceState::dispatch(PendingWaitCount waitCount) {
+  if (waitCount.vmcnt >= 0) {
+    sWaitCntVmcnt(waitCount.vmcnt);
+  }
+  if (waitCount.lgkmcnt >= 0) {
+    sWaitCntLgkmcnt(waitCount.lgkmcnt);
+  }
+}
+
 void WaveRaceState::registerEvent(int pc, MemoryEventType type,
                                   std::vector<uint32_t> regIds,
                                   uint64_t execMask, uint8_t byteMask) {

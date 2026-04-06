@@ -56,6 +56,12 @@ public:
   /// Retire LDS events until at most lgkmcnt remain outstanding.
   void sWaitCntLgkmcnt(int lgkmcnt);
 
+  /// Dispatch a pending memory event produced by an instruction executor.
+  void dispatch(PendingMemoryEvent event);
+
+  /// Dispatch a pending wait count produced by an s_waitcnt executor.
+  void dispatch(PendingWaitCount waitCount);
+
   /// Discard all wave-complete events (called when all waves reach barrier).
   void flushWaveCompleteMemoryEvents();
 

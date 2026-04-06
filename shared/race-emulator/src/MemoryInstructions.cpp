@@ -5,7 +5,6 @@
 #include "race-emulator/Instruction.h"
 #include "race-emulator/Util.h"
 #include "race-emulator/Wave.h"
-#include "race-emulator/WaveRaceState.h"
 #include "race-emulator/Workgroup.h"
 #include <cstdint>
 #include <cstring>
@@ -113,10 +112,9 @@ public:
     return [&wave, emulationFunction, dst, n]() {
       emulationFunction();
       auto pc = wave.getPc();
-      if (auto *rs = wave.getRaceState()) {
-        rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
-                          registerIndexRange(dst.index, n), wave.getExecU64());
-      }
+      wave.setPendingMemoryEvent({pc, MemoryEventType::GLOBAL_TO_VGPR,
+                                  registerIndexRange(dst.index, n),
+                                  wave.getExecU64(), wave.getWaveSize()});
       return pc + 1;
     };
   }
@@ -199,11 +197,9 @@ public:
     return [&wave, emulationFunction, dataSrc, n]() {
       emulationFunction();
       auto pc = wave.getPc();
-      if (auto *rs = wave.getRaceState()) {
-        rs->registerEvent(pc, MemoryEventType::VGPR_TO_GLOBAL,
-                          registerIndexRange(dataSrc.index, n),
-                          wave.getExecU64());
-      }
+      wave.setPendingMemoryEvent({pc, MemoryEventType::VGPR_TO_GLOBAL,
+                                  registerIndexRange(dataSrc.index, n),
+                                  wave.getExecU64(), wave.getWaveSize()});
       return pc + 1;
     };
   }
@@ -464,11 +460,14 @@ public:
         std::vector<uint32_t> ldsBaseAddresses;
         emulationFunction(ldsBaseAddresses);
         auto pc = wave.getPc();
-        if (auto *rs = wave.getRaceState()) {
-          rs->registerLdsEvent(pc, MemoryEventType::GLOBAL_TO_LDS, {},
-                               wave.getExecU64(), wave.getWaveSize(),
-                               ldsBaseAddresses, bytesPerLane);
-        }
+        wave.setPendingMemoryEvent({pc,
+                                    MemoryEventType::GLOBAL_TO_LDS,
+                                    {},
+                                    wave.getExecU64(),
+                                    wave.getWaveSize(),
+                                    0xF,
+                                    std::move(ldsBaseAddresses),
+                                    bytesPerLane});
         return pc + 1;
       };
     }
@@ -487,11 +486,9 @@ public:
     return [&wave, emulationFunction, dstReg, n]() {
       emulationFunction();
       auto pc = wave.getPc();
-      if (auto *rs = wave.getRaceState()) {
-        rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
-                          registerIndexRange(dstReg.index, n),
-                          wave.getExecU64());
-      }
+      wave.setPendingMemoryEvent({pc, MemoryEventType::GLOBAL_TO_VGPR,
+                                  registerIndexRange(dstReg.index, n),
+                                  wave.getExecU64(), wave.getWaveSize()});
       return pc + 1;
     };
   }
@@ -539,11 +536,9 @@ public:
     return [&wave, emulationFunction, srcReg, n]() {
       emulationFunction();
       auto pc = wave.getPc();
-      if (auto *rs = wave.getRaceState()) {
-        rs->registerEvent(pc, MemoryEventType::VGPR_TO_GLOBAL,
-                          registerIndexRange(srcReg.index, n),
-                          wave.getExecU64());
-      }
+      wave.setPendingMemoryEvent({pc, MemoryEventType::VGPR_TO_GLOBAL,
+                                  registerIndexRange(srcReg.index, n),
+                                  wave.getExecU64(), wave.getWaveSize()});
       return pc + 1;
     };
   }
@@ -656,12 +651,10 @@ public:
       std::vector<uint32_t> laneAddresses;
       emulationFunction(laneAddresses);
       auto pc = wave.getPc();
-      if (auto *rs = wave.getRaceState()) {
-        rs->registerLdsEvent(pc, MemoryEventType::VGPR_TO_LDS,
-                             registerIndexRange(dataReg.index, n),
-                             wave.getExecU64(), wave.getWaveSize(),
-                             laneAddresses, bytesPerLane);
-      }
+      wave.setPendingMemoryEvent({pc, MemoryEventType::VGPR_TO_LDS,
+                                  registerIndexRange(dataReg.index, n),
+                                  wave.getExecU64(), wave.getWaveSize(), 0xF,
+                                  std::move(laneAddresses), bytesPerLane});
       return pc + 1;
     };
   }
@@ -768,13 +761,12 @@ public:
       std::vector<uint32_t> laneAddresses;
       emulationFunction(laneAddresses);
       auto pc = wave.getPc();
-      if (auto *rs = wave.getRaceState()) {
-        uint8_t byteMask = d16 ? (high ? 0xC : 0x3) : 0xF;
-        rs->registerLdsEvent(pc, MemoryEventType::LDS_TO_VGPR,
-                             registerIndexRange(dstReg.index, N_Regs),
-                             wave.getExecU64(), wave.getWaveSize(),
-                             laneAddresses, bytesPerLane, byteMask);
-      }
+      uint8_t byteMask = d16 ? (high ? 0xC : 0x3) : 0xF;
+      wave.setPendingMemoryEvent({pc, MemoryEventType::LDS_TO_VGPR,
+                                  registerIndexRange(dstReg.index, N_Regs),
+                                  wave.getExecU64(), wave.getWaveSize(),
+                                  byteMask, std::move(laneAddresses),
+                                  bytesPerLane});
       return pc + 1;
     };
   }
@@ -833,12 +825,11 @@ public:
     return [&wave, emulationFunction, dstReg, hi]() {
       emulationFunction();
       auto pc = wave.getPc();
-      if (auto *rs = wave.getRaceState()) {
-        uint8_t byteMask = hi ? 0xC : 0x3;
-        rs->registerEvent(pc, MemoryEventType::GLOBAL_TO_VGPR,
-                          registerIndexRange(dstReg.index, 1),
-                          wave.getExecU64(), byteMask);
-      }
+      uint8_t byteMask = hi ? 0xC : 0x3;
+      wave.setPendingMemoryEvent({pc, MemoryEventType::GLOBAL_TO_VGPR,
+                                  registerIndexRange(dstReg.index, 1),
+                                  wave.getExecU64(), wave.getWaveSize(),
+                                  byteMask});
       return pc + 1;
     };
   }
@@ -998,16 +989,14 @@ public:
       std::vector<uint32_t> laneAddresses;
       emulationFunction(laneAddresses);
       auto pc = wave.getPc();
-      if (auto *rs = wave.getRaceState()) {
-        std::vector<uint32_t> regs = {
-            static_cast<uint32_t>(data0Reg.index),
-            static_cast<uint32_t>(data0Reg.index + 1),
-            static_cast<uint32_t>(data1Reg.index),
-            static_cast<uint32_t>(data1Reg.index + 1)};
-        rs->registerDualOffsetLdsEvent(pc, MemoryEventType::VGPR_TO_LDS, regs,
-                                       wave.getExecU64(), wave.getWaveSize(),
-                                       laneAddresses, offset0, offset1);
-      }
+      std::vector<uint32_t> regs = {static_cast<uint32_t>(data0Reg.index),
+                                    static_cast<uint32_t>(data0Reg.index + 1),
+                                    static_cast<uint32_t>(data1Reg.index),
+                                    static_cast<uint32_t>(data1Reg.index + 1)};
+      wave.setPendingMemoryEvent(
+          {pc, MemoryEventType::VGPR_TO_LDS, std::move(regs), wave.getExecU64(),
+           wave.getWaveSize(), 0xF, std::move(laneAddresses), 0, true, offset0,
+           offset1});
       return pc + 1;
     };
   }
@@ -1065,12 +1054,11 @@ public:
       std::vector<uint32_t> laneAddresses;
       emulationFunction(laneAddresses);
       auto pc = wave.getPc();
-      if (auto *rs = wave.getRaceState()) {
-        rs->registerDualOffsetLdsEvent(pc, MemoryEventType::LDS_TO_VGPR,
-                                       registerIndexRange(dstReg.index, 4),
-                                       wave.getExecU64(), wave.getWaveSize(),
-                                       laneAddresses, offset0, offset1);
-      }
+      wave.setPendingMemoryEvent({pc, MemoryEventType::LDS_TO_VGPR,
+                                  registerIndexRange(dstReg.index, 4),
+                                  wave.getExecU64(), wave.getWaveSize(), 0xF,
+                                  std::move(laneAddresses), 0, true, offset0,
+                                  offset1});
       return pc + 1;
     };
   }

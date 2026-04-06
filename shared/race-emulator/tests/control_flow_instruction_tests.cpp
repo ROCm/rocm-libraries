@@ -10,6 +10,7 @@ using namespace raceemulator;
 
 void tryExecute(Wave &regs, const std::string &line) {
   regs.tryExecute(line, false);
+  regs.getWorkgroup().dispatchPendingRaceEvents(regs.getWaveId());
 }
 
 // TODO(newling) add tests of control flow instructions
@@ -93,4 +94,67 @@ TEST(Instructions, S_SENDMSG) {
   regs.setSgpr(2, 0xDEADBEEF);
   tryExecute(regs, "s_sendmsg sendmsg(MSG_INTERRUPT)");
   EXPECT_EQ(regs.getSgpr(2), 0xDEADBEEFu); // unchanged
+}
+
+// Verify that instruction caching works: when enableLineCaching is true,
+// each line should only be compiled once regardless of how many times the
+// PC revisits it.
+TEST(Instructions, InstructionCaching) {
+  std::map<std::string, int> labels = {{"loop", 0}};
+  std::map<std::string, Macro> macros;
+  Workgroup wg({.vgprCount = 4,
+                .sgprCount = 4,
+                .waveSize = WaveSize{1},
+                .labels = &labels,
+                .macros = &macros});
+  auto &wave = wg.getWave(0);
+
+  // A 3-instruction loop: set v0, set v1, branch back to start.
+  // Run it 5 times (15 instruction executions total).
+  std::vector<std::string> program = {
+      "v_mov_b32 v0, 42", // PC 0
+      "v_mov_b32 v1, 99", // PC 1
+      "s_branch loop",    // PC 2 -> jumps to PC 0
+  };
+
+  int iterations = 5;
+  int totalInstructions = iterations * static_cast<int>(program.size());
+
+  EXPECT_EQ(wave.getCompileCount(), 0);
+  for (int i = 0; i < totalInstructions; ++i) {
+    int pc = wave.getPc();
+    wave.tryExecute(program[pc], /*enableLineCaching=*/true);
+  }
+
+  // Each of the 3 unique lines should be compiled exactly once.
+  EXPECT_EQ(wave.getCompileCount(), 3);
+}
+
+// Verify that without caching, instructions are recompiled each time.
+TEST(Instructions, NoCachingRecompiles) {
+  std::map<std::string, int> labels = {{"loop", 0}};
+  std::map<std::string, Macro> macros;
+  Workgroup wg({.vgprCount = 4,
+                .sgprCount = 4,
+                .waveSize = WaveSize{1},
+                .labels = &labels,
+                .macros = &macros});
+  auto &wave = wg.getWave(0);
+
+  std::vector<std::string> program = {
+      "v_mov_b32 v0, 42",
+      "v_mov_b32 v1, 99",
+      "s_branch loop",
+  };
+
+  int iterations = 3;
+  int totalInstructions = iterations * static_cast<int>(program.size());
+
+  for (int i = 0; i < totalInstructions; ++i) {
+    int pc = wave.getPc();
+    wave.tryExecute(program[pc], /*enableLineCaching=*/false);
+  }
+
+  // Without caching, each execution compiles fresh.
+  EXPECT_EQ(wave.getCompileCount(), totalInstructions);
 }

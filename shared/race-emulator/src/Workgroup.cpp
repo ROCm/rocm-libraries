@@ -5,6 +5,7 @@
 #include "race-emulator/Parsing.h"
 #include "race-emulator/Profiler.h"
 #include "race-emulator/Util.h"
+#include "race-emulator/WaveRaceState.h"
 #include <algorithm>
 #include <numeric>
 
@@ -51,6 +52,20 @@ void Workgroup::setProfiler(Profiler *p) {
   if (raceDetector) {
     raceDetector->setProfiler(p);
   }
+}
+
+void Workgroup::dispatchPendingRaceEvents(WaveId waveId) {
+  auto &wave = waves.at(waveId.value);
+  if (auto *rs = wave.getRaceState()) {
+    if (wave.pendingWaitCount) {
+      rs->dispatch(*wave.pendingWaitCount);
+    }
+    if (wave.pendingMemoryEvent) {
+      rs->dispatch(std::move(*wave.pendingMemoryEvent));
+    }
+  }
+  wave.pendingWaitCount.reset();
+  wave.pendingMemoryEvent.reset();
 }
 
 void Workgroup::run(const std::vector<ParsedLine> &tokens) {
@@ -112,6 +127,7 @@ void Workgroup::run(const std::vector<ParsedLine> &tokens) {
     }();
 
     wave.tryExecute(token.commentFreeLine, true);
+    dispatchPendingRaceEvents(WaveId{waveId});
 
     // Check if the instruction changed wave state (s_endpgm / s_barrier).
     if (!wave.isActive()) {

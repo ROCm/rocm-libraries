@@ -18,6 +18,7 @@ using namespace raceemulator;
 
 void tryExecute(Wave &regs, const std::string &line) {
   regs.tryExecute(line, false);
+  regs.getWorkgroup().dispatchPendingRaceEvents(regs.getWaveId());
 }
 
 } // namespace
