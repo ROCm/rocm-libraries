@@ -920,7 +920,7 @@ extern "C" __global__ void OpTensorLeadingOnes(MIOPEN_TYPE* a,
                                                const int c_cstride,
                                                const int work_per_wg,
                                                const int num_wg,
-                                               const unsigned int bitmap
+                                               const unsigned int bitmap,
                                                const MIOPEN_TYPE alpha0,
                                                const MIOPEN_TYPE alpha1,
                                                const MIOPEN_TYPE beta,
