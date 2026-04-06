@@ -129,7 +129,7 @@ operation:
   operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_DATA"
 
   test_data:
-    tensor_uids: { dy: 10, w: 11, dx: 12 }
+    tensor_uids: { dy: 1100, w: 1101, dx: 1102 }
     tensor_configs:
       dy: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
       w: { dims: [64, 3, 3, 3], strides: [27, 9, 3, 1] }

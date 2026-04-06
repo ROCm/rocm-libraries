@@ -104,7 +104,7 @@ operation:
   operation_type_enum: "HIPDNN_OPERATION_TYPE_REDUCTION"
 
   test_data:
-    tensor_uids: { x: 90, y: 91 }
+    tensor_uids: { x: 1700, y: 1701 }
     tensor_configs:
       x: { dims: [2, 3, 4, 4], strides: [48, 16, 4, 1] }
       y: { dims: [2, 3, 1, 1], strides: [3, 1, 1, 1] }
