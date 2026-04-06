@@ -803,8 +803,8 @@ namespace
             //   1. library/<arch>-<xnack>/  – split single-xnack-variant shard
             //   2. library/<arch>/          – combined xnack or no-xnack single-arch shard
             //   3. library/                 – flat multi-arch build (no subdir)
-            bool found_subdir = false;
-            std::string xnack_mode = rocblas_internal_get_xnack_mode();
+            bool        found_subdir = false;
+            std::string xnack_mode   = rocblas_internal_get_xnack_mode();
             if(!xnack_mode.empty())
             {
                 std::string processor_xnack = processor + "-" + xnack_mode;
