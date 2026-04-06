@@ -598,13 +598,31 @@ namespace stinkytofu
         // Check if this is a MUBUF instruction (buffer operations) with offen
         const MUBUFModifiers* mubufMod = inst.getModifier<MUBUFModifiers>();
 
+        // Compute the number of source operands to emit from the HW field metadata.
+        // Read-write operands already emitted via destRegs have duplicates appended
+        // at the end of srcRegs for use-def tracking; those must not be re-emitted.
+        const auto& srcRegs = inst.getSrcRegs();
+        size_t emitSrcCount = srcRegs.size();
+        {
+            const auto& fields = inst.getHwInstDesc()->operandFields;
+            if(!fields.empty())
+            {
+                emitSrcCount = 0;
+                for(const auto& f : fields)
+                    if(!f.isDest)
+                        emitSrcCount++;
+            }
+        }
+
         // Emit source registers with VOP3 modifiers if present (skip pseudo and implicit registers)
-        const auto& srcRegs         = inst.getSrcRegs();
-        size_t      nonSkippedIndex = 0; // Track the index of non-skipped operands
+        size_t nonSkippedIndex = 0; // Track the index of non-skipped operands
         for(size_t i = 0; i < srcRegs.size(); ++i)
         {
             if(isPseudoReg(srcRegs[i]) || isImplicitSrc(srcRegs[i], inst))
                 continue;
+
+            if(nonSkippedIndex >= emitSrcCount)
+                break;
 
             if(!firstOperand)
             {

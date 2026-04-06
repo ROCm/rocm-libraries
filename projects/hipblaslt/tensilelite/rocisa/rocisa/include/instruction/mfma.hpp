@@ -806,7 +806,7 @@ namespace rocisa
 
         std::vector<InstructionInput> getSrcParams() const override
         {
-            return {a, b, metadata};
+            return {a, b, metadata, acc};
         }
 
         std::string preStr() const override

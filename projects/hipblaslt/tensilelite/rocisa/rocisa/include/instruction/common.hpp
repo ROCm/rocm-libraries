@@ -1061,6 +1061,22 @@ namespace rocisa
         {
             return std::make_shared<SCMovB32>(*this);
         }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // dst is also a src:
+            //   if (SCC == 1) {
+            //     s0 = s1
+            //   } else {
+            //     s0 = s0
+            //   }
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+            {
+                params.push_back(dst);
+            }
+            return params;
+        }
     };
 
     struct SCMovB64 : public CommonInstruction
@@ -1082,6 +1098,20 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SCMovB64>(*this);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // dst is also a src:
+            //   if (SCC == 1) {
+            //     s0 = s1
+            //   } else {
+            //     s0 = s0
+            //   }
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            return params;
         }
     };
 
@@ -1502,7 +1532,11 @@ namespace rocisa
         std::string toString() const override
         {
             std::string kStr;
-            setMsb(kStr, {}, nullptr);
+            if(count > 0)
+            {
+                setMsb(kStr, {}, nullptr);
+            }
+
             std::string resultStr = "";
             for(int i = 0; i < count; i++)
             {
@@ -3503,6 +3537,15 @@ namespace rocisa
             return std::make_shared<VMacF32>(*this);
         }
 
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // dst is also a src: dst = src0 * src1 + dst
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            return params;
+        }
+
     private:
         bool addDstToSrc;
     };
@@ -5089,6 +5132,23 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VSwapB32>(*this);
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            // both dst and src are in dsts.
+            auto dsts = CommonInstruction::getDstParams();
+            dsts.insert(dsts.end(), srcs.begin(), srcs.end());
+            return dsts;
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // both dst and src are in srcs.
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            return params;
         }
     };
 

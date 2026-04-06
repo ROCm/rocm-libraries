@@ -1605,6 +1605,12 @@ namespace rocisa
             return std::make_shared<BufferAtomicAddF32>(*this);
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            // srcData is both src and dst.
+            return {srcData};
+        }
+
         std::string toString() const override
         {
             std::string kStr = instStr + " " + getArgStr();
@@ -1639,6 +1645,12 @@ namespace rocisa
             return std::make_shared<BufferAtomicCmpswapB32>(*this);
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            // srcData is both src and dst.
+            return {srcData};
+        }
+
         std::string typeConvert() const override
         {
             return "";
@@ -1666,6 +1678,12 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<BufferAtomicCmpswapB64>(*this);
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            // srcData is both src and dst.
+            return {srcData};
         }
 
         std::string typeConvert() const override

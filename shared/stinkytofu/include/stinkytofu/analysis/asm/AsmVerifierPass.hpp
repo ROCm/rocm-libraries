@@ -36,8 +36,9 @@ namespace stinkytofu
     {
         bool abortOnError        = true;
         bool verbose             = false;
-        bool checkRegisterWidths = true;
-        bool checkRegisterRanges = false;
+        bool checkRegisterWidths    = true;
+        bool checkRegisterRanges    = false;
+        bool checkReadWriteOperands = true;
     };
 
     /// Validate StinkyTofu Assembly IR (structure, HwInstDesc, register widths).

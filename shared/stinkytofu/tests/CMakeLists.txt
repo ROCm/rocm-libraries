@@ -51,6 +51,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/PatternParserTest.cpp
     unit/asm/FuzzTest.cpp
     unit/asm/HwInstDescTest.cpp
+    unit/asm/ReadWriteOperandTest.cpp
 )
 
 # High-Level IR Tests

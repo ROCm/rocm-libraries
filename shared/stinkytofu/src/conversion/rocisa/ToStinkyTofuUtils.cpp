@@ -335,6 +335,61 @@ namespace
             stinkyInst->addSrcReg(StinkyRegister::getEXECRegister(wfs));
         if(stinkyInst->is(IF_ImplicitWriteEXEC))
             stinkyInst->addDestReg(StinkyRegister::getEXECRegister(wfs));
+
+#ifndef NDEBUG
+        // Verify: read-write operands must exist in both destRegs and srcRegs.
+        {
+            const auto& fields = stinkyInst->getHwInstDesc()->operandFields;
+            for(const auto& field : fields)
+            {
+                if(!field.isReadWrite)
+                    continue;
+
+                const auto& destRegs = stinkyInst->getDestRegs();
+                const auto& srcRegs  = stinkyInst->getSrcRegs();
+                unsigned    dIdx = 0, sIdx = 0;
+                for(const auto& f : fields)
+                {
+                    if(&f == &field)
+                        break;
+                    if(f.isDest || f.isReadWrite)
+                        dIdx++;
+                    else
+                        sIdx++;
+                }
+
+                const StinkyRegister* reg = nullptr;
+                if(field.isDest && dIdx < destRegs.size())
+                    reg = &destRegs[dIdx];
+                else if(sIdx < srcRegs.size())
+                    reg = &srcRegs[sIdx];
+
+                if(reg && reg->dataType == StinkyRegister::Type::Register)
+                {
+                    if(std::find(destRegs.begin(), destRegs.end(), *reg) == destRegs.end())
+                    {
+                        std::cerr << "Read-write operand missing from destRegs\n"
+                                  << "  Instruction: " << stinkyInst->getHwInstDesc()->mnemonic
+                                  << ": ";
+                        stinkyInst->dump(std::cerr);
+                        std::cerr << "  Register: ";
+                        reg->dump(std::cerr);
+                        assert(false && "Read-write operand missing from destRegs");
+                    }
+                    if(std::find(srcRegs.begin(), srcRegs.end(), *reg) == srcRegs.end())
+                    {
+                        std::cerr << "Read-write operand missing from srcRegs\n"
+                                  << "  Instruction: " << stinkyInst->getHwInstDesc()->mnemonic
+                                  << ": ";
+                        stinkyInst->dump(std::cerr);
+                        std::cerr << "  Register: ";
+                        reg->dump(std::cerr);
+                        assert(false && "Read-write operand missing from srcRegs");
+                    }
+                }
+            }
+        }
+#endif
     }
 
     /// Helper to extract neg_lo/neg_hi modifiers from instruction string
