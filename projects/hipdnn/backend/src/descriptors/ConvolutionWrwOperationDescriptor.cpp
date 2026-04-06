@@ -5,6 +5,7 @@
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
@@ -125,6 +126,13 @@ void ConvolutionWrwOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
                     arrayOfElements,
                     "ConvolutionWrwOperationDescriptor::setAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        setString(_name,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "ConvolutionWrwOperationDescriptor::setAttribute()");
+        break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "ConvolutionWrwOperationDescriptor::setAttribute: attributeName not "
@@ -220,6 +228,22 @@ void ConvolutionWrwOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
                     arrayOfElements,
                     "ConvolutionWrwOperationDescriptor::getAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        getString(_name,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "ConvolutionWrwOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_TYPE_EXT:
+        getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "ConvolutionWrwOperationDescriptor::getAttribute()");
+        break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "ConvolutionWrwOperationDescriptor::getAttribute: attributeName not "
@@ -241,6 +265,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
     ConvolutionWrwOperationDescriptor::buildNode() const
 {
     auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    node->name = _name;
     node->compute_data_type = _computeDataType;
     node->attributes.Set(hipdnn_data_sdk::data_objects::ConvolutionWrwAttributesT(_data));
     return node;
@@ -255,7 +280,8 @@ std::string ConvolutionWrwOperationDescriptor::toString() const
 {
     using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "ConvolutionWrwOperationDescriptor: {";
-    str += "x_uid=" + std::to_string(_data.x_tensor_uid);
+    str += "name=" + _name;
+    str += ", x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", dy_uid=" + std::to_string(_data.dy_tensor_uid);
     str += ", dw_uid=" + std::to_string(_data.dw_tensor_uid);
     str += ", pre_padding=" + vecToString(_data.pre_padding);
@@ -268,6 +294,29 @@ std::string ConvolutionWrwOperationDescriptor::toString() const
     str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
+}
+
+std::shared_ptr<ConvolutionWrwOperationDescriptor> ConvolutionWrwOperationDescriptor::fromNode(
+    const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+    const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
+{
+    const auto* attrs = nodeT.attributes.AsConvolutionWrwAttributes();
+    THROW_IF_NULL(attrs,
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "ConvolutionWrwOperationDescriptor::fromNode: ConvolutionWrwAttributes is null");
+
+    auto desc = std::make_shared<ConvolutionWrwOperationDescriptor>();
+    desc->_data = *attrs;
+    desc->_computeDataType = nodeT.compute_data_type;
+    desc->_name = nodeT.name;
+    desc->_xDesc = findTensorInMap(
+        tensorMap, attrs->x_tensor_uid, "ConvolutionWrwOperationDescriptor::fromNode: X");
+    desc->_dyDesc = findTensorInMap(
+        tensorMap, attrs->dy_tensor_uid, "ConvolutionWrwOperationDescriptor::fromNode: Dy");
+    desc->_dwDesc = findTensorInMap(
+        tensorMap, attrs->dw_tensor_uid, "ConvolutionWrwOperationDescriptor::fromNode: Dw");
+    desc->finalize();
+    return desc;
 }
 
 } // namespace hipdnn_backend

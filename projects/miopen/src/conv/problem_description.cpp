@@ -153,11 +153,8 @@ void ProblemDescription::HeuristicUpdateLayouts()
     {
         for(const std::string& layout : supported_layouts)
         {
-            bool in_ok  = in.IsPossibleLayout4D5D(layout, mode);
-            bool out_ok = out.IsPossibleLayout4D5D(layout, mode);
-            bool wei_ok = weights.IsPossibleLayout4D5D(layout, mode);
-
-            if(in_ok && out_ok && wei_ok)
+            if(in.IsPossibleLayout4D5D(layout, mode) && out.IsPossibleLayout4D5D(layout, mode) &&
+               weights.IsPossibleLayout4D5D(layout, mode))
             {
                 // Update the cached layout strings to match the detected layout
                 in_layout      = layout;

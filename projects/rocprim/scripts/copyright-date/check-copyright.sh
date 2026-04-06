@@ -73,6 +73,9 @@ fi
 # Current year
 year="$(date +%Y)"
 
+# Change working directory to git root
+cd "$(git rev-parse --show-toplevel)"
+
 # Enable rename detection with full matches only, this skips copyright checks for file name only
 # changes.
 diff_opts=(-z --name-only '--diff-filter=MA' '--find-renames=100%')

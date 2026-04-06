@@ -73,30 +73,33 @@ auto GetConvTestCasesFloat()
 }
 
 template <miopenDataType_t datatype>
-const auto& GetTestParams()
+miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
-    static const auto params = [] {
-        Gpu supported_gpus = Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 |
-                             Gpu::gfx103X | Gpu::gfx110X | Gpu::gfx115X | Gpu::gfx120X;
-        if constexpr(datatype == miopenFloat)
-        {
-            supported_gpus = supported_gpus | Gpu::gfx900;
-        }
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
-        p.CheckXnackDisabled();
-        if constexpr(datatype == miopenHalf)
-        {
-            // FP16 ALT attribute is disabled to enable the backward solver on MI200 for HALF
-            p.SetConvAttrFp16Alt(0);
-        }
-        return p;
-    }();
-    return params;
+    Gpu supported_gpus = Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 |
+                         Gpu::gfx103X | Gpu::gfx110X | Gpu::gfx115X | Gpu::gfx120X;
+    if constexpr(datatype == miopenFloat)
+    {
+        supported_gpus = supported_gpus | Gpu::gfx900;
+    }
+    auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
+    p.CheckXnackDisabled();
+    if constexpr(datatype == miopenHalf)
+    {
+        // FP16 ALT attribute is disabled to enable the backward solver on MI200 for HALF
+        p.SetConvAttrFp16Alt(0);
+    }
+    return p;
 }
 
-const auto& GetTestParamsHalf() { return GetTestParams<miopenHalf>(); }
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsHalf()
+{
+    return GetTestParams<miopenHalf>();
+}
 
-const auto& GetTestParamsFloat() { return GetTestParams<miopenFloat>(); }
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsFloat()
+{
+    return GetTestParams<miopenFloat>();
+}
 
 } // namespace
 

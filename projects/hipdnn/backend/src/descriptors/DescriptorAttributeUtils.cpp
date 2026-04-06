@@ -150,6 +150,54 @@ void getString(const std::string& source,
     }
 }
 
+void setByteArray(std::vector<uint8_t>& target,
+                  hipdnnBackendAttributeType_t attributeType,
+                  int64_t elementCount,
+                  const void* arrayOfElements,
+                  const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_CHAR, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_LT(elementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string(errorPrefix) + ": elementCount is negative");
+    auto ptr = static_cast<const uint8_t*>(arrayOfElements);
+    target.assign(ptr, ptr + static_cast<size_t>(elementCount));
+}
+
+void getByteArray(const std::vector<uint8_t>& source,
+                  hipdnnBackendAttributeType_t attributeType,
+                  int64_t requestedElementCount,
+                  int64_t* elementCount,
+                  void* arrayOfElements,
+                  const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_CHAR, attributeType, errorPrefix);
+
+    auto count = static_cast<int64_t>(source.size());
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = count;
+        return;
+    }
+
+    THROW_IF_LT(requestedElementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string(errorPrefix) + ": requestedElementCount is negative");
+
+    auto copyCount = std::min(requestedElementCount, count);
+    if(elementCount != nullptr)
+    {
+        *elementCount = copyCount;
+    }
+    std::memcpy(arrayOfElements, source.data(), static_cast<size_t>(copyCount));
+}
+
 void setDataType(hipdnn_data_sdk::data_objects::DataType& target,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t elementCount,
@@ -325,6 +373,50 @@ void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
     }
     auto tmp = fromSdkNormFwdPhase(source);
     std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+}
+
+void setReductionMode(hipdnn_data_sdk::data_objects::ReductionMode& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnReduceTensorOp_t tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdkReductionMode(tmp);
+}
+
+void getReductionMode(hipdnn_data_sdk::data_objects::ReductionMode source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    auto tmp = fromSdkReductionMode(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
 }
 
 void getOperationType(hipdnnOperationType_t source,
