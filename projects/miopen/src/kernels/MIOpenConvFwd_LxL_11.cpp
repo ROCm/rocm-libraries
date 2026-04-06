@@ -294,7 +294,7 @@ extern "C" __global__ __launch_bounds__(
     uint ex_row = lcl_id / MLO_PROCESSING_WIDTH;
     uint ex_col = lcl_id & (MLO_PROCESSING_WIDTH - 1);
 #if MLO_PROCESSING_WIDTH >= 64
-    ex_row      = uniform(ex_row);
+    ex_row = uniform(ex_row);
 #endif
 #endif
     uint ex_pix = ex_col * MLO_OUT_PIX_TILE0;
@@ -589,10 +589,10 @@ __launch_bounds__(MLO_GRP_SZ0* MLO_GRP_SZ1* MLO_GRP_SZ2) void MIOpenCvFwd11x11_2
     uint bb = iDiv_legacy(lcl_id, (MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1));
     uint t0 = iMod(lcl_id, bb, (MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1));
 #elif(MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1) != 0
-    uint bb     = lcl_id / (MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1);
-    uint t0     = lcl_id & ((MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1) - 1);
+    uint bb = lcl_id / (MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1);
+    uint t0 = lcl_id & ((MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1) - 1);
 #if(MLO_PROCESSING_WIDTH * MLO_LAST_OUT_EXTENT1) >= 64
-    bb          = uniform(bb);
+    bb = uniform(bb);
 #endif
 #else
     uint bb = lcl_id;
