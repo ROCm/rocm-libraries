@@ -1,33 +1,59 @@
-:orphan:
-
 .. meta::
-    :description: rocThrust documentation and API reference
-    :keywords: rocThrust, ROCm, API, reference, execution policy
+  :description: rocThrust documentation and API reference
+  :keywords: rocThrust, ROCm, API, reference, execution policy
 
 .. _hip-execution-policies:
 
 ******************************************
-rocThrust and policies
+rocThrust execution policies
 ******************************************
 
-In addition to the standard Thrust execution policies (eg. ``thrust::host``, ``thrust::device``, ``thrust::seq``),
-rocThrust's HIP backend provides the following:
+rocThrust provides five different execution policies:
 
-* ``hip_rocprim::par`` - This policy causes algorithms to be launched in a parallel configuration.
-  API calls are blocking (synchronous with respect to the host).
+* ``thrust::host``:  Algorithms run in parallel on the host CPU backend. 
 
-* ``hip_rocprim::par_nosync`` - This policy tells Thrust that algorithms may avoid synchronization
-  barriers when it is possible to do so. As a result, algorithms may be launched asynchronously with
-  respect to the host. This can allow you to perform other host-side work while the algorithms
-  are running on the device. If you use this policy, you must synchronize before accessing results
-  on the host side.
+* ``thrust::device``:  Algorithms run on the device backend. When the HIP backend is used, ``thrust::device`` defaults to ``thrust::hip::par``.
 
-The example below illustrates the behavior of these two policies.
+* ``thrust::seq``: Algorithms run sequentially in the current thread. 
+
+* ``hip_rocprim::par``: Algorithms run in parallel on the device. The host blocks on each algorithm running on the GPU, waiting for each to finish before launching the next.
+
+* ``hip_rocprim::par_nosync``: Algorithms run in parallel on the device. The host doesn't block on the algorithms running on the GPU and can perform other work while waiting for the GPU to finish running the algorithms. The host and device must be explicitly synchronized before the host-side results can be accessed.
+
+For example, when using the ``hip_rocprim::par`` policy, ``thrust::count`` and ``thrust::reduce`` are both blocking with respect to the host, and their results on the host are available without any explicit synchronization:
 
 .. code-block:: cpp
 
+  auto par_policy = thrust::hip_rocprim::par;
+  int count = thrust::count(par_policy, d_vec1.begin(), d_vec1.end(), 50);
+  int reduction = thrust::reduce(par_policy, d_vec2.begin(), d_vec2.end());
+
+  std::cout << "par results:" << std::endl;
+  std::cout << "count: " << count << std::endl;
+  std::cout << "reduction: " << reduction << std::endl;
+
+When using the ``hip_rocprim::par_nosync`` policy, ``thrust::count`` and ``thrust::reduce`` are asynchronous with respect to the host. The host can do other work while the algorithms are running on the device. ``hipDeviceSynchronize()`` must be called to synchronize the host and the device before results can be accessed:
+
+.. code:: cpp
+
+  auto nosync_policy = thrust::hip_rocprim::par_nosync;
+  int count2 = thrust::count(nosync_policy, d_vec1.begin(), d_vec1.end(), 50);
+  int reduction2 = thrust::reduce(nosync_policy, d_vec2.begin(), d_vec2.end());
+  
+  DoHostSideWork();
+
+  hipDeviceSynchronize();
+
+  std::cout << "par_nosync results:" << std::endl;
+  std::cout << "count: " << count2 << std::endl;
+  std::cout << "reduction: " << reduction2 << std::endl;
+
+You can test out these two policies using the following code:
+
+.. code:: cpp
+
   #include <hip/hip_runtime_api.h>
-  #include <thrust/host_vector.h>
+  #include <thrust/host_vector.h> 
   #include <thrust/device_vector.h>
   #include <thrust/random.h>
   #include <thrust/count.h>
@@ -38,52 +64,52 @@ The example below illustrates the behavior of these two policies.
 
   int main(int argc, char* argv[])
   {
-      // Allocate host and device vectors.
-      const size_t size = 100;
-      thrust::host_vector<int> h_vec(size);
-      thrust::device_vector<int> d_vec1(size);
-      thrust::device_vector<int> d_vec2(size);
+    // Allocate host and device vectors.
+    const size_t size = 100;
+    thrust::host_vector<int> h_vec(size);
+    thrust::device_vector<int> d_vec1(size);
+    thrust::device_vector<int> d_vec2(size);
 
-      // Fill host vector with random values.
-      const int limit = 100;
-      auto seed = std::time(nullptr);
-      thrust::default_random_engine rng(seed);
-      for (int i = 0; i < size; i++)
-          h_vec[i] = rng() % limit;
+    // Fill host vector with random values.
+    const int limit = 100;
+    auto seed = std::time(nullptr);
+    thrust::default_random_engine rng(seed);
+    for (int i = 0; i < size; i++)
+        h_vec[i] = rng() % limit;
 
-      // Copy data to device vectors.
-      d_vec1 = h_vec;
-      d_vec2 = h_vec;
+    // Copy data to device vectors.
+    d_vec1 = h_vec;
+    d_vec2 = h_vec;
 
-      // Launch some algorithms using the hip_rocprim::par policy.
-      // The calls below are blocking with respect to the host.
-      // However, internally, each algorithm will run in parallel.
-      auto par_policy = thrust::hip_rocprim::par;
-      int count = thrust::count(par_policy, d_vec1.begin(), d_vec1.end(), 50);
-      int reduction = thrust::reduce(par_policy, d_vec2.begin(), d_vec2.end());
+    // Launch some algorithms using the hip_rocprim::par policy.
+    // The calls below are blocking with respect to the host.
+    // However, internally, each algorithm will run in parallel.
+    auto par_policy = thrust::hip_rocprim::par;
+    int count = thrust::count(par_policy, d_vec1.begin(), d_vec1.end(), 50);
+    int reduction = thrust::reduce(par_policy, d_vec2.begin(), d_vec2.end());
 
-      // Print out the results.
-      std::cout << "par results:" << std::endl;
-      std::cout << "count: " << count << std::endl;
-      std::cout << "reduction: " << reduction << std::endl;
+    // Print out the results.
+    std::cout << "par results:" << std::endl;
+    std::cout << "count: " << count << std::endl;
+    std::cout << "reduction: " << reduction << std::endl;
 
-      // Launch the algorithms using the hip_rocprim::par_nosync policy.
-      // These calls may not be blocking with respect to the host.
-      auto nosync_policy = thrust::hip_rocprim::par_nosync;
-      int count2 = thrust::count(nosync_policy, d_vec1.begin(), d_vec1.end(), 50);
-      int reduction2 = thrust::reduce(nosync_policy, d_vec2.begin(), d_vec2.end());
+    // Launch the algorithms using the hip_rocprim::par_nosync policy.
+    // These calls may not be blocking with respect to the host.
+    auto nosync_policy = thrust::hip_rocprim::par_nosync;
+    int count2 = thrust::count(nosync_policy, d_vec1.begin(), d_vec1.end(), 50);
+    int reduction2 = thrust::reduce(nosync_policy, d_vec2.begin(), d_vec2.end());
 
-      // We can perform other host-side work here, and it may overlap with the
-      // algorithms launched above.
-      DoHostSideWork();
+    // We can perform other host-side work here, and it may overlap with the
+    // algorithms launched above.
+    DoHostSideWork();
 
-      // We must synchronize before accessing the results on the host.
-      hipDeviceSynchronize();
+    // We must synchronize before accessing the results on the host.
+    hipDeviceSynchronize();
 
-      // Print out the results.
-      std::cout << "par_nosync results:" << std::endl;
-      std::cout << "count: " << count2 << std::endl;
-      std::cout << "reduction: " << reduction2 << std::endl;
+    // Print out the results.
+    std::cout << "par_nosync results:" << std::endl;
+    std::cout << "count: " << count2 << std::endl;
+    std::cout << "reduction: " << reduction2 << std::endl;
 
-      return 0;
-  }
+    return 0;
+  } 
