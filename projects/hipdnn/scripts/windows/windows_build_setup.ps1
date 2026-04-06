@@ -3,10 +3,12 @@
 # Run this script from an Administrator PowerShell prompt
 
 param(
-    [string]$ClangPath = "C:\dist\clang",
-    [string]$TheRockPath = "C:\dist\therock",
-    [string]$ProjectPath = "C:\projects\hipdnn",
-    [string]$GpuTarget = "gfx1103",
+    [string]$InstallRoot = "D:\develop",
+    [string]$VsBuildToolsPath = "",
+    [string]$ClangPath = "",
+    [string]$TheRockPath = "",
+    [Alias("GpuTarget")]
+    [string]$Asic = "gfx1151",
     [switch]$SkipPrerequisites = $false,
     [switch]$SkipWindowsConfig = $false,
     [switch]$SkipToolchainDownload = $false,
@@ -16,6 +18,17 @@ param(
 # Script configuration
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+
+# Resolve default install paths from InstallRoot unless explicit paths are provided.
+if (-not $ClangPath) {
+    $ClangPath = Join-Path $InstallRoot "dist\clang"
+}
+if (-not $TheRockPath) {
+    $TheRockPath = Join-Path $InstallRoot "dist\therock"
+}
+if (-not $VsBuildToolsPath) {
+    $VsBuildToolsPath = Join-Path $InstallRoot "dist\vs-buildtools"
+}
 
 # Version configuration
 $CLANG_VERSION = "20.1.8"
@@ -45,10 +58,11 @@ Write-Host "`n===================================================" -ForegroundCo
 Write-Host "  hipDNN Windows Build Setup Script" -ForegroundColor Magenta
 Write-Host "===================================================" -ForegroundColor Magenta
 Write-Host "Configuration:" -ForegroundColor Yellow
+Write-Host "  Install Root: $InstallRoot"
+Write-Host "  VS Build Tools Path: $VsBuildToolsPath"
 Write-Host "  Clang Path: $ClangPath"
 Write-Host "  TheRock Path: $TheRockPath"
-Write-Host "  Project Path: $ProjectPath"
-Write-Host "  GPU Target: $GpuTarget"
+Write-Host "  ASIC: $Asic"
 Write-Host "===================================================`n" -ForegroundColor Magenta
 
 # Section 1: Install Prerequisites
@@ -74,7 +88,8 @@ if (-not $SkipPrerequisites) {
     $vsParams = "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 "
     $vsParams += "--add Microsoft.VisualStudio.Component.VC.CMake.Project "
     $vsParams += "--add Microsoft.VisualStudio.Component.VC.ATL "
-    $vsParams += "--add Microsoft.VisualStudio.Component.Windows11SDK.22621"
+    $vsParams += "--add Microsoft.VisualStudio.Component.Windows11SDK.22621 "
+    $vsParams += "--installPath `"$VsBuildToolsPath`""
 
     choco install visualstudio2022buildtools -y --params "`"$vsParams`"" 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 3010) {
@@ -190,11 +205,11 @@ if (-not $SkipToolchainDownload) {
         $detectedGpu = & "$ClangPath\bin\amdgpu-arch.exe" 2>$null
         if ($detectedGpu) {
             Write-Success "Detected GPU: $detectedGpu"
-            if ($detectedGpu -ne $GpuTarget) {
-                Write-Warning "Detected GPU ($detectedGpu) differs from specified target ($GpuTarget)"
+            if ($detectedGpu -ne $Asic) {
+                Write-Warning "Detected GPU ($detectedGpu) differs from specified target ($Asic)"
                 $response = Read-Host 'Use detected GPU? (Y/N)'
                 if ($response -eq 'Y') {
-                    $GpuTarget = $detectedGpu
+                    $Asic = $detectedGpu
                 }
             }
         }
@@ -203,15 +218,16 @@ if (-not $SkipToolchainDownload) {
     # Download and install TheRock
     Write-Status "Setting up TheRock ROCm SDK..."
     if (-not (Test-Path "$TheRockPath\bin\hipconfig.exe")) {
-        Write-Status "Downloading TheRock for $GpuTarget..."
+        Write-Status "Downloading TheRock for $Asic..."
 
         # Determine GFX family
-        $gfxFamily = switch -Regex ($GpuTarget) {
+        $gfxFamily = switch -Regex ($Asic) {
+            "gfx115[0-9]" { "gfx1151" }
             "gfx110[0-9]" { "gfx110X-all" }
             "gfx103[0-9]" { "gfx103X-all" }
             "gfx90[0-9]"  { "gfx90X-all" }
             default {
-                Write-Warning "Unknown GFX family for $GpuTarget, using gfx110X-all"
+                Write-Warning "Unknown GFX family for $Asic, using gfx110X-all"
                 "gfx110X-all"
             }
         }

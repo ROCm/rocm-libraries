@@ -47,7 +47,7 @@ param(
     [string]$SHA = "",
     [string]$VenvPath = "D:\develop\latest_wheels",
     [string]$ClangPath = "D:\develop\dist\clang\bin",
-    [string]$GpuTarget = "gfx1103"
+    [string]$GpuTarget = "gfx1151"
 )
 
 $ErrorActionPreference = "Stop"
