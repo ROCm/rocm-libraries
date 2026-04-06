@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/PointwiseConstants.hpp>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
@@ -23,6 +24,7 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_tests::constants;
 
 class TestPointwiseOperationDescriptor : public ::testing::Test
 {
@@ -91,10 +93,12 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<PointwiseOperationDescriptor>();
-        _in0Desc = createFinalizedTensor(40, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _out0Desc = createFinalizedTensor(41, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _in1Desc = createFinalizedTensor(3);
-        _in2Desc = createFinalizedTensor(4);
+        _in0Desc
+            = createFinalizedTensor(K_PW_TENSOR_IN0_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+        _out0Desc
+            = createFinalizedTensor(K_PW_TENSOR_OUT0_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+        _in1Desc = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
+        _in2Desc = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
@@ -185,7 +189,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetTensorDescriptorIn0)
         HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in0Desc));
 
     // Verify UID extracted via getData()
-    ASSERT_EQ(desc->getData().in_0_tensor_uid, 40);
+    ASSERT_EQ(desc->getData().in_0_tensor_uid, K_PW_TENSOR_IN0_UID);
     ASSERT_NE(desc->getIn0Desc(), nullptr);
 }
 
@@ -195,7 +199,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetTensorDescriptorOut0)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_out0Desc));
 
-    ASSERT_EQ(desc->getData().out_0_tensor_uid, 41);
+    ASSERT_EQ(desc->getData().out_0_tensor_uid, K_PW_TENSOR_OUT0_UID);
     ASSERT_NE(desc->getOut0Desc(), nullptr);
 }
 
@@ -205,7 +209,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetTensorDescriptorIn1)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in1Desc));
 
-    ASSERT_EQ(desc->getData().in_1_tensor_uid, 3);
+    ASSERT_EQ(desc->getData().in_1_tensor_uid, K_PW_TENSOR_IN1_UID);
     ASSERT_NE(desc->getIn1Desc(), nullptr);
 }
 
@@ -215,7 +219,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetTensorDescriptorIn2)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_in2Desc));
 
-    ASSERT_EQ(desc->getData().in_2_tensor_uid, 4);
+    ASSERT_EQ(desc->getData().in_2_tensor_uid, K_PW_TENSOR_IN2_UID);
     ASSERT_NE(desc->getIn2Desc(), nullptr);
 }
 
@@ -565,10 +569,10 @@ TEST_F(TestPointwiseOperationDescriptor, FinalizePreservesTensorReferences)
     ASSERT_NE(desc->getIn2Desc(), nullptr);
 
     // Verify UIDs match
-    ASSERT_EQ(desc->getIn0Desc()->getData().uid, 40);
-    ASSERT_EQ(desc->getOut0Desc()->getData().uid, 41);
-    ASSERT_EQ(desc->getIn1Desc()->getData().uid, 3);
-    ASSERT_EQ(desc->getIn2Desc()->getData().uid, 4);
+    ASSERT_EQ(desc->getIn0Desc()->getData().uid, K_PW_TENSOR_IN0_UID);
+    ASSERT_EQ(desc->getOut0Desc()->getData().uid, K_PW_TENSOR_OUT0_UID);
+    ASSERT_EQ(desc->getIn1Desc()->getData().uid, K_PW_TENSOR_IN1_UID);
+    ASSERT_EQ(desc->getIn2Desc()->getData().uid, K_PW_TENSOR_IN2_UID);
 }
 
 // =============================================================================
@@ -582,10 +586,10 @@ TEST_F(TestPointwiseOperationDescriptor, ToStringContainsExpectedInfo)
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("PointwiseOperationDescriptor"), std::string::npos);
-    ASSERT_NE(str.find("in_0_uid=40"), std::string::npos);
-    ASSERT_NE(str.find("out_0_uid=41"), std::string::npos);
-    ASSERT_NE(str.find("in_1_uid=3"), std::string::npos);
-    ASSERT_NE(str.find("in_2_uid=4"), std::string::npos);
+    ASSERT_NE(str.find("in_0_uid=1300"), std::string::npos);
+    ASSERT_NE(str.find("out_0_uid=1301"), std::string::npos);
+    ASSERT_NE(str.find("in_1_uid=1302"), std::string::npos);
+    ASSERT_NE(str.find("in_2_uid=1303"), std::string::npos);
     ASSERT_NE(str.find("axis=nullopt"), std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
@@ -612,9 +616,9 @@ TEST_F(TestPointwiseOperationDescriptor, GetTensorDescriptorsReturnsBinaryOpTens
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    ASSERT_EQ(tensors[0]->getData().uid, 40);
-    ASSERT_EQ(tensors[1]->getData().uid, 41);
-    ASSERT_EQ(tensors[2]->getData().uid, 3);
+    ASSERT_EQ(tensors[0]->getData().uid, K_PW_TENSOR_IN0_UID);
+    ASSERT_EQ(tensors[1]->getData().uid, K_PW_TENSOR_OUT0_UID);
+    ASSERT_EQ(tensors[2]->getData().uid, K_PW_TENSOR_IN1_UID);
 }
 
 TEST_F(TestPointwiseOperationDescriptor, BuildNodeProducesCorrectNodeT)
@@ -633,10 +637,10 @@ TEST_F(TestPointwiseOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto* attrs = node->attributes.AsPointwiseAttributes();
     ASSERT_NE(attrs, nullptr);
-    ASSERT_EQ(attrs->in_0_tensor_uid, 40);
-    ASSERT_EQ(attrs->out_0_tensor_uid, 41);
-    ASSERT_EQ(attrs->in_1_tensor_uid, 3);
-    ASSERT_EQ(attrs->in_2_tensor_uid, 4);
+    ASSERT_EQ(attrs->in_0_tensor_uid, K_PW_TENSOR_IN0_UID);
+    ASSERT_EQ(attrs->out_0_tensor_uid, K_PW_TENSOR_OUT0_UID);
+    ASSERT_EQ(attrs->in_1_tensor_uid, K_PW_TENSOR_IN1_UID);
+    ASSERT_EQ(attrs->in_2_tensor_uid, K_PW_TENSOR_IN2_UID);
     ASSERT_FALSE(attrs->axis_tensor_uid.has_value());
 }
 
@@ -661,7 +665,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetTensorDescriptorsOrderIsIn0Out0In1In
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 4);
-    // Verify ordering: [IN_0, OUT_0, IN_1, IN_2] matches UIDs [40, 41, 3, 4]
+    // Verify ordering: [IN_0, OUT_0, IN_1, IN_2]
     EXPECT_EQ(tensors[0], desc->getIn0Desc());
     EXPECT_EQ(tensors[1], desc->getOut0Desc());
     EXPECT_EQ(tensors[2], desc->getIn1Desc());
@@ -678,7 +682,7 @@ TEST_F(TestPointwiseOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
     // Verify the returned interface is the same underlying object
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 4);
-    ASSERT_EQ(tensors[0]->getData().uid, 40);
+    ASSERT_EQ(tensors[0]->getData().uid, K_PW_TENSOR_IN0_UID);
 }
 
 TEST_F(TestPointwiseOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
@@ -717,8 +721,10 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<PointwiseOperationDescriptor>();
-        _in0Desc = createFinalizedTensor(40, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _out0Desc = createFinalizedTensor(41, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+        _in0Desc
+            = createFinalizedTensor(K_PW_TENSOR_IN0_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
+        _out0Desc
+            = createFinalizedTensor(K_PW_TENSOR_OUT0_UID, {1, 64, 32, 32}, {65536, 1024, 32, 1});
     }
 
     void TearDown() override

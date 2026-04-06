@@ -23,6 +23,7 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
 class TestConvolutionBwdOperationDescriptor : public ::testing::Test
@@ -96,7 +97,6 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<ConvolutionBwdOperationDescriptor>();
-        using namespace hipdnn_tests::constants;
         _dyDesc = createFinalizedTensor(
             K_DGRAD_TENSOR_DY_UID, toVec(K_DGRAD_TENSOR_DY_DIMS), toVec(K_DGRAD_TENSOR_DY_STRIDES));
         _wDesc = createFinalizedTensor(
@@ -270,7 +270,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorDescriptorDy)
                                        &_dyDesc));
 
     // Verify UID extracted via getData()
-    ASSERT_EQ(desc->getData().dy_tensor_uid, 1100);
+    ASSERT_EQ(desc->getData().dy_tensor_uid, K_DGRAD_TENSOR_DY_UID);
     ASSERT_NE(desc->getDyDesc(), nullptr);
 }
 
@@ -280,7 +280,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorDescriptorW)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_wDesc));
 
-    ASSERT_EQ(desc->getData().w_tensor_uid, 1101);
+    ASSERT_EQ(desc->getData().w_tensor_uid, K_DGRAD_TENSOR_W_UID);
     ASSERT_NE(desc->getWDesc(), nullptr);
 }
 
@@ -292,7 +292,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorDescriptorDx)
                                        1,
                                        &_dxDesc));
 
-    ASSERT_EQ(desc->getData().dx_tensor_uid, 1102);
+    ASSERT_EQ(desc->getData().dx_tensor_uid, K_DGRAD_TENSOR_DX_UID);
     ASSERT_NE(desc->getDxDesc(), nullptr);
 }
 
@@ -761,9 +761,9 @@ TEST_F(TestConvolutionBwdOperationDescriptor, FinalizePreservesTensorReferences)
     ASSERT_NE(desc->getDxDesc(), nullptr);
 
     // Verify UIDs match
-    ASSERT_EQ(desc->getDyDesc()->getData().uid, 1100);
-    ASSERT_EQ(desc->getWDesc()->getData().uid, 1101);
-    ASSERT_EQ(desc->getDxDesc()->getData().uid, 1102);
+    ASSERT_EQ(desc->getDyDesc()->getData().uid, K_DGRAD_TENSOR_DY_UID);
+    ASSERT_EQ(desc->getWDesc()->getData().uid, K_DGRAD_TENSOR_W_UID);
+    ASSERT_EQ(desc->getDxDesc()->getData().uid, K_DGRAD_TENSOR_DX_UID);
 }
 
 // =============================================================================
@@ -794,9 +794,9 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetTensorDescriptorsReturnsAllTens
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    ASSERT_EQ(tensors[0]->getData().uid, 1100);
-    ASSERT_EQ(tensors[1]->getData().uid, 1101);
-    ASSERT_EQ(tensors[2]->getData().uid, 1102);
+    ASSERT_EQ(tensors[0]->getData().uid, K_DGRAD_TENSOR_DY_UID);
+    ASSERT_EQ(tensors[1]->getData().uid, K_DGRAD_TENSOR_W_UID);
+    ASSERT_EQ(tensors[2]->getData().uid, K_DGRAD_TENSOR_DX_UID);
 }
 
 TEST_F(TestConvolutionBwdOperationDescriptor, BuildNodeProducesCorrectNodeT)
@@ -815,9 +815,9 @@ TEST_F(TestConvolutionBwdOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto* attrs = node->attributes.AsConvolutionBwdAttributes();
     ASSERT_NE(attrs, nullptr);
-    ASSERT_EQ(attrs->dy_tensor_uid, 1100);
-    ASSERT_EQ(attrs->w_tensor_uid, 1101);
-    ASSERT_EQ(attrs->dx_tensor_uid, 1102);
+    ASSERT_EQ(attrs->dy_tensor_uid, K_DGRAD_TENSOR_DY_UID);
+    ASSERT_EQ(attrs->w_tensor_uid, K_DGRAD_TENSOR_W_UID);
+    ASSERT_EQ(attrs->dx_tensor_uid, K_DGRAD_TENSOR_DX_UID);
     ASSERT_EQ(attrs->pre_padding.size(), 2);
     ASSERT_EQ(attrs->post_padding.size(), 2);
     ASSERT_EQ(attrs->stride.size(), 2);
@@ -861,7 +861,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
     // Verify the returned interface is the same underlying object
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    ASSERT_EQ(tensors[0]->getData().uid, 1100);
+    ASSERT_EQ(tensors[0]->getData().uid, K_DGRAD_TENSOR_DY_UID);
 }
 
 TEST_F(TestConvolutionBwdOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
