@@ -78,9 +78,9 @@ static constexpr double default_double_epsilon()
 // C++ traits to simplify type selection for FFTW plans, complex and/or real
 // FFTW types, based on the base real type of the floating-point arithmetic of
 // interest. The correct FFTW complex type can be accessed via, for example,
-// using complex_t = fftw_complex_trait<Tfloat>::complex_t;
-// NOTE: FFTW does not natively support half-precision, single-precision,
-// members of fftw_trait<rocfft_fp16> are made equivalent to the members of fftw_trait<float>.
+// using complex_t = typename fftw_complex_trait<Tfloat>::complex_t;
+// NOTE: FFTW does not support half-precision: members of fftw_trait<rocfft_fp16>
+// are made equivalent to the members of fftw_trait<float>.
 template <typename Tfloat,
           std::enable_if_t<std::is_same<Tfloat, double>::value || std::is_same<Tfloat, float>::value
                                || std::is_same<Tfloat, rocfft_fp16>::value,
