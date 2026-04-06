@@ -312,8 +312,15 @@ inline bool IsShaderConstraintsMet(const ProblemDescription& problem,
             return false;
     }
 
-    if(!problem.IsLayoutDefault())
-        return false;
+    // Use IsPossibleLayout4D5D to check actual tensor strides rather than cached layout string
+    // This allows transposed solvers to work correctly when they modify tensor strides
+    {
+        static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+        if(!(problem.GetIn().IsPossibleLayout4D5D("NCHW", strict) &&
+             problem.GetWeights().IsPossibleLayout4D5D("NCHW", strict) &&
+             problem.GetOut().IsPossibleLayout4D5D("NCHW", strict)))
+            return false;
+    }
 
     return IsWinogradV21Preferred<Winodata, Winofilter>(asic, problem)
                ? IsShaderConstraintsMetV21(problem, R, S, C, K, H, W, OH, OW, N)
@@ -686,13 +693,17 @@ static bool IsApplicableBase(const ExecutionContext& ctx, const ProblemDescripti
     if(name == "gfx90a" && problem.IsGfx90aFp16altRequired())
         return false;
 
+    // Use IsPossibleLayout4D5D to check actual tensor strides rather than cached layout string
+    // This allows transposed solvers to work correctly when they modify tensor strides
+    static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+
     // clang-format off
     if (!((problem.GetKernelStrideW() == 1 || problem.GetKernelStrideW() == 2)
         && problem.GetKernelStrideW() == problem.GetKernelStrideH()
         && problem.GetDilationW() == 1
         && problem.GetDilationH() == 1
         && problem.GetBias() == 0
-        && problem.GetInLayout() == "NCHW"))
+        && problem.GetIn().IsPossibleLayout4D5D("NCHW", strict)))
         return false;
         // clang-format on
 
@@ -1150,6 +1161,7 @@ bool ConvBinWinogradRxSf2x3g1::IsApplicable(const ExecutionContext& ctx,
 {
     if(env::disabled(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1))
         return false;
+
     return IsApplicableBase<2, 3>(ctx, problem) && problem.GetGroupCount() == 1;
 }
 
@@ -1165,9 +1177,11 @@ ConvSolution ConvBinWinogradRxSf2x3g1::GetSolution(const ExecutionContext& ctx,
     const auto tunable = ConvBinWinoRxS<2, 3>{};
     return tunable.GetSolution(ctx, problem, tunable.GetDefaultPerformanceConfig(ctx, problem));
 }
-
 template struct MIOPEN_INTERNALS_EXPORT ConvBinWinoRxS<2, 3>;
 template struct MIOPEN_INTERNALS_EXPORT ConvBinWinoRxS<3, 2>;
+
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinoRxS<2, 3>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinoRxS<3, 2>;
 
 } // namespace conv
 } // namespace solver

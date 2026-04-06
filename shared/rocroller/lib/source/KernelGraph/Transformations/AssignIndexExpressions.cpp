@@ -1061,6 +1061,8 @@ namespace rocRoller::KernelGraph
                 return -1;
 
             AssertFatal(user->size, "Invalid User dimension: missing size.", ShowValue(target));
+            auto bufferSize = ToBytes(user->size, params.valueType);
+            Log::debug("KernelGraph::makeBuffer: using User.size for user {}", target);
 
             // Get the base pointer from command arguments
             auto arg = findArgumentByName(command, user->argumentName);
@@ -1076,8 +1078,7 @@ namespace rocRoller::KernelGraph
             bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, basePointer);
             bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
                                                       BufferDescriptor::GetDefaultOptions(context));
-            bufferExpr
-                = BufferDescriptor::SetSize(bufferExpr, ToBytes(user->size, params.valueType));
+            bufferExpr = BufferDescriptor::SetSize(bufferExpr, bufferSize);
 
             // Create the Assign node
             auto bufferVarType      = VariableType{DataType::None, PointerType::Buffer};
