@@ -134,6 +134,9 @@ namespace TensileLite
 
             DataInitialization(po::variables_map const&    args,
                                ClientProblemFactory const& problemFactory);
+            DataInitialization(po::variables_map const&    args,
+                               ClientProblemFactory const& problemFactory,
+                               bool                        cpuOnly);
             ~DataInitialization();
 
             /**
@@ -1050,9 +1053,14 @@ namespace TensileLite
             /// cannot be used with problem dependent data.
             bool m_problemDependentData = false;
 
+            bool m_cpuOnly = false;
+
             int64_t                         m_rotatingBuffer = 0;
             std::shared_ptr<RotatingMemory> m_rm;
             int32_t                         m_rotatingMode = 0;
+
+            void initCommon(po::variables_map const&    args,
+                            ClientProblemFactory const& problemFactory);
         };
 
         template <>

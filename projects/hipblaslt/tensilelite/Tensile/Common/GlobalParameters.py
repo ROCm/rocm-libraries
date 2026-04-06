@@ -92,6 +92,7 @@ globalParameters["NumElementsToValidateWinner"] = (
 globalParameters["CheckForRaces"] = (
     0
 )
+globalParameters["ValidateWithEmulator"] = 0
 globalParameters["BoundsCheck"] = 0  # Bounds check
 # 1: Perform bounds check to find out of bounds reads/writes.  NumElementsToValidate must be -1.
 # 2: Perform bounds check by front side guard page

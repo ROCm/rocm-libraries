@@ -133,51 +133,80 @@ namespace
         throw std::runtime_error("No assembly file found containing kernel: " + kernelName);
     };
 
-    // Return true if the kernel passed the check, and false if it could not be checked. An exception will be thrown if the check falied.
+    std::string loadAsmString(const std::string& asmFilename)
+    {
+        std::ifstream asmFile(asmFilename);
+        if(!asmFile.is_open())
+            throw std::runtime_error("Failed to open assembly file: " + asmFilename);
+        return std::string((std::istreambuf_iterator<char>(asmFile)),
+                           std::istreambuf_iterator<char>());
+    }
+
+    struct TargetArchHardware
+    {
+        std::shared_ptr<TensileLite::AMDGPU>       hardware;
+        std::shared_ptr<raceemulator::Architecture> arch;
+    };
+
+    TargetArchHardware makeHardwareFromTargetArch(
+        const TensileLite::Client::po::variables_map& args,
+        const std::string&                             flagName)
+    {
+        auto targetArch = args["target-arch"].as<std::string>();
+        if(targetArch.empty())
+            throw std::runtime_error(flagName + " requires --target-arch");
+
+        auto processor = TensileLite::AMDGPU::toProcessor(targetArch);
+        auto arch      = raceemulator::architectureFromTarget(targetArch);
+        int  cuCount   = arch->getCuCount();
+        auto hardware
+            = std::make_shared<TensileLite::AMDGPU>(processor, cuCount, targetArch);
+        return {hardware, arch};
+    }
+
+    void runEmulatorOnKernel(const TensileLite::KernelInvocation&        kernel,
+                             const std::string&                          libraryFilename,
+                             std::shared_ptr<raceemulator::Architecture> arch,
+                             const std::vector<raceemulator::Dim3d>&     workgroupIds,
+                             const raceemulator::RunConfig&              config)
+    {
+        auto asmString = loadAsmString(
+            getAsmFilename(libraryFilename, kernel.kernelName));
+        auto emulator = raceemulator::Emulator(asmString, arch);
+        emulator.addAllKernargs(kernel.args.data());
+
+        int blockSize = kernel.workGroupSize.x
+                      * kernel.workGroupSize.y
+                      * kernel.workGroupSize.z;
+
+        emulator.run(workgroupIds, {blockSize, 1, 1}, config);
+    }
+
+    std::vector<raceemulator::Dim3d>
+    allWorkgroupIds(const TensileLite::KernelInvocation& kernel)
+    {
+        auto nwg = kernel.numWorkGroups;
+        std::vector<raceemulator::Dim3d> wgIds;
+        for(int z = 0; z < static_cast<int>(nwg.z); ++z)
+            for(int y = 0; y < static_cast<int>(nwg.y); ++y)
+                for(int x = 0; x < static_cast<int>(nwg.x); ++x)
+                    wgIds.push_back({x, y, z});
+        return wgIds;
+    }
+
     bool checkForRaces(const std::vector<std::vector<TensileLite::KernelInvocation>>& kernels,
                        const std::string&                                             filename,
                        const std::string&                                             archName)
     {
-
-        if(kernels.size() != 1)
-        {
+        if(kernels.size() != 1 || kernels[0].empty())
             return false;
-        }
-        const auto& kernelInvocations = kernels[0];
-        if(kernelInvocations.empty())
-        {
-            return false;
-        }
-        const auto& kernel        = kernelInvocations[0];
-        std::string kernelName    = kernel.kernelName;
-        auto        workGroupSize = kernel.workGroupSize;
-        auto        numWorkGroups = kernel.numWorkGroups;
-        auto        numWorkItems  = kernel.numWorkItems;
-        auto        wgs           = kernel.workGroupSize;
 
-        auto asmFilename = getAsmFilename(filename, kernelName);
-
-        // Load the assembly file into a string. We will use C++ filesystem and other modern C++ for this.
-        std::ifstream asmFile(asmFilename);
-        if(!asmFile.is_open())
-        {
-            throw std::runtime_error("Failed to open assembly file: " + asmFilename);
-        }
-        std::string asmString_((std::istreambuf_iterator<char>(asmFile)),
-                               std::istreambuf_iterator<char>());
-
-        // To manually introduce a race for testing, replace `s_waitcnt` with `; s_waitcnt` in the loaded string, for example.
-
-        auto emulator = raceemulator::Emulator(asmString_,
-                                                raceemulator::architectureFromTarget(archName));
-        emulator.addAllKernargs(kernel.args.data());
-        const int  waveSize             = emulator.getArch().getWaveSize();
-        const auto numWavesPerWorkGroup = (wgs.x * wgs.y * wgs.z) / waveSize;
-        emulator.run({0, 0, 0},
-                     {static_cast<int>(waveSize * numWavesPerWorkGroup), 1, 1},
-                     {.raceChecks = true, .completeEmulation = false});
-        std::cout << "No races detected in kernel: " << kernelName << std::endl;
-
+        auto arch = raceemulator::architectureFromTarget(archName);
+        runEmulatorOnKernel(kernels[0][0], filename, arch,
+                            {{0, 0, 0}},
+                            {.raceChecks = true, .completeEmulation = false});
+        std::cout << "No races detected in kernel: "
+                  << kernels[0][0].kernelName << std::endl;
         return true;
     }
 #endif // HIPBLASLT_HAS_RACE_EMULATOR
@@ -370,6 +399,7 @@ namespace TensileLite
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
                 ("check-for-races",          po::value<int>()->default_value(0), "If 0, do not check, otherwise do check")
                 ("print-kernel-args",        po::value<bool>()->default_value(false), "Print kernel arguments and exit without running on GPU.")
+                ("validate-with-emulator",   po::value<int>()->default_value(0), "If non-zero, run emulator-based numerical validation against CPU reference (no GPU required).")
                 ("target-arch",              po::value<std::string>()->default_value(""), "Target GPU architecture (e.g. gfx1151). When set, bypasses GPU hardware detection.")
                 ("bounds-check",             po::value<BoundsCheckMode>()->default_value(BoundsCheckMode::Disable),
                 "1:Use sentinel values to check memory boundaries."
@@ -1009,74 +1039,186 @@ int main(int argc, const char* argv[])
 
     ClientProblemFactory problemFactory(args);
 
-    // --print-kernel-args mode: compute and print kernel arguments without GPU.
-    // Requires --target-arch (e.g. gfx1151) and a library-file.
-    if(args["print-kernel-args"].as<bool>())
+    // GPU-free early-exit paths: --print-kernel-args and --validate-with-emulator.
+    // Both share: construct hardware from --target-arch, load library, iterate
+    // problems finding solutions and generating kernel invocations.
+    bool printKernelArgs       = args["print-kernel-args"].as<bool>();
+    bool validateWithEmulator  = args["validate-with-emulator"].as<int>() != 0;
+
+    if(printKernelArgs || validateWithEmulator)
     {
-        auto targetArch = args["target-arch"].as<std::string>();
-        if(targetArch.empty())
-            throw std::runtime_error("--print-kernel-args requires --target-arch");
+        std::string flagName = printKernelArgs
+            ? "--print-kernel-args" : "--validate-with-emulator";
 
-        auto processor = AMDGPU::toProcessor(targetArch);
-        auto arch      = raceemulator::architectureFromTarget(targetArch);
-        int  cuCount   = arch->getCuCount();
+        auto [hardware, arch] = makeHardwareFromTargetArch(args, flagName);
 
-        auto hardware = std::make_shared<AMDGPU>(processor, cuCount, targetArch);
-        auto library  = LoadSolutionLibrary(args);
+        auto library = LoadSolutionLibrary(args);
         if(!library)
             throw std::runtime_error("Failed to load solution library");
 
+        // For emulator validation, allocate real CPU buffers and a validator.
+        std::shared_ptr<DataInitialization> dataInit;
+        std::unique_ptr<ReferenceValidator> validator;
+        std::string                         filename;
+        bool                                anyValidationFailure = false;
+        if(validateWithEmulator)
+        {
+#ifdef HIPBLASLT_HAS_RACE_EMULATOR
+            std::cout << "Emulator validation: target arch = "
+                      << hardware->archName() << std::endl;
+            filename = args["library-file"].as<std::string>();
+            std::cout << "Emulator validation: allocating CPU-only buffers..."
+                      << std::endl;
+            dataInit = std::make_shared<DataInitialization>(
+                args, problemFactory, /*cpuOnly=*/true);
+            validator = std::make_unique<ReferenceValidator>(args, dataInit);
+#else
+            throw std::runtime_error(
+                "Emulator validation requested (--validate-with-emulator) "
+                "but this build was compiled without "
+                "HIPBLASLT_ENABLE_RACE_EMULATOR");
+#endif
+        }
+
         auto problems = problemFactory.problems();
+        if(validateWithEmulator)
+            std::cout << "Emulator validation: " << problems.size()
+                      << " problem(s) to validate" << std::endl;
+
         for(size_t pi = 0; pi < problems.size(); ++pi)
         {
-            auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(problems[pi]);
+            auto problem
+                = std::dynamic_pointer_cast<ContractionProblemGemm>(problems[pi]);
             if(!problem)
             {
-                std::cerr << "Problem " << pi << " is not a GEMM problem" << std::endl;
+                std::cerr << "Problem " << pi
+                          << " is not a GEMM problem, skipping" << std::endl;
                 continue;
             }
+
             auto solution = library->findBestSolution(*problem, *hardware);
             if(!solution)
             {
-                std::cerr << "No solution found for problem " << pi << std::endl;
+                std::cerr << "No solution found for problem " << pi
+                          << ", skipping" << std::endl;
                 continue;
             }
 
-            // Create inputs with dummy non-null pointers (not dereferenced).
-            // solve() validates that pointers are non-null when alpha != 0.
-            static char dummy[1];
-            ContractionInputs inputs;
-            inputs.a     = dummy;
-            inputs.b     = dummy;
-            inputs.c     = dummy;
-            inputs.d     = dummy;
-            inputs.alpha = static_cast<float>(1.0);
-            inputs.beta  = static_cast<float>(0.0);
-
-            auto kernels
-                = solution->solve(*problem, inputs, *hardware, nullptr, 0, nullptr);
-
-            std::cout << "Problem " << pi << ":" << std::endl;
-            for(size_t ki = 0; ki < kernels.size(); ++ki)
+            if(printKernelArgs)
             {
-                auto& k = kernels[ki];
-                std::cout << "  Kernel " << ki << ": " << k.kernelName << std::endl;
-                std::cout << "    workGroupSize: (" << k.workGroupSize.x << ", "
-                          << k.workGroupSize.y << ", " << k.workGroupSize.z << ")"
-                          << std::endl;
-                std::cout << "    numWorkGroups: (" << k.numWorkGroups.x << ", "
-                          << k.numWorkGroups.y << ", " << k.numWorkGroups.z << ")"
-                          << std::endl;
-                std::cout << "    numWorkItems:  (" << k.numWorkItems.x << ", "
-                          << k.numWorkItems.y << ", " << k.numWorkItems.z << ")"
-                          << std::endl;
-                std::cout << "    args (" << k.args.size() << " bytes):" << std::endl;
-                std::cout << k.args;
-                std::cout << "    NOTE: pointer values (d, c, a, b) are placeholders"
-                             " (no GPU memory allocated)." << std::endl;
-                std::cout << "    NOTE: WGMXCCG (bits [31:22] of internalArgs1) is"
-                             " approximate (CU count unknown without GPU)." << std::endl;
+                // Use dummy pointers — solve() just needs non-null when alpha != 0.
+                static char dummy[1];
+                ContractionInputs inputs;
+                inputs.a     = dummy;
+                inputs.b     = dummy;
+                inputs.c     = dummy;
+                inputs.d     = dummy;
+                inputs.alpha = static_cast<float>(1.0);
+                inputs.beta  = static_cast<float>(0.0);
+
+                auto kernels = solution->solve(
+                    *problem, inputs, *hardware, nullptr, 0, nullptr);
+
+                std::cout << "Problem " << pi << ":" << std::endl;
+                for(size_t ki = 0; ki < kernels.size(); ++ki)
+                {
+                    auto& k = kernels[ki];
+                    std::cout << "  Kernel " << ki << ": " << k.kernelName
+                              << std::endl;
+                    std::cout << "    workGroupSize: ("
+                              << k.workGroupSize.x << ", "
+                              << k.workGroupSize.y << ", "
+                              << k.workGroupSize.z << ")" << std::endl;
+                    std::cout << "    numWorkGroups: ("
+                              << k.numWorkGroups.x << ", "
+                              << k.numWorkGroups.y << ", "
+                              << k.numWorkGroups.z << ")" << std::endl;
+                    std::cout << "    numWorkItems:  ("
+                              << k.numWorkItems.x << ", "
+                              << k.numWorkItems.y << ", "
+                              << k.numWorkItems.z << ")" << std::endl;
+                    std::cout << "    args (" << k.args.size()
+                              << " bytes):" << std::endl;
+                    std::cout << k.args;
+                    std::cout << "    NOTE: pointer values (d, c, a, b) are "
+                                 "placeholders (no GPU memory allocated)."
+                              << std::endl;
+                    std::cout << "    NOTE: WGMXCCG (bits [31:22] of "
+                                 "internalArgs1) is approximate (CU count "
+                                 "unknown without GPU)." << std::endl;
+                }
             }
+            else // validateWithEmulator
+            {
+#ifdef HIPBLASLT_HAS_RACE_EMULATOR
+                std::cout << "Problem " << pi
+                          << ": computing CPU reference..." << std::flush;
+                validator->preProblem(problem.get());
+                std::cout << " done" << std::endl;
+
+                // Save the CPU reference D into a separate buffer.
+                // DataInitialization reuses the same underlying buffers,
+                // so both reference and emulator ContractionInputs will
+                // point to the same D. We save the reference and point
+                // the reference inputs at our copy.
+                auto& refInputs = dynamic_cast<ContractionInputs&>(
+                    *validator->getReferenceInputs());
+                size_t dBytes = problem->d().totalAllocatedElements()
+                              * DataTypeInfo::Get(problem->d().dataType())
+                                    .elementSize;
+                std::vector<char> savedReferenceD(dBytes);
+                std::memcpy(savedReferenceD.data(), refInputs.d, dBytes);
+                refInputs.d = savedReferenceD.data();
+
+                // Prepare fresh inputs for emulator (resets D to pristine)
+                auto emulatorInputs
+                    = dataInit->prepareCPUInputs(problem.get());
+                auto kernels = solution->solve(
+                    *problem,
+                    dynamic_cast<ContractionInputs&>(*emulatorInputs),
+                    *hardware, nullptr, 0, nullptr);
+
+                if(kernels.size() != 1)
+                {
+                    std::cerr << "Problem " << pi
+                              << ": multi-kernel solution, skipping"
+                              << std::endl;
+                    continue;
+                }
+
+                auto wgIds = allWorkgroupIds(kernels[0]);
+                std::cout << "  Running emulator on " << wgIds.size()
+                          << " workgroup(s) (" << kernels[0].kernelName
+                          << ")..." << std::flush;
+                runEmulatorOnKernel(kernels[0], filename, arch, wgIds,
+                                    {.raceChecks        = true,
+                                     .completeEmulation = true});
+                std::cout << " done" << std::endl;
+
+                bool mismatch = validator->validate(
+                    *problem,
+                    dynamic_cast<ContractionInputs const&>(refInputs),
+                    dynamic_cast<ContractionInputs const&>(
+                        *emulatorInputs));
+
+                anyValidationFailure |= mismatch;
+                std::cout << "Problem " << pi << ": "
+                          << (mismatch ? "FAILED" : "PASSED") << std::endl;
+#endif
+            }
+        }
+
+        if(validateWithEmulator)
+        {
+#ifdef HIPBLASLT_HAS_RACE_EMULATOR
+            if(anyValidationFailure)
+            {
+                std::cerr << "Emulator validation FAILED" << std::endl;
+                return 1;
+            }
+            std::cout << "Emulator validation PASSED for all problems"
+                      << std::endl;
+#endif
         }
         return 0;
     }

@@ -99,6 +99,11 @@ namespace TensileLite
                           ContractionInputs const&      reference,
                           ContractionInputs const&      result);
 
+            std::shared_ptr<ProblemInputs> getReferenceInputs() const
+            {
+                return m_referenceInputs;
+            }
+
             bool checkResults(TensorDescriptor const& tensor,
                               void const*             refPtr,
                               void const*             resPtr,

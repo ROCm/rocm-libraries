@@ -899,7 +899,8 @@ namespace TensileLite
         }
 
         DataInitialization::DataInitialization(po::variables_map const&    args,
-                                               ClientProblemFactory const& problemFactory)
+                                               ClientProblemFactory const& problemFactory,
+                                               bool                        cpuOnly)
             : m_maxBatch(0)
             , m_stridedBatched(args["strided-batched"].as<bool>())
             , m_sparse(args["sparse"].as<int>())
@@ -908,7 +909,81 @@ namespace TensileLite
             , m_keepPristineCopyOnGPU(args["pristine-on-gpu"].as<bool>())
             , m_workspaceSize(problemFactory.workspaceSize())
             , m_pruneMode(args["prune-mode"].as<PruneSparseMode>())
+            , m_cpuOnly(cpuOnly)
+        {
+            initCommon(args, problemFactory);
+            allocNewCPUInputs();
 
+            if(m_cpuOnly)
+            {
+                // Allocate workspace on host instead of GPU
+                if(!m_workspacePristine && m_workspaceSize > 0)
+                {
+                    m_workspacePristine = std::shared_ptr<void>(
+                        std::malloc(m_workspaceSize), [](auto p) { free(p); });
+                    if(!m_workspacePristine)
+                        throw std::runtime_error(
+                            "Failed to allocate CPU workspace");
+                }
+
+                // Initialize CPU valid arrays (no GPU copy needed)
+                if(!m_problemDependentData)
+                {
+                    for(auto& it : m_vdata)
+                    {
+                        for(auto& p : it.pristine)
+                        {
+                            auto& pUnit = p.second;
+                            initArray(p.first, it.init,
+                                      pUnit.cpuInput.valid.get(),
+                                      pUnit.maxElements);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                allocNewGPUInputs();
+                for(auto& it : m_vdata)
+                {
+                    for(auto& p : it.pristine)
+                    {
+                        auto  dataTypeSize = DataTypeInfo::Get(p.first).elementSize;
+                        auto& pUnit        = p.second;
+                        if(!m_problemDependentData)
+                        {
+                            initArray(p.first, it.init,
+                                      pUnit.cpuInput.valid.get(),
+                                      pUnit.maxElements);
+                            HIP_CHECK_EXC(hipMemcpy(pUnit.gpuInput.valid.get(),
+                                                    pUnit.cpuInput.valid.get(),
+                                                    dataTypeSize * pUnit.maxElements,
+                                                    hipMemcpyHostToDevice));
+                        }
+                        if(pUnit.gpuInput.bad && pUnit.cpuInput.bad)
+                        {
+                            initArray(p.first,
+                                      InitMode::BadOutput,
+                                      pUnit.cpuInput.bad.get(),
+                                      pUnit.maxElements);
+                            HIP_CHECK_EXC(hipMemcpy(pUnit.gpuInput.bad.get(),
+                                                    pUnit.cpuInput.bad.get(),
+                                                    dataTypeSize * pUnit.maxElements,
+                                                    hipMemcpyHostToDevice));
+                        }
+                    }
+                }
+            }
+        }
+
+        DataInitialization::DataInitialization(po::variables_map const&    args,
+                                               ClientProblemFactory const& problemFactory)
+            : DataInitialization(args, problemFactory, false)
+        {
+        }
+
+        void DataInitialization::initCommon(po::variables_map const&    args,
+                                            ClientProblemFactory const& problemFactory)
         {
             m_rotatingBuffer
                 = args["rotating-buffer-size"].as<int32_t>() * 1024 * 1024; // Change to bytes

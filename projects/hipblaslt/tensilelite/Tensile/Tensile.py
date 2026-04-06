@@ -501,6 +501,9 @@ def Tensile(userArgs):
     argParser.add_argument("--print-kernel-args", dest="printKernelArgs", action="store_true",
             help="After building, print the kernel arguments without running on GPU. "
                  "Implies --build-only. Requires ISA to be set in the YAML config.")
+    argParser.add_argument("--validate-with-emulator", dest="validateWithEmulator", action="store_true",
+            help="After building, run emulator-based numerical validation against CPU reference. "
+                 "No GPU required. Implies --build-only. Requires ISA to be set in the YAML config.")
     argParser.add_argument("--restore-from-log", type=str, dest="RestoreLog",
             help="A log file captured in previous tuning. ONLY RELIABLE when configs yaml not changes")
 
@@ -510,7 +513,8 @@ def Tensile(userArgs):
     altFormat = args.AlternateFormat
     useCache = args.useCache
     printKernelArgs = args.printKernelArgs
-    buildOnly = args.buildOnly or printKernelArgs
+    validateWithEmulator = args.validateWithEmulator
+    buildOnly = args.buildOnly or printKernelArgs or validateWithEmulator
     outputPath = Path(ensurePath(os.path.abspath(args.OutputPath)))
     print1(f"#  OutputPath: {str(outputPath)}")
 
@@ -646,34 +650,47 @@ def Tensile(userArgs):
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
+    if globalParameters["ValidateWithEmulator"]:
+        buildOnly = True
+
     executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly)
 
-    if printKernelArgs:
+    def runClientPostBuild(flagName, clientFlags, checkReturnCode=False):
+        """Run the tensilelite client on each ClientParameters.ini with the given flags."""
         import glob
         import subprocess
         clientExe = ClientWriter.getClientExecutablePath()
         iniFiles = glob.glob(str(outputPath / "**" / "ClientParameters.ini"), recursive=True)
         if not iniFiles:
-            printWarning("No ClientParameters.ini found for --print-kernel-args")
-        else:
-            # Determine target arch from the ISA in the config
-            isaList = globalParameters["ISA"]
-            if isaList:
-                isa = isaList[0]
-                targetArch = f"gfx{isa[0]*100 + isa[1]*10 + isa[2]}"
-            else:
-                printExit("--print-kernel-args requires ISA to be set (e.g. ISA: [[11, 5, 1]])")
-            for iniFile in iniFiles:
-                clientArgs = [
-                    clientExe,
-                    "--print-kernel-args",
-                    "--target-arch", targetArch,
-                    "--config-file", iniFile,
-                ]
-                env = os.environ.copy()
-                env["TENSILE_DB"] = hex(int(env.get("TENSILE_DB", "0"), 0) | 0x40)
-                print1(f"# Printing kernel args for {iniFile}")
-                subprocess.run(clientArgs, env=env)
+            printWarning(f"No ClientParameters.ini found for {flagName}")
+            return
+        isaList = globalParameters["ISA"]
+        if not isaList:
+            printExit(f"{flagName} requires ISA to be set (e.g. ISA: [[11, 5, 1]])")
+        isa = isaList[0]
+        targetArch = f"gfx{isa[0]*100 + isa[1]*10 + isa[2]}"
+        for iniFile in iniFiles:
+            clientArgs = [
+                clientExe,
+                *clientFlags,
+                "--target-arch", targetArch,
+                "--config-file", iniFile,
+            ]
+            env = os.environ.copy()
+            env["TENSILE_DB"] = hex(int(env.get("TENSILE_DB", "0"), 0) | 0x40)
+            print1(f"# {flagName}: {iniFile}")
+            result = subprocess.run(clientArgs, env=env)
+            if checkReturnCode and result.returncode != 0:
+                printExit(f"{flagName} failed for {iniFile}")
+
+    if printKernelArgs:
+        runClientPostBuild("--print-kernel-args", ["--print-kernel-args"])
+
+    # Check both CLI flag and YAML GlobalParameter
+    if validateWithEmulator or globalParameters["ValidateWithEmulator"]:
+        runClientPostBuild("--validate-with-emulator",
+                           ["--validate-with-emulator", "1"],
+                           checkReturnCode=True)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)
