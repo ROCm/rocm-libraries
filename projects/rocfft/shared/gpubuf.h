@@ -235,11 +235,11 @@ public:
         if(ret != hipSuccess)
             return ret;
 
-        if(bsize > device_memory_accountant::singleton().get_usable_bytes(device))
+        if(size > device_memory_accountant::singleton().get_usable_bytes(device))
         {
             std::stringstream msg;
             msg << "Unauthorized device allocation (device ID: " << device << ").\n"
-                << "\tRequested size is " << byte_size_to_str(bsize) << "\n"
+                << "\tRequested size is " << byte_size_to_str(size) << "\n"
                 << device_memory_accountant::singleton().get_details(device);
             throw DEVICEBUF_MEM_USAGE{msg.str()};
         }
