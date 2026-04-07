@@ -270,7 +270,7 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                   "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD,
+        getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,

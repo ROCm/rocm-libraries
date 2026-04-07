@@ -102,7 +102,7 @@ class TestLoadConvolutionFwd:
     def test_operation_type_enum(self, convolution_fwd_config):
         assert (
             convolution_fwd_config.operation_type_enum
-            == "HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD"
+            == "HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT"
         )
 
     def test_infer_properties(self, convolution_fwd_config):
