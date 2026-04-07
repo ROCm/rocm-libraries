@@ -412,7 +412,7 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
     hipdnnDataType_t computeType = {};
     int64_t dtCount = 0;
     desc->getAttribute(
-        HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
+        HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
     ASSERT_EQ(computeType, HIPDNN_DATA_FLOAT);
 
     // Verify forward_phase
@@ -423,7 +423,7 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &forwardPhaseCount,
                        &forwardPhase);
-    ASSERT_EQ(forwardPhase, HIPDNN_NORM_FWD_PHASE_TRAINING);
+    ASSERT_EQ(forwardPhase, HIPDNN_NORM_FWD_TRAINING);
 
     // Verify x tensor
     hipdnn_backend::ScopedDescriptor xScoped;
@@ -522,12 +522,12 @@ TEST_F(TestRMSNormOperationFromNode, GetAttributeWorksAfterFromNode)
                            toVec(K_RMSNORM_TENSOR_INV_RMS_STRIDES));
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_RMSNORM);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_RMSNORM_EXT);
 }
 
 TEST_F(TestRMSNormOperationFromNode, NamePreservedFromNode)

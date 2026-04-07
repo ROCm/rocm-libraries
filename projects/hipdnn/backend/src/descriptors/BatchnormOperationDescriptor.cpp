@@ -171,7 +171,7 @@ void BatchnormOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                                     arrayOfElements,
                                     "BatchnormOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT:
+    case HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -312,7 +312,7 @@ void BatchnormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                                     arrayOfElements,
                                     "BatchnormOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT:
+    case HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
@@ -337,7 +337,7 @@ void BatchnormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   "BatchnormOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM,
+        getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,
