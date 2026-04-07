@@ -244,7 +244,7 @@ TEST_F(TestEngineDescriptor, GetEngineDescriptorUnsupportedAttr)
 
     ASSERT_THROW_HIPDNN_STATUS(
         engine->getAttribute(
-            HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET, HIPDNN_TYPE_INT32, 1, nullptr, &dummy),
+            HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT, HIPDNN_TYPE_INT32, 1, nullptr, &dummy),
         HIPDNN_STATUS_NOT_SUPPORTED);
 }
 
@@ -431,7 +431,7 @@ TEST_F(TestEngineDescriptor, GetKnobInfoCountWithNoKnobs)
     makeEngineFinalized();
 
     int64_t knobCount = -1;
-    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                          0,
                                          &knobCount,
@@ -447,7 +447,7 @@ TEST_F(TestEngineDescriptor, GetKnobInfoInvalidType)
     int64_t knobCount = 0;
     ASSERT_THROW_HIPDNN_STATUS(
         engine->getAttribute(
-            HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT, HIPDNN_TYPE_INT64, 0, &knobCount, nullptr),
+            HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE, HIPDNN_TYPE_INT64, 0, &knobCount, nullptr),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -456,7 +456,7 @@ TEST_F(TestEngineDescriptor, GetKnobInfoNotFinalized)
     auto engine = getEngineDescriptor();
 
     int64_t knobCount = 0;
-    ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                                     0,
                                                     &knobCount,
@@ -470,7 +470,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoCountWithKnobs)
     makeEngineFinalizedWithKnobs();
 
     int64_t knobCount = -1;
-    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                          0,
                                          &knobCount,
@@ -485,7 +485,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoReturnsSerializedKnobs)
 
     // First, get the count
     int64_t knobCount = 0;
-    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                          0,
                                          &knobCount,
@@ -495,7 +495,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoReturnsSerializedKnobs)
     // Now get the actual knob data
     std::vector<hipdnnBackendFlatbufferData_t> knobData(static_cast<size_t>(knobCount));
     int64_t returnedCount = 0;
-    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                          knobCount,
                                          &returnedCount,
@@ -524,7 +524,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoNullPointerWhenCountNonZero)
     makeEngineFinalizedWithKnobs();
 
     int64_t returnedCount = 0;
-    ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                                     1,
                                                     &returnedCount,

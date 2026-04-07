@@ -45,7 +45,8 @@ TEST_F(IntegrationBackendDescriptor, WillNotCreateDescriptorIfTypeNotSupported)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
 
-    const hipdnnStatus_t status = hipdnnBackendCreateDescriptor(HIPDNN_INVALID_TYPE, &descriptor);
+    const hipdnnStatus_t status
+        = hipdnnBackendCreateDescriptor(HIPDNN_INVALID_TYPE_EXT, &descriptor);
 
     EXPECT_EQ(status, HIPDNN_STATUS_NOT_SUPPORTED);
 }

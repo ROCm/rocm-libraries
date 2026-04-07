@@ -9,8 +9,8 @@
 
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
-#include <hipdnn_frontend/node/SdpaFpropNode.hpp>
-#include <hipdnn_test_sdk/constants/SdpaFpropConstants.hpp>
+#include <hipdnn_frontend/node/SdpaFwdNode.hpp>
+#include <hipdnn_test_sdk/constants/SdpaFwdConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -39,13 +39,13 @@ public:
     }
 };
 
-// Use SDK constants from SdpaFpropConstants.hpp:
+// Use SDK constants from SdpaFwdConstants.hpp:
 // K_SDPA_TENSOR_Q_UID, K_SDPA_TENSOR_K_UID, K_SDPA_TENSOR_V_UID, K_SDPA_TENSOR_O_UID,
 // K_SDPA_TENSOR_Q_DIMS, K_SDPA_TENSOR_Q_STRIDES, etc.
 
 // Lifts a frontend graph via build_operation_graph(handle), then
 // reconstructs it with fromBackendDescriptor() for verification.
-class IntegrationSdpaFpropDescriptorLifting : public ::testing::Test
+class IntegrationSdpaFwdDescriptorLifting : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -71,11 +71,11 @@ protected:
         }
     }
 
-    /// Builds a standard SdpaFprop graph for round-trip testing.
+    /// Builds a standard SdpaFwd graph for round-trip testing.
     static std::shared_ptr<TestableGraph> buildGraph()
     {
         auto graph = std::make_shared<TestableGraph>();
-        graph->set_name("SdpaFpropLiftingTestGraph")
+        graph->set_name("SdpaFwdLiftingTestGraph")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
@@ -105,10 +105,10 @@ protected:
     hipdnnHandle_t _handle = nullptr;
 };
 
-// Builds a standard SdpaFprop graph, lowers via build_operation_graph(handle),
+// Builds a standard SdpaFwd graph, lowers via build_operation_graph(handle),
 // lifts back with fromBackendDescriptor(), and performs comprehensive field-by-field
 // validation of graph data types, tensor attributes, and operation parameters.
-TEST_F(IntegrationSdpaFpropDescriptorLifting, BasicSdpaFpropRoundTrip)
+TEST_F(IntegrationSdpaFwdDescriptorLifting, BasicSdpaFwdRoundTrip)
 {
     auto originalGraph = buildGraph();
 
@@ -170,8 +170,8 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, BasicSdpaFpropRoundTrip)
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
 
-    auto* opNode = dynamic_cast<SdpaFpropNode*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a SdpaFpropNode";
+    auto* opNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr) << "Expected a SdpaFwdNode";
 
     // Verify diagonal alignment (direct member access, no getter)
     EXPECT_EQ(opNode->attributes.diagonal_alignment, DiagonalAlignment::TOP_LEFT);
@@ -182,7 +182,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, BasicSdpaFpropRoundTrip)
 
 // After lifting, verifies tensor objects in the node attributes are the same
 // shared_ptr instances as in the tensor map (pointer equality).
-TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropTensorSharingPreserved)
+TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdTensorSharingPreserved)
 {
     auto originalGraph = buildGraph();
 
@@ -204,7 +204,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropTensorSharingPreserved)
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
 
-    auto* opNode = dynamic_cast<SdpaFpropNode*>(subNodes[0].get());
+    auto* opNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
     ASSERT_NE(opNode, nullptr);
 
     // Verify q tensor sharing
@@ -221,10 +221,10 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropTensorSharingPreserved)
     EXPECT_EQ(tensorMap[K_SDPA_TENSOR_O_UID].get(), opNode->attributes.get_o().get());
 }
 
-// Builds a SdpaFprop graph, serializes to binary, creates a backend descriptor
+// Builds a SdpaFwd graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
 // all fields survive the FlatBuffer-direct path.
-TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropLiftWithoutFinalization)
+TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdLiftWithoutFinalization)
 {
     auto originalGraph = buildGraph();
 
@@ -253,7 +253,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropLiftWithoutFinalization)
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
 
-    auto* opNode = dynamic_cast<SdpaFpropNode*>(subNodes[0].get());
+    auto* opNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
     ASSERT_NE(opNode, nullptr);
 
     // Verify diagonal alignment
@@ -283,13 +283,13 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropLiftWithoutFinalization)
 // Builds an SDPA fprop graph with all optional boolean flags, scalar parameters,
 // and optional tensors set, lowers via the C-API, lifts back, and verifies
 // every attribute survives.
-TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropWithAllOptionalAttributesViaCApi)
+TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaCApi)
 {
     auto originalGraph = buildGraph();
 
     auto& subNodes = originalGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
-    auto* sdpaNode = dynamic_cast<SdpaFpropNode*>(subNodes[0].get());
+    auto* sdpaNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
 
     // Optional input tensors
@@ -368,10 +368,10 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropWithAllOptionalAttributes
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    // Verify node attributes on the lifted SdpaFpropNode
+    // Verify node attributes on the lifted SdpaFwdNode
     auto& liftedNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(liftedNodes.size(), 1u);
-    auto* liftedNode = dynamic_cast<SdpaFpropNode*>(liftedNodes[0].get());
+    auto* liftedNode = dynamic_cast<SdpaFwdNode*>(liftedNodes[0].get());
     ASSERT_NE(liftedNode, nullptr);
 
     const auto& attrs = liftedNode->attributes;
@@ -465,10 +465,10 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropWithAllOptionalAttributes
 
 // Builds an SDPA fprop graph without explicit tensor UIDs, then verifies
 // auto-assigned UIDs are unique and correctly referenced after a round-trip.
-TEST_F(IntegrationSdpaFpropDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
+TEST_F(IntegrationSdpaFwdDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
 {
     auto graph = std::make_shared<TestableGraph>();
-    graph->set_name("AutoUidSdpaFpropGraph")
+    graph->set_name("AutoUidSdpaFwdGraph")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
@@ -518,7 +518,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, AutoAssignedUidsPreservedInRoundTr
     // Verify the node references resolve to tensors in the map
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
-    auto* sdpaNode = dynamic_cast<SdpaFpropNode*>(subNodes[0].get());
+    auto* sdpaNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
 
     EXPECT_NE(uids.count(sdpaNode->attributes.get_q()->get_uid()), 0u);
@@ -529,7 +529,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, AutoAssignedUidsPreservedInRoundTr
 
 // Serializes an SDPA fprop graph to binary, then deserializes via the backend
 // using a handle (full finalization). Verifies the reconstructed graph matches the original.
-TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropDeserializeViaBackendWithHandle)
+TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdDeserializeViaBackendWithHandle)
 {
     auto originalGraph = buildGraph();
 
@@ -547,7 +547,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropDeserializeViaBackendWith
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
     EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
     EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
-    EXPECT_EQ(liftedGraph->get_name(), "SdpaFpropLiftingTestGraph");
+    EXPECT_EQ(liftedGraph->get_name(), "SdpaFwdLiftingTestGraph");
 
     // Verify tensors
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -562,10 +562,10 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropDeserializeViaBackendWith
     EXPECT_EQ(tensorMap[K_SDPA_TENSOR_O_UID]->get_dim(), toVec(K_SDPA_TENSOR_O_DIMS));
     EXPECT_EQ(tensorMap[K_SDPA_TENSOR_O_UID]->get_name(), "o");
 
-    // Verify the node is an SdpaFpropNode with the correct operation name
+    // Verify the node is an SdpaFwdNode with the correct operation name
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
-    auto* sdpaNode = dynamic_cast<SdpaFpropNode*>(subNodes[0].get());
+    auto* sdpaNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
     EXPECT_EQ(sdpaNode->attributes.get_name(), "test_op");
     EXPECT_EQ(sdpaNode->attributes.get_q()->get_uid(), K_SDPA_TENSOR_Q_UID);

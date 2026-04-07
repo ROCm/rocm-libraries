@@ -6,7 +6,7 @@
 #include "TestMacros.hpp"
 #include "descriptors/NodeFactory.hpp"
 #include "descriptors/ScopedDescriptor.hpp"
-#include "descriptors/SdpaFpropOperationDescriptor.hpp"
+#include "descriptors/SdpaFwdOperationDescriptor.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
 
@@ -14,7 +14,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_test_sdk/constants/SdpaFpropConstants.hpp>
+#include <hipdnn_test_sdk/constants/SdpaFwdConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <functional>
@@ -29,10 +29,10 @@ using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
 // =============================================================================
-// SdpaFpropOperationDescriptor::fromNode() Tests
+// SdpaFwdOperationDescriptor::fromNode() Tests
 // =============================================================================
 
-class TestSdpaFpropOperationFromNode : public ::testing::Test
+class TestSdpaFwdOperationFromNode : public ::testing::Test
 {
 protected:
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> _tensorMap;
@@ -119,7 +119,7 @@ protected:
                   toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
     }
 
-    static hipdnn_data_sdk::data_objects::SdpaAttributesT createStandardSdpaFpropAttrs()
+    static hipdnn_data_sdk::data_objects::SdpaAttributesT createStandardSdpaFwdAttrs()
     {
         hipdnn_data_sdk::data_objects::SdpaAttributesT attrs;
         attrs.q_tensor_uid = K_SDPA_TENSOR_Q_UID;
@@ -159,23 +159,23 @@ protected:
     {
         NodeT node;
         node.compute_data_type = computeType;
-        node.attributes.Set(createStandardSdpaFpropAttrs());
+        node.attributes.Set(createStandardSdpaFwdAttrs());
         return node;
     }
 };
 
-TEST_F(TestSdpaFpropOperationFromNode, CreatesValidFinalizedDescriptor)
+TEST_F(TestSdpaFwdOperationFromNode, CreatesValidFinalizedDescriptor)
 {
     auto node = createStandardNode();
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_SDPA_FWD_DESCRIPTOR);
     EXPECT_EQ(desc->getData().q_tensor_uid, K_SDPA_TENSOR_Q_UID);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, NodeFactoryDelegatesCorrectly)
+TEST_F(TestSdpaFwdOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
     auto node = createStandardNode();
 
@@ -190,7 +190,7 @@ TEST_F(TestSdpaFpropOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaAttributes);
-    auto desc = std::static_pointer_cast<SdpaFpropOperationDescriptor>(graphOp);
+    auto desc = std::static_pointer_cast<SdpaFwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -257,21 +257,21 @@ TEST_F(TestSdpaFpropOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 // -- 3c: Parameterized compute data type tests --
 
-class TestSdpaFpropComputeDataType : public TestSdpaFpropOperationFromNode,
-                                     public ::testing::WithParamInterface<DataType>
+class TestSdpaFwdComputeDataType : public TestSdpaFwdOperationFromNode,
+                                   public ::testing::WithParamInterface<DataType>
 {
 };
 
-TEST_P(TestSdpaFpropComputeDataType, PreservesComputeDataType)
+TEST_P(TestSdpaFwdComputeDataType, PreservesComputeDataType)
 {
     auto node = createStandardNode(GetParam());
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), GetParam());
 }
 
 INSTANTIATE_TEST_SUITE_P(ComputeDataTypes,
-                         TestSdpaFpropComputeDataType,
+                         TestSdpaFwdComputeDataType,
                          ::testing::Values(DataType::HALF,
                                            DataType::BFLOAT16,
                                            DataType::FLOAT,
@@ -280,56 +280,56 @@ INSTANTIATE_TEST_SUITE_P(ComputeDataTypes,
 
 // -- 3c: Parameterized diagonal alignment tests --
 
-class TestSdpaFpropDiagonalAlignment : public TestSdpaFpropOperationFromNode,
-                                       public ::testing::WithParamInterface<DiagonalAlignment>
+class TestSdpaFwdDiagonalAlignment : public TestSdpaFwdOperationFromNode,
+                                     public ::testing::WithParamInterface<DiagonalAlignment>
 {
 };
 
-TEST_P(TestSdpaFpropDiagonalAlignment, PreservesDiagonalAlignment)
+TEST_P(TestSdpaFwdDiagonalAlignment, PreservesDiagonalAlignment)
 {
     auto node = createStandardNode();
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.diagonal_alignment = GetParam();
     node.attributes.Set(attrs);
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().diagonal_alignment, GetParam());
 }
 
 INSTANTIATE_TEST_SUITE_P(DiagonalAlignments,
-                         TestSdpaFpropDiagonalAlignment,
+                         TestSdpaFwdDiagonalAlignment,
                          ::testing::Values(DiagonalAlignment::TOP_LEFT,
                                            DiagonalAlignment::BOTTOM_RIGHT));
 
 // -- 3c: Parameterized attention implementation tests --
 
-class TestSdpaFpropAttentionImplementation
-    : public TestSdpaFpropOperationFromNode,
+class TestSdpaFwdAttentionImplementation
+    : public TestSdpaFwdOperationFromNode,
       public ::testing::WithParamInterface<AttentionImplementation>
 {
 };
 
-TEST_P(TestSdpaFpropAttentionImplementation, PreservesAttentionImplementation)
+TEST_P(TestSdpaFwdAttentionImplementation, PreservesAttentionImplementation)
 {
     auto node = createStandardNode();
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.implementation = GetParam();
     node.attributes.Set(attrs);
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().implementation, GetParam());
 }
 
 INSTANTIATE_TEST_SUITE_P(AttentionImplementations,
-                         TestSdpaFpropAttentionImplementation,
+                         TestSdpaFwdAttentionImplementation,
                          ::testing::Values(AttentionImplementation::AUTO,
                                            AttentionImplementation::COMPOSITE,
                                            AttentionImplementation::UNIFIED));
 
-TEST_F(TestSdpaFpropOperationFromNode, SetsTensorReferences)
+TEST_F(TestSdpaFwdOperationFromNode, SetsTensorReferences)
 {
     auto node = createStandardNode();
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getQDesc(), nullptr);
     EXPECT_EQ(desc->getQDesc()->getData().uid, K_SDPA_TENSOR_Q_UID);
@@ -389,10 +389,10 @@ TEST_F(TestSdpaFpropOperationFromNode, SetsTensorReferences)
     EXPECT_EQ(desc->getAmaxODesc()->getData().uid, K_SDPA_TENSOR_AMAX_O_UID);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, TensorReferencesMatchTensorMap)
+TEST_F(TestSdpaFwdOperationFromNode, TensorReferencesMatchTensorMap)
 {
     auto node = createStandardNode();
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getQDesc(), _tensorMap[K_SDPA_TENSOR_Q_UID]);
     EXPECT_EQ(desc->getKDesc(), _tensorMap[K_SDPA_TENSOR_K_UID]);
@@ -424,10 +424,10 @@ TEST_F(TestSdpaFpropOperationFromNode, TensorReferencesMatchTensorMap)
     EXPECT_EQ(desc->getAmaxODesc(), _tensorMap[K_SDPA_TENSOR_AMAX_O_UID]);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, SetsTensorReferencesWithFullValues)
+TEST_F(TestSdpaFwdOperationFromNode, SetsTensorReferencesWithFullValues)
 {
     auto node = createStandardNode();
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getQDesc(), nullptr);
     EXPECT_EQ(desc->getQDesc()->getData().uid, K_SDPA_TENSOR_Q_UID);
@@ -508,45 +508,45 @@ TEST_F(TestSdpaFpropOperationFromNode, SetsTensorReferencesWithFullValues)
     EXPECT_EQ(desc->getAmaxODesc()->getData().strides, toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FailsWithMissingQTensor)
+TEST_F(TestSdpaFwdOperationFromNode, FailsWithMissingQTensor)
 {
     _tensorMap.erase(K_SDPA_TENSOR_Q_UID);
     auto node = createStandardNode();
 
-    ASSERT_THROW_HIPDNN_STATUS(SdpaFpropOperationDescriptor::fromNode(node, _tensorMap),
+    ASSERT_THROW_HIPDNN_STATUS(SdpaFwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FailsWithMissingKTensor)
+TEST_F(TestSdpaFwdOperationFromNode, FailsWithMissingKTensor)
 {
     _tensorMap.erase(K_SDPA_TENSOR_K_UID);
     auto node = createStandardNode();
 
-    ASSERT_THROW_HIPDNN_STATUS(SdpaFpropOperationDescriptor::fromNode(node, _tensorMap),
+    ASSERT_THROW_HIPDNN_STATUS(SdpaFwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FailsWithMissingVTensor)
+TEST_F(TestSdpaFwdOperationFromNode, FailsWithMissingVTensor)
 {
     _tensorMap.erase(K_SDPA_TENSOR_V_UID);
     auto node = createStandardNode();
 
-    ASSERT_THROW_HIPDNN_STATUS(SdpaFpropOperationDescriptor::fromNode(node, _tensorMap),
+    ASSERT_THROW_HIPDNN_STATUS(SdpaFwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FailsWithMissingOTensor)
+TEST_F(TestSdpaFwdOperationFromNode, FailsWithMissingOTensor)
 {
     _tensorMap.erase(K_SDPA_TENSOR_O_UID);
     auto node = createStandardNode();
 
-    ASSERT_THROW_HIPDNN_STATUS(SdpaFpropOperationDescriptor::fromNode(node, _tensorMap),
+    ASSERT_THROW_HIPDNN_STATUS(SdpaFwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, SucceedsWithOnlyRequiredTensors)
+TEST_F(TestSdpaFwdOperationFromNode, SucceedsWithOnlyRequiredTensors)
 {
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.attn_mask_tensor_uid = flatbuffers::nullopt;
     attrs.scale_tensor_uid = flatbuffers::nullopt;
     attrs.seq_len_q_tensor_uid = flatbuffers::nullopt;
@@ -576,7 +576,7 @@ TEST_F(TestSdpaFpropOperationFromNode, SucceedsWithOnlyRequiredTensors)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
@@ -614,17 +614,17 @@ TEST_F(TestSdpaFpropOperationFromNode, SucceedsWithOnlyRequiredTensors)
 
 // -- 3d: Parameterized optional tensor missing tests --
 
-class TestSdpaFpropOptionalTensorMissing : public TestSdpaFpropOperationFromNode,
-                                           public ::testing::WithParamInterface<int64_t>
+class TestSdpaFwdOptionalTensorMissing : public TestSdpaFwdOperationFromNode,
+                                         public ::testing::WithParamInterface<int64_t>
 {
 };
 
-TEST_P(TestSdpaFpropOptionalTensorMissing, SucceedsWhenOptionalTensorMissing)
+TEST_P(TestSdpaFwdOptionalTensorMissing, SucceedsWhenOptionalTensorMissing)
 {
     const int64_t erasedUid = GetParam();
     _tensorMap.erase(erasedUid);
     auto node = createStandardNode();
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
@@ -662,7 +662,7 @@ TEST_P(TestSdpaFpropOptionalTensorMissing, SucceedsWhenOptionalTensorMissing)
 }
 
 INSTANTIATE_TEST_SUITE_P(OptionalTensors,
-                         TestSdpaFpropOptionalTensorMissing,
+                         TestSdpaFwdOptionalTensorMissing,
                          ::testing::Values(K_SDPA_TENSOR_ATTN_MASK_UID,
                                            K_SDPA_TENSOR_SCALE_UID,
                                            K_SDPA_TENSOR_SEQ_LEN_Q_UID,
@@ -688,10 +688,10 @@ INSTANTIATE_TEST_SUITE_P(OptionalTensors,
                                            K_SDPA_TENSOR_AMAX_S_UID,
                                            K_SDPA_TENSOR_AMAX_O_UID));
 
-TEST_F(TestSdpaFpropOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
+TEST_F(TestSdpaFwdOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
     auto node = createStandardNode();
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 28);
@@ -725,10 +725,10 @@ TEST_F(TestSdpaFpropOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
     EXPECT_EQ(tensors[27]->getData().uid, K_SDPA_TENSOR_AMAX_O_UID);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, BuildNodeRoundTrip)
+TEST_F(TestSdpaFwdOperationFromNode, BuildNodeRoundTrip)
 {
     auto node = createStandardNode();
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -769,16 +769,16 @@ TEST_F(TestSdpaFpropOperationFromNode, BuildNodeRoundTrip)
     EXPECT_EQ(rebuiltAttrs->implementation, AttentionImplementation::AUTO);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesMmaCoreMode)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesMmaCoreMode)
 {
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.mma_core_mode = DataType::HALF;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_EQ(desc->getData().mma_core_mode, DataType::HALF);
@@ -789,27 +789,27 @@ TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesMmaCoreMode)
     EXPECT_EQ(rebuiltAttrs->mma_core_mode, DataType::HALF);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodeMmaCoreModeDefaultsToNotSet)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodeMmaCoreModeDefaultsToNotSet)
 {
     // When mma_core_mode is NOT_SET, the packer omits the attribute.
     // The unpacker should leave it at the default (NOT_SET).
     auto node = createStandardNode();
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_EQ(desc->getData().mma_core_mode, DataType::UNSET);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesGenerateStats)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesGenerateStats)
 {
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.generate_stats = true;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().generate_stats.has_value());
@@ -822,16 +822,16 @@ TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesGenerateStats)
     EXPECT_EQ(rebuiltAttrs->generate_stats.value(), true);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesAlibiMask)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesAlibiMask)
 {
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.alibi_mask = true;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().alibi_mask);
@@ -842,16 +842,16 @@ TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesAlibiMask)
     EXPECT_TRUE(rebuiltAttrs->alibi_mask);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesPaddingMask)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesPaddingMask)
 {
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.padding_mask = true;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().padding_mask);
@@ -862,16 +862,16 @@ TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesPaddingMask)
     EXPECT_TRUE(rebuiltAttrs->padding_mask);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesCausalMask)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesCausalMask)
 {
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.causal_mask = true;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().causal_mask);
@@ -882,16 +882,16 @@ TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesCausalMask)
     EXPECT_TRUE(rebuiltAttrs->causal_mask);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesCausalMaskBottomRight)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesCausalMaskBottomRight)
 {
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.causal_mask_bottom_right = true;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().causal_mask_bottom_right);
@@ -902,16 +902,16 @@ TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesCausalMaskBottomRight)
     EXPECT_TRUE(rebuiltAttrs->causal_mask_bottom_right);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesDropoutProbability)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesDropoutProbability)
 {
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.dropout_probability = 0.5F;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().dropout_probability.has_value());
@@ -924,16 +924,16 @@ TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesDropoutProbability)
     EXPECT_FLOAT_EQ(rebuiltAttrs->dropout_probability.value(), 0.5F);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesAttnScaleValue)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesAttnScaleValue)
 {
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.attn_scale_value = 0.5F;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().attn_scale_value.has_value());
@@ -946,16 +946,16 @@ TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesAttnScaleValue)
     EXPECT_FLOAT_EQ(rebuiltAttrs->attn_scale_value.value(), 0.5F);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesLeftBound)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesLeftBound)
 {
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.left_bound = 2;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().left_bound.has_value());
@@ -968,16 +968,16 @@ TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesLeftBound)
     EXPECT_EQ(rebuiltAttrs->left_bound.value(), 2);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesRightBound)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesRightBound)
 {
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.right_bound = 2;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().right_bound.has_value());
@@ -990,16 +990,16 @@ TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesRightBound)
     EXPECT_EQ(rebuiltAttrs->right_bound.value(), 2);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesMaxSeqLenKv)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesMaxSeqLenKv)
 {
-    auto attrs = createStandardSdpaFpropAttrs();
+    auto attrs = createStandardSdpaFwdAttrs();
     attrs.max_seq_len_kv = 2;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().max_seq_len_kv.has_value());
@@ -1012,10 +1012,10 @@ TEST_F(TestSdpaFpropOperationFromNode, FromNodePreservesMaxSeqLenKv)
     EXPECT_EQ(rebuiltAttrs->max_seq_len_kv.value(), 2);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
+TEST_F(TestSdpaFwdOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
 {
     auto node = createStandardNode();
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
@@ -1033,23 +1033,23 @@ TEST_F(TestSdpaFpropOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
     EXPECT_FALSE(rebuiltAttrs->max_seq_len_kv.has_value());
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, GetAttributeWorksAfterFromNode)
+TEST_F(TestSdpaFwdOperationFromNode, GetAttributeWorksAfterFromNode)
 {
     auto node = createStandardNode();
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
     int64_t dtCount = 0;
     desc->getAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
+        HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
     ASSERT_EQ(computeType, HIPDNN_DATA_FLOAT);
 
     // Verify diagonal_alignment
     hipdnnDiagonalAlignment_t diagonalAlignment = {};
     int64_t diagonalAlignmentCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                        1,
                        &diagonalAlignmentCount,
                        &diagonalAlignment);
@@ -1058,8 +1058,8 @@ TEST_F(TestSdpaFpropOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify implementation
     hipdnnAttentionImplementation_t implementation = {};
     int64_t implementationCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
-                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT,
+                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                        1,
                        &implementationCount,
                        &implementation);
@@ -1068,7 +1068,7 @@ TEST_F(TestSdpaFpropOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify q tensor
     hipdnn_backend::ScopedDescriptor qScoped;
     int64_t qCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_QDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &qCount,
@@ -1084,7 +1084,7 @@ TEST_F(TestSdpaFpropOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify k tensor
     hipdnn_backend::ScopedDescriptor kScoped;
     int64_t kCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_KDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &kCount,
@@ -1100,7 +1100,7 @@ TEST_F(TestSdpaFpropOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify v tensor
     hipdnn_backend::ScopedDescriptor vScoped;
     int64_t vCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_VDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &vCount,
@@ -1116,7 +1116,7 @@ TEST_F(TestSdpaFpropOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify o tensor
     hipdnn_backend::ScopedDescriptor oScoped;
     int64_t oCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_ODESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &oCount,
@@ -1130,66 +1130,66 @@ TEST_F(TestSdpaFpropOperationFromNode, GetAttributeWorksAfterFromNode)
                                                            toVec(K_SDPA_TENSOR_O_STRIDES));
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, OperationTypeIsCorrectAfterFromNode)
+TEST_F(TestSdpaFwdOperationFromNode, OperationTypeIsCorrectAfterFromNode)
 {
     auto node = createStandardNode();
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_SDPA_FORWARD);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_SDPA_FORWARD_EXT);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, NamePreservedFromNode)
+TEST_F(TestSdpaFwdOperationFromNode, NamePreservedFromNode)
 {
     auto node = createStandardNode();
-    node.name = "test_sdpafprop_1";
+    node.name = "test_sdpa_fwd_1";
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
-    ASSERT_EQ(count, static_cast<int64_t>(std::string("test_sdpafprop_1").size() + 1));
+    ASSERT_EQ(count, static_cast<int64_t>(std::string("test_sdpa_fwd_1").size() + 1));
 
     std::vector<char> buffer(static_cast<size_t>(count));
     int64_t actualCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, count, &actualCount, buffer.data());
-    EXPECT_STREQ(buffer.data(), "test_sdpafprop_1");
+    EXPECT_STREQ(buffer.data(), "test_sdpa_fwd_1");
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, EmptyNamePreservedFromNode)
+TEST_F(TestSdpaFwdOperationFromNode, EmptyNamePreservedFromNode)
 {
     auto node = createStandardNode();
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
     EXPECT_EQ(count, 1);
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, BuildNodePreservesName)
+TEST_F(TestSdpaFwdOperationFromNode, BuildNodePreservesName)
 {
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = SdpaFpropOperationDescriptor::fromNode(node, _tensorMap);
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_build_name");
 }
 
-TEST_F(TestSdpaFpropOperationFromNode, FromNodeFailsWithWrongAttributeType)
+TEST_F(TestSdpaFwdOperationFromNode, FromNodeFailsWithWrongAttributeType)
 {
     // A node with ConvolutionFwdAttributes should fail SDPA fromNode — wrong union type.
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(hipdnn_data_sdk::data_objects::ConvolutionFwdAttributesT{});
 
-    ASSERT_THROW_HIPDNN_STATUS(SdpaFpropOperationDescriptor::fromNode(node, _tensorMap),
+    ASSERT_THROW_HIPDNN_STATUS(SdpaFwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }

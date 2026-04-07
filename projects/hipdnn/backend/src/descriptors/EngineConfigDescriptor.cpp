@@ -151,7 +151,7 @@ void EngineConfigDescriptor::setAttribute(hipdnnBackendAttributeName_t attribute
     case HIPDNN_ATTR_ENGINECFG_ENGINE:
         setEngine(attributeType, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT:
+    case HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE:
         setKnobChoice(attributeType, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES:

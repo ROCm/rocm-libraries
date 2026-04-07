@@ -120,7 +120,7 @@ operation:
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_INF_VAR_COMP_TYPE_EXT"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE_EXT"
 
   test_data:
     constants_include: "BnInfVarExtConstants"
