@@ -1140,8 +1140,15 @@ type_convert(const S& x, fp32x8_t (&result)[2])
 }
 #endif
 
-template <index_t pk_size>
-struct pk_fp6_legacy_t
+enum class f6_kind
+{
+    fp6,
+    bf6
+};
+
+// Generic packed type for fp6 and bf6.
+template <index_t pk_size, f6_kind kind>
+struct pk_f6_legacy_t
 {
     static constexpr index_t num_bits_elem = 6;
     using element_type                     = int32_t; // element storage fundamental type
@@ -1152,8 +1159,8 @@ struct pk_fp6_legacy_t
                   "Packed elements must fit exactly into the element storage.");
     static constexpr index_t vector_size = (packed_size * num_bits_elem) / num_bits_vec_elem;
     element_type data_[vector_size]; // packed data
-    using type = pk_fp6_legacy_t<packed_size>;
-    CK_TILE_HOST_DEVICE constexpr explicit pk_fp6_legacy_t(int value = 0)
+    using type = pk_f6_legacy_t<packed_size, kind>;
+    CK_TILE_HOST_DEVICE constexpr explicit pk_f6_legacy_t(int value = 0)
     {
         for(size_t i = 0; i < vector_size; ++i)
         {
@@ -1230,28 +1237,15 @@ struct pk_fp6_legacy_t
     }
 };
 
-using pk_fp6x16_t = pk_fp6_legacy_t<16>;
-using pk_fp6x32_t = pk_fp6_legacy_t<32>;
-template <>
-struct numeric_traits<pk_fp6x16_t>
-{
-    static constexpr int PackedSize = 16;
-};
+using pk_fp6x16_t = pk_f6_legacy_t<16, f6_kind::fp6>;
+using pk_fp6x32_t = pk_f6_legacy_t<32, f6_kind::fp6>;
+using pk_bf6x16_t = pk_f6_legacy_t<16, f6_kind::bf6>;
+using pk_bf6x32_t = pk_f6_legacy_t<32, f6_kind::bf6>;
 
-template <>
-struct impl::ext_vector<pk_fp6x16_t, 1>
+template <int N, f6_kind kind>
+struct numeric_traits<pk_f6_legacy_t<N, kind>>
 {
-    static constexpr index_t N = 1;
-    using value_type           = int32x3_tt;
-    using type                 = int32x3_tt;
-};
-
-template <>
-struct impl::ext_vector<pk_fp6x16_t, 2>
-{
-    static constexpr index_t N = 2;
-    using value_type           = int32x6_tt;
-    using type                 = int32x6_tt;
+    static constexpr int PackedSize = N;
 };
 
 // Arithmetic operations using float conversion
