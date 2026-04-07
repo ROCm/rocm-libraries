@@ -209,6 +209,20 @@ struct sort_last<test_utils::greater, T> {
     static constexpr T value = _HIPCUB_STD::numeric_limits<T>::lowest();
 };
 
+template<typename T>
+struct sort_last<test_utils::less, test_utils::custom_test_type<T>>
+{
+    static constexpr test_utils::custom_test_type<T> value = test_utils::custom_test_type<T>(
+        _HIPCUB_STD::numeric_limits<T>::max(), _HIPCUB_STD::numeric_limits<T>::max());
+};
+
+template<typename T>
+struct sort_last<test_utils::greater, test_utils::custom_test_type<T>>
+{
+    static constexpr test_utils::custom_test_type<T> value = test_utils::custom_test_type<T>(
+        _HIPCUB_STD::numeric_limits<T>::lowest(), _HIPCUB_STD::numeric_limits<T>::lowest());
+};
+
 template<unsigned int BlockSize,
          unsigned int LogicalWarpSize,
          unsigned int ItemsPerThread,
