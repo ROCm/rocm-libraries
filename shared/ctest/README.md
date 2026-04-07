@@ -518,8 +518,8 @@ Each test gets labels that enable flexible CTest filtering:
 
 | Test Type      | Labels                                                              |
 | -------------- | ------------------------------------------------------------------- |
-| Category suite | Category labels from YAML (e.g., `quick`, `standard`)               |
-| GPU exclusion  | Category labels + `ex_gpu_<arch>` (e.g., `quick`, `ex_gpu_gfx1150`) |
+| Category suite | Category labels from YAML (for example, `quick`, `standard`)               |
+| GPU exclusion  | Category labels + `ex_gpu_<arch>` (for example, `quick`, `ex_gpu_gfx1150`) |
 
 
 ## Function Reference
