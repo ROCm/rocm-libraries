@@ -116,7 +116,7 @@ operation:
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT"
 
   infer_properties:
     strategy: "match_input"

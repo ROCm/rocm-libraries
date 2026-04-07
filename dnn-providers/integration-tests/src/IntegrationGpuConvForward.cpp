@@ -86,10 +86,7 @@ protected:
 
         auto [graphObj, outputs] = buildGraph(getSharedHandle(), testCase);
 
-        this->registerValidator(
-            outputs.y, this->getTolerance(TestConfig::get().getEngineId(), graphObj, outputs.y));
-
-        graphObj.set_preferred_engine_id_ext(TestConfig::get().getEngineId());
+        this->registerValidator(outputs.y, this->getTolerance(graphObj, outputs.y));
 
         this->verifyGraph(graphObj, convTestCase.seed);
     }
