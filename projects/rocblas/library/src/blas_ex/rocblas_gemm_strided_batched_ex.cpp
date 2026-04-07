@@ -101,6 +101,25 @@ rocblas_status rocblas_gemm_strided_batched_ex_get_solutions(rocblas_handle    h
             return validArgs;
         }
 
+        auto layer_mode = handle->layer_mode;
+        rocblas_internal_logger logger;
+        if(layer_mode & rocblas_layer_mode_log_trace)
+        {
+            auto trans_a_letter = rocblas_transpose_letter(trans_a);
+            auto trans_b_letter = rocblas_transpose_letter(trans_b);
+
+            if(layer_mode & rocblas_layer_mode_log_trace)
+                logger.log_trace(handle, "rocblas_gemm_strided_batched_ex_get_solutions",
+                                 trans_a, trans_b, m, n, k,
+                                 LOG_TRACE_SCALAR_VALUE(handle, alpha),
+                                 a, a_type, lda, stride_a,
+                                 b, b_type, ldb, stride_b,
+                                 LOG_TRACE_SCALAR_VALUE(handle, beta),
+                                 c, c_type, ldc, stride_c,
+                                 d, d_type, ldd, stride_d,
+                                 batch_count, compute_type, algo, flags, list_array, list_size);
+        }
+
         return rocblas_gemm_ex_get_solutions_template<false>(handle,
                                                              trans_a,
                                                              trans_b,

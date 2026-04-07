@@ -96,6 +96,23 @@ rocblas_status rocblas_gemm_ex_get_solutions(rocblas_handle    handle,
             return validArgs;
         }
 
+        auto layer_mode = handle->layer_mode;
+        rocblas_internal_logger logger;
+        if(layer_mode & rocblas_layer_mode_log_trace)
+        {
+            auto trans_a_letter = rocblas_transpose_letter(trans_a);
+            auto trans_b_letter = rocblas_transpose_letter(trans_b);
+
+            if(layer_mode & rocblas_layer_mode_log_trace)
+                logger.log_trace(handle, "rocblas_gemm_ex_get_solutions",
+                                 trans_a, trans_b, m, n, k,
+                                 LOG_TRACE_SCALAR_VALUE(handle, alpha),
+                                 a, a_type, lda, b, b_type, ldb,
+                                 LOG_TRACE_SCALAR_VALUE(handle, beta),
+                                 c, c_type, ldc, d, d_type, ldd,
+                                 compute_type, algo, flags, list_array, list_size);
+        }
+
         rocblas_int batch_count = 1;
 
         // TODO: These strides could be 0 ( {} ) instead of 1 ( {1} ) once Tensile is fixed
@@ -154,6 +171,17 @@ rocblas_status rocblas_gemm_ex_get_solutions_by_type(rocblas_handle   handle,
                                                      rocblas_int*     list_size)
 {
 #ifdef BUILD_WITH_TENSILE
+    if(!handle)
+        return rocblas_status_invalid_handle;
+
+    auto layer_mode = handle->layer_mode;
+    rocblas_internal_logger logger;
+
+    if(layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_gemm_ex_get_solutions_by_type",
+                         input_type, output_type, compute_type,
+                         flags, list_array, list_size);
+
     // Create dummy GEMM problem to take advantage of problem templating
     // Most parameters are ignored, just needs to be valid for all types
     rocblas_double_complex alpha{0, 0};
