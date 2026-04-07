@@ -24,7 +24,7 @@ namespace hipdnn_frontend::detail
                                                HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
                                                tensorMap,
                                                dyTensor,
-                                               "convolutionbwd DY tensor"));
+                                               "conv dgrad DY tensor"));
     attributes.set_dy(dyTensor);
 
     // Unpack w tensor
@@ -33,7 +33,7 @@ namespace hipdnn_frontend::detail
                                                HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W,
                                                tensorMap,
                                                wTensor,
-                                               "convolutionbwd W tensor"));
+                                               "conv dgrad W tensor"));
     attributes.set_w(wTensor);
 
     // Unpack dx tensor
@@ -42,11 +42,11 @@ namespace hipdnn_frontend::detail
                                                HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX,
                                                tensorMap,
                                                dxTensor,
-                                               "convolutionbwd DX tensor"));
+                                               "conv dgrad DX tensor"));
     attributes.set_dx(dxTensor);
 
     // Unpack shared convolution parameters
-    HIPDNN_CHECK_ERROR(unpackConvolutionParams(opDesc, attributes, "convolutionbwd"));
+    HIPDNN_CHECK_ERROR(unpackConvolutionParams(opDesc, attributes, "conv dgrad"));
 
     // Unpack operation name
     std::string opName;

@@ -18,6 +18,7 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::toVec;
 using namespace hipdnn_tests::constants::integration;
+using hipdnn_tests::buildConvFpropGraph;
 using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::liftGraph;
 using hipdnn_tests::liftGraphWithoutFinalization;
@@ -30,40 +31,6 @@ namespace
 // and verifies the reconstructed graph matches the original.
 class IntegrationGraphLifting : public IntegrationTestFixture
 {
-protected:
-    // Builds a standard conv fprop graph for round-trip testing
-    static std::shared_ptr<TestableGraphLifting>
-        buildConvFpropGraph(DataType computeType = DataType::FLOAT,
-                            DataType intermediateType = DataType::FLOAT,
-                            DataType ioType = DataType::FLOAT)
-    {
-        auto graph = std::make_shared<TestableGraphLifting>();
-        graph->set_name("LiftingTestGraph")
-            .set_compute_data_type(computeType)
-            .set_intermediate_data_type(intermediateType)
-            .set_io_data_type(ioType);
-
-        auto x = std::make_shared<TensorAttributes>();
-        x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-        x->set_dim(toVec(K_TENSOR_X_DIMS)).set_stride(toVec(K_TENSOR_X_STRIDES));
-
-        auto w = std::make_shared<TensorAttributes>();
-        w->set_uid(K_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
-        w->set_dim(toVec(K_TENSOR_W_DIMS)).set_stride(toVec(K_TENSOR_W_STRIDES));
-
-        ConvFpropAttributes convAttrs;
-        convAttrs.set_name("conv_fprop_op");
-        convAttrs.set_pre_padding(toVec(K_CONV_PRE_PADDING));
-        convAttrs.set_post_padding(toVec(K_CONV_POST_PADDING));
-        convAttrs.set_stride(toVec(K_CONV_STRIDE));
-        convAttrs.set_dilation(toVec(K_CONV_DILATION));
-        convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
-
-        auto y = graph->conv_fprop(x, w, convAttrs);
-        y->set_uid(K_TENSOR_Y_UID).set_output(true).set_name("Y");
-
-        return graph;
-    }
 };
 
 // Builds a conv fprop graph, lowers via build_operation_graph(handle), extracts the
@@ -190,7 +157,8 @@ TEST_F(IntegrationGraphLifting, NullDescriptorReturnsError)
 // lowers through the C-API, lifts, and verifies all three are preserved.
 TEST_F(IntegrationGraphLifting, DataTypesPreservedThroughCApi)
 {
-    auto originalGraph = buildConvFpropGraph(DataType::FLOAT, DataType::HALF, DataType::BFLOAT16);
+    auto originalGraph = buildConvFpropGraph(
+        "ConvFpropTestGraph", DataType::FLOAT, DataType::HALF, DataType::BFLOAT16);
 
     auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
@@ -372,7 +340,7 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendEmptyDataReturnsError)
 // Verifies that the graph name survives the C-API round-trip (lower -> lift).
 TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughCApi)
 {
-    auto originalGraph = buildConvFpropGraph();
+    auto originalGraph = buildConvFpropGraph("LiftingTestGraph");
 
     auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
@@ -384,7 +352,7 @@ TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughCApi)
 // is preserved through the FlatBuffer-direct deserialization path.
 TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughDeserializeViaBackend)
 {
-    auto originalGraph = buildConvFpropGraph();
+    auto originalGraph = buildConvFpropGraph("LiftingTestGraph");
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;

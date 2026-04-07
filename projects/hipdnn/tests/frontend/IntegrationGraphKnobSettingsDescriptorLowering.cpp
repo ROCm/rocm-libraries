@@ -73,14 +73,7 @@ class IntegrationGraphKnobsDescriptorLowering : public IntegrationTestFixture
 protected:
     void SetUp() override
     {
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testKnobsPluginPath().c_str()};
-
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+        IntegrationTestFixture::SetUp();
 
         // Query the exact plugin paths the backend resolved when loading,
         // then find the knobs plugin by name. This ensures we dlopen the same
@@ -97,6 +90,11 @@ protected:
 
         _knobRecorder = std::make_unique<hipdnn_tests::TestPluginKnobRecorder>(*it);
         _knobRecorder->reset();
+    }
+
+    std::vector<std::string> getPluginPaths() const override
+    {
+        return {hipdnn_tests::plugin_constants::testKnobsPluginPath()};
     }
 
     void TearDown() override

@@ -15,9 +15,9 @@ namespace hipdnn_frontend::detail
 // get_pre_padding(), get_post_padding(), get_stride(), get_dilation(),
 // get_convolution_mode(), and the public member compute_data_type.
 template <typename ConvAttrs>
-inline Error packConvolutionParams(hipdnnBackendDescriptor_t opDesc,
-                                   const ConvAttrs& attributes,
-                                   const std::string& errorLabel)
+[[nodiscard]] inline Error packConvolutionParams(hipdnnBackendDescriptor_t opDesc,
+                                                 const ConvAttrs& attributes,
+                                                 const std::string& errorLabel)
 {
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc,
                                             HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
@@ -66,9 +66,9 @@ inline Error packConvolutionParams(hipdnnBackendDescriptor_t opDesc,
 // set_post_padding(), set_stride(), set_dilation(), set_convolution_mode(),
 // and set_compute_data_type().
 template <typename ConvAttrs>
-inline Error unpackConvolutionParams(hipdnnBackendDescriptor_t opDesc,
-                                     ConvAttrs& attributes,
-                                     const std::string& errorLabel)
+[[nodiscard]] inline Error unpackConvolutionParams(hipdnnBackendDescriptor_t opDesc,
+                                                   ConvAttrs& attributes,
+                                                   const std::string& errorLabel)
 {
     std::vector<int64_t> prePadding;
     HIPDNN_CHECK_ERROR(getDescriptorAttrVec(

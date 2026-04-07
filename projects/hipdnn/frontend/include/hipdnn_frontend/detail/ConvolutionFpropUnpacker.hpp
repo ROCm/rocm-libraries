@@ -23,24 +23,33 @@ namespace hipdnn_frontend::detail
 {
     // Unpack X (input) tensor
     std::shared_ptr<graph::TensorAttributes> xTensor;
-    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, xTensor, "conv X tensor"));
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
+                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                                               tensorMap,
+                                               xTensor,
+                                               "conv fprop X tensor"));
     attributes.set_x(xTensor);
 
     // Unpack W (weights) tensor
     std::shared_ptr<graph::TensorAttributes> wTensor;
-    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, tensorMap, wTensor, "conv W tensor"));
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
+                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
+                                               tensorMap,
+                                               wTensor,
+                                               "conv fprop W tensor"));
     attributes.set_w(wTensor);
 
     // Unpack Y (output) tensor
     std::shared_ptr<graph::TensorAttributes> yTensor;
-    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, tensorMap, yTensor, "conv Y tensor"));
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
+                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
+                                               tensorMap,
+                                               yTensor,
+                                               "conv fprop Y tensor"));
     attributes.set_y(yTensor);
 
     // Unpack shared convolution parameters
-    HIPDNN_CHECK_ERROR(unpackConvolutionParams(opDesc, attributes, "conv"));
+    HIPDNN_CHECK_ERROR(unpackConvolutionParams(opDesc, attributes, "conv fprop"));
 
     // Unpack operation name
     std::string opName;

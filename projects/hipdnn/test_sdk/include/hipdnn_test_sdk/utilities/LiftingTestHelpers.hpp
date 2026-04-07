@@ -5,9 +5,13 @@
 
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
+#include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 namespace hipdnn_tests
 {
@@ -93,6 +97,46 @@ inline std::shared_ptr<TestableGraphLifting>
     }
 
     return liftedGraph;
+}
+
+/// Builds a standard conv fprop graph using the integration test constants.
+/// Used by multiple integration test fixtures for round-trip (lower/lift) testing.
+inline std::shared_ptr<TestableGraphLifting>
+    buildConvFpropGraph(const std::string& graphName = "ConvFpropTestGraph",
+                        hipdnn_frontend::DataType computeType = hipdnn_frontend::DataType::FLOAT,
+                        hipdnn_frontend::DataType intermediateType
+                        = hipdnn_frontend::DataType::FLOAT,
+                        hipdnn_frontend::DataType ioType = hipdnn_frontend::DataType::FLOAT)
+{
+    using namespace hipdnn_frontend::graph;
+    using namespace constants::integration;
+
+    auto graph = std::make_shared<TestableGraphLifting>();
+    graph->set_name(graphName)
+        .set_compute_data_type(computeType)
+        .set_intermediate_data_type(intermediateType)
+        .set_io_data_type(ioType);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    x->set_dim(toVec(K_TENSOR_X_DIMS)).set_stride(toVec(K_TENSOR_X_STRIDES));
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(K_TENSOR_W_UID).set_name("W").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    w->set_dim(toVec(K_TENSOR_W_DIMS)).set_stride(toVec(K_TENSOR_W_STRIDES));
+
+    ConvFpropAttributes convAttrs;
+    convAttrs.set_name("conv_fprop_op");
+    convAttrs.set_pre_padding(toVec(K_CONV_PRE_PADDING));
+    convAttrs.set_post_padding(toVec(K_CONV_POST_PADDING));
+    convAttrs.set_stride(toVec(K_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+    convAttrs.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
+
+    auto y = graph->conv_fprop(x, w, convAttrs);
+    y->set_uid(K_TENSOR_Y_UID).set_output(true).set_name("Y");
+
+    return graph;
 }
 
 } // namespace hipdnn_tests
