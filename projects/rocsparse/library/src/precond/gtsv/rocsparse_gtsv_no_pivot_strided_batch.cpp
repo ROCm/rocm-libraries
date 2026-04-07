@@ -26,89 +26,23 @@
 #include "internal/precond/rocsparse_gtsv.h"
 
 #include "gtsv_nopivot_strided_batch_device.h"
-#include "gtsv_nopivot_strided_batch_large_device.h"
 #include "gtsv_nopivot_strided_batch_medium_device.h"
 
 #include <map>
 
-// LCOV_EXCL_START
-static constexpr int determine_spike_solver_blocksize()
+namespace rocsparse
 {
-    return 256;
+    // LCOV_EXCL_START
+    static constexpr int determine_spike_solver_blocksize()
+    {
+        return 256;
+    }
+    static constexpr int determine_max_recursion_levels()
+    {
+        return 3;
+    }
+    // LCOV_EXCL_STOP
 }
-// LCOV_EXCL_STOP
-
-#define LAUNCH_GTSV_NOPIVOT_STRIDED_BATCH_PCR_POW2_STAGE1(T, block_size, stride, iter) \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
-        (rocsparse::gtsv_nopivot_strided_batch_pcr_pow2_stage1_kernel<block_size>),    \
-        dim3(((m - 1) / block_size + 1), batch_count, 1),                              \
-        dim3(block_size, 1, 1),                                                        \
-        0,                                                                             \
-        handle->stream,                                                                \
-        stride,                                                                        \
-        m,                                                                             \
-        batch_count,                                                                   \
-        ((iter == 0) ? batch_stride : m),                                              \
-        ((iter == 0) ? dl : (((iter & 1) == 0) ? da0 : da1)),                          \
-        ((iter == 0) ? d : (((iter & 1) == 0) ? db0 : db1)),                           \
-        ((iter == 0) ? du : (((iter & 1) == 0) ? dc0 : dc1)),                          \
-        ((iter == 0) ? x : (((iter & 1) == 0) ? drhs0 : drhs1)),                       \
-        (((iter & 1) == 0) ? da1 : da0),                                               \
-        (((iter & 1) == 0) ? db1 : db0),                                               \
-        (((iter & 1) == 0) ? dc1 : dc0),                                               \
-        (((iter & 1) == 0) ? drhs1 : drhs0));
-
-#define LAUNCH_GTSV_NOPIVOT_STRIDED_BATCH_CR_POW2_STAGE2(T, block_size, iter)      \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                            \
-        (rocsparse::gtsv_nopivot_strided_batch_cr_pow2_stage2_kernel<block_size>), \
-        dim3(subsystem_count, batch_count, 1),                                     \
-        dim3(block_size),                                                          \
-        0,                                                                         \
-        handle->stream,                                                            \
-        m,                                                                         \
-        batch_count,                                                               \
-        batch_stride,                                                              \
-        (((iter & 1) != 0) ? da1 : da0),                                           \
-        (((iter & 1) != 0) ? db1 : db0),                                           \
-        (((iter & 1) != 0) ? dc1 : dc0),                                           \
-        (((iter & 1) != 0) ? drhs1 : drhs0),                                       \
-        x);
-
-#define LAUNCH_GTSV_NOPIVOT_STRIDED_BATCH_PCR_STAGE1(T, block_size, stride, iter) \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                           \
-        (rocsparse::gtsv_nopivot_strided_batch_pcr_stage1_kernel<block_size>),    \
-        dim3(((m - 1) / block_size + 1), batch_count, 1),                         \
-        dim3(block_size),                                                         \
-        0,                                                                        \
-        handle->stream,                                                           \
-        stride,                                                                   \
-        m,                                                                        \
-        batch_count,                                                              \
-        ((iter == 0) ? batch_stride : m),                                         \
-        ((iter == 0) ? dl : (((iter & 1) == 0) ? da0 : da1)),                     \
-        ((iter == 0) ? d : (((iter & 1) == 0) ? db0 : db1)),                      \
-        ((iter == 0) ? du : (((iter & 1) == 0) ? dc0 : dc1)),                     \
-        ((iter == 0) ? x : (((iter & 1) == 0) ? drhs0 : drhs1)),                  \
-        (((iter & 1) == 0) ? da1 : da0),                                          \
-        (((iter & 1) == 0) ? db1 : db0),                                          \
-        (((iter & 1) == 0) ? dc1 : dc0),                                          \
-        (((iter & 1) == 0) ? drhs1 : drhs0));
-
-#define LAUNCH_GTSV_NOPIVOT_STRIDED_BATCH_PCR_STAGE2(T, block_size, iter)      \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                        \
-        (rocsparse::gtsv_nopivot_strided_batch_pcr_stage2_kernel<block_size>), \
-        dim3(subsystem_count, batch_count, 1),                                 \
-        dim3(block_size),                                                      \
-        0,                                                                     \
-        handle->stream,                                                        \
-        m,                                                                     \
-        batch_count,                                                           \
-        batch_stride,                                                          \
-        (((iter & 1) != 0) ? da1 : da0),                                       \
-        (((iter & 1) != 0) ? db1 : db0),                                       \
-        (((iter & 1) != 0) ? dc1 : dc0),                                       \
-        (((iter & 1) != 0) ? drhs1 : drhs0),                                   \
-        x);
 
 template <typename T>
 rocsparse_status
@@ -155,22 +89,34 @@ rocsparse_status
         return rocsparse_status_success;
     }
 
-    if(m <= 512)
+    if(m <= 1024)
     {
         *buffer_size = 0;
+        return rocsparse_status_success;
     }
-    else if(m <= 131072) //2^17
+
+    *buffer_size = 0;
+
+    constexpr int BLOCKSIZE            = determine_spike_solver_blocksize();
+    constexpr int MAX_RECURSION_LEVELS = determine_max_recursion_levels();
+
+    int current_m = m;
+    for(int level = 0; level < MAX_RECURSION_LEVELS; level++)
     {
-        *buffer_size = 0;
+        if(current_m <= 1024)
+            break;
 
-        *buffer_size += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256; // dl_modified
-        *buffer_size += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256; // d_modified
-        *buffer_size += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256; // du_modified
-        *buffer_size += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256; // B_modified
+        *buffer_size
+            += ((sizeof(T) * int64_t(current_m) * batch_count - 1) / 256 + 1) * 256; // dl_modified
+        *buffer_size
+            += ((sizeof(T) * int64_t(current_m) * batch_count - 1) / 256 + 1) * 256; // d_modified
+        *buffer_size
+            += ((sizeof(T) * int64_t(current_m) * batch_count - 1) / 256 + 1) * 256; // du_modified
+        *buffer_size
+            += ((sizeof(T) * int64_t(current_m) * batch_count - 1) / 256 + 1) * 256; // B_modified
 
-        constexpr int BLOCKSIZE  = determine_spike_solver_blocksize();
-        const int     nblocks    = ((m - 1) / BLOCKSIZE + 1);
-        const int     num_spikes = 2 * nblocks;
+        const int nblocks    = ((current_m - 1) / BLOCKSIZE + 1);
+        const int num_spikes = 2 * nblocks;
 
         *buffer_size
             += ((sizeof(T) * int64_t(num_spikes) * batch_count - 1) / 256 + 1) * 256; // dl_spike
@@ -180,19 +126,8 @@ rocsparse_status
             += ((sizeof(T) * int64_t(num_spikes) * batch_count - 1) / 256 + 1) * 256; // du_spike
         *buffer_size
             += ((sizeof(T) * int64_t(num_spikes) * batch_count - 1) / 256 + 1) * 256; // B_spike
-    }
-    else
-    {
-        *buffer_size = 0;
 
-        *buffer_size += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256; // da0
-        *buffer_size += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256; // da1
-        *buffer_size += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256; // db0
-        *buffer_size += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256; // db1
-        *buffer_size += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256; // dc0
-        *buffer_size += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256; // dc1
-        *buffer_size += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256; // drhs0
-        *buffer_size += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256; // drhs1
+        current_m = num_spikes;
     }
 
     return rocsparse_status_success;
@@ -200,6 +135,22 @@ rocsparse_status
 
 namespace rocsparse
 {
+    template <typename T>
+    struct gtsv_no_pivot_buffer_data
+    {
+        static constexpr int MAX_RECURSION_LEVELS = determine_max_recursion_levels();
+
+        T* dl_modified[MAX_RECURSION_LEVELS];
+        T* d_modified[MAX_RECURSION_LEVELS];
+        T* du_modified[MAX_RECURSION_LEVELS];
+        T* B_modified[MAX_RECURSION_LEVELS];
+
+        T* dl_spike[MAX_RECURSION_LEVELS];
+        T* d_spike[MAX_RECURSION_LEVELS];
+        T* du_spike[MAX_RECURSION_LEVELS];
+        T* B_spike[MAX_RECURSION_LEVELS];
+    };
+
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_cramer_rule_kernel(rocsparse_handle handle,
                                                rocsparse_int    n,
@@ -471,8 +422,7 @@ namespace rocsparse
                                                                 const T*         du,
                                                                 T*               x,
                                                                 rocsparse_int    batch_count,
-                                                                rocsparse_int    batch_stride,
-                                                                void*            temp_buffer)
+                                                                rocsparse_int    batch_stride)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -658,62 +608,45 @@ namespace rocsparse
     }
 
     template <typename T>
-    rocsparse_status gtsv_no_pivot_strided_batch_medium_template(rocsparse_handle handle,
-                                                                 rocsparse_int    m,
-                                                                 const T*         dl,
-                                                                 const T*         d,
-                                                                 const T*         du,
-                                                                 T*               x,
-                                                                 rocsparse_int    batch_count,
-                                                                 rocsparse_int    batch_stride,
-                                                                 void*            temp_buffer)
+    rocsparse_status
+        gtsv_no_pivot_strided_batch_medium_template(rocsparse_handle              handle,
+                                                    rocsparse_int                 m,
+                                                    const T*                      dl,
+                                                    const T*                      d,
+                                                    const T*                      du,
+                                                    T*                            x,
+                                                    rocsparse_int                 batch_count,
+                                                    rocsparse_int                 batch_stride,
+                                                    gtsv_no_pivot_buffer_data<T>* buffer_data,
+                                                    int                           level)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        rocsparse_host_assert(m > 1024 && m <= 131072,
-                              "This function is designed for m > 1024 and m <= 131072.");
-
-        char* ptr         = reinterpret_cast<char*>(temp_buffer);
-        T*    dl_modified = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256;
-        T* d_modified = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256;
-        T* du_modified = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256;
-        T* B_modified = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * int64_t(m) * batch_count - 1) / 256 + 1) * 256;
+        rocsparse_host_assert(m > 1024, "This function is designed for m > 1024.");
 
         constexpr int BLOCKSIZE  = determine_spike_solver_blocksize();
         const int     nblocks    = ((m - 1) / BLOCKSIZE + 1);
         const int     num_spikes = 2 * nblocks;
 
-        T* dl_spike = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * int64_t(num_spikes) * batch_count - 1) / 256 + 1) * 256;
-        T* d_spike = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * int64_t(num_spikes) * batch_count - 1) / 256 + 1) * 256;
-        T* du_spike = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * int64_t(num_spikes) * batch_count - 1) / 256 + 1) * 256;
-        T* B_spike = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * int64_t(num_spikes) * batch_count - 1) / 256 + 1) * 256;
-
-        RETURN_IF_ROCSPARSE_ERROR((launch_forward_elimination_kernel<BLOCKSIZE>(handle,
-                                                                                m,
-                                                                                batch_count,
-                                                                                batch_stride,
-                                                                                batch_stride,
-                                                                                num_spikes,
-                                                                                dl,
-                                                                                d,
-                                                                                du,
-                                                                                x,
-                                                                                dl_modified,
-                                                                                d_modified,
-                                                                                du_modified,
-                                                                                B_modified,
-                                                                                dl_spike,
-                                                                                d_spike,
-                                                                                du_spike,
-                                                                                B_spike)));
+        RETURN_IF_ROCSPARSE_ERROR(
+            (launch_forward_elimination_kernel<BLOCKSIZE>(handle,
+                                                          m,
+                                                          batch_count,
+                                                          batch_stride,
+                                                          batch_stride,
+                                                          num_spikes,
+                                                          dl,
+                                                          d,
+                                                          du,
+                                                          x,
+                                                          buffer_data->dl_modified[level],
+                                                          buffer_data->d_modified[level],
+                                                          buffer_data->du_modified[level],
+                                                          buffer_data->B_modified[level],
+                                                          buffer_data->dl_spike[level],
+                                                          buffer_data->d_spike[level],
+                                                          buffer_data->du_spike[level],
+                                                          buffer_data->B_spike[level])));
 
         // Define function pointer type for kernel dispatch
         using KernelFuncPtr = rocsparse_status (*)(rocsparse_handle handle,
@@ -744,8 +677,13 @@ namespace rocsparse
 
             if(it != s_kernel_dispatch.end())
             {
-                RETURN_IF_ROCSPARSE_ERROR(it->second(
-                    handle, num_spikes, batch_count, dl_spike, d_spike, du_spike, B_spike));
+                RETURN_IF_ROCSPARSE_ERROR(it->second(handle,
+                                                     num_spikes,
+                                                     batch_count,
+                                                     buffer_data->dl_spike[level],
+                                                     buffer_data->d_spike[level],
+                                                     buffer_data->du_spike[level],
+                                                     buffer_data->B_spike[level]));
             }
             else
             {
@@ -754,117 +692,63 @@ namespace rocsparse
         }
         else
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            RETURN_IF_ROCSPARSE_ERROR(
+                gtsv_no_pivot_strided_batch_template_dispatch(handle,
+                                                              num_spikes,
+                                                              buffer_data->dl_spike[level],
+                                                              buffer_data->d_spike[level],
+                                                              buffer_data->du_spike[level],
+                                                              buffer_data->B_spike[level],
+                                                              batch_count,
+                                                              num_spikes,
+                                                              buffer_data,
+                                                              level + 1));
         }
 
-        RETURN_IF_ROCSPARSE_ERROR((launch_backward_substitution_kernel<BLOCKSIZE>(handle,
-                                                                                  m,
-                                                                                  batch_count,
-                                                                                  batch_stride,
-                                                                                  num_spikes,
-                                                                                  dl_modified,
-                                                                                  d_modified,
-                                                                                  du_modified,
-                                                                                  B_modified,
-                                                                                  B_spike,
-                                                                                  x)));
+        RETURN_IF_ROCSPARSE_ERROR(
+            (launch_backward_substitution_kernel<BLOCKSIZE>(handle,
+                                                            m,
+                                                            batch_count,
+                                                            batch_stride,
+                                                            num_spikes,
+                                                            buffer_data->dl_modified[level],
+                                                            buffer_data->d_modified[level],
+                                                            buffer_data->du_modified[level],
+                                                            buffer_data->B_modified[level],
+                                                            buffer_data->B_spike[level],
+                                                            x)));
 
         return rocsparse_status_success;
     }
 
     template <typename T>
-    rocsparse_status gtsv_no_pivot_strided_batch_large_template(rocsparse_handle handle,
-                                                                rocsparse_int    m,
-                                                                const T*         dl,
-                                                                const T*         d,
-                                                                const T*         du,
-                                                                T*               x,
-                                                                rocsparse_int    batch_count,
-                                                                rocsparse_int    batch_stride,
-                                                                void*            temp_buffer)
+    static rocsparse_status
+        gtsv_no_pivot_strided_batch_template_dispatch(rocsparse_handle              handle,
+                                                      rocsparse_int                 m,
+                                                      const T*                      dl,
+                                                      const T*                      d,
+                                                      const T*                      du,
+                                                      T*                            x,
+                                                      rocsparse_int                 batch_count,
+                                                      rocsparse_int                 batch_stride,
+                                                      gtsv_no_pivot_buffer_data<T>* buffer_data,
+                                                      int                           level)
     {
-        ROCSPARSE_ROUTINE_TRACE;
-
-        rocsparse_host_assert(m > 512, "This function is designed for m > 512.");
-
-        char* ptr = reinterpret_cast<char*>(temp_buffer);
-        T*    da0 = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256;
-        T* da1 = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256;
-        T* db0 = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256;
-        T* db1 = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256;
-        T* dc0 = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256;
-        T* dc1 = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256;
-        T* drhs0 = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256;
-        T* drhs1 = reinterpret_cast<T*>(ptr);
-        // ptr += ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256;
-
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
-            da0, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
-            da1, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
-            db0, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
-            db1, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
-            dc0, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
-            dc1, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
-            drhs0, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
-            drhs1, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
-
-        // Run special algorithm if m is power of 2
-        if((m & (m - 1)) == 0)
+        // If m is small we can solve the systems entirely in shared memory
+        if(m <= 1024)
         {
-            // Stage1: Break large tridiagonal system into multiple smaller systems
-            // using parallel cyclic reduction so that each sub system is of size 512.
-            rocsparse_int iter = static_cast<rocsparse_int>(rocsparse::log2(m))
-                                 - static_cast<rocsparse_int>(rocsparse::log2(512));
-
-            rocsparse_int stride = 1;
-            for(rocsparse_int i = 0; i < iter; i++)
-            {
-                LAUNCH_GTSV_NOPIVOT_STRIDED_BATCH_PCR_POW2_STAGE1(T, 256, stride, i);
-
-                stride *= 2;
-            }
-
-            // Stage2: Solve the many systems from stage1 in parallel using cyclic reduction.
-            rocsparse_int subsystem_count = 1 << iter;
-
-            LAUNCH_GTSV_NOPIVOT_STRIDED_BATCH_CR_POW2_STAGE2(T, 256, iter);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::gtsv_no_pivot_strided_batch_small_template(
+                handle, m, dl, d, du, x, batch_count, batch_stride));
+            return rocsparse_status_success;
         }
         else
         {
-            // Stage1: Break large tridiagonal system into multiple smaller systems
-            // using parallel cyclic reduction so that each sub system is of size 512 or less.
-            rocsparse_int iter = static_cast<rocsparse_int>(rocsparse::log2(m))
-                                 - static_cast<rocsparse_int>(rocsparse::log2(512)) + 1;
-
-            rocsparse_int stride = 1;
-            for(rocsparse_int i = 0; i < iter; i++)
-            {
-                LAUNCH_GTSV_NOPIVOT_STRIDED_BATCH_PCR_STAGE1(T, 256, stride, i);
-
-                stride *= 2;
-            }
-
-            // Stage2: Solve the many systems from stage1 in parallel using cyclic reduction.
-            rocsparse_int subsystem_count = 1 << iter;
-
-            LAUNCH_GTSV_NOPIVOT_STRIDED_BATCH_PCR_STAGE2(T, 512, iter);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::gtsv_no_pivot_strided_batch_medium_template(
+                handle, m, dl, d, du, x, batch_count, batch_stride, buffer_data, level));
+            return rocsparse_status_success;
         }
 
-        return rocsparse_status_success;
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
 }
 
@@ -910,22 +794,51 @@ rocsparse_status rocsparse::gtsv_no_pivot_strided_batch_template(rocsparse_handl
         return rocsparse_status_success;
     }
 
-    // If m is small we can solve the systems entirely in shared memory
     if(m <= 1024)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::gtsv_no_pivot_strided_batch_small_template(
-            handle, m, dl, d, du, x, batch_count, batch_stride, temp_buffer));
-        return rocsparse_status_success;
-    }
-    else if(m <= 131072)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::gtsv_no_pivot_strided_batch_medium_template(
-            handle, m, dl, d, du, x, batch_count, batch_stride, temp_buffer));
+            handle, m, dl, d, du, x, batch_count, batch_stride));
         return rocsparse_status_success;
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::gtsv_no_pivot_strided_batch_large_template(
-        handle, m, dl, d, du, x, batch_count, batch_stride, temp_buffer));
+    gtsv_no_pivot_buffer_data<T> buffer_data;
+
+    char* ptr = reinterpret_cast<char*>(temp_buffer);
+
+    int    current_m = m;
+    size_t offset    = 0;
+    for(int level = 0; level < determine_max_recursion_levels(); level++)
+    {
+        if(current_m <= 1024)
+            break;
+
+        buffer_data.dl_modified[level] = reinterpret_cast<T*>(ptr + offset);
+        offset += ((sizeof(T) * int64_t(current_m) * batch_count - 1) / 256 + 1) * 256;
+        buffer_data.d_modified[level] = reinterpret_cast<T*>(ptr + offset);
+        offset += ((sizeof(T) * int64_t(current_m) * batch_count - 1) / 256 + 1) * 256;
+        buffer_data.du_modified[level] = reinterpret_cast<T*>(ptr + offset);
+        offset += ((sizeof(T) * int64_t(current_m) * batch_count - 1) / 256 + 1) * 256;
+        buffer_data.B_modified[level] = reinterpret_cast<T*>(ptr + offset);
+        offset += ((sizeof(T) * int64_t(current_m) * batch_count - 1) / 256 + 1) * 256;
+
+        constexpr int BLOCKSIZE  = determine_spike_solver_blocksize();
+        const int     nblocks    = ((current_m - 1) / BLOCKSIZE + 1);
+        const int     num_spikes = 2 * nblocks;
+
+        buffer_data.dl_spike[level] = reinterpret_cast<T*>(ptr + offset);
+        offset += ((sizeof(T) * int64_t(num_spikes) * batch_count - 1) / 256 + 1) * 256;
+        buffer_data.d_spike[level] = reinterpret_cast<T*>(ptr + offset);
+        offset += ((sizeof(T) * int64_t(num_spikes) * batch_count - 1) / 256 + 1) * 256;
+        buffer_data.du_spike[level] = reinterpret_cast<T*>(ptr + offset);
+        offset += ((sizeof(T) * int64_t(num_spikes) * batch_count - 1) / 256 + 1) * 256;
+        buffer_data.B_spike[level] = reinterpret_cast<T*>(ptr + offset);
+        offset += ((sizeof(T) * int64_t(num_spikes) * batch_count - 1) / 256 + 1) * 256;
+
+        current_m = num_spikes;
+    }
+
+    RETURN_IF_ROCSPARSE_ERROR(gtsv_no_pivot_strided_batch_template_dispatch(
+        handle, m, dl, d, du, x, batch_count, batch_stride, &buffer_data, 0));
     return rocsparse_status_success;
 }
 
