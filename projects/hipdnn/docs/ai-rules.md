@@ -204,3 +204,8 @@ TestConvolutionHeuristicsFp32              TestConvolutionHeuristics
 ## Conditional Guidelines
 
 When modifying public API headers (under `backend/include/`, `frontend/include/hipdnn_frontend/`, `plugin_sdk/include/`), add Doxygen comments (`/** @brief ... */` for classes/functions/files, `///<` for enum values) to any new or changed public API. Exclude `detail/` subdirectories and generated files. For full style details, see `docs/doxygen-guidelines.md`.
+
+<!-- core-seq-2: descriptor validation -->
+
+<!-- core-seq-2: descriptor validation -->
+<!-- core-seq-2: descriptor validation -->
