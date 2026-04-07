@@ -799,8 +799,8 @@ try
         throw std::invalid_argument("Invalid Device ID");
     set_device(device_id);
 
-    auto perf_monitor = EfficiencyMonitor::create();
-    perf_monitor->setDeviceId(device_id);
+    // auto perf_monitor = EfficiencyMonitor::create();
+    // perf_monitor->setDeviceId(device_id);
 
     if(datafile)
         return hipblaslt_bench_datafile(filter, any_stride, props);
