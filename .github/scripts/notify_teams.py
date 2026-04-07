@@ -365,7 +365,9 @@ def main():
     parser.add_argument(
         "--pr-number", default="", help="Pull request number (optional)"
     )
-    parser.add_argument("--pr-title", nargs='*', default=[], help="Pull request title (optional)")
+    parser.add_argument(
+        "--pr-title", nargs='*', default=[], help="Pull request title (optional)"
+    )
     parser.add_argument(
         "--job-name", default="", help="Job/test name (optional, for test failures)"
     )
