@@ -19,7 +19,8 @@ set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld -stdlib=libc++")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "-fuse-ld=lld")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld")
 
-list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
+list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} /opt/rocm)
+
 find_package(hip REQUIRED)
 find_package(libhipcxx REQUIRED)
 
@@ -38,7 +39,11 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix" FORCE)
+  if(DEFINED ENV{ROCM_PATH})
+    set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+  else()
+    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix" FORCE)
+  endif()
 endif()
 
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/inc/hip/
