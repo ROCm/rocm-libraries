@@ -13,7 +13,7 @@ struct ValidatorArgs
 {
     const void* reference;
     const void* implementation;
-    int* resultFlags;
+    int* failureFlag; // single int: 0 = all passed, 1 = any element failed
     long long totalElements;
     double absoluteTolerance;
     double relativeTolerance;

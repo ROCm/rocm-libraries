@@ -85,7 +85,7 @@ __device__ inline bool isnan(_Float16 x)
 
 __device__ inline bool isnan(__bf16 x)
 {
-    return __builtin_isnan(x);
+    return __builtin_isnan(static_cast<float>(x));
 }
 
 // --- isinf overloads ---
@@ -107,7 +107,7 @@ __device__ inline bool isinf(_Float16 x)
 
 __device__ inline bool isinf(__bf16 x)
 {
-    return __builtin_isinf(x);
+    return __builtin_isinf(static_cast<float>(x));
 }
 
 // --- TF32 truncation ---

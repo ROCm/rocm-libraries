@@ -5,12 +5,10 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/types.hpp>
-#include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
-#include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
 
 #include <cstdint>
 #include <hip/hip_runtime.h>
@@ -168,9 +166,9 @@ inline void
 } // namespace detail
 
 // GPU-based floating-point tensor validator implementing IReferenceValidation.
-// Launches a HipRTC kernel to perform element-wise tolerance comparison on the GPU,
-// then reads result flags back to the host.
-// Falls back to CpuFpReferenceValidation on GPU errors.
+// Launches a HipRTC kernel to perform element-wise tolerance comparison on the GPU
+// using a single atomic failure flag. On failure, falls back to CpuFpReferenceValidation
+// for detailed per-element diagnostics. Also falls back on GPU errors.
 template <class T>
 class GpuFpReferenceValidation : public hipdnn_test_sdk::utilities::IReferenceValidation
 {
@@ -233,9 +231,10 @@ private:
     {
         auto totalElements = static_cast<int64_t>(reference.elementCount());
 
-        // Allocate device result buffer
-        auto resultBufSize = static_cast<size_t>(totalElements) * sizeof(int);
-        const detail::GpuValidatorBuffer resultBuf(resultBufSize);
+        // Allocate single failure flag on device
+        const detail::GpuValidatorBuffer flagBuf(sizeof(int));
+        detail::throwOnHipError(hipMemset(flagBuf.get(), 0, sizeof(int)),
+                                "validateAllClose: hipMemset failureFlag failed");
 
         // Get device pointers — triggers host→device migration if needed
         auto* refPtr = reference.rawDeviceData();
@@ -252,54 +251,27 @@ private:
         detail::ValidatorArgs args{};
         args.reference = refPtr;
         args.implementation = implPtr;
-        args.resultFlags = static_cast<int*>(resultBuf.get());
+        args.failureFlag = static_cast<int*>(flagBuf.get());
         args.totalElements = totalElements;
         args.absoluteTolerance = static_cast<double>(_absoluteTolerance);
         args.relativeTolerance = static_cast<double>(_relativeTolerance);
 
         detail::launchValidatorKernel(kernel.function(), totalElements, args);
 
-        // Copy result flags back to host
-        std::vector<int> hostResults(static_cast<size_t>(totalElements));
+        // Read back single failure flag
+        int hostFlag = 0;
         detail::throwOnHipError(
-            hipMemcpy(hostResults.data(), resultBuf.get(), resultBufSize, hipMemcpyDeviceToHost),
-            "validateAllClose: hipMemcpy result flags failed");
+            hipMemcpy(&hostFlag, flagBuf.get(), sizeof(int), hipMemcpyDeviceToHost),
+            "validateAllClose: hipMemcpy failureFlag failed");
 
-        // Check results and log failures
-        bool allPassed = true;
-        hipdnn_data_sdk::utilities::TensorView<T> refView(reference);
-        hipdnn_data_sdk::utilities::TensorView<T> implView(implementation);
-
-        for(int64_t i = 0; i < totalElements; ++i)
+        if(hostFlag != 0)
         {
-            if(hostResults[static_cast<size_t>(i)] == 0)
-            {
-                if(allPassed)
-                {
-                    // Log first failure with element details
-                    auto indices = linearToMultiIndex(i, reference.dims());
-                    T refValue = refView.getHostValue(indices);
-                    T implValue = implView.getHostValue(indices);
-
-                    using hipdnn_data_sdk::types::fabs;
-                    auto absDiff = static_cast<float>(fabs(implValue - refValue));
-                    auto threshold = _absoluteTolerance
-                                     + _relativeTolerance * fabs(static_cast<float>(refValue));
-
-                    HIPDNN_SDK_LOG_ERROR("GPU validation failed at indices "
-                                         << hipdnn_test_sdk::utilities::StreamVec(indices)
-                                         << ": reference value = " << refValue
-                                         << ", implementation value = " << implValue
-                                         << ", absolute difference = " << absDiff
-                                         << ", threshold = " << threshold
-                                         << ", (atol=" << _absoluteTolerance
-                                         << ", rtol=" << _relativeTolerance << ")");
-                }
-                allPassed = false;
-            }
+            HIPDNN_SDK_LOG_INFO(
+                "GPU validation detected failure, falling back to CPU for detailed diagnostics");
+            return cpuFallback(reference, implementation);
         }
 
-        return allPassed;
+        return true;
     }
 
     bool cpuFallback(hipdnn_data_sdk::utilities::ITensor& reference,
@@ -308,19 +280,6 @@ private:
         const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<T> cpuValidator(
             _absoluteTolerance, _relativeTolerance);
         return cpuValidator.allClose(reference, implementation);
-    }
-
-    static std::vector<int64_t> linearToMultiIndex(int64_t linearIdx,
-                                                   const std::vector<int64_t>& dims)
-    {
-        std::vector<int64_t> indices(dims.size());
-        for(auto i = static_cast<int64_t>(dims.size()) - 1; i >= 0; --i)
-        {
-            auto ui = static_cast<size_t>(i);
-            indices[ui] = linearIdx % dims[ui];
-            linearIdx /= dims[ui];
-        }
-        return indices;
     }
 
     float _absoluteTolerance;
@@ -376,8 +335,10 @@ private:
     {
         auto totalElements = static_cast<int64_t>(reference.elementCount());
 
-        auto resultBufSize = static_cast<size_t>(totalElements) * sizeof(int);
-        const detail::GpuValidatorBuffer resultBuf(resultBufSize);
+        // Allocate single failure flag on device
+        const detail::GpuValidatorBuffer flagBuf(sizeof(int));
+        detail::throwOnHipError(hipMemset(flagBuf.get(), 0, sizeof(int)),
+                                "validateExact: hipMemset failureFlag failed");
 
         auto* refPtr = reference.rawDeviceData();
         auto* implPtr = implementation.rawDeviceData();
@@ -391,42 +352,27 @@ private:
         detail::ValidatorArgs args{};
         args.reference = refPtr;
         args.implementation = implPtr;
-        args.resultFlags = static_cast<int*>(resultBuf.get());
+        args.failureFlag = static_cast<int*>(flagBuf.get());
         args.totalElements = totalElements;
         args.absoluteTolerance = 0.0;
         args.relativeTolerance = 0.0;
 
         detail::launchValidatorKernel(kernel.function(), totalElements, args);
 
-        std::vector<int> hostResults(static_cast<size_t>(totalElements));
+        // Read back single failure flag
+        int hostFlag = 0;
         detail::throwOnHipError(
-            hipMemcpy(hostResults.data(), resultBuf.get(), resultBufSize, hipMemcpyDeviceToHost),
-            "validateExact: hipMemcpy result flags failed");
+            hipMemcpy(&hostFlag, flagBuf.get(), sizeof(int), hipMemcpyDeviceToHost),
+            "validateExact: hipMemcpy failureFlag failed");
 
-        bool allPassed = true;
-        hipdnn_data_sdk::utilities::TensorView<T> refView(reference);
-        hipdnn_data_sdk::utilities::TensorView<T> implView(implementation);
-
-        for(int64_t i = 0; i < totalElements; ++i)
+        if(hostFlag != 0)
         {
-            if(hostResults[static_cast<size_t>(i)] == 0)
-            {
-                if(allPassed)
-                {
-                    auto indices = linearToMultiIndex(i, reference.dims());
-                    T refValue = refView.getHostValue(indices);
-                    T implValue = implView.getHostValue(indices);
-
-                    HIPDNN_SDK_LOG_ERROR("GPU integer validation failed at indices "
-                                         << hipdnn_test_sdk::utilities::StreamVec(indices)
-                                         << ": reference value = " << refValue
-                                         << ", implementation value = " << implValue);
-                }
-                allPassed = false;
-            }
+            HIPDNN_SDK_LOG_INFO("GPU integer validation detected failure, falling back to CPU "
+                                "for detailed diagnostics");
+            return cpuFallback(reference, implementation);
         }
 
-        return allPassed;
+        return true;
     }
 
     bool cpuFallback(hipdnn_data_sdk::utilities::ITensor& reference,
@@ -434,19 +380,6 @@ private:
     {
         const hipdnn_test_sdk::utilities::CpuIntReferenceValidation<T> cpuValidator;
         return cpuValidator.allClose(reference, implementation);
-    }
-
-    static std::vector<int64_t> linearToMultiIndex(int64_t linearIdx,
-                                                   const std::vector<int64_t>& dims)
-    {
-        std::vector<int64_t> indices(dims.size());
-        for(auto i = static_cast<int64_t>(dims.size()) - 1; i >= 0; --i)
-        {
-            auto ui = static_cast<size_t>(i);
-            indices[ui] = linearIdx % dims[ui];
-            linearIdx /= dims[ui];
-        }
-        return indices;
     }
 };
 
