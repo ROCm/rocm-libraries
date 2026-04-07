@@ -13,48 +13,48 @@ namespace hipdnn_tests::constants
 // Represents: batch=2, num_heads=4, seq_len=128, head_dim=64
 
 // Required input tensors
-constexpr int64_t K_SDPA_TENSOR_Q_UID = 40;
+constexpr int64_t K_SDPA_TENSOR_Q_UID = 1800;
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_Q_DIMS = {2, 4, 128, 64};
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_Q_STRIDES = {32768, 8192, 64, 1};
 
-constexpr int64_t K_SDPA_TENSOR_K_UID = 41;
+constexpr int64_t K_SDPA_TENSOR_K_UID = 1801;
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_K_DIMS = {2, 4, 128, 64};
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_K_STRIDES = {32768, 8192, 64, 1};
 
-constexpr int64_t K_SDPA_TENSOR_V_UID = 42;
+constexpr int64_t K_SDPA_TENSOR_V_UID = 1802;
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_V_DIMS = {2, 4, 128, 64};
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_V_STRIDES = {32768, 8192, 64, 1};
 
 // Required output tensor
-constexpr int64_t K_SDPA_TENSOR_O_UID = 43;
+constexpr int64_t K_SDPA_TENSOR_O_UID = 1803;
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_O_DIMS = {2, 4, 128, 64};
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_O_STRIDES = {32768, 8192, 64, 1};
 
 // Optional tensors (1D scalars or masks)
-constexpr int64_t K_SDPA_TENSOR_ATTN_MASK_UID = 5;
-constexpr int64_t K_SDPA_TENSOR_SCALE_UID = 6;
-constexpr int64_t K_SDPA_TENSOR_SEQ_LEN_Q_UID = 7;
-constexpr int64_t K_SDPA_TENSOR_SEQ_LEN_KV_UID = 8;
-constexpr int64_t K_SDPA_TENSOR_SEED_UID = 9;
-constexpr int64_t K_SDPA_TENSOR_OFFSET_UID = 10;
-constexpr int64_t K_SDPA_TENSOR_DROPOUT_MASK_UID = 11;
-constexpr int64_t K_SDPA_TENSOR_DROPOUT_SCALE_UID = 12;
-constexpr int64_t K_SDPA_TENSOR_PAGE_TABLE_K_UID = 13;
-constexpr int64_t K_SDPA_TENSOR_PAGE_TABLE_V_UID = 14;
-constexpr int64_t K_SDPA_TENSOR_BLOCK_MASK_UID = 15;
-constexpr int64_t K_SDPA_TENSOR_SINK_TOKEN_UID = 16;
-constexpr int64_t K_SDPA_TENSOR_DESCALE_Q_UID = 17;
-constexpr int64_t K_SDPA_TENSOR_DESCALE_K_UID = 18;
-constexpr int64_t K_SDPA_TENSOR_DESCALE_V_UID = 19;
-constexpr int64_t K_SDPA_TENSOR_DESCALE_S_UID = 20;
-constexpr int64_t K_SDPA_TENSOR_SCALE_S_UID = 21;
-constexpr int64_t K_SDPA_TENSOR_SCALE_O_UID = 22;
-constexpr int64_t K_SDPA_TENSOR_STATS_UID = 23;
-constexpr int64_t K_SDPA_TENSOR_MAX_UID = 24;
-constexpr int64_t K_SDPA_TENSOR_SUM_EXP_UID = 25;
-constexpr int64_t K_SDPA_TENSOR_RNG_DUMP_UID = 26;
-constexpr int64_t K_SDPA_TENSOR_AMAX_S_UID = 27;
-constexpr int64_t K_SDPA_TENSOR_AMAX_O_UID = 28;
+constexpr int64_t K_SDPA_TENSOR_ATTN_MASK_UID = 1804;
+constexpr int64_t K_SDPA_TENSOR_SCALE_UID = 1805;
+constexpr int64_t K_SDPA_TENSOR_SEQ_LEN_Q_UID = 1806;
+constexpr int64_t K_SDPA_TENSOR_SEQ_LEN_KV_UID = 1807;
+constexpr int64_t K_SDPA_TENSOR_SEED_UID = 1808;
+constexpr int64_t K_SDPA_TENSOR_OFFSET_UID = 1809;
+constexpr int64_t K_SDPA_TENSOR_DROPOUT_MASK_UID = 1810;
+constexpr int64_t K_SDPA_TENSOR_DROPOUT_SCALE_UID = 1811;
+constexpr int64_t K_SDPA_TENSOR_PAGE_TABLE_K_UID = 1812;
+constexpr int64_t K_SDPA_TENSOR_PAGE_TABLE_V_UID = 1813;
+constexpr int64_t K_SDPA_TENSOR_BLOCK_MASK_UID = 1814;
+constexpr int64_t K_SDPA_TENSOR_SINK_TOKEN_UID = 1815;
+constexpr int64_t K_SDPA_TENSOR_DESCALE_Q_UID = 1816;
+constexpr int64_t K_SDPA_TENSOR_DESCALE_K_UID = 1817;
+constexpr int64_t K_SDPA_TENSOR_DESCALE_V_UID = 1818;
+constexpr int64_t K_SDPA_TENSOR_DESCALE_S_UID = 1819;
+constexpr int64_t K_SDPA_TENSOR_SCALE_S_UID = 1820;
+constexpr int64_t K_SDPA_TENSOR_SCALE_O_UID = 1821;
+constexpr int64_t K_SDPA_TENSOR_STATS_UID = 1822;
+constexpr int64_t K_SDPA_TENSOR_MAX_UID = 1823;
+constexpr int64_t K_SDPA_TENSOR_SUM_EXP_UID = 1824;
+constexpr int64_t K_SDPA_TENSOR_RNG_DUMP_UID = 1825;
+constexpr int64_t K_SDPA_TENSOR_AMAX_S_UID = 1826;
+constexpr int64_t K_SDPA_TENSOR_AMAX_O_UID = 1827;
 
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_STATS_DIMS = {2, 4, 128, 1};
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_STATS_STRIDES = {512, 128, 1, 1};

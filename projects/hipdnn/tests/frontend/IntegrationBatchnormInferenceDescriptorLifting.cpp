@@ -22,7 +22,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::toVec;
-using namespace hipdnn_tests::constants::batchnorm_inference::integration;
+using namespace hipdnn_tests::constants;
 
 namespace
 {
@@ -80,32 +80,33 @@ protected:
             .set_io_data_type(DataType::FLOAT);
 
         auto x = std::make_shared<TensorAttributes>();
-        x->set_uid(K_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
-        x->set_dim(toVec(K_SPATIAL_DIMS)).set_stride(toVec(K_SPATIAL_STRIDES));
+        x->set_uid(K_BN_INF_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
+        x->set_dim(toVec(K_BN_INF_SPATIAL_DIMS)).set_stride(toVec(K_BN_INF_SPATIAL_STRIDES));
 
         auto mean = std::make_shared<TensorAttributes>();
-        mean->set_uid(K_TENSOR_MEAN_UID).set_name("mean").set_data_type(DataType::FLOAT);
-        mean->set_dim(toVec(K_CHANNEL_DIMS)).set_stride(toVec(K_CHANNEL_STRIDES));
+        mean->set_uid(K_BN_INF_TENSOR_MEAN_UID).set_name("mean").set_data_type(DataType::FLOAT);
+        mean->set_dim(toVec(K_BN_INF_CHANNEL_DIMS)).set_stride(toVec(K_BN_INF_CHANNEL_STRIDES));
 
         auto invVariance = std::make_shared<TensorAttributes>();
-        invVariance->set_uid(K_TENSOR_INV_VARIANCE_UID)
+        invVariance->set_uid(K_BN_INF_TENSOR_INV_VARIANCE_UID)
             .set_name("inv_variance")
             .set_data_type(DataType::FLOAT);
-        invVariance->set_dim(toVec(K_CHANNEL_DIMS)).set_stride(toVec(K_CHANNEL_STRIDES));
+        invVariance->set_dim(toVec(K_BN_INF_CHANNEL_DIMS))
+            .set_stride(toVec(K_BN_INF_CHANNEL_STRIDES));
 
         auto scale = std::make_shared<TensorAttributes>();
-        scale->set_uid(K_TENSOR_SCALE_UID).set_name("scale").set_data_type(DataType::FLOAT);
-        scale->set_dim(toVec(K_CHANNEL_DIMS)).set_stride(toVec(K_CHANNEL_STRIDES));
+        scale->set_uid(K_BN_INF_TENSOR_SCALE_UID).set_name("scale").set_data_type(DataType::FLOAT);
+        scale->set_dim(toVec(K_BN_INF_CHANNEL_DIMS)).set_stride(toVec(K_BN_INF_CHANNEL_STRIDES));
 
         auto bias = std::make_shared<TensorAttributes>();
-        bias->set_uid(K_TENSOR_BIAS_UID).set_name("bias").set_data_type(DataType::FLOAT);
-        bias->set_dim(toVec(K_CHANNEL_DIMS)).set_stride(toVec(K_CHANNEL_STRIDES));
+        bias->set_uid(K_BN_INF_TENSOR_BIAS_UID).set_name("bias").set_data_type(DataType::FLOAT);
+        bias->set_dim(toVec(K_BN_INF_CHANNEL_DIMS)).set_stride(toVec(K_BN_INF_CHANNEL_STRIDES));
 
         BatchnormInferenceAttributes attrs;
         attrs.set_name("test_op");
 
         auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, attrs);
-        y->set_uid(K_TENSOR_Y_UID).set_output(true).set_name("y");
+        y->set_uid(K_BN_INF_TENSOR_Y_UID).set_output(true).set_name("y");
 
         return graph;
     }
@@ -143,52 +144,54 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, BasicBatchnormInferenceRo
     ASSERT_EQ(tensorMap.size(), 6u);
 
     // Verify x tensor (spatial dims)
-    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_uid(), K_TENSOR_X_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_dim(), toVec(K_SPATIAL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_stride(), toVec(K_SPATIAL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_name(), "x");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_X_UID]->get_uid(), K_BN_INF_TENSOR_X_UID);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_X_UID]->get_dim(), toVec(K_BN_INF_SPATIAL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_X_UID]->get_stride(), toVec(K_BN_INF_SPATIAL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_X_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_X_UID]->get_name(), "x");
 
     // Verify mean tensor (channel dims)
-    ASSERT_NE(tensorMap.count(K_TENSOR_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_MEAN_UID]->get_uid(), K_TENSOR_MEAN_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_MEAN_UID]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_MEAN_UID]->get_stride(), toVec(K_CHANNEL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_MEAN_UID]->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(tensorMap[K_TENSOR_MEAN_UID]->get_name(), "mean");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_MEAN_UID]->get_uid(), K_BN_INF_TENSOR_MEAN_UID);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_MEAN_UID]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_MEAN_UID]->get_stride(), toVec(K_BN_INF_CHANNEL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_MEAN_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_MEAN_UID]->get_name(), "mean");
 
     // Verify inv_variance tensor (channel dims)
-    ASSERT_NE(tensorMap.count(K_TENSOR_INV_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_INV_VARIANCE_UID]->get_uid(), K_TENSOR_INV_VARIANCE_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_INV_VARIANCE_UID]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_INV_VARIANCE_UID]->get_stride(), toVec(K_CHANNEL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_INV_VARIANCE_UID]->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(tensorMap[K_TENSOR_INV_VARIANCE_UID]->get_name(), "inv_variance");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_INV_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_INV_VARIANCE_UID]->get_uid(),
+              K_BN_INF_TENSOR_INV_VARIANCE_UID);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_INV_VARIANCE_UID]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_INV_VARIANCE_UID]->get_stride(),
+              toVec(K_BN_INF_CHANNEL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_INV_VARIANCE_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_INV_VARIANCE_UID]->get_name(), "inv_variance");
 
     // Verify scale tensor (channel dims)
-    ASSERT_NE(tensorMap.count(K_TENSOR_SCALE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_SCALE_UID]->get_uid(), K_TENSOR_SCALE_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_SCALE_UID]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_SCALE_UID]->get_stride(), toVec(K_CHANNEL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_SCALE_UID]->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(tensorMap[K_TENSOR_SCALE_UID]->get_name(), "scale");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_SCALE_UID]->get_uid(), K_BN_INF_TENSOR_SCALE_UID);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_SCALE_UID]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_SCALE_UID]->get_stride(), toVec(K_BN_INF_CHANNEL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_SCALE_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_SCALE_UID]->get_name(), "scale");
 
     // Verify bias tensor (channel dims)
-    ASSERT_NE(tensorMap.count(K_TENSOR_BIAS_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_BIAS_UID]->get_uid(), K_TENSOR_BIAS_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_BIAS_UID]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_BIAS_UID]->get_stride(), toVec(K_CHANNEL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_BIAS_UID]->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(tensorMap[K_TENSOR_BIAS_UID]->get_name(), "bias");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_BIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_BIAS_UID]->get_uid(), K_BN_INF_TENSOR_BIAS_UID);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_BIAS_UID]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_BIAS_UID]->get_stride(), toVec(K_BN_INF_CHANNEL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_BIAS_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_BIAS_UID]->get_name(), "bias");
 
     // Verify y tensor (spatial dims, inferred from x)
-    ASSERT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_uid(), K_TENSOR_Y_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_dim(), toVec(K_SPATIAL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_stride(), toVec(K_SPATIAL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_name(), "y");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_Y_UID]->get_uid(), K_BN_INF_TENSOR_Y_UID);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_Y_UID]->get_dim(), toVec(K_BN_INF_SPATIAL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_Y_UID]->get_stride(), toVec(K_BN_INF_SPATIAL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_Y_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_Y_UID]->get_name(), "y");
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
@@ -229,24 +232,24 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, BatchnormInferenceTensorS
     ASSERT_NE(opNode, nullptr);
 
     // Verify x tensor sharing
-    EXPECT_EQ(opNode->attributes.get_x()->get_uid(), K_TENSOR_X_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID].get(), opNode->attributes.get_x().get());
+    EXPECT_EQ(opNode->attributes.get_x()->get_uid(), K_BN_INF_TENSOR_X_UID);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_X_UID].get(), opNode->attributes.get_x().get());
     // Verify mean tensor sharing
-    EXPECT_EQ(opNode->attributes.get_mean()->get_uid(), K_TENSOR_MEAN_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_MEAN_UID].get(), opNode->attributes.get_mean().get());
+    EXPECT_EQ(opNode->attributes.get_mean()->get_uid(), K_BN_INF_TENSOR_MEAN_UID);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_MEAN_UID].get(), opNode->attributes.get_mean().get());
     // Verify inv_variance tensor sharing
-    EXPECT_EQ(opNode->attributes.get_inv_variance()->get_uid(), K_TENSOR_INV_VARIANCE_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_INV_VARIANCE_UID].get(),
+    EXPECT_EQ(opNode->attributes.get_inv_variance()->get_uid(), K_BN_INF_TENSOR_INV_VARIANCE_UID);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_INV_VARIANCE_UID].get(),
               opNode->attributes.get_inv_variance().get());
     // Verify scale tensor sharing
-    EXPECT_EQ(opNode->attributes.get_scale()->get_uid(), K_TENSOR_SCALE_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_SCALE_UID].get(), opNode->attributes.get_scale().get());
+    EXPECT_EQ(opNode->attributes.get_scale()->get_uid(), K_BN_INF_TENSOR_SCALE_UID);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_SCALE_UID].get(), opNode->attributes.get_scale().get());
     // Verify bias tensor sharing
-    EXPECT_EQ(opNode->attributes.get_bias()->get_uid(), K_TENSOR_BIAS_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_BIAS_UID].get(), opNode->attributes.get_bias().get());
+    EXPECT_EQ(opNode->attributes.get_bias()->get_uid(), K_BN_INF_TENSOR_BIAS_UID);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_BIAS_UID].get(), opNode->attributes.get_bias().get());
     // Verify y tensor sharing
-    EXPECT_EQ(opNode->attributes.get_y()->get_uid(), K_TENSOR_Y_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID].get(), opNode->attributes.get_y().get());
+    EXPECT_EQ(opNode->attributes.get_y()->get_uid(), K_BN_INF_TENSOR_Y_UID);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_Y_UID].get(), opNode->attributes.get_y().get());
 }
 
 // Builds a BatchnormInference graph, serializes to binary, creates a backend descriptor
@@ -291,30 +294,31 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, BatchnormInferenceLiftWit
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 6u);
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_dim(), toVec(K_SPATIAL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_stride(), toVec(K_SPATIAL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_name(), "x");
-    ASSERT_NE(tensorMap.count(K_TENSOR_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_MEAN_UID]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_MEAN_UID]->get_stride(), toVec(K_CHANNEL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_MEAN_UID]->get_name(), "mean");
-    ASSERT_NE(tensorMap.count(K_TENSOR_INV_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_INV_VARIANCE_UID]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_INV_VARIANCE_UID]->get_stride(), toVec(K_CHANNEL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_INV_VARIANCE_UID]->get_name(), "inv_variance");
-    ASSERT_NE(tensorMap.count(K_TENSOR_SCALE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_SCALE_UID]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_SCALE_UID]->get_stride(), toVec(K_CHANNEL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_SCALE_UID]->get_name(), "scale");
-    ASSERT_NE(tensorMap.count(K_TENSOR_BIAS_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_BIAS_UID]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_BIAS_UID]->get_stride(), toVec(K_CHANNEL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_BIAS_UID]->get_name(), "bias");
-    ASSERT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_dim(), toVec(K_SPATIAL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_stride(), toVec(K_SPATIAL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_name(), "y");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_X_UID]->get_dim(), toVec(K_BN_INF_SPATIAL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_X_UID]->get_stride(), toVec(K_BN_INF_SPATIAL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_X_UID]->get_name(), "x");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_MEAN_UID]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_MEAN_UID]->get_stride(), toVec(K_BN_INF_CHANNEL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_MEAN_UID]->get_name(), "mean");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_INV_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_INV_VARIANCE_UID]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_INV_VARIANCE_UID]->get_stride(),
+              toVec(K_BN_INF_CHANNEL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_INV_VARIANCE_UID]->get_name(), "inv_variance");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_SCALE_UID]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_SCALE_UID]->get_stride(), toVec(K_BN_INF_CHANNEL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_SCALE_UID]->get_name(), "scale");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_BIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_BIAS_UID]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_BIAS_UID]->get_stride(), toVec(K_BN_INF_CHANNEL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_BIAS_UID]->get_name(), "bias");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_Y_UID]->get_dim(), toVec(K_BN_INF_SPATIAL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_Y_UID]->get_stride(), toVec(K_BN_INF_SPATIAL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_Y_UID]->get_name(), "y");
 }
 
 // Creates tensors without explicit set_uid(), verifies that auto-assigned UIDs
@@ -329,23 +333,23 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, AutoAssignedUidsPreserved
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_name("x").set_data_type(DataType::FLOAT);
-    x->set_dim(toVec(K_SPATIAL_DIMS)).set_stride(toVec(K_SPATIAL_STRIDES));
+    x->set_dim(toVec(K_BN_INF_SPATIAL_DIMS)).set_stride(toVec(K_BN_INF_SPATIAL_STRIDES));
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_name("mean").set_data_type(DataType::FLOAT);
-    mean->set_dim(toVec(K_CHANNEL_DIMS)).set_stride(toVec(K_CHANNEL_STRIDES));
+    mean->set_dim(toVec(K_BN_INF_CHANNEL_DIMS)).set_stride(toVec(K_BN_INF_CHANNEL_STRIDES));
 
     auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_name("inv_variance").set_data_type(DataType::FLOAT);
-    invVariance->set_dim(toVec(K_CHANNEL_DIMS)).set_stride(toVec(K_CHANNEL_STRIDES));
+    invVariance->set_dim(toVec(K_BN_INF_CHANNEL_DIMS)).set_stride(toVec(K_BN_INF_CHANNEL_STRIDES));
 
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("scale").set_data_type(DataType::FLOAT);
-    scale->set_dim(toVec(K_CHANNEL_DIMS)).set_stride(toVec(K_CHANNEL_STRIDES));
+    scale->set_dim(toVec(K_BN_INF_CHANNEL_DIMS)).set_stride(toVec(K_BN_INF_CHANNEL_STRIDES));
 
     auto bias = std::make_shared<TensorAttributes>();
     bias->set_name("bias").set_data_type(DataType::FLOAT);
-    bias->set_dim(toVec(K_CHANNEL_DIMS)).set_stride(toVec(K_CHANNEL_STRIDES));
+    bias->set_dim(toVec(K_BN_INF_CHANNEL_DIMS)).set_stride(toVec(K_BN_INF_CHANNEL_STRIDES));
 
     BatchnormInferenceAttributes attrs;
     attrs.set_name("auto_uid_bn_inf_op");
@@ -399,12 +403,12 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, AutoAssignedUidsPreserved
     EXPECT_EQ(uidSet.size(), 6u) << "All 6 tensor UIDs must be distinct";
 
     // Verify tensor dims survived the round trip
-    EXPECT_EQ(tensorMap[xUid]->get_dim(), toVec(K_SPATIAL_DIMS));
-    EXPECT_EQ(tensorMap[meanUid]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[invVarianceUid]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[scaleUid]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[biasUid]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[yUid]->get_dim(), toVec(K_SPATIAL_DIMS));
+    EXPECT_EQ(tensorMap[xUid]->get_dim(), toVec(K_BN_INF_SPATIAL_DIMS));
+    EXPECT_EQ(tensorMap[meanUid]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[invVarianceUid]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[scaleUid]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[biasUid]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[yUid]->get_dim(), toVec(K_BN_INF_SPATIAL_DIMS));
 }
 
 } // namespace
