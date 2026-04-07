@@ -97,6 +97,8 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
 
   if "CustomKernel" in state and state["CustomKernel"]["name"]:
     return state["CustomKernel"]["name"]
+  if state.get("CustomKernelName", ""):
+    return state["CustomKernelName"]
 
   gsuBackup = state["GlobalSplitU"]
   ggBackup = state["ProblemType"]["GroupedGemm"]
@@ -171,6 +173,8 @@ def shortenFileBase(splitGSU, kernel):
 def getKernelFileBase(splitGSU: bool, kernel):
   if "CustomKernel" in kernel and kernel["CustomKernel"]["name"]:
     fileBase = kernel["CustomKernel"]["name"]
+  elif kernel.get("CustomKernelName", ""):
+    fileBase = kernel["CustomKernelName"]
   else:
     fileBase = shortenFileBase(splitGSU, kernel)
   return fileBase

@@ -4743,7 +4743,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       elif not ( self.states.asmCaps["HasMFMA"] or self.states.asmCaps["HasWMMA"]):
         raise RuntimeError("MatrixInstruction not supported for {0}".format(self.states.version))
 
-      if kernel["MFMA_BF16_1K"] and not self.states.asmCaps["HasMFMA_bf16_1k"]:
+      if kernel.get("MFMA_BF16_1K") and not self.states.asmCaps["HasMFMA_bf16_1k"]:
         raise RuntimeError("BF16_1k MatrixInstruction not supported for {0}".format(self.states.version))
 
       if kernel["ProblemType"]["Sparse"] and not self.states.asmCaps["HasSMFMA"]:

@@ -30,7 +30,9 @@ import yaml
 import os
 
 def isCustomKernelConfig(config):
-    return "CustomKernel" in config and config["CustomKernel"]["name"]
+    if "CustomKernel" in config and config["CustomKernel"]["name"]:
+        return True
+    return bool(config.get("CustomKernelName", ""))
 
 def getCustomKernelFilepath(name, directory=CUSTOM_KERNEL_PATH):
     flat = os.path.join(directory, (name + ".s"))
