@@ -57,28 +57,6 @@ struct LayoutsSelector<3>
     using OutLayout = ck::tensor_layout::convolution::NDHWGK;
 };
 
-inline auto Get2DLayouts()
-{
-    struct Layouts
-    {
-        using InLayout  = ck::tensor_layout::convolution::NHWGC;
-        using WeiLayout = ck::tensor_layout::convolution::GKYXC;
-        using OutLayout = ck::tensor_layout::convolution::NHWGK;
-    };
-    return Layouts{};
-}
-
-inline auto Get3DLayouts()
-{
-    struct Layouts
-    {
-        using InLayout  = ck::tensor_layout::convolution::NDHWGC;
-        using WeiLayout = ck::tensor_layout::convolution::GKZYXC;
-        using OutLayout = ck::tensor_layout::convolution::NDHWGK;
-    };
-    return Layouts{};
-}
-
 // ---------------------------------------------------------------------------
 // DeviceOp template aliases (same as in solver)
 // ---------------------------------------------------------------------------

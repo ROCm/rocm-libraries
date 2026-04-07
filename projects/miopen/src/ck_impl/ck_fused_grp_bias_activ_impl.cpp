@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <string>
 #include <memory>
-#include <limits>
 
 #include "ck_grouped_conv_common.hpp"
 #include "ck_grouped_conv_impl_helpers.hpp"
@@ -311,7 +310,7 @@ struct CKArgs
                                   nullptr,
                                   1.0f,
                                   0.0f,
-                                  OutElementOp{0, std::numeric_limits<DataType>::max()});
+                                  OutElementOp{0, ck::NumericLimits<DataType>::Max()});
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
