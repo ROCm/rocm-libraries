@@ -24,7 +24,7 @@ class GemmBenchmark:
             print(f"Error: Binary directory {bin_dir} does not exist")
             return []
 
-        kernels = list(bin_dir.glob("benchmark_gemm_*"))
+        kernels = list(bin_dir.glob("benchmark_gemm_universal_*"))
         if self.verbose:
             print(f"Found {len(kernels)} kernel executables")
             for k in kernels:
