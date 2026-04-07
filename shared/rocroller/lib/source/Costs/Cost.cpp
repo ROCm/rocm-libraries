@@ -26,6 +26,8 @@ namespace rocRoller
                 return "LinearWeighted";
             case CostFunction::LinearWeightedSimple:
                 return "LinearWeightedSimple";
+            case CostFunction::LinearWeightedSimpleStreamK:
+                return "LinearWeightedSimpleStreamK";
             case CostFunction::Count:
                 return "Count";
             }

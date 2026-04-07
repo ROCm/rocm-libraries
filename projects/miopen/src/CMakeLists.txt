@@ -204,7 +204,6 @@ set( MIOpen_Source
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
     solver/conv/conv_direct_naive_conv_wrw.cpp
-    solver/conv/conv_hip_implicit_gemm_bwd_data_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v1r1.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v1r1_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v4r1.cpp
@@ -214,10 +213,10 @@ set( MIOpen_Source
     solver/conv/conv_hip_implicit_gemm_fwd_v4r4_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r4_xdlops_padded_gemm.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r5_xdlops.cpp
-    solver/conv/conv_hip_implicit_gemm_fwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_fwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_bwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp
+    solver/ck_grouped_conv_lib_loader.cpp
     solver/conv/conv_hip_implicit_gemm_3d_grouped_fwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_3d_grouped_wrw_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_3d_grouped_bwd_xdlops.cpp
@@ -932,6 +931,9 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
     if(GPU_TARGETS MATCHES "gfx950")
         target_compile_definitions(MIOpen PRIVATE CK_USE_GFX95)
     endif()
+
+    # Build per-GPU-target CK grouped conv shared libraries
+    add_subdirectory(ck_impl)
 endif()
 
 if(WIN32)

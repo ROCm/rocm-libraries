@@ -13,6 +13,7 @@ ALL_CONFIG_NAMES = [
     "convolution_wrw.yaml",
     "matmul.yaml",
     "pointwise.yaml",
+    "reduction.yaml",
     "sdpa.yaml",
 ]
 

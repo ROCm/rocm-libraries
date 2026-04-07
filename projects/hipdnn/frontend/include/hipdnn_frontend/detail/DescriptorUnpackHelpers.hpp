@@ -332,7 +332,7 @@ template <typename T>
     // Restore pass-by-value scalar if present.
     bool isByValue = false;
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(tensorDesc,
-                                               HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT,
+                                               HIPDNN_ATTR_TENSOR_IS_BY_VALUE,
                                                HIPDNN_TYPE_BOOLEAN,
                                                isByValue,
                                                "tensor is_by_value"));
@@ -386,6 +386,13 @@ template <typename T>
         {
             int32_t val = 0;
             std::memcpy(&val, valueBytes.data(), sizeof(int32_t));
+            tensor->set_value(val);
+            break;
+        }
+        case DataType::INT64:
+        {
+            int64_t val = 0;
+            std::memcpy(&val, valueBytes.data(), sizeof(int64_t));
             tensor->set_value(val);
             break;
         }
@@ -525,6 +532,100 @@ template <typename T>
     T raw{};
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(desc, attrName, attrType, raw, errorContext));
     value = raw;
+    return {};
+}
+
+/// Unpacks a tensor array attribute from an operation descriptor, deduplicating
+/// against the tensor map. Each tensor is either found in the map (shared) or
+/// unpacked fresh and registered.
+[[nodiscard]] inline Error unpackAndRegisterTensorArray(
+    hipdnnBackendDescriptor_t opDesc,
+    hipdnnBackendAttributeName_t tensorAttrName,
+    std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,
+    std::vector<std::shared_ptr<graph::TensorAttributes>>& outTensors,
+    const std::string& errorContext)
+{
+    auto [descs, descErr] = getDescriptorAttrDescArray(opDesc, tensorAttrName, errorContext);
+    if(descErr.is_bad())
+    {
+        return descErr;
+    }
+
+    outTensors.clear();
+    outTensors.reserve(descs.size());
+    for(auto& scopedDesc : descs)
+    {
+        if(scopedDesc.get() == nullptr)
+        {
+            continue;
+        }
+
+        int64_t uid = 0;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(scopedDesc.get(),
+                                                   HIPDNN_ATTR_TENSOR_UNIQUE_ID,
+                                                   HIPDNN_TYPE_INT64,
+                                                   uid,
+                                                   errorContext + " tensor UID"));
+
+        auto it = tensorMap.find(uid);
+        if(it != tensorMap.end())
+        {
+            outTensors.push_back(it->second);
+        }
+        else
+        {
+            std::shared_ptr<graph::TensorAttributes> tensor;
+            HIPDNN_CHECK_ERROR(unpackTensorAttributes(scopedDesc.get(), tensor));
+            tensorMap[uid] = tensor;
+            outTensors.push_back(std::move(tensor));
+        }
+    }
+
+    return {};
+}
+
+/// Unpacks a byte array attribute (HIPDNN_TYPE_CHAR) from a backend descriptor.
+/// Returns an empty vector if the attribute is not supported or has no elements.
+[[nodiscard]] inline Error getDescriptorAttrByteArray(hipdnnBackendDescriptor_t desc,
+                                                      hipdnnBackendAttributeName_t attrName,
+                                                      std::vector<uint8_t>& value,
+                                                      const std::string& errorContext)
+{
+    int64_t count = 0;
+    auto countStatus = hipdnnBackend()->backendGetAttribute(
+        desc, attrName, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
+    if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED)
+    {
+        value.clear();
+        return {};
+    }
+    if(countStatus != HIPDNN_STATUS_SUCCESS)
+    {
+        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
+        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Failed to get count for " + errorContext
+                    + " Backend error: " + backendErrMsg.data()};
+    }
+    if(count <= 0)
+    {
+        value.clear();
+        return {};
+    }
+
+    value.resize(static_cast<size_t>(count));
+    int64_t actualCount = 0;
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendGetAttribute(
+            desc, attrName, HIPDNN_TYPE_CHAR, count, &actualCount, value.data()),
+        "Failed to get " + errorContext);
+    if(actualCount != count)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Element count mismatch for " + errorContext + ": expected " + std::to_string(count)
+                    + " but got " + std::to_string(actualCount)};
+    }
+
     return {};
 }
 

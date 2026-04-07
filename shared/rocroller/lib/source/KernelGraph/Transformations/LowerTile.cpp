@@ -110,7 +110,8 @@ namespace rocRoller
             addLoadMacroTileCTPreTiled(KernelGraph&                     graph,
                                        std::vector<DeferredConnection>& connections,
                                        int                              macTileTag,
-                                       std::vector<int> const&          sdim)
+                                       std::vector<int> const&          sdim,
+                                       bool                             updatePreTiledSubDimStrides)
         {
             namespace CT = rocRoller::KernelGraph::CoordinateGraph;
             using ET     = rocRoller::Expression::EvaluationTime;
@@ -119,26 +120,63 @@ namespace rocRoller
 
             auto tile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
-            auto sdimPTXTile = sdim[0];
-            auto sdimPTYTile = sdim[1];
-            auto sdimX       = sdim[2];
-            auto sdimY       = sdim[3];
+            auto sdimX       = sdim[0];
+            auto sdimY       = sdim[1];
+            auto sdimPTXTile = sdim[2];
+            auto sdimPTYTile = sdim[3];
 
-            auto numPTTilesX = graph.coordinates.get<SubDimension>(sdimPTXTile)->size;
-            auto numPTTilesY = graph.coordinates.get<SubDimension>(sdimPTYTile)->size;
+            auto sizeX = graph.coordinates.get<SubDimension>(sdimX)->size;
+            auto sizeY = graph.coordinates.get<SubDimension>(sdimY)->size;
 
-            auto sizePTTileXExpr = graph.coordinates.get<SubDimension>(sdimX)->size;
+            auto sizePTTileXExpr = graph.coordinates.get<SubDimension>(sdimPTXTile)->size;
             AssertFatal(
                 evaluationTimes(sizePTTileXExpr)[ET::Translate],
                 "Size of pre-tile tile must be known at translate time (ie, must be literal).");
 
-            auto sizePTTileYExpr = graph.coordinates.get<SubDimension>(sdimY)->size;
+            auto sizePTTileYExpr = graph.coordinates.get<SubDimension>(sdimPTYTile)->size;
             AssertFatal(
                 evaluationTimes(sizePTTileYExpr)[ET::Translate],
                 "Size of pre-tile tile must be known at translate time (ie, must be literal).");
 
             auto sizePTTileX = getUnsignedInt(evaluate(sizePTTileXExpr));
             auto sizePTTileY = getUnsignedInt(evaluate(sizePTTileYExpr));
+
+            if(updatePreTiledSubDimStrides)
+            {
+                auto const strideDataType = DataType::UInt32;
+
+                auto stridePTTileXExpr = graph.coordinates.get<SubDimension>(sdimPTXTile)->stride;
+                auto stridePTTileX     = getUnsignedInt(evaluate(stridePTTileXExpr));
+                auto columnMajor       = stridePTTileX == 1u;
+
+                auto subDimX = graph.coordinates.get<SubDimension>(sdimX).value();
+                auto subDimY = graph.coordinates.get<SubDimension>(sdimY).value();
+
+                auto tileSizeX = literal(sizePTTileX, strideDataType);
+                auto tileSizeY = literal(sizePTTileY, strideDataType);
+
+                if(columnMajor)
+                {
+                    subDimX.stride = tileSizeX * tileSizeY;
+                    subDimY.stride = (subDimX.size / tileSizeX) * tileSizeX * tileSizeY;
+                }
+                else
+                {
+                    subDimX.stride = (subDimY.size / tileSizeY) * tileSizeX * tileSizeY;
+                    subDimY.stride = tileSizeX * tileSizeY;
+                }
+
+                graph.coordinates.setElement(sdimX, subDimX);
+                graph.coordinates.setElement(sdimY, subDimY);
+            }
+
+            auto numPTTilesX = tileCeilDivide(sizeX, sizePTTileX);
+            auto numPTTilesY = tileCeilDivide(sizeY, sizePTTileY);
+
+            Log::debug("PreTiled CT: numPTTilesX: {}", toString(numPTTilesX));
+            Log::debug("PreTiled CT: numPTTilesY: {}", toString(numPTTilesY));
+            Log::debug("PreTiled CT: sizePTTileXExpr: {}", toString(sizePTTileXExpr));
+            Log::debug("PreTiled CT: sizePTTileYExpr: {}", toString(sizePTTileYExpr));
 
             auto nPTX = graph.coordinates.addElement(CT::WaveTileNumber(0, numPTTilesX, nullptr));
             auto nPTY = graph.coordinates.addElement(CT::WaveTileNumber(1, numPTTilesY, nullptr));
@@ -147,20 +185,20 @@ namespace rocRoller
             auto iPTY
                 = graph.coordinates.addElement(CT::WaveTileIndex(1, literal(sizePTTileY), nullptr));
 
-            graph.coordinates.addElement(PassThrough(), {sdimPTXTile}, {nPTX});
-            graph.coordinates.addElement(PassThrough(), {sdimPTYTile}, {nPTY});
+            graph.coordinates.addElement(PassThrough(), {sdimX}, {nPTX});
+            graph.coordinates.addElement(PassThrough(), {sdimY}, {nPTY});
 
-            graph.coordinates.addElement(PassThrough(), {sdimX}, {iPTX});
-            graph.coordinates.addElement(PassThrough(), {sdimY}, {iPTY});
+            graph.coordinates.addElement(PassThrough(), {sdimPTXTile}, {iPTX});
+            graph.coordinates.addElement(PassThrough(), {sdimPTYTile}, {iPTY});
 
-            connections.push_back(DC<SubDimension>(sdimX, 0));
-            connections.push_back(DC<SubDimension>(sdimY, 1));
+            connections.push_back(DC<SubDimension>(sdimPTXTile, 0));
+            connections.push_back(DC<SubDimension>(sdimPTYTile, 1));
 
-            // TODO: Audit scale-pretile and pretile-b paths to make
-            // this intuitive.  Consider renaming the numPTTilesX/Y
-            // variables.
-            auto numTilesX = tileCeilDivide(numPTTilesX, tile.sizes[0]);
-            auto numTilesY = tileCeilDivide(numPTTilesY, tile.sizes[1]);
+            auto numTilesX = tileCeilDivide(sizeX, tile.sizes[0]);
+            auto numTilesY = tileCeilDivide(sizeY, tile.sizes[1]);
+
+            Log::debug("PreTiled CT: numTilesX: {}", toString(numTilesX));
+            Log::debug("PreTiled CT: numTilesY: {}", toString(numTilesY));
 
             auto nX = graph.coordinates.addElement(tile.tileNumber(0, numTilesX));
             auto nY = graph.coordinates.addElement(tile.tileNumber(1, numTilesY));
@@ -222,10 +260,12 @@ namespace rocRoller
             addLoadMacroTileCT(KernelGraph&                     graph,
                                std::vector<DeferredConnection>& connections,
                                int                              macTileTag,
-                               std::vector<int> const&          sdim)
+                               std::vector<int> const&          sdim,
+                               bool                             updatePreTiledSubDimStrides)
         {
             if(sdim.size() == 4)
-                return addLoadMacroTileCTPreTiled(graph, connections, macTileTag, sdim);
+                return addLoadMacroTileCTPreTiled(
+                    graph, connections, macTileTag, sdim, updatePreTiledSubDimStrides);
 
             auto macTile   = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto sdimX     = sdim[0];
@@ -835,7 +875,38 @@ namespace rocRoller
             auto workitemX
                 = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
 
-            if(rightmostFastest)
+            if(macTile.layoutType == LayoutType::MATRIX_A
+               || macTile.layoutType == LayoutType::MATRIX_B
+               || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
+               || macTile.layoutType == LayoutType::SCRATCH)
+            {
+                // GEMM layouts: use rightmostFastest to control threadtile orientation
+                if(rightmostFastest)
+                {
+                    elementNumberX = graph.coordinates.addElement(
+                        ElementNumber(0, literal(thrTile.sizes.at(0))));
+                    elementNumberY = graph.coordinates.addElement(
+                        ElementNumber(1, literal(thrTile.sizes.at(1))));
+
+                    graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberX});
+                    graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
+
+                    graph.coordinates.addElement(Flatten(), {nThrX, nThrY}, {workitemX});
+                }
+                else
+                {
+                    elementNumberX = graph.coordinates.addElement(
+                        ElementNumber(0, literal(thrTile.sizes.at(1))));
+                    elementNumberY = graph.coordinates.addElement(
+                        ElementNumber(1, literal(thrTile.sizes.at(0))));
+
+                    graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberY});
+                    graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberX});
+
+                    graph.coordinates.addElement(Flatten(), {nThrY, nThrX}, {workitemX});
+                }
+            }
+            else
             {
                 elementNumberX
                     = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
@@ -845,47 +916,11 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberX});
                 graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
 
-                if(macTile.layoutType == LayoutType::MATRIX_A
-                   || macTile.layoutType == LayoutType::MATRIX_B
-                   || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
-                   || macTile.layoutType == LayoutType::SCRATCH)
-                {
-                    graph.coordinates.addElement(Flatten(), {nThrX, nThrY}, {workitemX});
-                }
-                else
-                {
-                    graph.coordinates.addElement(PassThrough(), {nThrX}, {workitemX});
+                graph.coordinates.addElement(PassThrough(), {nThrX}, {workitemX});
 
-                    auto workitemY
-                        = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
-                    graph.coordinates.addElement(PassThrough(), {nThrY}, {workitemY});
-                }
-            }
-            else
-            {
-                elementNumberX
-                    = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(1))));
-                elementNumberY
-                    = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(0))));
-
-                graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberY});
-                graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberX});
-
-                if(macTile.layoutType == LayoutType::MATRIX_A
-                   || macTile.layoutType == LayoutType::MATRIX_B
-                   || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
-                   || macTile.layoutType == LayoutType::SCRATCH)
-                {
-                    graph.coordinates.addElement(Flatten(), {nThrY, nThrX}, {workitemX});
-                }
-                else
-                {
-                    graph.coordinates.addElement(PassThrough(), {nThrX}, {workitemX});
-
-                    auto workitemY
-                        = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
-                    graph.coordinates.addElement(PassThrough(), {nThrY}, {workitemY});
-                }
+                auto workitemY
+                    = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
+                graph.coordinates.addElement(PassThrough(), {nThrY}, {workitemY});
             }
 
             connections.push_back(DC<ElementNumber>(elementNumberX, 0));
@@ -1283,7 +1318,43 @@ namespace rocRoller
 
             int elementNumberX, elementNumberY;
 
-            if(rightmostFastest)
+            if(macTile.layoutType == LayoutType::MATRIX_A
+               || macTile.layoutType == LayoutType::MATRIX_B
+               || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
+               || macTile.layoutType == LayoutType::SCRATCH)
+            {
+                if(rightmostFastest)
+                {
+                    elementNumberX = graph.coordinates.addElement(
+                        ElementNumber(0, literal(thrTile.sizes.at(0))));
+                    elementNumberY = graph.coordinates.addElement(
+                        ElementNumber(1, literal(thrTile.sizes.at(1))));
+
+                    connections.push_back(DC<ElementNumber>(elementNumberX, 0));
+                    connections.push_back(DC<ElementNumber>(elementNumberY, 1));
+
+                    graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrX});
+                    graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
+
+                    graph.coordinates.addElement(Tile(), {workitemX}, {nThrX, nThrY});
+                }
+                else
+                {
+                    elementNumberX = graph.coordinates.addElement(
+                        ElementNumber(0, literal(thrTile.sizes.at(1))));
+                    elementNumberY = graph.coordinates.addElement(
+                        ElementNumber(1, literal(thrTile.sizes.at(0))));
+
+                    connections.push_back(DC<ElementNumber>(elementNumberX, 0));
+                    connections.push_back(DC<ElementNumber>(elementNumberY, 1));
+
+                    graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrX});
+                    graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrY});
+
+                    graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, nThrX});
+                }
+            }
+            else
             {
                 elementNumberX
                     = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
@@ -1296,50 +1367,11 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrX});
                 graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
 
-                if(macTile.layoutType == LayoutType::MATRIX_A
-                   || macTile.layoutType == LayoutType::MATRIX_B
-                   || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
-                   || macTile.layoutType == LayoutType::SCRATCH)
-                {
-                    graph.coordinates.addElement(Tile(), {workitemX}, {nThrX, nThrY});
-                }
-                else
-                {
-                    auto workitemY
-                        = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
+                auto workitemY
+                    = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
 
-                    graph.coordinates.addElement(PassThrough(), {workitemX}, {nThrX});
-                    graph.coordinates.addElement(PassThrough(), {workitemY}, {nThrY});
-                }
-            }
-            else
-            {
-                elementNumberX
-                    = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(1))));
-                elementNumberY
-                    = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(0))));
-
-                graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrX});
-                graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrY});
-
-                connections.push_back(DC<ElementNumber>(elementNumberX, 0));
-                connections.push_back(DC<ElementNumber>(elementNumberY, 1));
-
-                if(macTile.layoutType == LayoutType::MATRIX_A
-                   || macTile.layoutType == LayoutType::MATRIX_B
-                   || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
-                   || macTile.layoutType == LayoutType::SCRATCH)
-                {
-                    graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, nThrX});
-                }
-                else
-                {
-                    auto workitemY
-                        = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
-
-                    graph.coordinates.addElement(PassThrough(), {workitemX}, {nThrX});
-                    graph.coordinates.addElement(PassThrough(), {workitemY}, {nThrY});
-                }
+                graph.coordinates.addElement(PassThrough(), {workitemX}, {nThrX});
+                graph.coordinates.addElement(PassThrough(), {workitemY}, {nThrY});
             }
 
             if(jammedTiles.size() > 0 && jammedTiles[0] > 1)

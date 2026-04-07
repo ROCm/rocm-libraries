@@ -372,7 +372,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionParameters)
     auto computeType = HIPDNN_DATA_HALF;
     convDesc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    hipdnnConvolutionMode_t convMode = HIPDNN_CROSS_CORRELATION;
     convDesc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     convDesc->finalize();
@@ -400,7 +400,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionParameters)
 
 TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionModeConvolution)
 {
-    // Verify HIPDNN_CONVOLUTION_MODE_CONVOLUTION round-trips correctly
+    // Verify HIPDNN_CONVOLUTION round-trips correctly
     // (contrasting with CROSS_CORRELATION tested in DeserializePreservesConvolutionParameters)
     auto xDesc = createFinalizedTensor(K_TENSOR_X_UID);
     auto wDesc
@@ -446,7 +446,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionModeConvolutio
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     // Use CONVOLUTION mode (not CROSS_CORRELATION)
-    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION;
     convDesc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     convDesc->finalize();

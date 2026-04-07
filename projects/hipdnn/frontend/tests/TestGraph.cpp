@@ -4499,7 +4499,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
     // Mock getting knob count
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -4517,7 +4517,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
     // Mock getting actual knob data
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     1,
                                     _,
@@ -4556,7 +4556,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
     // Mock setting knob settings on engine config
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(engineConfigDesc,
-                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     1,
                                     NotNull()))
@@ -4648,7 +4648,7 @@ TEST_F(TestGraph, CreateExecutionPlanWithInt64Knobs)
     // Mock getting knob count
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -4666,7 +4666,7 @@ TEST_F(TestGraph, CreateExecutionPlanWithInt64Knobs)
     // Mock getting actual knob data
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     1,
                                     _,
@@ -4705,7 +4705,7 @@ TEST_F(TestGraph, CreateExecutionPlanWithInt64Knobs)
     // Mock setting knob settings on engine config
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(engineConfigDesc,
-                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     1,
                                     NotNull()))
@@ -4812,7 +4812,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
     // Mock getting knob count
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -4830,7 +4830,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
     // Mock getting actual knob data
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     2,
                                     _,
@@ -4871,7 +4871,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
     // Mock setting knob settings on engine config (2 knobs)
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(engineConfigDesc,
-                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     2,
                                     NotNull()))
@@ -4964,7 +4964,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
     // Mock getting knob count - return 0 (no knobs available)
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -5081,7 +5081,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
     // Mock getting knob count
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -5099,7 +5099,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
     // Mock getting actual knob data
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     1,
                                     _,
@@ -5138,7 +5138,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
     // Mock setting knob settings - only 1 valid knob should be set
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(engineConfigDesc,
-                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     1,
                                     NotNull()))
@@ -5243,7 +5243,7 @@ TEST_F(TestGraph, GetKnobsForEngineReturnsEmptyVectorWhenNoKnobs)
     // Mock getting knob count - return 0 (no knobs)
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -5340,7 +5340,7 @@ TEST_F(TestGraph, GetKnobsForEngineReturnsKnobsWhenAvailable)
     // Mock getting knob count - return 2
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -5358,7 +5358,7 @@ TEST_F(TestGraph, GetKnobsForEngineReturnsKnobsWhenAvailable)
     // Mock getting actual knob data
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     2,
                                     _,
@@ -5464,7 +5464,7 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesDeprecatedKnobs)
     // Mock getting knob count
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -5482,7 +5482,7 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesDeprecatedKnobs)
     // Mock getting actual knob data
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     1,
                                     _,
@@ -5578,7 +5578,7 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
     // Mock getting knob count
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -5596,7 +5596,7 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
     // Mock getting actual knob data
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     1,
                                     _,
@@ -5685,7 +5685,7 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesCountMismatch)
     // Mock getting knob count - return 2
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -5703,7 +5703,7 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesCountMismatch)
     // Mock getting actual knob data - but return different count
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     2,
                                     _,
@@ -5807,7 +5807,7 @@ TEST_F(TestGraph, GetKnobLookupForEngineReturnsMapByKnobId)
     // Mock getting knob count
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -5825,7 +5825,7 @@ TEST_F(TestGraph, GetKnobLookupForEngineReturnsMapByKnobId)
     // Mock getting actual knob data
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     2,
                                     _,
@@ -5907,7 +5907,7 @@ TEST_F(TestGraph, GetKnobLookupForEngineReturnsEmptyMapWhenNoKnobs)
     // Mock getting knob count - return 0
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -5976,7 +5976,7 @@ TEST_F(TestGraph, GetKnobLookupForEngineClearsPreExistingEntries)
     // Mock getting knob count - return 0
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -6197,7 +6197,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithDeprecatedKnob)
     // Mock getting knob count
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     0,
                                     _,
@@ -6215,7 +6215,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithDeprecatedKnob)
     // Mock getting actual knob data
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(engineDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     1,
                                     _,
@@ -6254,7 +6254,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithDeprecatedKnob)
     // Mock setting knob settings on engine config (deprecated knob still works)
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(engineConfigDesc,
-                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                     HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                     1,
                                     NotNull()))
@@ -6604,7 +6604,7 @@ TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
     EXPECT_FALSE(config->matchOperation("conv_fprop", {x8, w}).has_value());
 }
 
-TEST_F(TestGraph, SdpaFpropNodeCreation)
+TEST_F(TestGraph, SdpaFwdNodeCreation)
 {
     Graph graph;
     graph.set_io_data_type(DataType::FLOAT)
@@ -6633,7 +6633,7 @@ TEST_F(TestGraph, SdpaFpropNodeCreation)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
-TEST_F(TestGraph, SdpaFpropNodeCreationWithStats)
+TEST_F(TestGraph, SdpaFwdNodeCreationWithStats)
 {
     Graph graph;
     graph.set_io_data_type(DataType::FLOAT)
@@ -6665,7 +6665,7 @@ TEST_F(TestGraph, SdpaFpropNodeCreationWithStats)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
-TEST_F(TestGraph, BuildAndSerializeSdpaFpropGraph)
+TEST_F(TestGraph, BuildAndSerializeSdpaFwdGraph)
 {
     Graph graph;
     graph.set_name("SerializedSdpaGraph")
@@ -6737,7 +6737,7 @@ TEST_F(TestGraph, BuildAndSerializeSdpaFpropGraph)
     EXPECT_FALSE(deserializedSdpaAttributes->stats_tensor_uid.has_value());
 }
 
-TEST_F(TestGraph, BuildAndSerializeSdpaFpropGraphWithStats)
+TEST_F(TestGraph, BuildAndSerializeSdpaFwdGraphWithStats)
 {
     Graph graph;
     graph.set_name("SerializedSdpaStatsGraph")

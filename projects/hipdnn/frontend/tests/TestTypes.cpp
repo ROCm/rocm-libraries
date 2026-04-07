@@ -23,6 +23,7 @@ TEST(TestTypes, ToSdkTypeDataTypes)
     EXPECT_EQ(toSdkType(DataType::INT4), hipdnn_data_sdk::data_objects::DataType::INT4);
     EXPECT_EQ(toSdkType(DataType::FP6_E2M3), hipdnn_data_sdk::data_objects::DataType::FP6_E2M3);
     EXPECT_EQ(toSdkType(DataType::FP6_E3M2), hipdnn_data_sdk::data_objects::DataType::FP6_E3M2);
+    EXPECT_EQ(toSdkType(DataType::INT64), hipdnn_data_sdk::data_objects::DataType::INT64);
     EXPECT_EQ(toSdkType(DataType::NOT_SET), hipdnn_data_sdk::data_objects::DataType::UNSET);
 }
 
@@ -44,6 +45,7 @@ TEST(TestTypes, FromSdkTypeDataTypes)
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT4), DataType::INT4);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP6_E2M3), DataType::FP6_E2M3);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP6_E3M2), DataType::FP6_E3M2);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT64), DataType::INT64);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::UNSET), DataType::NOT_SET);
 }
 
@@ -89,6 +91,7 @@ TEST(TestTypes, GetDataTypeEnumFromType)
     EXPECT_EQ(getDataTypeEnumFromType<int8_t>(), DataType::INT8);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e4m3>(), DataType::FP8_E4M3);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e5m2>(), DataType::FP8_E5M2);
+    EXPECT_EQ(getDataTypeEnumFromType<int64_t>(), DataType::INT64);
 
     EXPECT_EQ(getDataTypeEnumFromType<float*>(), DataType::NOT_SET);
     EXPECT_EQ(getDataTypeEnumFromType<char>(), DataType::NOT_SET);
@@ -112,6 +115,7 @@ TEST(TestTypes, DataTypeToString)
     EXPECT_STREQ(to_string(DataType::INT4), "int4");
     EXPECT_STREQ(to_string(DataType::FP6_E2M3), "fp6_e2m3");
     EXPECT_STREQ(to_string(DataType::FP6_E3M2), "fp6_e3m2");
+    EXPECT_STREQ(to_string(DataType::INT64), "int64");
     EXPECT_STREQ(to_string(DataType::NOT_SET), "unknown");
 }
 
@@ -175,6 +179,10 @@ TEST(TestTypes, DataTypeStreamOperator)
 
     oss << DataType::FP6_E3M2;
     EXPECT_EQ(oss.str(), "fp6_e3m2");
+    oss.str("");
+
+    oss << DataType::INT64;
+    EXPECT_EQ(oss.str(), "int64");
     oss.str("");
 
     oss << DataType::NOT_SET;
@@ -284,8 +292,9 @@ TEST(TestTypes, ToHipdnnDataType)
     EXPECT_EQ(toHipdnnDataType(DataType::FP8_E8M0), HIPDNN_DATA_FP8_E8M0);
     EXPECT_EQ(toHipdnnDataType(DataType::FP4_E2M1), HIPDNN_DATA_FP4_E2M1);
     EXPECT_EQ(toHipdnnDataType(DataType::INT4), HIPDNN_DATA_INT4);
-    EXPECT_EQ(toHipdnnDataType(DataType::FP6_E2M3), HIPDNN_DATA_FP6_E2M3);
-    EXPECT_EQ(toHipdnnDataType(DataType::FP6_E3M2), HIPDNN_DATA_FP6_E3M2);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP6_E2M3), HIPDNN_DATA_FP6_E2M3_EXT);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP6_E3M2), HIPDNN_DATA_FP6_E3M2_EXT);
+    EXPECT_EQ(toHipdnnDataType(DataType::INT64), HIPDNN_DATA_INT64);
     EXPECT_EQ(toHipdnnDataType(DataType::NOT_SET), std::nullopt);
 }
 
@@ -312,8 +321,9 @@ TEST(TestTypes, FromHipdnnDataTypeAllValidTypes)
     check(HIPDNN_DATA_FP8_E8M0, DataType::FP8_E8M0);
     check(HIPDNN_DATA_FP4_E2M1, DataType::FP4_E2M1);
     check(HIPDNN_DATA_INT4, DataType::INT4);
-    check(HIPDNN_DATA_FP6_E2M3, DataType::FP6_E2M3);
-    check(HIPDNN_DATA_FP6_E3M2, DataType::FP6_E3M2);
+    check(HIPDNN_DATA_FP6_E2M3_EXT, DataType::FP6_E2M3);
+    check(HIPDNN_DATA_FP6_E3M2_EXT, DataType::FP6_E3M2);
+    check(HIPDNN_DATA_INT64, DataType::INT64);
 }
 
 TEST(TestTypes, FromHipdnnDataTypeUnknownReturnsError)
@@ -345,7 +355,8 @@ TEST(TestTypes, FromHipdnnDataTypeRoundTrip)
                    DataType::FP4_E2M1,
                    DataType::INT4,
                    DataType::FP6_E2M3,
-                   DataType::FP6_E3M2})
+                   DataType::FP6_E3M2,
+                   DataType::INT64})
     {
         auto hipdnnOpt = toHipdnnDataType(dt);
         ASSERT_TRUE(hipdnnOpt.has_value()) << "toHipdnnDataType failed for " << to_string(dt);
@@ -359,11 +370,11 @@ TEST(TestTypes, FromHipdnnConvModeValidModes)
 {
     using namespace hipdnn_frontend;
 
-    auto [xcorr, xcorrErr] = fromHipdnnConvMode(HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    auto [xcorr, xcorrErr] = fromHipdnnConvMode(HIPDNN_CROSS_CORRELATION);
     EXPECT_TRUE(xcorrErr.is_good());
     EXPECT_EQ(xcorr, ConvolutionMode::CROSS_CORRELATION);
 
-    auto [conv, convErr] = fromHipdnnConvMode(HIPDNN_CONVOLUTION_MODE_CONVOLUTION);
+    auto [conv, convErr] = fromHipdnnConvMode(HIPDNN_CONVOLUTION);
     EXPECT_TRUE(convErr.is_good());
     EXPECT_EQ(conv, ConvolutionMode::CONVOLUTION);
 }
@@ -542,11 +553,11 @@ TEST(TestTypes, FromHipdnnNormFwdPhaseValidPhases)
 {
     using namespace hipdnn_frontend;
 
-    auto [inference, inferenceErr] = fromHipdnnNormFwdPhase(HIPDNN_NORM_FWD_PHASE_INFERENCE);
+    auto [inference, inferenceErr] = fromHipdnnNormFwdPhase(HIPDNN_NORM_FWD_INFERENCE);
     EXPECT_TRUE(inferenceErr.is_good());
     EXPECT_EQ(inference, NormFwdPhase::INFERENCE);
 
-    auto [training, trainingErr] = fromHipdnnNormFwdPhase(HIPDNN_NORM_FWD_PHASE_TRAINING);
+    auto [training, trainingErr] = fromHipdnnNormFwdPhase(HIPDNN_NORM_FWD_TRAINING);
     EXPECT_TRUE(trainingErr.is_good());
     EXPECT_EQ(training, NormFwdPhase::TRAINING);
 }
@@ -727,4 +738,74 @@ TEST(TestTypes, FromHipdnnPointwiseModeRoundTrip)
             << "fromHipdnnPointwiseMode failed for mode " << static_cast<int>(mode);
         EXPECT_EQ(roundTripped, mode) << "Round-trip mismatch for mode " << static_cast<int>(mode);
     }
+}
+
+TEST(TestTypes, FromHipdnnReductionModeAllValidModes)
+{
+    using namespace hipdnn_frontend;
+
+    const std::vector<std::pair<hipdnnReduceTensorOp_t, ReductionMode>> validModes = {
+        {HIPDNN_REDUCE_TENSOR_ADD, ReductionMode::ADD},
+        {HIPDNN_REDUCE_TENSOR_MUL, ReductionMode::MUL},
+        {HIPDNN_REDUCE_TENSOR_MIN, ReductionMode::MIN},
+        {HIPDNN_REDUCE_TENSOR_MAX, ReductionMode::MAX},
+        {HIPDNN_REDUCE_TENSOR_AMAX, ReductionMode::AMAX},
+        {HIPDNN_REDUCE_TENSOR_AVG, ReductionMode::AVG},
+        {HIPDNN_REDUCE_TENSOR_NORM1, ReductionMode::NORM1},
+        {HIPDNN_REDUCE_TENSOR_NORM2, ReductionMode::NORM2},
+        {HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS, ReductionMode::MUL_NO_ZEROS},
+    };
+
+    for(const auto& [hipdnnMode, expectedMode] : validModes)
+    {
+        auto [mode, err] = fromHipdnnReduceTensorOp(hipdnnMode);
+        EXPECT_TRUE(err.is_good())
+            << "fromHipdnnReduceTensorOp failed for mode value " << static_cast<int>(hipdnnMode);
+        EXPECT_EQ(mode, expectedMode) << "Mismatch for mode value " << static_cast<int>(hipdnnMode);
+    }
+}
+
+TEST(TestTypes, FromHipdnnReductionModeUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownMode = static_cast<hipdnnReduceTensorOp_t>(9999);
+    auto [mode, err] = fromHipdnnReduceTensorOp(unknownMode);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(mode, ReductionMode::NOT_SET);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnReductionModeRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto mode : {
+            ReductionMode::ADD,
+            ReductionMode::MUL,
+            ReductionMode::MIN,
+            ReductionMode::MAX,
+            ReductionMode::AMAX,
+            ReductionMode::AVG,
+            ReductionMode::NORM1,
+            ReductionMode::NORM2,
+            ReductionMode::MUL_NO_ZEROS,
+        })
+    {
+        auto hipdnnOpt = toBackendReductionMode(mode);
+        ASSERT_TRUE(hipdnnOpt.has_value())
+            << "toBackendReductionMode failed for mode " << static_cast<int>(mode);
+        auto [roundTripped, err] = fromHipdnnReduceTensorOp(hipdnnOpt.value());
+        EXPECT_TRUE(err.is_good())
+            << "fromHipdnnReduceTensorOp failed for mode " << static_cast<int>(mode);
+        EXPECT_EQ(roundTripped, mode) << "Round-trip mismatch for mode " << static_cast<int>(mode);
+    }
+}
+
+TEST(TestTypes, ToBackendReductionModeNotSetReturnsNullopt)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toBackendReductionMode(ReductionMode::NOT_SET), std::nullopt);
 }
