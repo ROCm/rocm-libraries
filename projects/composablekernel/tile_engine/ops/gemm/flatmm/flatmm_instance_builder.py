@@ -43,7 +43,6 @@ def normalize_gpu_targets(raw_targets):
 
 
 class FlatmmKernelBuilder(GemmKernelBuilder):
-    SUPPORTED_GPU_TARGETS = ["gfx90a", "gfx942", "gfx950"]
     DEFAULT_VECTOR_LOAD_SIZE_BYTES = 16
     DEFAULT_SMEM_CAPACITY_BYTES = 65536
     GFX950_SMEM_CAPACITY_BYTES = 163840
