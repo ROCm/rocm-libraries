@@ -43,8 +43,8 @@
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
-#include <hipdnn_frontend/node/SdpaBpropNode.hpp>
-#include <hipdnn_frontend/node/SdpaFpropNode.hpp>
+#include <hipdnn_frontend/node/SdpaBwdNode.hpp>
+#include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 #include <memory>
 #include <optional>
 #include <string>
@@ -199,7 +199,7 @@ void unpackNodeFromFlatBuffer(
                     outNodes);
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
-                unpackNodeFromFlatBuffer<graph::SdpaAttributes, graph::SdpaFpropNode>(
+                unpackNodeFromFlatBuffer<graph::SdpaAttributes, graph::SdpaFwdNode>(
                     fbNode,
                     fbNode->attributes_as_SdpaAttributes(),
                     tensorMap,
@@ -241,7 +241,7 @@ void unpackNodeFromFlatBuffer(
                     outNodes);
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes:
-                unpackNodeFromFlatBuffer<graph::SdpaBackwardAttributes, graph::SdpaBpropNode>(
+                unpackNodeFromFlatBuffer<graph::SdpaBackwardAttributes, graph::SdpaBwdNode>(
                     fbNode,
                     fbNode->attributes_as_SdpaBackwardAttributes(),
                     tensorMap,

@@ -25,6 +25,7 @@ public:
     ///
     /// Supports GQA/MQA: numHeads must be divisible by both numHeadsK and numHeadsV.
     /// Optionally adds an additive attention mask before softmax.
+    /// Optionally outputs LSE (log-sum-exp) for backward pass recomputation.
     ///
     /// @param q              Query tensor [B, H, Sq, D]
     /// @param k              Key tensor   [B, Hkv, Skv, D]
@@ -35,6 +36,10 @@ public:
     ///                       to [B, H, Sq, Skv] (rank 1–4), with broadcasting on size-1 dims
     /// @param causalMask     When true, applies a lower-triangular causal mask so each
     ///                       query position sq can only attend to kv positions skv <= sq
+    /// @param lse            Optional log-sum-exp output [B, H, Sq] (always float type).
+    ///                       Stores maxVal + log(sumExp) for each query position.
+    ///                       Used for memory-efficient backward pass recomputation.
+    ///                       Pass nullptr (default) to disable LSE output.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -47,7 +52,8 @@ public:
                         std::optional<float> attnScaleValue = std::nullopt,
                         const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask
                         = nullptr,
-                        bool causalMask = false)
+                        bool causalMask = false,
+                        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr)
     {
         if(q.dims().size() != 4)
         {
@@ -106,6 +112,23 @@ public:
         {
             throw std::invalid_argument(
                 "CpuFpReferenceSdpa: numHeads must be divisible by numHeadsK");
+        }
+
+        // Validate LSE tensor if provided
+        if(lse != nullptr)
+        {
+            if(lse->dims().size() != 3)
+            {
+                throw std::invalid_argument("CpuFpReferenceSdpa: lse must be rank-3 [B, H, Sq]");
+            }
+            if(lse->dims()[0] != batch || lse->dims()[1] != numHeads || lse->dims()[2] != seqQ)
+            {
+                throw std::invalid_argument(
+                    "CpuFpReferenceSdpa: lse shape must be [" + std::to_string(batch) + ", "
+                    + std::to_string(numHeads) + ", " + std::to_string(seqQ) + "] but got ["
+                    + std::to_string(lse->dims()[0]) + ", " + std::to_string(lse->dims()[1]) + ", "
+                    + std::to_string(lse->dims()[2]) + "]");
+            }
         }
 
         const auto headsPerHeadK = numHeads / numHeadsK;
@@ -188,6 +211,16 @@ public:
                 probs[static_cast<size_t>(skv)] /= sumExp;
             }
 
+            // Step 4b: Write LSE (log-sum-exp) if requested
+            // LSE = maxVal + log(sumExp) enables backward pass to recompute softmax
+            // probabilities without storing the full [B, H, Sq, Skv] attention matrix.
+            // For fully masked rows (sumExp = 0), log(0) = -inf which is correct.
+            if(lse != nullptr)
+            {
+                const float lseVal = maxVal + std::log(sumExp);
+                lse->setHostValue(lseVal, std::vector<int64_t>{b, h, sq});
+            }
+
             // Step 5: Weighted sum over V to produce O
             for(int64_t dv = 0; dv < headDimV; ++dv)
             {
@@ -208,6 +241,10 @@ public:
         parallelFunc(std::thread::hardware_concurrency());
 
         o.memory().markHostModified();
+        if(lse != nullptr)
+        {
+            lse->memory().markHostModified();
+        }
     }
 };
 

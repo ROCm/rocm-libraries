@@ -396,7 +396,7 @@ def _validate_config(config: OperationConfig) -> None:
                 raise ConfigError(
                     f"Operation '{config.name}', data field '{df.name}': "
                     f"mode fields must have 'test_backend_value' set "
-                    f"(e.g., 'HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION')."
+                    f"(e.g., 'HIPDNN_CROSS_CORRELATION')."
                 )
             if not df.backend_setter or not df.backend_getter:
                 raise ConfigError(

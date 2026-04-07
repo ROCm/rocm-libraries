@@ -421,7 +421,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
     int64_t modeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &modeCount, &convMode);
-    ASSERT_EQ(convMode, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    ASSERT_EQ(convMode, HIPDNN_CROSS_CORRELATION);
 
     // Verify getAttribute returns correct post_padding
     std::vector<int64_t> postPadding(2);
@@ -505,12 +505,12 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
     EXPECT_EQ(yUid, K_TENSOR_Y_UID);
 
     // Verify getAttribute returns correct operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT);
 }
 
 TEST_F(TestConvolutionFwdOperationFromNode, NamePreservedFromNode)
@@ -595,7 +595,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, NameSetViaAttributeRoundTrips)
                        HIPDNN_TYPE_INT64,
                        static_cast<int64_t>(dilationVals.size()),
                        dilationVals.data());
-    auto convMode = static_cast<int64_t>(HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    auto convMode = static_cast<int64_t>(HIPDNN_CROSS_CORRELATION);
     desc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     auto compType = static_cast<int64_t>(HIPDNN_DATA_FLOAT);

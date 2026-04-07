@@ -1668,10 +1668,10 @@ TEST_P(TestGraphSerializationRoundTrip, RMSNormNodeWithBias)
     roundTripAndCompare(graph);
 }
 
-TEST_P(TestGraphSerializationRoundTrip, SdpaFpropNode)
+TEST_P(TestGraphSerializationRoundTrip, SdpaFwdNode)
 {
     Graph graph;
-    graph.set_name("sdpa_fprop_test");
+    graph.set_name("sdpa_fwd_test");
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_io_data_type(DataType::HALF);
 
