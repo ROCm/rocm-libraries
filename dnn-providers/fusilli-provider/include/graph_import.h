@@ -26,8 +26,10 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include <format>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <unordered_map>
 
 #include "custom_ops.h"
@@ -109,8 +111,19 @@ private:
   // Helper class for reading from flatbuffer.
   hipdnn_plugin_sdk::GraphWrapper opGraphWrapper;
 
+  // Hash of the serialized FlatBuffer bytes, used as a fallback graph name
+  // when the hipDNN graph has no name set. This ensures a unique compile cache
+  // key per distinct graph structure.
+  std::string serializedGraphHash;
+
   GraphImport(const hipdnnPluginConstData_t *opGraph)
-      : opGraphWrapper(opGraph->ptr, opGraph->size) {}
+      : opGraphWrapper(opGraph->ptr, opGraph->size) {
+    std::hash<std::string_view> hasher;
+    size_t hash = hasher(std::string_view(
+        static_cast<const char *>(opGraph->ptr), opGraph->size));
+    // 016x: zero-pad to 16 hex digits (full 64-bit size_t, 64/4 = 16).
+    serializedGraphHash = std::format("hipdnn_{:016x}", hash);
+  }
 
   fusilli::ErrorObject importGraph() {
     const hipdnn_data_sdk::data_objects::Graph &hipDnnGraph =
@@ -128,7 +141,9 @@ private:
     FUSILLI_ASSIGN_OR_RETURN(
         computeDataType,
         hipDnnDataTypeToFusilliDataType(hipDnnGraph.compute_data_type()));
-    fusilliGraph.setName(hipDnnGraph.name()->str())
+    std::string graphName =
+        hipDnnGraph.name() ? hipDnnGraph.name()->str() : serializedGraphHash;
+    fusilliGraph.setName(graphName)
         .setIODataType(ioDataType)
         .setIntermediateDataType(intermediateDataType)
         .setComputeDataType(computeDataType);
