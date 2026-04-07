@@ -27,6 +27,8 @@ find_package(libhipcxx REQUIRED)
 # # Used for automatic generation of LLVM IR (by dissasembling bitcode generated during compilation from the "-save-temps" option)
 # find_program(LLVM_DIS llvm-dis REQUIRED HINTS /opt/rocm/llvm/bin)
 
+include(GNUInstallDirs)
+
 add_subdirectory(src)
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   add_subdirectory(test)
@@ -35,7 +37,6 @@ endif()
 #-----------------------------------------------------------------------------
 # Installation and Packaging Rules
 #-----------------------------------------------------------------------------
-include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -47,7 +48,7 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/inc/hip/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hipthreads/hip
 )
 
 install(TARGETS hipthreads
