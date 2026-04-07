@@ -3,7 +3,7 @@
 
 #pragma once
 #include "CommonRegister.h"
-#include "Profiler.h"
+#include "ProfilerInterface.h"
 #include "Types.h"
 #include <array>
 #include <cstdint>
@@ -99,7 +99,7 @@ public:
   RaceDetector *getDetector() { return detector; }
   const RaceDetector *getDetector() const { return detector; }
 
-  void setProfiler(Profiler *p) { profiler = p; }
+  void setProfiler(ProfilerInterface &p) { profiler_ = &p; }
 
 private:
   void registerEventWithIntervals(int pc, MemoryEventType type,
@@ -117,8 +117,6 @@ private:
     regEventCount[static_cast<int>(type)][reg]--;
   }
 
-  Profiler::ScopedStopwatch profileScope(std::string_view key);
-
   std::vector<std::vector<EventId>> vgprMemoryEvents;
   std::vector<std::vector<EventId>> sgprMemoryEvents;
   std::vector<int> sgprEventCount;
@@ -131,7 +129,7 @@ private:
 
   WaveId waveId;
   RaceDetector *detector;
-  Profiler *profiler = nullptr;
+  ProfilerInterface *profiler_ = &NullProfiler::instance();
 };
 
 } // namespace raceemulator

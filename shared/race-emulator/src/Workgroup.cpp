@@ -33,7 +33,7 @@ Workgroup::Workgroup(const WorkgroupConfig &config)
         lds.getSize(), config.nWaves, config.vgprCount, config.sgprCount,
         config.workgroupId, config.raceHandler);
     if (profiler) {
-      raceDetector->setProfiler(profiler);
+      raceDetector->setProfiler(*profiler);
     }
   }
 

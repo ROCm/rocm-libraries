@@ -16,8 +16,6 @@
 
 namespace raceemulator {
 
-class Profiler;
-
 /// Workgroup-level race detection state. Owns the event registry, live LDS
 /// event lists, per-byte counters, and per-wave WaveRaceStates.
 ///
@@ -131,9 +129,7 @@ public:
                     std::function<std::string_view(int)> getSourceLine) const;
 
 private:
-  /// Propagate profiler to all owned WaveRaceStates.
-  void setProfiler(Profiler *p);
-
+  void setProfiler(ProfilerInterface &p);
   WaveRaceState &getWaveRaceState(int waveIndex);
 
   static void adjustByteCounts(const IntervalSet &ivs, std::vector<int> &counts,

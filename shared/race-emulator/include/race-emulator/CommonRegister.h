@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
-#include <cassert>
-#include <cstring>
-#include <iostream>
 #include <ostream>
+#include <sstream>
 #include <string>
-#include <vector>
 
 namespace raceemulator {
 
@@ -66,7 +63,21 @@ public:
     return CommonRegister{Type::VGPR, idx};
   }
 
-  void appendStr(std::ostream &os) const;
-  std::string str() const;
+  void appendStr(std::ostream &os) const {
+    char prefix = (type == Type::SGPR) ? 's' : (type == Type::VGPR) ? 'v' : '?';
+    os << prefix << index;
+  }
+
+  std::string str() const {
+    std::ostringstream oss;
+    appendStr(oss);
+    return oss.str();
+  }
 };
+
+inline std::ostream &operator<<(std::ostream &os, const CommonRegister &reg) {
+  reg.appendStr(os);
+  return os;
+}
+
 } // namespace raceemulator

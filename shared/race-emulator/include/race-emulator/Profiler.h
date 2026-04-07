@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "ProfilerInterface.h"
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -56,7 +58,7 @@ namespace raceemulator {
 ///
 /// Not thread-safe. For multi-threaded use, give each thread its own Profiler
 /// and merge results afterwards.
-class Profiler {
+class Profiler : public ProfilerInterface {
   struct Entry {
     double totalSeconds = 0.0;
     uint64_t count = 0;
@@ -67,6 +69,13 @@ public:
   /// Construct a profiler. When disabled (default), scopedStopwatch() returns
   /// no-op instances with near-zero overhead.
   explicit Profiler(bool enabled = false) : enabled(enabled) {}
+  Profiler(const Profiler &other)
+      : enabled(other.enabled), nextScopeId(other.nextScopeId),
+        wallStart(other.wallStart), activeStart(other.activeStart),
+        scopeStack(other.scopeStack), entries(other.entries) {}
+  Profiler &operator=(const Profiler &) = delete;
+  Profiler(Profiler &&) = default;
+  Profiler &operator=(Profiler &&) = default;
 
   /// RAII stopwatch. Construct via Profiler::scopedStopwatch() to time a
   /// scope, or default-construct for a no-op instance (zero overhead).
@@ -116,6 +125,12 @@ public:
 
   bool isEnabled() const { return enabled; }
 
+  // ProfilerInterface implementation.
+  void beginScope(std::string_view key) override {
+    interfaceScope_.emplace(scopedStopwatch(key));
+  }
+  void endScope() override { interfaceScope_.reset(); }
+
   /// Print a sorted timing report.
   /// Entries below minPercentage of total time are aggregated into "other".
   void report(std::ostream &os, double minPercentage = 1.0) const;
@@ -157,6 +172,7 @@ private:
   Clock::time_point activeStart;
   std::vector<ScopeFrame> scopeStack;
   std::unordered_map<std::string, Entry> entries;
+  std::optional<ScopedStopwatch> interfaceScope_;
 };
 
 } // namespace raceemulator

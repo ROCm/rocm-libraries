@@ -24,10 +24,9 @@ WaveRaceState &RaceDetector::getWaveRaceState(int waveIndex) {
   return waveRaceStates[waveIndex];
 }
 
-void RaceDetector::setProfiler(Profiler *p) {
-  for (auto &wrs : waveRaceStates) {
+void RaceDetector::setProfiler(ProfilerInterface &p) {
+  for (auto &wrs : waveRaceStates)
     wrs.setProfiler(p);
-  }
 }
 
 EventId RaceDetector::allocateEventId(WaveId waveId, int pc,

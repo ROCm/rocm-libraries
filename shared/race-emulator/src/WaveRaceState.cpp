@@ -4,11 +4,20 @@
 #include "race-emulator/WaveRaceState.h"
 #include "race-emulator/IntervalSet.h"
 #include "race-emulator/RaceDetector.h"
-#include "race-emulator/Util.h"
 #include <bit>
 #include <span>
 
 namespace raceemulator {
+namespace {
+/// RAII guard for ProfilerInterface::beginScope/endScope.
+struct ProfileScope {
+  ProfilerInterface &p;
+  ProfileScope(ProfilerInterface &p, std::string_view key) : p(p) {
+    p.beginScope(key);
+  }
+  ~ProfileScope() { p.endScope(); }
+};
+} // namespace
 
 WaveRaceState::WaveRaceState(int vgprCount, int sgprCount, WaveId waveId,
                              RaceDetector *detector)
@@ -57,7 +66,7 @@ void WaveRaceState::registerEventWithIntervals(int pc, MemoryEventType type,
                                                uint64_t execMask,
                                                uint8_t byteMask,
                                                IntervalSet ldsIntervals) {
-  auto sw = profileScope("registerEvent");
+  ProfileScope ps(*profiler_, "registerEvent");
   bool toSgpr = isToSgpr(type);
   if (!toSgpr) {
     for (auto reg : regIds) {
@@ -112,7 +121,7 @@ void WaveRaceState::registerDualOffsetLdsEvent(
 }
 
 void WaveRaceState::retireEventRegisters(EventId eventId) {
-  auto sw = profileScope("retireEventRegisters");
+  ProfileScope ps(*profiler_, "retireEventRegisters");
   auto eventType = detector->getEventType(eventId);
   bool toSgpr = isToSgpr(eventType);
   for (uint32_t regId : detector->getEventRegisters(eventId)) {
@@ -167,7 +176,7 @@ void WaveRaceState::sWaitCntLgkmcnt(int lgkmcnt) {
 }
 
 void WaveRaceState::flushWaveCompleteMemoryEvents() {
-  auto sw = profileScope("removeEvents");
+  ProfileScope ps(*profiler_, "removeEvents");
   for (EventId eventId : waveCompleteMemoryEvents) {
     detector->retireEvent(eventId);
   }
@@ -220,11 +229,6 @@ void WaveRaceState::checkSgprRead(int reg) const {
                                   -1, false, detector->getWorkgroupId()});
     }
   }
-}
-
-Profiler::ScopedStopwatch WaveRaceState::profileScope(std::string_view key) {
-  return profiler ? profiler->scopedStopwatch(key)
-                  : Profiler::ScopedStopwatch{};
 }
 
 } // namespace raceemulator

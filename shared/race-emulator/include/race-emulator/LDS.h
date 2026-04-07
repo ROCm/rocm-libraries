@@ -3,6 +3,7 @@
 
 #pragma once
 #include "EmulatorException.h"
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <string>

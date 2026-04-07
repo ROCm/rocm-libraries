@@ -393,22 +393,6 @@ Profiler::ScopedStopwatch Wave::profileScope(std::string_view key) {
   return p ? p->scopedStopwatch(key) : Profiler::ScopedStopwatch{};
 }
 
-void CommonRegister::appendStr(std::ostream &os) const {
-  char prefix = (type == Type::SGPR) ? 's' : (type == Type::VGPR) ? 'v' : '?';
-  os << prefix << index;
-}
-
-std::string CommonRegister::str() const {
-  std::ostringstream oss;
-  appendStr(oss);
-  return oss.str();
-}
-
-std::ostream &operator<<(std::ostream &os, const CommonRegister &reg) {
-  reg.appendStr(os);
-  return os;
-}
-
 // ---------------------------------- Parsing Helpers
 
 namespace {} // namespace
