@@ -23,8 +23,8 @@ std::vector<PoolingTestCase> GetAsymNHWCPooling2dTestCases()
 
     // Dataset 1: Asymmetric dataset (NHWC)
     // Legacy test_drive coverage:
-    //   forward path:  test_pooling2d --all --dataset 1 --limit 0 --in_layout NHWC --out_layout NHWC
-    //   backward path: test_pooling2d --forw 0 --in_layout NHWC --out_layout NHWC
+    //   forward path:  test_pooling2d --all --dataset 1 --limit 0 --in_layout NHWC --out_layout
+    //   NHWC backward path: test_pooling2d --forw 0 --in_layout NHWC --out_layout NHWC
     std::vector<std::vector<int>> dataset1_inputs  = {{1, 4, 4, 4}};
     std::vector<std::vector<int>> dataset1_lens    = {{2, 2}, {1, 2}, {2, 1}};
     std::vector<std::vector<int>> dataset1_strides = {{1, 1}, {2, 1}, {1, 2}, {2, 2}};
