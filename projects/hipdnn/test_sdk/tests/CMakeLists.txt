@@ -22,6 +22,7 @@ add_executable(
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceLayernorm.cpp
     utilities/TestCpuFpReferenceMatmul.cpp
+    utilities/TestCpuFpReferenceReduction.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
     utilities/TestCpuFpReferenceUtilities.cpp
     utilities/TestCpuFpReferenceValidation.cpp
