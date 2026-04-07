@@ -69,7 +69,8 @@ TEST(TestHipKernelContainer, GetApplicableEngineIdsSdpaGraph)
 
     std::vector<int64_t> dims{4, 8, 256, 128};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    auto graph = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims, strides);
+    auto graph = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims, strides, dims, strides, dims, strides, dims, strides, DataType::BFLOAT16);
     auto graphBuffer = graph.Release();
 
     auto graphWrapper = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(graphBuffer.data(),
