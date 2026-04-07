@@ -22,7 +22,10 @@ endif()
 # Generate static lib libhipthreads.a
 add_library(hipthreads STATIC hip/thread.cxx)
 set_source_files_properties(hip/thread.cxx PROPERTIES LANGUAGE HIP)
-target_include_directories(hipthreads PRIVATE ${CMAKE_SOURCE_DIR}/inc)
+target_include_directories(hipthreads PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/inc>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipthreads>
+)
 
 if(NOT DISABLE_WERROR)
   target_compile_options(hipthreads PRIVATE "-Werror")
