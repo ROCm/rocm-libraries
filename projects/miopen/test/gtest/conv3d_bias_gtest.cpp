@@ -59,7 +59,7 @@ struct conv3d_bias_test : public conv_bias_test<T>, public testing::TestWithPara
 
 using GPU_Conv3d_Bias_FP32  = conv3d_bias_test<float>;
 using GPU_Conv3d_Bias_FP16  = conv3d_bias_test<half_float::half>;
-using GPU_Conv2d_Bias_BFP16 = conv3d_bias_test<bfloat16>;
+using GPU_Conv3d_Bias_BFP16 = conv3d_bias_test<bfloat16>;
 
 struct TestNameGenerator
 {
@@ -84,7 +84,7 @@ struct TestNameGenerator
 
 TEST_P(GPU_Conv3d_Bias_FP32, TestFloat) { run(); }
 TEST_P(GPU_Conv3d_Bias_FP16, TestFloat16) { run(); }
-TEST_P(GPU_Conv2d_Bias_BFP16, TestBFloat16) { run(); }
+TEST_P(GPU_Conv3d_Bias_BFP16, TestBFloat16) { run(); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv3d_Bias_FP32, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv3d_Bias_FP32, GetCasesFull(), TestNameGenerator{});
@@ -92,5 +92,5 @@ INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv3d_Bias_FP32, GetCasesFull(), TestNameGen
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv3d_Bias_FP16, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv3d_Bias_FP16, GetCasesFull(), TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv2d_Bias_BFP16, GetCasesSmoke(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2d_Bias_BFP16, GetCasesFull(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Conv3d_Bias_BFP16, GetCasesSmoke(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv3d_Bias_BFP16, GetCasesFull(), TestNameGenerator{});
