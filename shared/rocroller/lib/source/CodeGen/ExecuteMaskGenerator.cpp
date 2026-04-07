@@ -34,9 +34,7 @@ namespace rocRoller
             ConditionalOp const&                                 op,
             std::function<Generator<Instruction>(std::set<int>)> generateFn)
         {
-            auto const& architecture = m_context->targetArchitecture();
-            auto const  wavefrontSize
-                = architecture.GetCapability(GPUCapability::DefaultWavefrontSize);
+            auto const wavefrontSize = m_context->kernel()->wavefront_size();
             AssertFatal(wavefrontSize == 32 || wavefrontSize == 64, ShowValue(wavefrontSize));
 
             auto expr = m_fastArith(op.condition);
@@ -121,9 +119,7 @@ namespace rocRoller
             ConditionalOp const&                                 op,
             std::function<Generator<Instruction>(std::set<int>)> generateFn)
         {
-            auto const& architecture = m_context->targetArchitecture();
-            auto const  wavefrontSize
-                = architecture.GetCapability(GPUCapability::DefaultWavefrontSize);
+            auto const wavefrontSize = m_context->kernel()->wavefront_size();
             AssertFatal(wavefrontSize == 32 || wavefrontSize == 64, ShowValue(wavefrontSize));
 
             auto expr = m_fastArith(op.condition);
@@ -139,10 +135,10 @@ namespace rocRoller
                         ShowValue(varType),
                         ShowValue(wavefrontSize));
 
-            auto elseLabel
-                = m_context->labelAllocator()->label(fmt::format("ELSE_Conditional_EXECZ_{}", tag));
-            auto exitLabel
-                = m_context->labelAllocator()->label(fmt::format("EXIT_Conditional_EXECZ_{}", tag));
+            auto elseLabel = m_context->labelAllocator()->label(
+                fmt::format("ELSE_Conditional_EXECZ_{}", op.conditionName, tag));
+            auto exitLabel = m_context->labelAllocator()->label(
+                fmt::format("EXIT_Conditional_EXECZ_{}", op.conditionName, tag));
 
             co_yield Instruction::Lock(Scheduling::Dependency::Branch,
                                        "Lock for Conditional EXECZ");
