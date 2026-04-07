@@ -75,43 +75,41 @@ protected:
             .set_io_data_type(DataType::FLOAT);
 
         auto x = std::make_shared<TensorAttributes>();
-        x->set_uid(K_BATCHNORM_INTEG_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-        x->set_dim(toVec(K_BATCHNORM_INTEG_DATA_DIMS))
-            .set_stride(toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
+        x->set_uid(K_BATCHNORM_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+        x->set_dim(toVec(K_BATCHNORM_TENSOR_X_DIMS))
+            .set_stride(toVec(K_BATCHNORM_TENSOR_X_STRIDES));
 
         auto scale = std::make_shared<TensorAttributes>();
-        scale->set_uid(K_BATCHNORM_INTEG_TENSOR_SCALE_UID)
+        scale->set_uid(K_BATCHNORM_TENSOR_SCALE_UID)
             .set_name("Scale")
             .set_data_type(DataType::FLOAT);
-        scale->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+        scale->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
         auto bias = std::make_shared<TensorAttributes>();
-        bias->set_uid(K_BATCHNORM_INTEG_TENSOR_BIAS_UID)
-            .set_name("Bias")
-            .set_data_type(DataType::FLOAT);
-        bias->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+        bias->set_uid(K_BATCHNORM_TENSOR_BIAS_UID).set_name("Bias").set_data_type(DataType::FLOAT);
+        bias->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
         auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
-        epsilon->set_uid(K_BATCHNORM_INTEG_TENSOR_EPSILON_UID).set_name("Epsilon");
+        epsilon->set_uid(K_BATCHNORM_TENSOR_EPSILON_UID).set_name("Epsilon");
 
         auto prevRunMean = std::make_shared<TensorAttributes>();
-        prevRunMean->set_uid(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID)
+        prevRunMean->set_uid(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID)
             .set_name("PrevRunMean")
             .set_data_type(DataType::FLOAT);
-        prevRunMean->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+        prevRunMean->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
         auto prevRunVar = std::make_shared<TensorAttributes>();
-        prevRunVar->set_uid(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID)
+        prevRunVar->set_uid(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID)
             .set_name("PrevRunVar")
             .set_data_type(DataType::FLOAT);
-        prevRunVar->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+        prevRunVar->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
         auto momentum = std::make_shared<TensorAttributes>(0.1f);
-        momentum->set_uid(K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID).set_name("Momentum");
+        momentum->set_uid(K_BATCHNORM_TENSOR_MOMENTUM_UID).set_name("Momentum");
 
         BatchnormAttributes bnAttrs;
         bnAttrs.set_name("bn_fwd_op");
@@ -120,15 +118,15 @@ protected:
 
         auto [y, meanOut, invVarOut, nextRunMean, nextRunVar]
             = graph->batchnorm(x, scale, bias, bnAttrs);
-        y->set_uid(K_BATCHNORM_INTEG_TENSOR_Y_UID).set_output(true).set_name("Y");
-        meanOut->set_uid(K_BATCHNORM_INTEG_TENSOR_MEAN_UID).set_output(true).set_name("Mean");
-        invVarOut->set_uid(K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID)
+        y->set_uid(K_BATCHNORM_TENSOR_Y_UID).set_output(true).set_name("Y");
+        meanOut->set_uid(K_BATCHNORM_TENSOR_MEAN_UID).set_output(true).set_name("Mean");
+        invVarOut->set_uid(K_BATCHNORM_TENSOR_INV_VARIANCE_UID)
             .set_output(true)
             .set_name("InvVariance");
-        nextRunMean->set_uid(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID)
+        nextRunMean->set_uid(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID)
             .set_output(true)
             .set_name("NextRunMean");
-        nextRunVar->set_uid(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID)
+        nextRunVar->set_uid(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID)
             .set_output(true)
             .set_name("NextRunVar");
 
@@ -146,22 +144,22 @@ protected:
 
         auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_BATCHNORM_MINIMAL_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-        x->set_dim(toVec(K_BATCHNORM_INTEG_DATA_DIMS))
-            .set_stride(toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
+        x->set_dim(toVec(K_BATCHNORM_TENSOR_X_DIMS))
+            .set_stride(toVec(K_BATCHNORM_TENSOR_X_STRIDES));
 
         auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_BATCHNORM_MINIMAL_TENSOR_SCALE_UID)
             .set_name("Scale")
             .set_data_type(DataType::FLOAT);
-        scale->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+        scale->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
         auto bias = std::make_shared<TensorAttributes>();
         bias->set_uid(K_BATCHNORM_MINIMAL_TENSOR_BIAS_UID)
             .set_name("Bias")
             .set_data_type(DataType::FLOAT);
-        bias->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+        bias->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
         auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
         epsilon->set_uid(K_BATCHNORM_MINIMAL_TENSOR_EPSILON_UID).set_name("Epsilon");
@@ -217,63 +215,63 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BasicBatchnormRoundTrip)
            "nextRunMean, nextRunVar)";
 
     // Verify X tensor
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_X_UID), 0u);
-    auto liftedX = tensorMap[K_BATCHNORM_INTEG_TENSOR_X_UID];
-    EXPECT_EQ(liftedX->get_uid(), K_BATCHNORM_INTEG_TENSOR_X_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_X_UID), 0u);
+    auto liftedX = tensorMap[K_BATCHNORM_TENSOR_X_UID];
+    EXPECT_EQ(liftedX->get_uid(), K_BATCHNORM_TENSOR_X_UID);
     EXPECT_EQ(liftedX->get_name(), "X");
-    EXPECT_EQ(liftedX->get_dim(), toVec(K_BATCHNORM_INTEG_DATA_DIMS));
-    EXPECT_EQ(liftedX->get_stride(), toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
+    EXPECT_EQ(liftedX->get_dim(), toVec(K_BATCHNORM_TENSOR_X_DIMS));
+    EXPECT_EQ(liftedX->get_stride(), toVec(K_BATCHNORM_TENSOR_X_STRIDES));
     EXPECT_EQ(liftedX->get_data_type(), DataType::FLOAT);
 
     // Verify Y tensor
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_Y_UID), 0u);
-    auto liftedY = tensorMap[K_BATCHNORM_INTEG_TENSOR_Y_UID];
-    EXPECT_EQ(liftedY->get_uid(), K_BATCHNORM_INTEG_TENSOR_Y_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_Y_UID), 0u);
+    auto liftedY = tensorMap[K_BATCHNORM_TENSOR_Y_UID];
+    EXPECT_EQ(liftedY->get_uid(), K_BATCHNORM_TENSOR_Y_UID);
     EXPECT_EQ(liftedY->get_name(), "Y");
-    EXPECT_EQ(liftedY->get_dim(), toVec(K_BATCHNORM_INTEG_DATA_DIMS));
-    EXPECT_EQ(liftedY->get_stride(), toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
+    EXPECT_EQ(liftedY->get_dim(), toVec(K_BATCHNORM_TENSOR_X_DIMS));
+    EXPECT_EQ(liftedY->get_stride(), toVec(K_BATCHNORM_TENSOR_X_STRIDES));
     EXPECT_EQ(liftedY->get_data_type(), DataType::FLOAT);
 
     // Verify Scale tensor
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_SCALE_UID), 0u);
-    auto liftedScale = tensorMap[K_BATCHNORM_INTEG_TENSOR_SCALE_UID];
-    EXPECT_EQ(liftedScale->get_uid(), K_BATCHNORM_INTEG_TENSOR_SCALE_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_SCALE_UID), 0u);
+    auto liftedScale = tensorMap[K_BATCHNORM_TENSOR_SCALE_UID];
+    EXPECT_EQ(liftedScale->get_uid(), K_BATCHNORM_TENSOR_SCALE_UID);
     EXPECT_EQ(liftedScale->get_name(), "Scale");
-    EXPECT_EQ(liftedScale->get_dim(), toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
-    EXPECT_EQ(liftedScale->get_stride(), toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(liftedScale->get_dim(), toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(liftedScale->get_stride(), toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
     EXPECT_EQ(liftedScale->get_data_type(), DataType::FLOAT);
 
     // Verify Bias tensor
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_BIAS_UID), 0u);
-    auto liftedBias = tensorMap[K_BATCHNORM_INTEG_TENSOR_BIAS_UID];
-    EXPECT_EQ(liftedBias->get_uid(), K_BATCHNORM_INTEG_TENSOR_BIAS_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_BIAS_UID), 0u);
+    auto liftedBias = tensorMap[K_BATCHNORM_TENSOR_BIAS_UID];
+    EXPECT_EQ(liftedBias->get_uid(), K_BATCHNORM_TENSOR_BIAS_UID);
     EXPECT_EQ(liftedBias->get_name(), "Bias");
-    EXPECT_EQ(liftedBias->get_dim(), toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
-    EXPECT_EQ(liftedBias->get_stride(), toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(liftedBias->get_dim(), toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(liftedBias->get_stride(), toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
     EXPECT_EQ(liftedBias->get_data_type(), DataType::FLOAT);
 
     // Verify PrevRunMean tensor
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID), 0u);
-    auto liftedPrevRunMean = tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID];
-    EXPECT_EQ(liftedPrevRunMean->get_uid(), K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID), 0u);
+    auto liftedPrevRunMean = tensorMap[K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID];
+    EXPECT_EQ(liftedPrevRunMean->get_uid(), K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID);
     EXPECT_EQ(liftedPrevRunMean->get_name(), "PrevRunMean");
-    EXPECT_EQ(liftedPrevRunMean->get_dim(), toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
-    EXPECT_EQ(liftedPrevRunMean->get_stride(), toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(liftedPrevRunMean->get_dim(), toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(liftedPrevRunMean->get_stride(), toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
     EXPECT_EQ(liftedPrevRunMean->get_data_type(), DataType::FLOAT);
 
     // Verify PrevRunVar tensor
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID), 0u);
-    auto liftedPrevRunVar = tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID];
-    EXPECT_EQ(liftedPrevRunVar->get_uid(), K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID), 0u);
+    auto liftedPrevRunVar = tensorMap[K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID];
+    EXPECT_EQ(liftedPrevRunVar->get_uid(), K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID);
     EXPECT_EQ(liftedPrevRunVar->get_name(), "PrevRunVar");
-    EXPECT_EQ(liftedPrevRunVar->get_dim(), toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
-    EXPECT_EQ(liftedPrevRunVar->get_stride(), toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(liftedPrevRunVar->get_dim(), toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(liftedPrevRunVar->get_stride(), toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
     EXPECT_EQ(liftedPrevRunVar->get_data_type(), DataType::FLOAT);
 
     // Verify Epsilon tensor (scalar): pass-by-value with actual value preserved
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_EPSILON_UID), 0u);
-    auto liftedEpsilon = tensorMap[K_BATCHNORM_INTEG_TENSOR_EPSILON_UID];
-    EXPECT_EQ(liftedEpsilon->get_uid(), K_BATCHNORM_INTEG_TENSOR_EPSILON_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_EPSILON_UID), 0u);
+    auto liftedEpsilon = tensorMap[K_BATCHNORM_TENSOR_EPSILON_UID];
+    EXPECT_EQ(liftedEpsilon->get_uid(), K_BATCHNORM_TENSOR_EPSILON_UID);
     EXPECT_EQ(liftedEpsilon->get_name(), "Epsilon");
     EXPECT_EQ(liftedEpsilon->get_dim(), std::vector<int64_t>{1});
     EXPECT_EQ(liftedEpsilon->get_stride(), std::vector<int64_t>{1});
@@ -283,9 +281,9 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BasicBatchnormRoundTrip)
     EXPECT_FLOAT_EQ(liftedEpsilon->get_pass_by_value<float>().value(), 1e-5f);
 
     // Verify Momentum tensor (scalar): pass-by-value with actual value preserved
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID), 0u);
-    auto liftedMomentum = tensorMap[K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID];
-    EXPECT_EQ(liftedMomentum->get_uid(), K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_MOMENTUM_UID), 0u);
+    auto liftedMomentum = tensorMap[K_BATCHNORM_TENSOR_MOMENTUM_UID];
+    EXPECT_EQ(liftedMomentum->get_uid(), K_BATCHNORM_TENSOR_MOMENTUM_UID);
     EXPECT_EQ(liftedMomentum->get_name(), "Momentum");
     EXPECT_EQ(liftedMomentum->get_dim(), std::vector<int64_t>{1});
     EXPECT_EQ(liftedMomentum->get_stride(), std::vector<int64_t>{1});
@@ -295,33 +293,33 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BasicBatchnormRoundTrip)
     EXPECT_FLOAT_EQ(liftedMomentum->get_pass_by_value<float>().value(), 0.1f);
 
     // Verify Mean tensor (inferred dims)
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_MEAN_UID), 0u);
-    auto liftedMean = tensorMap[K_BATCHNORM_INTEG_TENSOR_MEAN_UID];
-    EXPECT_EQ(liftedMean->get_uid(), K_BATCHNORM_INTEG_TENSOR_MEAN_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_MEAN_UID), 0u);
+    auto liftedMean = tensorMap[K_BATCHNORM_TENSOR_MEAN_UID];
+    EXPECT_EQ(liftedMean->get_uid(), K_BATCHNORM_TENSOR_MEAN_UID);
     EXPECT_EQ(liftedMean->get_name(), "Mean");
     EXPECT_FALSE(liftedMean->get_dim().empty());
     EXPECT_FALSE(liftedMean->get_stride().empty());
 
     // Verify InvVariance tensor (inferred dims)
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID), 0u);
-    auto liftedInvVar = tensorMap[K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID];
-    EXPECT_EQ(liftedInvVar->get_uid(), K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_INV_VARIANCE_UID), 0u);
+    auto liftedInvVar = tensorMap[K_BATCHNORM_TENSOR_INV_VARIANCE_UID];
+    EXPECT_EQ(liftedInvVar->get_uid(), K_BATCHNORM_TENSOR_INV_VARIANCE_UID);
     EXPECT_EQ(liftedInvVar->get_name(), "InvVariance");
     EXPECT_FALSE(liftedInvVar->get_dim().empty());
     EXPECT_FALSE(liftedInvVar->get_stride().empty());
 
     // Verify NextRunMean tensor (inferred dims)
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID), 0u);
-    auto liftedNextRunMean = tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID];
-    EXPECT_EQ(liftedNextRunMean->get_uid(), K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID), 0u);
+    auto liftedNextRunMean = tensorMap[K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID];
+    EXPECT_EQ(liftedNextRunMean->get_uid(), K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID);
     EXPECT_EQ(liftedNextRunMean->get_name(), "NextRunMean");
     EXPECT_FALSE(liftedNextRunMean->get_dim().empty());
     EXPECT_FALSE(liftedNextRunMean->get_stride().empty());
 
     // Verify NextRunVar tensor (inferred dims)
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID), 0u);
-    auto liftedNextRunVar = tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID];
-    EXPECT_EQ(liftedNextRunVar->get_uid(), K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID), 0u);
+    auto liftedNextRunVar = tensorMap[K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID];
+    EXPECT_EQ(liftedNextRunVar->get_uid(), K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID);
     EXPECT_EQ(liftedNextRunVar->get_name(), "NextRunVar");
     EXPECT_FALSE(liftedNextRunVar->get_dim().empty());
     EXPECT_FALSE(liftedNextRunVar->get_stride().empty());
@@ -366,27 +364,24 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormTensorSharingPreserved)
     ASSERT_NE(bnNode, nullptr);
 
     // Verify pointer equality: tensor map and node attributes share the same objects
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_X_UID].get(), bnNode->attributes.get_x().get());
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_SCALE_UID].get(),
-              bnNode->attributes.get_scale().get());
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_BIAS_UID].get(),
-              bnNode->attributes.get_bias().get());
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_EPSILON_UID].get(),
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_X_UID].get(), bnNode->attributes.get_x().get());
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_SCALE_UID].get(), bnNode->attributes.get_scale().get());
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_BIAS_UID].get(), bnNode->attributes.get_bias().get());
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_EPSILON_UID].get(),
               bnNode->attributes.get_epsilon().get());
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_Y_UID].get(), bnNode->attributes.get_y().get());
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_MEAN_UID].get(),
-              bnNode->attributes.get_mean().get());
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID].get(),
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_Y_UID].get(), bnNode->attributes.get_y().get());
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_MEAN_UID].get(), bnNode->attributes.get_mean().get());
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_INV_VARIANCE_UID].get(),
               bnNode->attributes.get_inv_variance().get());
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID].get(),
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID].get(),
               bnNode->attributes.get_prev_running_mean().get());
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID].get(),
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID].get(),
               bnNode->attributes.get_prev_running_variance().get());
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID].get(),
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_MOMENTUM_UID].get(),
               bnNode->attributes.get_momentum().get());
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID].get(),
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID].get(),
               bnNode->attributes.get_next_running_mean().get());
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID].get(),
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID].get(),
               bnNode->attributes.get_next_running_variance().get());
 }
 
@@ -434,63 +429,59 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormLiftWithoutFinalization)
     EXPECT_EQ(bnNode->attributes.compute_data_type, DataType::FLOAT);
 
     // Verify key tensor dims and names
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_X_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_X_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_DATA_DIMS));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_X_UID]->get_stride(),
-              toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_X_UID]->get_name(), "X");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_X_UID]->get_dim(), toVec(K_BATCHNORM_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_X_UID]->get_stride(),
+              toVec(K_BATCHNORM_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_X_UID]->get_name(), "X");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_Y_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_Y_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_DATA_DIMS));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_Y_UID]->get_stride(),
-              toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_Y_UID]->get_name(), "Y");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_Y_UID]->get_dim(), toVec(K_BATCHNORM_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_Y_UID]->get_stride(),
+              toVec(K_BATCHNORM_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_Y_UID]->get_name(), "Y");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_SCALE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_SCALE_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_SCALE_UID]->get_stride(),
-              toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_SCALE_UID]->get_name(), "Scale");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_SCALE_UID]->get_dim(),
+              toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_SCALE_UID]->get_stride(),
+              toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_SCALE_UID]->get_name(), "Scale");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_BIAS_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_BIAS_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_BIAS_UID]->get_stride(),
-              toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_BIAS_UID]->get_name(), "Bias");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_BIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_BIAS_UID]->get_dim(),
+              toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_BIAS_UID]->get_stride(),
+              toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_BIAS_UID]->get_name(), "Bias");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_EPSILON_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_EPSILON_UID]->get_name(), "Epsilon");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_EPSILON_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_EPSILON_UID]->get_name(), "Epsilon");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID]->get_name(), "Momentum");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_MOMENTUM_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_MOMENTUM_UID]->get_name(), "Momentum");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID]->get_name(), "PrevRunMean");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID]->get_dim(),
+              toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID]->get_name(), "PrevRunMean");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID]->get_name(),
-              "PrevRunVar");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID]->get_dim(),
+              toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID]->get_name(), "PrevRunVar");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_MEAN_UID]->get_name(), "Mean");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_MEAN_UID]->get_name(), "Mean");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID]->get_name(), "InvVariance");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_INV_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_INV_VARIANCE_UID]->get_name(), "InvVariance");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID]->get_name(), "NextRunMean");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID]->get_name(), "NextRunMean");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID]->get_name(),
-              "NextRunVar");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID]->get_name(), "NextRunVar");
 }
 
 // Builds a minimal batchnorm graph (required tensors only + mean/invVariance,
@@ -523,23 +514,23 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormMinimalRequiredTensorsRou
               K_BATCHNORM_MINIMAL_TENSOR_X_UID);
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_X_UID]->get_name(), "X");
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_X_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_DATA_DIMS));
+              toVec(K_BATCHNORM_TENSOR_X_DIMS));
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_X_UID]->get_stride(),
-              toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
+              toVec(K_BATCHNORM_TENSOR_X_STRIDES));
 
     ASSERT_NE(tensorMap.count(K_BATCHNORM_MINIMAL_TENSOR_SCALE_UID), 0u);
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_SCALE_UID]->get_name(), "Scale");
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_SCALE_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
+              toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_SCALE_UID]->get_stride(),
-              toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+              toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
     ASSERT_NE(tensorMap.count(K_BATCHNORM_MINIMAL_TENSOR_BIAS_UID), 0u);
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_BIAS_UID]->get_name(), "Bias");
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_BIAS_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
+              toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_BIAS_UID]->get_stride(),
-              toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+              toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
     ASSERT_NE(tensorMap.count(K_BATCHNORM_MINIMAL_TENSOR_EPSILON_UID), 0u);
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_EPSILON_UID]->get_name(), "Epsilon");
@@ -547,9 +538,9 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormMinimalRequiredTensorsRou
     ASSERT_NE(tensorMap.count(K_BATCHNORM_MINIMAL_TENSOR_Y_UID), 0u);
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_Y_UID]->get_name(), "Y");
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_Y_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_DATA_DIMS));
+              toVec(K_BATCHNORM_TENSOR_X_DIMS));
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_Y_UID]->get_stride(),
-              toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
+              toVec(K_BATCHNORM_TENSOR_X_STRIDES));
 
     ASSERT_NE(tensorMap.count(K_BATCHNORM_MINIMAL_TENSOR_MEAN_UID), 0u);
     EXPECT_EQ(tensorMap[K_BATCHNORM_MINIMAL_TENSOR_MEAN_UID]->get_name(), "Mean");
@@ -604,29 +595,29 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormRunningStatsPreserved)
     // Verify prev_running_mean
     auto prevRunMean = bnNode->attributes.get_prev_running_mean();
     ASSERT_NE(prevRunMean, nullptr) << "prev_running_mean should not be null";
-    EXPECT_EQ(prevRunMean->get_uid(), K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID);
+    EXPECT_EQ(prevRunMean->get_uid(), K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID);
     EXPECT_EQ(prevRunMean->get_name(), "PrevRunMean");
-    EXPECT_EQ(prevRunMean->get_dim(), toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
-    EXPECT_EQ(prevRunMean->get_stride(), toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(prevRunMean->get_dim(), toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(prevRunMean->get_stride(), toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
     // Verify prev_running_variance
     auto prevRunVar = bnNode->attributes.get_prev_running_variance();
     ASSERT_NE(prevRunVar, nullptr) << "prev_running_variance should not be null";
-    EXPECT_EQ(prevRunVar->get_uid(), K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID);
+    EXPECT_EQ(prevRunVar->get_uid(), K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID);
     EXPECT_EQ(prevRunVar->get_name(), "PrevRunVar");
-    EXPECT_EQ(prevRunVar->get_dim(), toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
-    EXPECT_EQ(prevRunVar->get_stride(), toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(prevRunVar->get_dim(), toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(prevRunVar->get_stride(), toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
     // Verify momentum (scalar)
     auto momentumTensor = bnNode->attributes.get_momentum();
     ASSERT_NE(momentumTensor, nullptr) << "momentum should not be null";
-    EXPECT_EQ(momentumTensor->get_uid(), K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID);
+    EXPECT_EQ(momentumTensor->get_uid(), K_BATCHNORM_TENSOR_MOMENTUM_UID);
     EXPECT_EQ(momentumTensor->get_name(), "Momentum");
 
     // Verify next_running_mean (inferred dims)
     auto nextRunMean = bnNode->attributes.get_next_running_mean();
     ASSERT_NE(nextRunMean, nullptr) << "next_running_mean should not be null";
-    EXPECT_EQ(nextRunMean->get_uid(), K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID);
+    EXPECT_EQ(nextRunMean->get_uid(), K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID);
     EXPECT_EQ(nextRunMean->get_name(), "NextRunMean");
     EXPECT_FALSE(nextRunMean->get_dim().empty());
     EXPECT_FALSE(nextRunMean->get_stride().empty());
@@ -634,7 +625,7 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormRunningStatsPreserved)
     // Verify next_running_variance (inferred dims)
     auto nextRunVar = bnNode->attributes.get_next_running_variance();
     ASSERT_NE(nextRunVar, nullptr) << "next_running_variance should not be null";
-    EXPECT_EQ(nextRunVar->get_uid(), K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID);
+    EXPECT_EQ(nextRunVar->get_uid(), K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID);
     EXPECT_EQ(nextRunVar->get_name(), "NextRunVar");
     EXPECT_FALSE(nextRunVar->get_dim().empty());
     EXPECT_FALSE(nextRunVar->get_stride().empty());
@@ -746,54 +737,49 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormPeerStatsPreserved)
         .set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(K_BATCHNORM_INTEG_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-    x->set_dim(toVec(K_BATCHNORM_INTEG_DATA_DIMS))
-        .set_stride(toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
+    x->set_uid(K_BATCHNORM_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+    x->set_dim(toVec(K_BATCHNORM_TENSOR_X_DIMS)).set_stride(toVec(K_BATCHNORM_TENSOR_X_STRIDES));
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(K_BATCHNORM_INTEG_TENSOR_SCALE_UID)
-        .set_name("Scale")
-        .set_data_type(DataType::FLOAT);
-    scale->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
-        .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+    scale->set_uid(K_BATCHNORM_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
+    scale->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
+        .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(K_BATCHNORM_INTEG_TENSOR_BIAS_UID)
-        .set_name("Bias")
-        .set_data_type(DataType::FLOAT);
-    bias->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
-        .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+    bias->set_uid(K_BATCHNORM_TENSOR_BIAS_UID).set_name("Bias").set_data_type(DataType::FLOAT);
+    bias->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
+        .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
     auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
-    epsilon->set_uid(K_BATCHNORM_INTEG_TENSOR_EPSILON_UID).set_name("Epsilon");
+    epsilon->set_uid(K_BATCHNORM_TENSOR_EPSILON_UID).set_name("Epsilon");
 
     auto prevRunMean = std::make_shared<TensorAttributes>();
-    prevRunMean->set_uid(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID)
+    prevRunMean->set_uid(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID)
         .set_name("PrevRunMean")
         .set_data_type(DataType::FLOAT);
-    prevRunMean->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
-        .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+    prevRunMean->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
+        .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
     auto prevRunVar = std::make_shared<TensorAttributes>();
-    prevRunVar->set_uid(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID)
+    prevRunVar->set_uid(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID)
         .set_name("PrevRunVar")
         .set_data_type(DataType::FLOAT);
-    prevRunVar->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
-        .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+    prevRunVar->set_dim(toVec(K_BATCHNORM_TENSOR_SCALE_DIMS))
+        .set_stride(toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
 
     auto momentum = std::make_shared<TensorAttributes>(0.1f);
-    momentum->set_uid(K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID).set_name("Momentum");
+    momentum->set_uid(K_BATCHNORM_TENSOR_MOMENTUM_UID).set_name("Momentum");
 
     // Create peer_stats tensors
     auto peerStat0 = std::make_shared<TensorAttributes>();
-    peerStat0->set_uid(K_BATCHNORM_INTEG_TENSOR_PEER_STAT_0_UID)
+    peerStat0->set_uid(K_BATCHNORM_TENSOR_PEER_STAT_0_UID)
         .set_name("PeerStat0")
         .set_data_type(DataType::FLOAT);
     peerStat0->set_dim(toVec(K_BATCHNORM_TENSOR_PEER_STAT_DIMS))
         .set_stride(toVec(K_BATCHNORM_TENSOR_PEER_STAT_STRIDES));
 
     auto peerStat1 = std::make_shared<TensorAttributes>();
-    peerStat1->set_uid(K_BATCHNORM_INTEG_TENSOR_PEER_STAT_1_UID)
+    peerStat1->set_uid(K_BATCHNORM_TENSOR_PEER_STAT_1_UID)
         .set_name("PeerStat1")
         .set_data_type(DataType::FLOAT);
     peerStat1->set_dim(toVec(K_BATCHNORM_TENSOR_PEER_STAT_DIMS))
@@ -807,15 +793,15 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormPeerStatsPreserved)
 
     auto [y, meanOut, invVarOut, nextRunMean, nextRunVar]
         = graph->batchnorm(x, scale, bias, bnAttrs);
-    y->set_uid(K_BATCHNORM_INTEG_TENSOR_Y_UID).set_output(true).set_name("Y");
-    meanOut->set_uid(K_BATCHNORM_INTEG_TENSOR_MEAN_UID).set_output(true).set_name("Mean");
-    invVarOut->set_uid(K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID)
+    y->set_uid(K_BATCHNORM_TENSOR_Y_UID).set_output(true).set_name("Y");
+    meanOut->set_uid(K_BATCHNORM_TENSOR_MEAN_UID).set_output(true).set_name("Mean");
+    invVarOut->set_uid(K_BATCHNORM_TENSOR_INV_VARIANCE_UID)
         .set_output(true)
         .set_name("InvVariance");
-    nextRunMean->set_uid(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID)
+    nextRunMean->set_uid(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID)
         .set_output(true)
         .set_name("NextRunMean");
-    nextRunVar->set_uid(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID)
+    nextRunVar->set_uid(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID)
         .set_output(true)
         .set_name("NextRunVar");
 
@@ -837,17 +823,17 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormPeerStatsPreserved)
     ASSERT_EQ(tensorMap.size(), 14u) << "Expected 14 tensors (12 base + 2 peer_stats)";
 
     // Verify peer_stats tensors appear in the tensor map with correct UIDs and names
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PEER_STAT_0_UID), 0u);
-    auto liftedPeerStat0 = tensorMap[K_BATCHNORM_INTEG_TENSOR_PEER_STAT_0_UID];
-    EXPECT_EQ(liftedPeerStat0->get_uid(), K_BATCHNORM_INTEG_TENSOR_PEER_STAT_0_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_PEER_STAT_0_UID), 0u);
+    auto liftedPeerStat0 = tensorMap[K_BATCHNORM_TENSOR_PEER_STAT_0_UID];
+    EXPECT_EQ(liftedPeerStat0->get_uid(), K_BATCHNORM_TENSOR_PEER_STAT_0_UID);
     EXPECT_EQ(liftedPeerStat0->get_name(), "PeerStat0");
     EXPECT_EQ(liftedPeerStat0->get_dim(), toVec(K_BATCHNORM_TENSOR_PEER_STAT_DIMS));
     EXPECT_EQ(liftedPeerStat0->get_stride(), toVec(K_BATCHNORM_TENSOR_PEER_STAT_STRIDES));
     EXPECT_EQ(liftedPeerStat0->get_data_type(), DataType::FLOAT);
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PEER_STAT_1_UID), 0u);
-    auto liftedPeerStat1 = tensorMap[K_BATCHNORM_INTEG_TENSOR_PEER_STAT_1_UID];
-    EXPECT_EQ(liftedPeerStat1->get_uid(), K_BATCHNORM_INTEG_TENSOR_PEER_STAT_1_UID);
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_PEER_STAT_1_UID), 0u);
+    auto liftedPeerStat1 = tensorMap[K_BATCHNORM_TENSOR_PEER_STAT_1_UID];
+    EXPECT_EQ(liftedPeerStat1->get_uid(), K_BATCHNORM_TENSOR_PEER_STAT_1_UID);
     EXPECT_EQ(liftedPeerStat1->get_name(), "PeerStat1");
     EXPECT_EQ(liftedPeerStat1->get_dim(), toVec(K_BATCHNORM_TENSOR_PEER_STAT_DIMS));
     EXPECT_EQ(liftedPeerStat1->get_stride(), toVec(K_BATCHNORM_TENSOR_PEER_STAT_STRIDES));
@@ -863,9 +849,9 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormPeerStatsPreserved)
     const auto& liftedPeerStats = bnNode->attributes.get_peer_stats();
     ASSERT_EQ(liftedPeerStats.size(), 2u) << "Expected 2 peer_stats tensors in lifted node";
 
-    EXPECT_EQ(liftedPeerStats[0]->get_uid(), K_BATCHNORM_INTEG_TENSOR_PEER_STAT_0_UID);
+    EXPECT_EQ(liftedPeerStats[0]->get_uid(), K_BATCHNORM_TENSOR_PEER_STAT_0_UID);
     EXPECT_EQ(liftedPeerStats[0]->get_name(), "PeerStat0");
-    EXPECT_EQ(liftedPeerStats[1]->get_uid(), K_BATCHNORM_INTEG_TENSOR_PEER_STAT_1_UID);
+    EXPECT_EQ(liftedPeerStats[1]->get_uid(), K_BATCHNORM_TENSOR_PEER_STAT_1_UID);
     EXPECT_EQ(liftedPeerStats[1]->get_name(), "PeerStat1");
 
     // Verify pointer equality: peer_stats in node attributes share objects with tensor map

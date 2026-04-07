@@ -19,7 +19,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::toVec;
-using namespace hipdnn_tests::constants::integration;
+using namespace hipdnn_tests::constants;
 
 namespace
 {
@@ -587,19 +587,19 @@ TEST_F(IntegrationPointwiseDescriptorLifting, ConvFpropReluFusionRoundTrip)
 
     // Conv fprop inputs
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-    x->set_dim(toVec(K_TENSOR_X_DIMS)).set_stride(toVec(K_TENSOR_X_STRIDES));
+    x->set_uid(K_FPROP_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+    x->set_dim(toVec(K_FPROP_TENSOR_X_DIMS)).set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
 
     auto w = std::make_shared<TensorAttributes>();
-    w->set_uid(K_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
-    w->set_dim(toVec(K_TENSOR_W_DIMS)).set_stride(toVec(K_TENSOR_W_STRIDES));
+    w->set_uid(K_FPROP_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
+    w->set_dim(toVec(K_FPROP_TENSOR_W_DIMS)).set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
     ConvFpropAttributes convAttrs;
     convAttrs.set_name("conv_fprop_op");
-    convAttrs.set_pre_padding(toVec(K_CONV_PRE_PADDING));
-    convAttrs.set_post_padding(toVec(K_CONV_POST_PADDING));
-    convAttrs.set_stride(toVec(K_CONV_STRIDE));
-    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+    convAttrs.set_pre_padding(toVec(K_FPROP_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_FPROP_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_FPROP_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
     convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
     // Conv output y is a virtual intermediate — no UID, not an output
@@ -634,10 +634,10 @@ TEST_F(IntegrationPointwiseDescriptorLifting, ConvFpropReluFusionRoundTrip)
     // First node: ConvolutionFpropNode
     auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
     ASSERT_NE(convNode, nullptr) << "Expected first node to be ConvolutionFpropNode";
-    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
-    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_CONV_POST_PADDING));
-    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
-    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_FPROP_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_FPROP_CONV_DILATION));
     EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
     EXPECT_EQ(convNode->attributes.get_name(), "conv_fprop_op");
 
@@ -655,8 +655,8 @@ TEST_F(IntegrationPointwiseDescriptorLifting, ConvFpropReluFusionRoundTrip)
 
     // Verify tensor map contains external tensors (X, W, relu_out) plus the virtual intermediate
     auto tensorMap = liftedGraph->getTensorsByUid();
-    EXPECT_NE(tensorMap.count(K_TENSOR_X_UID), 0u) << "X tensor not found";
-    EXPECT_NE(tensorMap.count(K_TENSOR_W_UID), 0u) << "W tensor not found";
+    EXPECT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u) << "X tensor not found";
+    EXPECT_NE(tensorMap.count(K_FPROP_TENSOR_W_UID), 0u) << "W tensor not found";
     EXPECT_NE(tensorMap.count(K_PW_RELU_OUT_UID), 0u) << "relu_out tensor not found";
 }
 

@@ -35,7 +35,7 @@ public:
     using Graph::get_raw_graph_descriptor;
 };
 
-using namespace hipdnn_tests::constants::dgrad::integration;
+using namespace hipdnn_tests::constants;
 
 // -- Test constants for AutoAssignedUidsPreservedInRoundTrip --
 
@@ -92,23 +92,23 @@ TEST_F(IntegrationConvolutionDgradDescriptorLowering, ConvDgradGraphRoundTrip)
         .set_compute_data_type(DataType::FLOAT);
 
     auto dy = std::make_shared<TensorAttributes>();
-    dy->set_uid(K_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
-    dy->set_dim(toVec(K_TENSOR_DY_DIMS)).set_stride(toVec(K_TENSOR_DY_STRIDES));
+    dy->set_uid(K_DGRAD_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
+    dy->set_dim(toVec(K_DGRAD_TENSOR_DY_DIMS)).set_stride(toVec(K_DGRAD_TENSOR_DY_STRIDES));
 
     auto w = std::make_shared<TensorAttributes>();
-    w->set_uid(K_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
-    w->set_dim(toVec(K_TENSOR_W_DIMS)).set_stride(toVec(K_TENSOR_W_STRIDES));
+    w->set_uid(K_DGRAD_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
+    w->set_dim(toVec(K_DGRAD_TENSOR_W_DIMS)).set_stride(toVec(K_DGRAD_TENSOR_W_STRIDES));
 
     ConvDgradAttributes convAttrs;
     convAttrs.set_name("conv_dgrad_op");
-    convAttrs.set_pre_padding(toVec(K_CONV_PRE_PADDING));
-    convAttrs.set_post_padding(toVec(K_CONV_POST_PADDING));
-    convAttrs.set_stride(toVec(K_CONV_STRIDE));
-    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+    convAttrs.set_pre_padding(toVec(K_DGRAD_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_DGRAD_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_DGRAD_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_DGRAD_CONV_DILATION));
     convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
     auto dx = graph->conv_dgrad(dy, w, convAttrs);
-    dx->set_uid(K_TENSOR_DX_UID).set_output(true).set_name("DX");
+    dx->set_uid(K_DGRAD_TENSOR_DX_UID).set_output(true).set_name("DX");
 
     // -- Validate and lower --
     auto result = graph->validate();
@@ -152,26 +152,26 @@ TEST_F(IntegrationConvolutionDgradDescriptorLowering, ConvDgradGraphRoundTrip)
     }
 
     // Verify DY tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_DY_UID), 0u);
-    auto* dyT = tensorMap[K_TENSOR_DY_UID];
+    ASSERT_NE(tensorMap.count(K_DGRAD_TENSOR_DY_UID), 0u);
+    auto* dyT = tensorMap[K_DGRAD_TENSOR_DY_UID];
     EXPECT_EQ(dyT->name, "DY");
     EXPECT_EQ(dyT->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(dyT->dims, toVec(K_TENSOR_DY_DIMS));
-    EXPECT_EQ(dyT->strides, toVec(K_TENSOR_DY_STRIDES));
+    EXPECT_EQ(dyT->dims, toVec(K_DGRAD_TENSOR_DY_DIMS));
+    EXPECT_EQ(dyT->strides, toVec(K_DGRAD_TENSOR_DY_STRIDES));
     EXPECT_FALSE(dyT->virtual_);
 
     // Verify W tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_W_UID), 0u);
-    auto* wT = tensorMap[K_TENSOR_W_UID];
+    ASSERT_NE(tensorMap.count(K_DGRAD_TENSOR_W_UID), 0u);
+    auto* wT = tensorMap[K_DGRAD_TENSOR_W_UID];
     EXPECT_EQ(wT->name, "W");
     EXPECT_EQ(wT->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(wT->dims, toVec(K_TENSOR_W_DIMS));
-    EXPECT_EQ(wT->strides, toVec(K_TENSOR_W_STRIDES));
+    EXPECT_EQ(wT->dims, toVec(K_DGRAD_TENSOR_W_DIMS));
+    EXPECT_EQ(wT->strides, toVec(K_DGRAD_TENSOR_W_STRIDES));
     EXPECT_FALSE(wT->virtual_);
 
     // Verify DX tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_DX_UID), 0u);
-    auto* dxT = tensorMap[K_TENSOR_DX_UID];
+    ASSERT_NE(tensorMap.count(K_DGRAD_TENSOR_DX_UID), 0u);
+    auto* dxT = tensorMap[K_DGRAD_TENSOR_DX_UID];
     EXPECT_EQ(dxT->name, "DX");
     EXPECT_EQ(dxT->data_type, DataTypeSdk::FLOAT);
     EXPECT_FALSE(dxT->virtual_);
@@ -185,13 +185,13 @@ TEST_F(IntegrationConvolutionDgradDescriptorLowering, ConvDgradGraphRoundTrip)
     auto* convBwd = node->attributes.AsConvolutionBwdAttributes();
     ASSERT_NE(convBwd, nullptr);
 
-    EXPECT_EQ(convBwd->dy_tensor_uid, K_TENSOR_DY_UID);
-    EXPECT_EQ(convBwd->w_tensor_uid, K_TENSOR_W_UID);
-    EXPECT_EQ(convBwd->dx_tensor_uid, K_TENSOR_DX_UID);
-    EXPECT_EQ(convBwd->pre_padding, toVec(K_CONV_PRE_PADDING));
-    EXPECT_EQ(convBwd->post_padding, toVec(K_CONV_POST_PADDING));
-    EXPECT_EQ(convBwd->stride, toVec(K_CONV_STRIDE));
-    EXPECT_EQ(convBwd->dilation, toVec(K_CONV_DILATION));
+    EXPECT_EQ(convBwd->dy_tensor_uid, K_DGRAD_TENSOR_DY_UID);
+    EXPECT_EQ(convBwd->w_tensor_uid, K_DGRAD_TENSOR_W_UID);
+    EXPECT_EQ(convBwd->dx_tensor_uid, K_DGRAD_TENSOR_DX_UID);
+    EXPECT_EQ(convBwd->pre_padding, toVec(K_DGRAD_CONV_PADDING));
+    EXPECT_EQ(convBwd->post_padding, toVec(K_DGRAD_CONV_PADDING));
+    EXPECT_EQ(convBwd->stride, toVec(K_DGRAD_CONV_STRIDE));
+    EXPECT_EQ(convBwd->dilation, toVec(K_DGRAD_CONV_DILATION));
     EXPECT_EQ(convBwd->conv_mode, ConvModeSdk::CROSS_CORRELATION);
 }
 

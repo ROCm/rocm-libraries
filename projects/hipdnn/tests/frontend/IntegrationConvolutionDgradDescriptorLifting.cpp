@@ -19,7 +19,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::toVec;
-using namespace hipdnn_tests::constants::dgrad;
+using namespace hipdnn_tests::constants;
 
 namespace
 {
@@ -77,23 +77,23 @@ protected:
             .set_io_data_type(DataType::FLOAT);
 
         auto dy = std::make_shared<TensorAttributes>();
-        dy->set_uid(K_TENSOR_DY_UID).set_name("dy").set_data_type(DataType::FLOAT);
-        dy->set_dim(toVec(K_TENSOR_DY_DIMS)).set_stride(toVec(K_TENSOR_DY_STRIDES));
+        dy->set_uid(K_DGRAD_TENSOR_DY_UID).set_name("dy").set_data_type(DataType::FLOAT);
+        dy->set_dim(toVec(K_DGRAD_TENSOR_DY_DIMS)).set_stride(toVec(K_DGRAD_TENSOR_DY_STRIDES));
 
         auto w = std::make_shared<TensorAttributes>();
-        w->set_uid(K_TENSOR_W_UID).set_name("w").set_data_type(DataType::FLOAT);
-        w->set_dim(toVec(K_TENSOR_W_DIMS)).set_stride(toVec(K_TENSOR_W_STRIDES));
+        w->set_uid(K_DGRAD_TENSOR_W_UID).set_name("w").set_data_type(DataType::FLOAT);
+        w->set_dim(toVec(K_DGRAD_TENSOR_W_DIMS)).set_stride(toVec(K_DGRAD_TENSOR_W_STRIDES));
 
         ConvDgradAttributes attrs;
         attrs.set_name("test_op");
         attrs.set_convolution_mode(ConvolutionMode::CONVOLUTION);
-        attrs.set_pre_padding(toVec(K_CONV_PADDING));
-        attrs.set_post_padding(toVec(K_CONV_PADDING));
-        attrs.set_stride(toVec(K_CONV_STRIDE));
-        attrs.set_dilation(toVec(K_CONV_DILATION));
+        attrs.set_pre_padding(toVec(K_DGRAD_CONV_PADDING));
+        attrs.set_post_padding(toVec(K_DGRAD_CONV_PADDING));
+        attrs.set_stride(toVec(K_DGRAD_CONV_STRIDE));
+        attrs.set_dilation(toVec(K_DGRAD_CONV_DILATION));
 
         auto dx = graph->conv_dgrad(dy, w, attrs);
-        dx->set_uid(K_TENSOR_DX_UID).set_output(true).set_name("dx");
+        dx->set_uid(K_DGRAD_TENSOR_DX_UID).set_output(true).set_name("dx");
 
         return graph;
     }
@@ -131,28 +131,28 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, BasicConvolutionBwdRoundTrip)
     ASSERT_EQ(tensorMap.size(), 3u);
 
     // Verify dy tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_DY_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_uid(), K_TENSOR_DY_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_dim(), toVec(K_TENSOR_DY_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_stride(), toVec(K_TENSOR_DY_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_name(), "dy");
+    ASSERT_NE(tensorMap.count(K_DGRAD_TENSOR_DY_UID), 0u);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DY_UID]->get_uid(), K_DGRAD_TENSOR_DY_UID);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DY_UID]->get_dim(), toVec(K_DGRAD_TENSOR_DY_DIMS));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DY_UID]->get_stride(), toVec(K_DGRAD_TENSOR_DY_STRIDES));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DY_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DY_UID]->get_name(), "dy");
 
     // Verify w tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_W_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_uid(), K_TENSOR_W_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_dim(), toVec(K_TENSOR_W_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_stride(), toVec(K_TENSOR_W_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_name(), "w");
+    ASSERT_NE(tensorMap.count(K_DGRAD_TENSOR_W_UID), 0u);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_W_UID]->get_uid(), K_DGRAD_TENSOR_W_UID);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_W_UID]->get_dim(), toVec(K_DGRAD_TENSOR_W_DIMS));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_W_UID]->get_stride(), toVec(K_DGRAD_TENSOR_W_STRIDES));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_W_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_W_UID]->get_name(), "w");
 
     // Verify dx tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_DX_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_uid(), K_TENSOR_DX_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_dim(), toVec(K_TENSOR_DX_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_stride(), toVec(K_TENSOR_DX_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_name(), "dx");
+    ASSERT_NE(tensorMap.count(K_DGRAD_TENSOR_DX_UID), 0u);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DX_UID]->get_uid(), K_DGRAD_TENSOR_DX_UID);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DX_UID]->get_dim(), toVec(K_DGRAD_TENSOR_DX_DIMS));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DX_UID]->get_stride(), toVec(K_DGRAD_TENSOR_DX_STRIDES));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DX_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DX_UID]->get_name(), "dx");
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
@@ -165,13 +165,13 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, BasicConvolutionBwdRoundTrip)
     EXPECT_EQ(opNode->attributes.get_convolution_mode(), ConvolutionMode::CONVOLUTION);
 
     // Verify pre_padding
-    EXPECT_EQ(opNode->attributes.get_pre_padding(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_pre_padding(), toVec(K_DGRAD_CONV_PADDING));
     // Verify post_padding
-    EXPECT_EQ(opNode->attributes.get_post_padding(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_DGRAD_CONV_PADDING));
     // Verify stride
-    EXPECT_EQ(opNode->attributes.get_stride(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_DGRAD_CONV_STRIDE));
     // Verify dilation
-    EXPECT_EQ(opNode->attributes.get_dilation(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_dilation(), toVec(K_DGRAD_CONV_DILATION));
 
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
@@ -205,14 +205,14 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, ConvolutionBwdTensorSharingPr
     ASSERT_NE(opNode, nullptr);
 
     // Verify dy tensor sharing
-    EXPECT_EQ(opNode->attributes.get_dy()->get_uid(), K_TENSOR_DY_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID].get(), opNode->attributes.get_dy().get());
+    EXPECT_EQ(opNode->attributes.get_dy()->get_uid(), K_DGRAD_TENSOR_DY_UID);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DY_UID].get(), opNode->attributes.get_dy().get());
     // Verify w tensor sharing
-    EXPECT_EQ(opNode->attributes.get_w()->get_uid(), K_TENSOR_W_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID].get(), opNode->attributes.get_w().get());
+    EXPECT_EQ(opNode->attributes.get_w()->get_uid(), K_DGRAD_TENSOR_W_UID);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_W_UID].get(), opNode->attributes.get_w().get());
     // Verify dx tensor sharing
-    EXPECT_EQ(opNode->attributes.get_dx()->get_uid(), K_TENSOR_DX_UID);
-    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID].get(), opNode->attributes.get_dx().get());
+    EXPECT_EQ(opNode->attributes.get_dx()->get_uid(), K_DGRAD_TENSOR_DX_UID);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DX_UID].get(), opNode->attributes.get_dx().get());
 }
 
 // Builds a ConvolutionBwd graph, serializes to binary, creates a backend descriptor
@@ -254,13 +254,13 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, ConvolutionBwdLiftWithoutFina
     EXPECT_EQ(opNode->attributes.get_convolution_mode(), ConvolutionMode::CONVOLUTION);
 
     // Verify pre_padding
-    EXPECT_EQ(opNode->attributes.get_pre_padding(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_pre_padding(), toVec(K_DGRAD_CONV_PADDING));
     // Verify post_padding
-    EXPECT_EQ(opNode->attributes.get_post_padding(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_DGRAD_CONV_PADDING));
     // Verify stride
-    EXPECT_EQ(opNode->attributes.get_stride(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_DGRAD_CONV_STRIDE));
     // Verify dilation
-    EXPECT_EQ(opNode->attributes.get_dilation(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_dilation(), toVec(K_DGRAD_CONV_DILATION));
 
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
@@ -269,15 +269,15 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, ConvolutionBwdLiftWithoutFina
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 3u);
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_DY_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_dim(), toVec(K_TENSOR_DY_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_stride(), toVec(K_TENSOR_DY_STRIDES));
-    ASSERT_NE(tensorMap.count(K_TENSOR_W_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_dim(), toVec(K_TENSOR_W_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_stride(), toVec(K_TENSOR_W_STRIDES));
-    ASSERT_NE(tensorMap.count(K_TENSOR_DX_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_dim(), toVec(K_TENSOR_DX_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_stride(), toVec(K_TENSOR_DX_STRIDES));
+    ASSERT_NE(tensorMap.count(K_DGRAD_TENSOR_DY_UID), 0u);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DY_UID]->get_dim(), toVec(K_DGRAD_TENSOR_DY_DIMS));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DY_UID]->get_stride(), toVec(K_DGRAD_TENSOR_DY_STRIDES));
+    ASSERT_NE(tensorMap.count(K_DGRAD_TENSOR_W_UID), 0u);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_W_UID]->get_dim(), toVec(K_DGRAD_TENSOR_W_DIMS));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_W_UID]->get_stride(), toVec(K_DGRAD_TENSOR_W_STRIDES));
+    ASSERT_NE(tensorMap.count(K_DGRAD_TENSOR_DX_UID), 0u);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DX_UID]->get_dim(), toVec(K_DGRAD_TENSOR_DX_DIMS));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DX_UID]->get_stride(), toVec(K_DGRAD_TENSOR_DX_STRIDES));
 }
 
 // Creates tensors without explicit set_uid(), verifies that auto-assigned UIDs
@@ -376,12 +376,12 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AsymmetricPaddingPreservedInL
         .set_io_data_type(DataType::FLOAT);
 
     auto dy = std::make_shared<TensorAttributes>();
-    dy->set_uid(K_TENSOR_DY_UID).set_name("dy").set_data_type(DataType::FLOAT);
-    dy->set_dim(toVec(K_TENSOR_DY_DIMS)).set_stride(toVec(K_TENSOR_DY_STRIDES));
+    dy->set_uid(K_DGRAD_TENSOR_DY_UID).set_name("dy").set_data_type(DataType::FLOAT);
+    dy->set_dim(toVec(K_DGRAD_TENSOR_DY_DIMS)).set_stride(toVec(K_DGRAD_TENSOR_DY_STRIDES));
 
     auto w = std::make_shared<TensorAttributes>();
-    w->set_uid(K_TENSOR_W_UID).set_name("w").set_data_type(DataType::FLOAT);
-    w->set_dim(toVec(K_TENSOR_W_DIMS)).set_stride(toVec(K_TENSOR_W_STRIDES));
+    w->set_uid(K_DGRAD_TENSOR_W_UID).set_name("w").set_data_type(DataType::FLOAT);
+    w->set_dim(toVec(K_DGRAD_TENSOR_W_DIMS)).set_stride(toVec(K_DGRAD_TENSOR_W_STRIDES));
 
     ConvDgradAttributes convAttrs;
     convAttrs.set_name("asym_dgrad_op");
@@ -392,7 +392,7 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AsymmetricPaddingPreservedInL
     convAttrs.set_convolution_mode(ConvolutionMode::CONVOLUTION);
 
     auto dx = graph->conv_dgrad(dy, w, convAttrs);
-    dx->set_uid(K_TENSOR_DX_UID).set_output(true).set_name("dx");
+    dx->set_uid(K_DGRAD_TENSOR_DX_UID).set_output(true).set_name("dx");
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -415,8 +415,8 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AsymmetricPaddingPreservedInL
 
     EXPECT_EQ(opNode->attributes.get_pre_padding(), toVec(K_ASYM_PRE_PADDING));
     EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_ASYM_POST_PADDING));
-    EXPECT_EQ(opNode->attributes.get_stride(), std::vector<int64_t>({1, 1}));
-    EXPECT_EQ(opNode->attributes.get_dilation(), std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_DGRAD_CONV_STRIDE));
+    EXPECT_EQ(opNode->attributes.get_dilation(), toVec(K_DGRAD_CONV_DILATION));
 }
 
 } // namespace
