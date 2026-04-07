@@ -299,8 +299,6 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC",          {110,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvCkIgemmFwdV6r1DlopsNchw",                         {114,   false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC",          {127,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvHipImplicitGemmFwdXdlops",                        {128,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvHipImplicitGemmBwdXdlops",                        {129,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmGroupFwdXdlops",                   {137,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemm3DGroupFwdXdlops",                 {138,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvWinoFuryRxS<2-3>",                                {139,   true,   false,  "miopenConvolutionFwdAlgoWinograd"}},
