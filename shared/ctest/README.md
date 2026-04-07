@@ -533,7 +533,7 @@ Each test gets labels that enable flexible CTest filtering:
 | `yaml_file`         | Yes      | Absolute path to `test_categories.yaml` (must exist)                                               |
 | `working_dir`       | Yes      | Working directory for test execution (must be a valid directory)                                   |
 | `install_test_file` | No       | Path to the generated install-time `CTestTestfile.cmake`. Not required for local builds, but      |
-|                     |          | required for install/package workflows (e.g., TheRock).                                            |
+|                     |          | required for install/package workflows (for example, TheRock).                                            |
 **Validation:** The function validates all inputs before execution and emits `WARNING` messages if any check fails, returning early without generating tests.
 
 ## YAML Reference
