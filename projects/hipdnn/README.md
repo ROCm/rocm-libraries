@@ -118,3 +118,5 @@ The documentation covers the frontend API including:
 ## Contributing
 
 For information about contributing to the hipDNN project, please see the [Contributing Guide](./CONTRIBUTING.md).
+
+<!-- core-seq-1: performance logging flag -->
