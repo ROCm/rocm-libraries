@@ -20,6 +20,9 @@ std::vector<PoolingTestCase> GetWidePooling2dTestCases()
     std::vector<PoolingTestCase> test_cases;
 
     // Dataset 2: Wide dataset
+    // Legacy test_drive coverage:
+    //   forward path:  test_pooling2d --all --dataset 2 --limit 0
+    //   backward path: test_pooling2d --forw 0
     std::vector<std::vector<int>> dataset2_inputs = {
         {1, 3, 255, 255}, {2, 3, 227, 227}, {1, 7, 127, 127}, {1, 1, 410, 400}};
     std::vector<std::vector<int>> dataset2_lens    = {{35, 35}, {100, 100}, {255, 255}, {410, 400}};

@@ -3,6 +3,8 @@
 
 #include "pooling_common.hpp"
 
+// Matches legacy switch semantics:
+// TEST_GET_INPUT_TENSOR=0 uses predefined dataset inputs, TEST_GET_INPUT_TENSOR=1 uses get_inputs().
 #define TEST_GET_INPUT_TENSOR 0
 
 namespace {
@@ -71,6 +73,7 @@ std::vector<PoolingTestCase> GetPooling2dTestCases()
 
     cached_test_cases = test_cases;
     cached            = true;
+    // Dataset 1 (asymmetric) and Dataset 2 (wide) are covered by dedicated files.
     return test_cases;
 }
 

@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
@@ -14,28 +13,22 @@
 #include <numeric>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <half/half.hpp>
 
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/pooling.hpp>
-#include <miopen/stringutils.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
 
-#include "../network_data.hpp"
 #include "../cpu_conv.hpp"
-#include "../driver.hpp"
 #include "../tensor_holder.hpp"
 #include "../test.hpp"
 #include "../verify.hpp"
 #include "../workspace.hpp"
 #include "get_handle.hpp"
-#include "gtest_common.hpp"
 
 namespace pooling_gtest {
 
@@ -176,12 +169,14 @@ struct verify_forward_pooling
 
                 if(in_cmp_idx)
                 {
+                    // Compute input linear index
                     std::size_t in_linear_idx = o * in_n_stride + w * in_c_stride;
                     for(int i = 0; i < SptDim; ++i)
                         in_linear_idx += idx[i + 2] * in_spatial_strides[i];
                     acc = op(acc, input_ptr[in_linear_idx]);
                 }
             });
+            // Compute output linear index
             std::size_t out_linear_idx = o * out_n_stride + w * out_c_stride;
             for(int i = 0; i < SptDim; ++i)
                 out_linear_idx += out_spatial_id[i] * out_spatial_strides[i];
@@ -330,6 +325,7 @@ struct verify_backward_pooling
                         idx[1] = w;
                         if(verify_index)
                         {
+                            // Compute input and output linear indices for verification
                             std::size_t in_verify_idx  = o * in_n_stride + w * in_c_stride;
                             std::size_t out_verify_idx = o * out_n_stride + w * out_c_stride;
                             auto out_spatial_id        = make_array(out_spatial_id_pack...);
@@ -438,13 +434,17 @@ struct verify_backward_pooling
         float alpha = 1, beta = 0;
         filter.Backward(handle,
                         &alpha,
+                        // y
                         out.desc,
                         out_dev.get(),
+                        // dy
                         dout.desc,
                         dout_dev.get(),
+                        // x
                         input.desc,
                         in_dev.get(),
                         &beta,
+                        // dx
                         dinput.desc,
                         din_dev.get(),
                         wspace.ptr());
@@ -458,6 +458,7 @@ template <typename T, typename Index, int SptDim>
 void RunPoolingTestWithIndexType(const PoolingTestCase& test_case)
 {
     tensor<T> input{test_case.in_shape};
+    // Set up tensor descriptor with correct layout BEFORE generating data.
     if(test_case.in_layout != (SptDim == 2 ? "NCHW" : "NCDHW"))
     {
         const std::vector<std::size_t> dim_lens = input.desc.GetLengths();
@@ -562,6 +563,10 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
        (test_case.index_type == miopenIndexUint8 || test_case.index_type == miopenIndexUint16))
         return false;
 
+    /// The "index is too small" limitation is an approximation
+    /// of the real limitation, and therefore applied only when
+    /// the "full test" is run. See:
+    /// \ref max_pooling_index_max_restriction
     switch(test_case.index_type)
     {
     case miopenIndexUint8:
@@ -570,6 +575,7 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
             return false;
         break;
     case miopenIndexUint16:
+        // test_pooling_test --all only test 5 uint16 cases
         if((spt_dim == 3 || (spt_dim == 2 && test_case.wsidx == 1)) &&
            test_case.mode == miopenPoolingMax)
             return false;
@@ -579,6 +585,7 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
     case miopenIndexUint32:
         if(skip_many_configs)
         {
+            // test_pooling_test --all only test 5 uint32 cases
             if(test_case.wsidx == 0)
             {
                 if(++num_uint32_case > 5)
