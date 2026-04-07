@@ -40,7 +40,8 @@ protected:
 
         auto knobIdOffset = builder.CreateString(knobId);
         auto strOffset = builder.CreateString(value);
-        auto stringValue = hipdnn_flatbuffers_sdk::data_objects::CreateStringValue(builder, strOffset);
+        auto stringValue
+            = hipdnn_flatbuffers_sdk::data_objects::CreateStringValue(builder, strOffset);
 
         hipdnn_flatbuffers_sdk::data_objects::KnobSettingBuilder settingBuilder(builder);
         settingBuilder.add_knob_id(knobIdOffset);
@@ -76,7 +77,8 @@ protected:
 TEST_F(TestKnobSettingWrapper, ConstructFromFlatbufferPointer)
 {
     auto buffer = createKnobSetting("test_knob_42", 100);
-    auto setting = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>(buffer.data());
+    auto setting
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>(buffer.data());
 
     const KnobSettingWrapper wrapper(setting);
     EXPECT_TRUE(wrapper.isValid());
@@ -167,7 +169,8 @@ TEST_F(TestKnobSettingWrapper, ValueAsTypeMismatchThrows)
 TEST_F(TestKnobSettingWrapper, GetKnobSettingFromValidWrapper)
 {
     auto buffer = createKnobSetting("test_knob_42", 100);
-    auto setting = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>(buffer.data());
+    auto setting
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>(buffer.data());
 
     const KnobSettingWrapper wrapper(setting);
     const auto& retrievedSetting = wrapper.getKnobSetting();
@@ -247,7 +250,8 @@ TEST_F(TestKnobSettingWrapper, ToKnobSettingTWithStringValue)
 
     ASSERT_NE(knobSettingT, nullptr);
     EXPECT_EQ(knobSettingT->knob_id, "test_knob_99");
-    EXPECT_EQ(knobSettingT->value.type, hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue);
+    EXPECT_EQ(knobSettingT->value.type,
+              hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue);
     ASSERT_NE(knobSettingT->value.AsStringValue(), nullptr);
     EXPECT_EQ(knobSettingT->value.AsStringValue()->value, "test_string_value");
 }
@@ -261,7 +265,8 @@ TEST_F(TestKnobSettingWrapper, ToKnobSettingTWithFloatValue)
 
     ASSERT_NE(knobSettingT, nullptr);
     EXPECT_EQ(knobSettingT->knob_id, "test_knob_123");
-    EXPECT_EQ(knobSettingT->value.type, hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
+    EXPECT_EQ(knobSettingT->value.type,
+              hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
     ASSERT_NE(knobSettingT->value.AsFloatValue(), nullptr);
     EXPECT_DOUBLE_EQ(knobSettingT->value.AsFloatValue()->value, 3.14159);
 }

@@ -7,7 +7,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include "FlatbufferTestUtils.hpp"
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -111,12 +111,12 @@ TEST(TestGraphWrapper, GetTensorMapReturnsCorrectTensors)
         builder, 2, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
 
     auto graph = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(builder,
-                                                                  "test",
-                                                                  DataType::FLOAT,
-                                                                  DataType::HALF,
-                                                                  DataType::BFLOAT16,
-                                                                  &tensorAttributes,
-                                                                  &nodes);
+                                                                         "test",
+                                                                         DataType::FLOAT,
+                                                                         DataType::HALF,
+                                                                         DataType::BFLOAT16,
+                                                                         &tensorAttributes,
+                                                                         &nodes);
     builder.Finish(graph);
 
     auto serializedGraph = builder.Release();

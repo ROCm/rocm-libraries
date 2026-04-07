@@ -7,7 +7,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/NodeWrapper.hpp>
-#include "FlatbufferTestUtils.hpp"
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -32,6 +32,7 @@ TEST(TestNodeWrapper, EnsureTheNodeIsWrappedCorrectly)
               hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
     EXPECT_NO_THROW(
         wrapper.attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes>());
-    EXPECT_THROW(wrapper.attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes>(),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        wrapper.attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes>(),
+        std::invalid_argument);
 }

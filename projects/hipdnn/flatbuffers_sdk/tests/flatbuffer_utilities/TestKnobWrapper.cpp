@@ -26,7 +26,8 @@ protected:
         auto descOffset = builder.CreateString(description);
 
         // default_value is required - always create one
-        auto defaultVal = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, defaultValue);
+        auto defaultVal
+            = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, defaultValue);
 
         flatbuffers::Offset<void> constraintOffset;
         hipdnn_flatbuffers_sdk::data_objects::KnobConstraint constraintType
@@ -47,7 +48,8 @@ protected:
         knobBuilder.add_deprecated(deprecated);
 
         // default_value is required - always set it
-        knobBuilder.add_default_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
+        knobBuilder.add_default_value_type(
+            hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
         knobBuilder.add_default_value(defaultVal.Union());
 
         if(withConstraint)
@@ -70,12 +72,14 @@ protected:
         auto knobIdStrOffset = builder.CreateString(knobIdStr);
         auto descOffset = builder.CreateString("Float knob");
 
-        auto floatVal = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, defaultValue);
+        auto floatVal
+            = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, defaultValue);
 
         hipdnn_flatbuffers_sdk::data_objects::KnobBuilder knobBuilder(builder);
         knobBuilder.add_knob_id(knobIdStrOffset);
         knobBuilder.add_description(descOffset);
-        knobBuilder.add_default_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
+        knobBuilder.add_default_value_type(
+            hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
         knobBuilder.add_default_value(floatVal.Union());
 
         auto knob = knobBuilder.Finish();
@@ -94,13 +98,14 @@ protected:
         auto descOffset = builder.CreateString("Knob with float constraint");
 
         auto floatVal = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, 1.0);
-        auto floatConstraint
-            = hipdnn_flatbuffers_sdk::data_objects::CreateFloatConstraint(builder, minValue, maxValue);
+        auto floatConstraint = hipdnn_flatbuffers_sdk::data_objects::CreateFloatConstraint(
+            builder, minValue, maxValue);
 
         hipdnn_flatbuffers_sdk::data_objects::KnobBuilder knobBuilder(builder);
         knobBuilder.add_knob_id(knobIdStrOffset);
         knobBuilder.add_description(descOffset);
-        knobBuilder.add_default_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
+        knobBuilder.add_default_value_type(
+            hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
         knobBuilder.add_default_value(floatVal.Union());
         knobBuilder.add_constraint_type(
             hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::FloatConstraint);
@@ -138,7 +143,8 @@ protected:
         hipdnn_flatbuffers_sdk::data_objects::KnobBuilder knobBuilder(builder);
         knobBuilder.add_knob_id(knobIdStrOffset);
         knobBuilder.add_description(descOffset);
-        knobBuilder.add_default_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue);
+        knobBuilder.add_default_value_type(
+            hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue);
         knobBuilder.add_default_value(stringValue.Union());
         knobBuilder.add_constraint_type(
             hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::StringConstraint);
@@ -210,7 +216,8 @@ TEST_F(TestKnobWrapper, GetDefaultValueType)
 {
     auto buffer = createKnob("KNOB_42", "Test");
     const KnobWrapper wrapper(buffer.data(), buffer.size());
-    EXPECT_EQ(wrapper.defaultValueType(), hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
+    EXPECT_EQ(wrapper.defaultValueType(),
+              hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
 }
 
 TEST_F(TestKnobWrapper, IsDeprecated)
@@ -230,7 +237,8 @@ TEST_F(TestKnobWrapper, HasDefaultValue)
     auto buffer = createKnob("KNOB_42", "Test", false);
     const KnobWrapper wrapper(buffer.data(), buffer.size());
     EXPECT_TRUE(wrapper.hasDefaultValue());
-    EXPECT_EQ(wrapper.defaultValueType(), hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
+    EXPECT_EQ(wrapper.defaultValueType(),
+              hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
 }
 
 TEST_F(TestKnobWrapper, DefaultValueAsIntValue)
@@ -249,8 +257,10 @@ TEST_F(TestKnobWrapper, DefaultValueAsFloatValue)
     const KnobWrapper wrapper(buffer.data(), buffer.size());
 
     EXPECT_TRUE(wrapper.hasDefaultValue());
-    EXPECT_EQ(wrapper.defaultValueType(), hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
-    const auto& floatValue = wrapper.defaultValueAs<hipdnn_flatbuffers_sdk::data_objects::FloatValue>();
+    EXPECT_EQ(wrapper.defaultValueType(),
+              hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
+    const auto& floatValue
+        = wrapper.defaultValueAs<hipdnn_flatbuffers_sdk::data_objects::FloatValue>();
     EXPECT_DOUBLE_EQ(floatValue.value(), 3.14159);
 }
 

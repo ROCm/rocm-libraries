@@ -40,6 +40,9 @@ if(flatbuffers_VERSION)
     message(STATUS "hipDNN Flatbuffers SDK: Using imported FlatBuffers ${flatbuffers_VERSION} headers (v${_hipdnn_fb_version_tag})")
 endif()
 
+# hipdnn_add_dependency_includes() is defined by hipdnn_data_sdk's imported config (loaded via
+# find_dependency above). If data_sdk ever stops providing this function, this will need to be
+# duplicated here.
 hipdnn_add_dependency_includes(hipdnn_flatbuffers_sdk flatbuffers::flatbuffers)
 if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
     hipdnn_add_dependency_includes(hipdnn_flatbuffers_sdk nlohmann_json::nlohmann_json)

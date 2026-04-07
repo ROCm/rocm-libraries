@@ -3,9 +3,9 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 
@@ -25,7 +25,8 @@ flatbuffers::FlatBufferBuilder buildEngineConfigWithKnobSettings(
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> knobSettings;
+    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>>
+        knobSettings;
     knobSettings.reserve(knobIdValues.size());
 
     for(const auto& [knobId, value] : knobIdValues)
@@ -40,7 +41,8 @@ flatbuffers::FlatBufferBuilder buildEngineConfigWithKnobSettings(
     }
 
     auto knobsVector = builder.CreateVector(knobSettings);
-    auto config = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, engineId, knobsVector);
+    auto config
+        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, engineId, knobsVector);
     builder.Finish(config);
     return builder;
 }

@@ -29,13 +29,15 @@ add_executable(
 
 target_compile_options(hipdnn_flatbuffers_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 
+# Fetch flatbuffers include dirs explicitly. Although hipdnn_flatbuffers_sdk propagates these
+# transitively for compilation, per-file clang-tidy (CXX_CLANG_TIDY) does not pick them up
+# automatically. We add them here and again as -extra-arg below so clang-tidy can resolve
+# flatbuffers headers.
 get_target_property(_fb_include_dirs flatbuffers::flatbuffers INTERFACE_INCLUDE_DIRECTORIES)
 
 target_include_directories(
     hipdnn_flatbuffers_sdk_tests
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../test_sdk/include
         ${_fb_include_dirs}
 )
 
@@ -45,6 +47,7 @@ target_link_libraries(
     GTest::gmock
     Threads::Threads
     hipdnn_flatbuffers_sdk
+    hipdnn_test_sdk
     flatbuffers::flatbuffers
     hip::host
     ${CMAKE_DL_LIBS}

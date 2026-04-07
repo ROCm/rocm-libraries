@@ -131,7 +131,8 @@ inline auto toVector(flatbuffers::FlatBufferBuilder& builder, const nlohmann::js
 {
     if(!entry.is_array())
     {
-        throw std::runtime_error("hipdnn_flatbuffers_sdk::json::to<vector<T>>(): field is not an array");
+        throw std::runtime_error(
+            "hipdnn_flatbuffers_sdk::json::to<vector<T>>(): field is not an array");
     }
     std::vector<flatbuffers::Offset<T>> ret;
     for(const auto& v : entry)

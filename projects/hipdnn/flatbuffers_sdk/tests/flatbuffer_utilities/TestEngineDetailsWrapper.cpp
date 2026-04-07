@@ -3,10 +3,10 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 
@@ -41,7 +41,8 @@ flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::KnobBuilder knobBuilder(builder);
         knobBuilder.add_knob_id(knobIdStrOffset);
         knobBuilder.add_description(descOffset);
-        knobBuilder.add_default_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
+        knobBuilder.add_default_value_type(
+            hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
         knobBuilder.add_default_value(defaultValueOffset.Union());
         knobs.push_back(knobBuilder.Finish());
     }

@@ -12,7 +12,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Common.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
-#include "FlatbufferTestUtils.hpp"
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -61,7 +61,8 @@ void toJsonAndBackTestSuite(const hipdnn_flatbuffers_sdk::data_objects::Graph* g
 TEST(TestJson, GraphToJsonAndBack)
 {
     auto nodeAttributeValues = EnumValuesNodeAttributes();
-    auto maxEnumValue = static_cast<size_t>(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MAX);
+    auto maxEnumValue
+        = static_cast<size_t>(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MAX);
     for(size_t i = 0; i <= maxEnumValue; i++)
     {
         auto enumValue = nodeAttributeValues[i];
@@ -81,7 +82,8 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid batchnorm inference graph)";
             break;
-        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
+            BatchnormInferenceAttributesVarianceExt:
             graphBuilder
                 = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
@@ -123,7 +125,7 @@ TEST(TestJson, GraphToJsonAndBack)
             context = "(valid matmul graph)";
             break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes:
-            graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph();
+            graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid sdpa fprop graph)";
             break;
@@ -153,7 +155,7 @@ TEST(TestJson, GraphToJsonAndBack)
             context = "(valid block scale quantize graph)";
             break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes:
-            graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaBpropGraph();
+            graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid sdpa backward graph)";
             break;

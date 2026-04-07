@@ -4,8 +4,8 @@
 #pragma once
 
 #include <flatbuffers/flatbuffers.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <optional>
 #include <stdexcept>
 #include <string>

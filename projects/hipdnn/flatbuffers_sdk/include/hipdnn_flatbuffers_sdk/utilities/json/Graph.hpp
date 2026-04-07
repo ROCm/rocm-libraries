@@ -194,9 +194,9 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
         case data_objects::NodeAttributes::ReductionAttributes:
             return to<data_objects::ReductionAttributes>(builder, entry).Union();
         default:
-            throw std::runtime_error(
-                "hipdnn_flatbuffers_sdk::json::to<data_objects::Node>(): Unsupported NodeAttributes type: "
-                + std::string{EnumNameNodeAttributes(type)});
+            throw std::runtime_error("hipdnn_flatbuffers_sdk::json::to<data_objects::Node>(): "
+                                     "Unsupported NodeAttributes type: "
+                                     + std::string{EnumNameNodeAttributes(type)});
         }
     }();
 

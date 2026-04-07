@@ -129,8 +129,8 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
             break;
         }
         default:
-            throw std::runtime_error(
-                "hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(): Unsupported TensorValue type");
+            throw std::runtime_error("hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(): "
+                                     "Unsupported TensorValue type");
         }
 
         return data_objects::CreateTensorAttributes(builder,
