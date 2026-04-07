@@ -16,7 +16,7 @@ add_executable(spmm main.hip)
 target_compile_options(spmm PUBLIC "-O3" "-fgpu-rdc" "-march=native")
 target_link_options(spmm PUBLIC "-fgpu-rdc")
 
-list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} /opt/rocm)
 
 find_package(hipthreads)
 find_package(rocprim REQUIRED CONFIG)

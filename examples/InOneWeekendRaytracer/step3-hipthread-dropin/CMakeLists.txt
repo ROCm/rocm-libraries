@@ -16,7 +16,7 @@ add_executable(inOneWeekend main.hip)
 target_compile_options(inOneWeekend PUBLIC "-O3" "-fgpu-rdc" "-march=native")
 target_link_options(inOneWeekend PUBLIC "-fgpu-rdc" "--hip-link")
 
-list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} /opt/rocm)
 
 find_package(hipthreads REQUIRED)
 find_package(rocprim REQUIRED)

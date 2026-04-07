@@ -19,7 +19,7 @@ set_source_files_properties(main.cxx PROPERTIES LANGUAGE HIP)
 target_compile_options(spmm PUBLIC "-O3" "-march=native")
 target_compile_definitions(spmm PUBLIC _LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE)
 
-list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} /opt/rocm)
 
 find_package(Threads REQUIRED)
 find_package(rocthrust REQUIRED)

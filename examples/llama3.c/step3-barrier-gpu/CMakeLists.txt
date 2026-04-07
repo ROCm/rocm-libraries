@@ -33,7 +33,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
+list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} /opt/rocm)
 
 # Treat llama3.cxx as HIP source code
 set_source_files_properties(llama3.cxx PROPERTIES LANGUAGE HIP)
