@@ -42,6 +42,7 @@ extern double half_epsilon;
 extern double single_epsilon;
 extern double double_epsilon;
 extern bool   skip_runtime_fails;
+extern bool   fftw_compare;
 
 extern double max_linf_eps_double;
 extern double max_l2_eps_double;

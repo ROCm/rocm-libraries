@@ -204,6 +204,27 @@ inline void validate_or_throw(fft_input_generator input_gen, const std::string& 
     }
 }
 
+inline bool is_host_generator(const fft_input_generator& gen)
+{
+    return gen == fft_input_generator::fft_input_random_generator_host
+           || gen == fft_input_generator::fft_input_generator_host;
+}
+inline bool is_device_generator(const fft_input_generator& gen)
+{
+    return gen == fft_input_generator::fft_input_random_generator_device
+           || gen == fft_input_generator::fft_input_generator_device;
+}
+inline bool is_random_generator(const fft_input_generator& gen)
+{
+    return gen == fft_input_generator::fft_input_random_generator_host
+           || gen == fft_input_generator::fft_input_random_generator_device;
+}
+inline bool is_deterministic_generator(const fft_input_generator& gen)
+{
+    return gen == fft_input_generator::fft_input_generator_host
+           || gen == fft_input_generator::fft_input_generator_device;
+}
+
 template <>
 struct is_fft_enum<fft_input_generator, true> : std::true_type
 {

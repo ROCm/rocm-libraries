@@ -24,6 +24,7 @@
 
 #include <numeric>
 #include <stddef.h>
+#include <stdexcept>
 #include <tuple>
 
 // arithmetic helper functions
@@ -46,6 +47,22 @@ static inline size_t CeilPo2(size_t n)
     }
 
     return t;
+}
+
+static size_t max_prime_factor(size_t len)
+{
+    if(len < 2)
+        throw std::invalid_argument("No prime factor for lengths smaller than 2");
+    if(len < 4)
+        return len;
+    size_t ret = 1;
+    while(len != 1)
+    {
+        ret++;
+        while(len % ret == 0)
+            len /= ret;
+    }
+    return ret;
 }
 
 template <typename T>

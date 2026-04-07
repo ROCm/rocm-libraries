@@ -110,7 +110,7 @@ bool use_fftw_wisdom = false;
 bool fftw_compare = true;
 
 // Cache the last cpu fft that was requested
-last_cpu_fft_cache last_cpu_fft_data;
+reference_fft_data_t reference_fft_data_t::cached_data = reference_fft_data_t::make_default();
 
 // Number of devices to distribute the FFT to for manual tests
 int manual_devices = 1;
@@ -843,7 +843,7 @@ TEST(manual, vs_fftw) // MANUAL TESTS HERE
     catch(const HOSTBUF_MEM_USAGE& e)
     {
         // explicitly clear test cache
-        last_cpu_fft_data = last_cpu_fft_cache();
+        reference_fft_data_t::clear_cache();
         GTEST_SKIP() << e.what();
     }
     catch(const DEVICEBUF_MEM_USAGE& e)

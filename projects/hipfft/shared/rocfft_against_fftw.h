@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "fft_enums.h"
 #include "fftw_transform.h"
 
 // Return the precision enum for rocFFT based upon the type.

@@ -98,7 +98,7 @@ bool use_fftw_wisdom = false;
 bool fftw_compare = true;
 
 // Cache the last cpu fft that was requested
-last_cpu_fft_cache last_cpu_fft_data;
+reference_fft_data_t reference_fft_data_t::cached_data = reference_fft_data_t::make_default();
 
 // Multi-process library to use
 fft_params::fft_mp_lib mp_lib = fft_params::fft_mp_lib_none;
