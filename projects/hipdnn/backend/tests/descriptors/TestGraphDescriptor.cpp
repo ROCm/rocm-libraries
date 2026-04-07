@@ -457,6 +457,23 @@ TEST_F(TestGraphDescriptor, BinarySerializeNullDescriptor)
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
+TEST_F(TestGraphDescriptor, BinarySerializeNullSize)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
+        &desc, serializedGraph.data(), serializedGraph.size());
+    ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
+    ASSERT_NE(desc, nullptr);
+
+    status = hipdnnBackendGetSerializedBinaryGraph_ext(desc, 0, nullptr, nullptr);
+    EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+
+    hipdnnBackendDestroyDescriptor(desc);
+}
+
 TEST_F(TestGraphDescriptor, BinarySerializeEmptyGraph)
 {
     // Create a graph descriptor with no operations via the C API
@@ -512,6 +529,19 @@ TEST_F(TestGraphDescriptor, MalformedJsonViaCApiReturnsBadParam)
     auto status
         = hipdnnBackendCreateAndDeserializeJsonGraph_ext(&desc, badJson.c_str(), badJson.size());
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestGraphDescriptor, BinaryDeserializeCorruptedData)
+{
+    const std::vector<uint8_t> garbageData = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04};
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto status
+        = hipdnnBackendCreateAndDeserializeGraph_ext(&desc, garbageData.data(), garbageData.size());
+    EXPECT_NE(status, HIPDNN_STATUS_SUCCESS);
+    if(desc != nullptr)
+    {
+        hipdnnBackendDestroyDescriptor(desc);
+    }
 }
 
 // ============================================================================

@@ -138,4 +138,4 @@ public:
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
 };
-}
+} // namespace hipdnn_frontend::detail

@@ -1135,7 +1135,14 @@ public:
 
     // ── Binary serialization (always available) ─────────────────────────
 
-    /// Serialize a graph to a binary byte vector, auto-lowering if needed.
+    /** @brief Serialize a graph to a binary byte vector, auto-lowering if needed.
+     *
+     * If the graph has not been lowered to a backend descriptor, it will be
+     * auto-lowered before serialization.
+     *
+     * @param[out] data The serialized binary data.
+     * @return Error indicating success or failure.
+     */
     Error serialize(std::vector<uint8_t>& data)
     {
         if(!_graphDesc || !_graphDesc->valid())
@@ -1146,7 +1153,13 @@ public:
         return std::as_const(*this).serialize(data);
     }
 
-    /// Serialize a previously built graph to a binary byte vector.
+    /** @brief Serialize a previously built graph to a binary byte vector.
+     *
+     * Requires a valid backend descriptor (call build_operation_graph() first).
+     *
+     * @param[out] data The serialized binary data.
+     * @return Error indicating success or failure.
+     */
     Error serialize(std::vector<uint8_t>& data) const
     {
         if(!_graphDesc || !_graphDesc->valid())
@@ -1172,7 +1185,10 @@ public:
         return {};
     }
 
-    /// Serialize the graph to a binary byte vector, auto-lowering if needed.
+    /** @brief Serialize the graph to a binary byte vector, auto-lowering if needed.
+     *
+     * @return A pair of the serialized data and an Error.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::pair<std::vector<uint8_t>, Error> to_binary()
     {
@@ -1181,7 +1197,10 @@ public:
         return {std::move(data), std::move(err)};
     }
 
-    /// Serialize a previously built graph to a binary byte vector.
+    /** @brief Serialize a previously built graph to a binary byte vector.
+     *
+     * @return A pair of the serialized data and an Error.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::pair<std::vector<uint8_t>, Error> to_binary() const
     {
@@ -1190,15 +1209,29 @@ public:
         return {std::move(data), std::move(err)};
     }
 
-    /// Convenience wrapper around deserialize() for API symmetry with to_binary().
-    /// Deserializes a graph from a binary byte vector, finalizing with the given handle.
+    /** @brief Deserialize a graph from a binary byte vector, finalizing with the given handle.
+     *
+     * Convenience wrapper around deserialize() for API symmetry with to_binary().
+     *
+     * @param handle The hipDNN handle for finalization.
+     * @param data The binary data to deserialize.
+     * @return Error indicating success or failure.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error from_binary(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
         return deserialize(handle, data);
     }
 
-    /// Deserialize a graph from a binary byte vector with handle (finalizes).
+    /** @brief Deserialize a graph from a binary byte vector with handle.
+     *
+     * Unpacks the serialized graph, reconstructs frontend nodes and attributes,
+     * and finalizes the backend descriptor with the given handle.
+     *
+     * @param handle The hipDNN handle for finalization.
+     * @param data The binary data to deserialize.
+     * @return Error indicating success or failure.
+     */
     Error deserialize(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
         std::vector<std::shared_ptr<graph::INode>> tempNodes;
@@ -1221,9 +1254,14 @@ public:
         return {};
     }
 
-    /// Deserialize a graph from a binary byte vector (structure only).
-    /// The backend descriptor is not finalized. Call build_operation_graph()
-    /// afterwards to finalize for execution.
+    /** @brief Deserialize a graph from a binary byte vector (structure only).
+     *
+     * The backend descriptor is not finalized. Call build_operation_graph()
+     * afterwards to finalize for execution.
+     *
+     * @param data The binary data to deserialize.
+     * @return Error indicating success or failure.
+     */
     Error deserialize(const std::vector<uint8_t>& data)
     {
         return deserialize(nullptr, data);
@@ -1231,7 +1269,13 @@ public:
 
     // ── JSON string serialization (always available) ────────────────────
 
-    /// Serialize a previously built graph to a JSON string.
+    /** @brief Serialize a previously built graph to a JSON string.
+     *
+     * Requires a valid backend descriptor (call build_operation_graph() first).
+     *
+     * @param[out] jsonData The serialized JSON string.
+     * @return Error indicating success or failure.
+     */
     Error serialize(std::string& jsonData) const
     {
         if(!_graphDesc || !_graphDesc->valid())
@@ -1247,22 +1291,28 @@ public:
                                              _graphDesc->get(), 0, &graphByteSize, nullptr),
                                          "Failed to query JSON graph size");
 
+        // The backend C API reports graphByteSize including the null terminator
+        // (standard C convention). We resize to the full size so the backend can
+        // write into the buffer, then shrink by one to exclude the terminator
+        // from the std::string's logical content.
         jsonData.resize(graphByteSize);
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
             detail::hipdnnBackend()->backendGetSerializedJsonGraphExt(
                 _graphDesc->get(), graphByteSize, &graphByteSize, jsonData.data()),
             "Failed to serialize graph to JSON");
-
-        // Backend reports size including null terminator; trim it from the std::string
-        if(!jsonData.empty() && jsonData.back() == '\0')
-        {
-            jsonData.pop_back();
-        }
+        jsonData.resize(graphByteSize - 1);
 
         return {};
     }
 
-    /// Serialize a graph to a JSON string, auto-lowering if needed.
+    /** @brief Serialize a graph to a JSON string, auto-lowering if needed.
+     *
+     * If the graph has not been lowered to a backend descriptor, it will be
+     * auto-lowered before serialization.
+     *
+     * @param[out] jsonData The serialized JSON string.
+     * @return Error indicating success or failure.
+     */
     Error serialize(std::string& jsonData)
     {
         if(!_graphDesc || !_graphDesc->valid())
@@ -1273,7 +1323,10 @@ public:
         return std::as_const(*this).serialize(jsonData);
     }
 
-    /// Serialize the graph to a JSON string, auto-lowering if needed.
+    /** @brief Serialize the graph to a JSON string, auto-lowering if needed.
+     *
+     * @return A pair of the serialized JSON string and an Error.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::pair<std::string, Error> to_json()
     {
@@ -1282,7 +1335,10 @@ public:
         return {std::move(jsonData), std::move(err)};
     }
 
-    /// Serialize a previously built graph to a JSON string.
+    /** @brief Serialize a previously built graph to a JSON string.
+     *
+     * @return A pair of the serialized JSON string and an Error.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::pair<std::string, Error> to_json() const
     {
@@ -1291,15 +1347,29 @@ public:
         return {std::move(jsonData), std::move(err)};
     }
 
-    /// Convenience wrapper around deserialize() for API symmetry with to_json().
-    /// Deserializes a graph from a JSON string, finalizing with the given handle.
+    /** @brief Deserialize a graph from a JSON string, finalizing with the given handle.
+     *
+     * Convenience wrapper around deserialize() for API symmetry with to_json().
+     *
+     * @param handle The hipDNN handle for finalization.
+     * @param json The JSON string to deserialize.
+     * @return Error indicating success or failure.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error from_json(hipdnnHandle_t handle, const std::string& json)
     {
         return deserialize(handle, json);
     }
 
-    /// Deserialize a graph from a JSON string with handle (finalizes).
+    /** @brief Deserialize a graph from a JSON string with handle.
+     *
+     * Unpacks the serialized graph, reconstructs frontend nodes and attributes,
+     * and finalizes the backend descriptor with the given handle.
+     *
+     * @param handle The hipDNN handle for finalization.
+     * @param jsonData The JSON string to deserialize.
+     * @return Error indicating success or failure.
+     */
     Error deserialize(hipdnnHandle_t handle, const std::string& jsonData)
     {
         std::vector<std::shared_ptr<graph::INode>> tempNodes;
@@ -1322,9 +1392,14 @@ public:
         return {};
     }
 
-    /// Deserialize a graph from a JSON string (structure only).
-    /// The backend descriptor is not finalized. Call build_operation_graph()
-    /// afterwards to finalize for execution.
+    /** @brief Deserialize a graph from a JSON string (structure only).
+     *
+     * The backend descriptor is not finalized. Call build_operation_graph()
+     * afterwards to finalize for execution.
+     *
+     * @param jsonData The JSON string to deserialize.
+     * @return Error indicating success or failure.
+     */
     Error deserialize(const std::string& jsonData)
     {
         return deserialize(nullptr, jsonData);
