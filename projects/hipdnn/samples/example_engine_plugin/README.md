@@ -129,12 +129,31 @@ cmake --install build --prefix /opt/rocm
 # Plugin .so is installed to <prefix>/lib/hipdnn_plugins/engines/
 ```
 
-### Windows (MSVC)
+### Windows
+
+Ensure that the ROCm install bin folder is in your system PATH. E.g.
 
 ```powershell
-cmake -B build -DCMAKE_PREFIX_PATH="C:\rocm" -G "Visual Studio 17 2022"
+set PATH=C:\ROCm\bin;%PATH%
+```
+
+### Windows (MSVC)
+
+With the ROCm bin folder in your system PATH:
+
+```powershell
+cmake -B build -G "Visual Studio 17 2022"
 cmake --build build --config Release
 ctest --test-dir build --build-config Release
+```
+
+The tests and sample can also be run directly:
+
+```powershell
+.\build\bin\Release\example_provider_tests.exe
+```
+```powershell
+.\build\bin\Release\example_provider_sample.exe
 ```
 
 ### CMake Options
