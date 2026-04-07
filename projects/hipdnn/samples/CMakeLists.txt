@@ -57,6 +57,8 @@ add_hipdnn_sample(hipdnn_sample_fused_conv_fprop_bias_activ convolution/FusedCon
 add_hipdnn_sample(hipdnn_sample_conv_wgrad convolution/ConvWgrad.cpp)
 add_hipdnn_sample(hipdnn_sample_conv_fprop_deterministic convolution/ConvFpropDeterministic.cpp)
 
+add_hipdnn_sample(hipdnn_sample_sdpa_fprop sdpa/SdpaFprop.cpp)
+
 add_hipdnn_sample(hipdnn_sample_serialization_roundtrip serialization/SerializationRoundTrip.cpp)
 
 add_hipdnn_sample(hipdnn_sample_knobs_usage knobs/KnobsUsage.cpp)
@@ -110,6 +112,11 @@ add_hipdnn_sample_test(hipdnn_sample_bn_backward)
 add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_activ)
 add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_drelu_bn_backward)
 add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_variance_activ)
+
+# Register SDPA samples as tests
+# Note: SDPA sample test is disabled until the ASM SDPA engine's isApplicable
+# check properly gates on architecture, data type, and head dimension.
+# add_hipdnn_sample_test(hipdnn_sample_sdpa_fprop)
 
 # Register serialization samples as tests
 add_hipdnn_sample_test(hipdnn_sample_serialization_roundtrip)

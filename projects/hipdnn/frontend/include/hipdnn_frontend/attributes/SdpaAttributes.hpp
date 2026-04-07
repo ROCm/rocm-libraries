@@ -33,13 +33,23 @@ namespace hipdnn_frontend::graph
  * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
  * @endcode
  *
+ * **Tensor Shapes (BHSD ordering):**
+ * - **Q** (query): `(B, H, S_q, D)` — batch, heads, query sequence length, head dimension
+ * - **K** (key): `(B, H_k, S_kv, D)` — batch, key heads, key/value sequence length, head dimension
+ * - **V** (value): `(B, H_v, S_kv, D_v)` — batch, value heads, key/value sequence length, value head dimension
+ * - **O** (output): `(B, H, S_q, D_v)` — batch, heads, query sequence length, value head dimension
+ * - **Stats** (optional): `(B, H, S_q, 1)` — softmax statistics (when generate_stats is true)
+ *
+ * Memory layout is controlled via strides. Use `TensorLayout::BHSD` for row-major or
+ * `TensorLayout::BSHD` for sequence-major layout.
+ *
  * **Required inputs:**
- * - Q: Query tensor [B, H, S_q, D]
- * - K: Key tensor [B, H, S_kv, D]
- * - V: Value tensor [B, H, S_kv, D]
+ * - Q: Query tensor
+ * - K: Key tensor (num_heads must divide evenly into Q's num_heads for GQA/MQA)
+ * - V: Value tensor (seq_kv must match K)
  *
  * **Outputs:**
- * - O: Attention output tensor [B, H, S_q, D]
+ * - O: Attention output tensor
  * - Stats: Softmax statistics (optional, when generate_stats is set)
  *
  * **Optional features:**
