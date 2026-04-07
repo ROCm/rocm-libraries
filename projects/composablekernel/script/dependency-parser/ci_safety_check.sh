@@ -54,7 +54,7 @@ if [ -n "$CHANGE_ID" ]; then
     CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}..HEAD 2>/dev/null || echo "")
 else
     # Fallback: Works for both branch builds and PRs without CHANGE_ID
-    # Use three-dot syntax to avoid including merge commit changes from develop
+    # Use two-dot syntax to get all files that differ between develop and the branch
     CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}..HEAD 2>/dev/null || echo "")
 fi
 
