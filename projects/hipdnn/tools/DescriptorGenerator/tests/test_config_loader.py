@@ -321,6 +321,9 @@ class TestTestDataParsing:
             convolution_fwd_config.test_data.constants_include == "ConvFpropConstants"
         )
 
+    def test_tensor_const_prefix(self, convolution_fwd_config):
+        assert convolution_fwd_config.test_data.tensor_const_prefix == "K_FPROP_"
+
 
 # ---------------------------------------------------------------------------
 # Task 2B.3: _parse_frontend_config() and _parse_frontend_tensors()

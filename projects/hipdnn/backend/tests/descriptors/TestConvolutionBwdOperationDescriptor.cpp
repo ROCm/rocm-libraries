@@ -19,6 +19,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 using namespace hipdnn_backend;
@@ -778,9 +779,9 @@ TEST_F(TestConvolutionBwdOperationDescriptor, ToStringContainsExpectedInfo)
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("ConvolutionBwdOperationDescriptor"), std::string::npos);
-    ASSERT_NE(str.find("dy_uid=1100"), std::string::npos);
-    ASSERT_NE(str.find("w_uid=1101"), std::string::npos);
-    ASSERT_NE(str.find("dx_uid=1102"), std::string::npos);
+    ASSERT_NE(str.find("dy_uid=" + std::to_string(K_DGRAD_TENSOR_DY_UID)), std::string::npos);
+    ASSERT_NE(str.find("w_uid=" + std::to_string(K_DGRAD_TENSOR_W_UID)), std::string::npos);
+    ASSERT_NE(str.find("dx_uid=" + std::to_string(K_DGRAD_TENSOR_DX_UID)), std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 

@@ -19,6 +19,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 using namespace hipdnn_backend;
@@ -645,12 +646,14 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, ToStringContainsExpectedInfo)
 
     const std::string str = desc->toString();
     ASSERT_NE(str.find("BatchnormInferenceOperationDescriptor"), std::string::npos);
-    ASSERT_NE(str.find("x_uid=70"), std::string::npos);
-    ASSERT_NE(str.find("mean_uid=71"), std::string::npos);
-    ASSERT_NE(str.find("inv_variance_uid=72"), std::string::npos);
-    ASSERT_NE(str.find("scale_uid=73"), std::string::npos);
-    ASSERT_NE(str.find("bias_uid=74"), std::string::npos);
-    ASSERT_NE(str.find("y_uid=75"), std::string::npos);
+    ASSERT_NE(str.find("x_uid=" + std::to_string(K_BN_INF_TENSOR_X_UID)), std::string::npos);
+    ASSERT_NE(str.find("mean_uid=" + std::to_string(K_BN_INF_TENSOR_MEAN_UID)), std::string::npos);
+    ASSERT_NE(str.find("inv_variance_uid=" + std::to_string(K_BN_INF_TENSOR_INV_VARIANCE_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("scale_uid=" + std::to_string(K_BN_INF_TENSOR_SCALE_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("bias_uid=" + std::to_string(K_BN_INF_TENSOR_BIAS_UID)), std::string::npos);
+    ASSERT_NE(str.find("y_uid=" + std::to_string(K_BN_INF_TENSOR_Y_UID)), std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 
