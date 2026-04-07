@@ -139,6 +139,44 @@ struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, CtrlFlags, Compile
  * @struct amdgcn_mma
  * @brief Specialization of amdgcn_mma for Scale MFMA on GFX950 targets
  *
+ * This specialization implements the Scale MFMA instruction for pk_fp6x16_t A and B
+ * matrices with fp32_t accumulator, with 16x16x128 block sizes.
+ *
+ * @tparam CtrlFlags      Control flags for the Scale MFMA operation
+ * @tparam CompilerTarget Current compiler target
+ */
+// TODO: c++20 template <CtrlFlagsScaleMfmaI CtrlFlags, amdgcn_target CompilerTarget>
+// TODO: c++20 requires
+template <typename CtrlFlags, typename CompilerTarget>
+// clang-format off
+//               | A B C DataTypes          | MNK + WaveSize     |AParams  |BPar |CPar |
+struct amdgcn_mma<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
+: amdgcn_mma_base<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, 64u, 32, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>
+{
+    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
+                                        BVecType const& bVec,
+                                        CVecType const& cVec,
+                                        int const& scale_A,
+                                        int const& scale_B)
+    {
+        return {__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
+            int32x8_t{aVec.data[0], aVec.data[1], aVec.data[2], aVec.data[3], aVec.data[4], aVec.data[5], 0, 0},
+            int32x8_t{bVec.data[0], bVec.data[1], bVec.data[2], bVec.data[3], bVec.data[4], bVec.data[5], 0, 0},
+            cVec,
+            scale::detail::ScaleDataTypeToFlag_v<pk_fp6x16_t>,
+            scale::detail::ScaleDataTypeToFlag_v<pk_fp6x16_t>,
+            static_cast<int>(CtrlFlags::OPSEL_A),
+            scale_A,
+            static_cast<int>(CtrlFlags::OPSEL_B),
+            scale_B)};
+    }
+};
+// clang-format on
+
+/**
+ * @struct amdgcn_mma
+ * @brief Specialization of amdgcn_mma for Scale MFMA on GFX950 targets
+ *
  * This specialization implements the Scale MFMA instruction for fp8_t A and B
  * matrices with fp32_t accumulator, with 32x32x64 block sizes.
  *
@@ -253,5 +291,43 @@ struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u, CtrlFlags, Compiler
             scale_B)};
     }
 };
+
+/**
+ * @struct amdgcn_mma
+ * @brief Specialization of amdgcn_mma for Scale MFMA on GFX950 targets
+ *
+ * This specialization implements the Scale MFMA instruction for pk_fp6x16_t A and B
+ * matrices with fp32_t accumulator, with 32x32x64 block sizes.
+ *
+ * @tparam CtrlFlags      Control flags for the Scale MFMA operation
+ * @tparam CompilerTarget Current compiler target
+ */
+// TODO: c++20 template <CtrlFlagsScaleMfmaI CtrlFlags, amdgcn_target CompilerTarget>
+// TODO: c++20 requires
+template <typename CtrlFlags, typename CompilerTarget>
+// clang-format off
+//               | A B C DataTypes                | MNK + WaveSize    |AParams  |BPar |CPar  |
+struct amdgcn_mma<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 32u, 32u, 64u, CtrlFlags, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
+: amdgcn_mma_base<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 32u, 32u, 64u, 64u, 32, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>
+{
+    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,
+                                        BVecType const& bVec,
+                                        CVecType const& cVec,
+                                        int const& scale_A,
+                                        int const& scale_B)
+    {
+        return {__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
+            int32x8_t{aVec.data[0], aVec.data[1], aVec.data[2], aVec.data[3], aVec.data[4], aVec.data[5], 0, 0},
+            int32x8_t{bVec.data[0], bVec.data[1], bVec.data[2], bVec.data[3], bVec.data[4], bVec.data[5], 0, 0},
+            cVec,
+            scale::detail::ScaleDataTypeToFlag_v<pk_fp6x16_t>,
+            scale::detail::ScaleDataTypeToFlag_v<pk_fp6x16_t>,
+            static_cast<int>(CtrlFlags::OPSEL_A),
+            scale_A,
+            static_cast<int>(CtrlFlags::OPSEL_B),
+            scale_B)};
+    }
+};
+// clang-format on
 
 } // namespace ck_tile::core::arch::mma
