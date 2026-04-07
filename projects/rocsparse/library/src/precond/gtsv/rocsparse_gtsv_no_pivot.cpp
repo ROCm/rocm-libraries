@@ -124,6 +124,12 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
         current_m = num_spikes;
     }
 
+    if(current_m > 1024)
+    {
+        *buffer_size = 0;
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    }
+
     return rocsparse_status_success;
 }
 
@@ -626,8 +632,6 @@ namespace rocsparse
                                                    gtsv_no_pivot_buffer_data<T>* buffer_data,
                                                    int                           level)
     {
-        std::cout << "level: " << level << std::endl;
-
         ROCSPARSE_ROUTINE_TRACE;
 
         constexpr int BLOCKSIZE  = determine_spike_solver_blocksize();
@@ -699,6 +703,11 @@ namespace rocsparse
         }
         else
         {
+            if(level + 1 >= determine_max_recursion_levels())
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+
             RETURN_IF_ROCSPARSE_ERROR(gtsv_no_pivot_template_dispatch(handle,
                                                                       num_spikes,
                                                                       n,
@@ -753,8 +762,6 @@ namespace rocsparse
                 handle, m, n, dl, d, du, B, ldb, buffer_data, level));
             return rocsparse_status_success;
         }
-
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
 }
 
@@ -846,6 +853,11 @@ rocsparse_status rocsparse::gtsv_no_pivot_template(rocsparse_handle handle,
         offset += ((sizeof(T) * int64_t(num_spikes) * n - 1) / 256 + 1) * 256;
 
         current_m = num_spikes;
+    }
+
+    if(current_m > 1024)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
 
     RETURN_IF_ROCSPARSE_ERROR(
