@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_problem.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_v2_custom_policy.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_one_warp_v1.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_v2_prefetch_k.hpp"
