@@ -1,170 +1,303 @@
-# Grouped Convolution Tile Engine
+# Grouped Convolution ML Heuristics & Benchmarking
 
-GPU benchmark and kernel generation utilities for grouped convolution operations with JIT compilation.
+Training data collection and validation utilities for ML-based kernel selection in grouped convolution operations.
+
+## Overview
+
+This directory supports the **ML heuristic system** for grouped convolution kernel selection. The system achieves **99.67% efficiency** on unseen production workloads by predicting optimal kernels without exhaustive GPU search.
+
+**Key Results:**
+- Forward pass: 99.67% mean efficiency (validated on 10 unseen MIOpen shapes)
+- 70% perfect oracle matches (selected exact best kernel)
+- <1ms selection latency (30,000-60,000× faster than exhaustive search)
+
+See [dispatcher/heuristics/GROUPED_CONV_ML_SUMMARY.md](../../dispatcher/heuristics/GROUPED_CONV_ML_SUMMARY.md) for full technical details.
+
+---
 
 ## Files
 
-- **`grouped_conv_benchmark.py`** - Quick GPU benchmark for specific kernel configs
-- **`grouped_conv_full_benchmark.py`** - Production-scale systematic sweep (all kernels × all problems)
-- **`grouped_conv_instance_builder.py`** - Kernel configuration generator from JSON sweeps
-- **`configs/*.json`** - Kernel sweep configuration files
+### Benchmarking & Data Collection
+- **`grouped_conv_full_benchmark.py`** - Systematic sweep for training data (kernels × problems)
+- **`run_one_grouped_conv_kernel.py`** - Subprocess worker for isolated GPU execution
+- **`test_batch_benchmark.py`** - Quick integration test (2 kernels × small problems)
+- **`grouped_conv_instance_builder.py`** - Kernel configuration generator from JSON
 
-## Features
+### ML Validation
+- **`validate_ml_vs_oracle.py`** - Compare ML predictions vs exhaustive GPU search
+- **`compare_ml_vs_oracle.py`** - Analysis of ML vs oracle performance
 
-- **JIT compilation** via dispatcher's `setup_multiple_grouped_conv_dispatchers()`
-- **Actual GPU execution** with HIP event timing
-- Tests forward, backward data, and backward weight convolutions
-- Multiple problem presets (ResNet, MobileNet, custom)
-- Trait-based kernel filtering via JSON configs
-- CSV and JSON output with streaming results
-- Resume support for long-running sweeps
+### Configuration
+- **`configs/*.json`** - Kernel trait configurations (forward, bwd_data, bwd_weight)
+- **`problems/*.py`** - Problem datasets (training, validation, MIOpen production shapes)
 
-## Quick Benchmark Usage
+---
 
-Fast benchmarking for specific configs and problems:
+## ML Heuristic Workflow
+
+### 1. Training Data Collection
+
+Already completed. Training datasets:
+- **Forward**: 48,845 samples (1,372 unique shapes) - Tier-1 extended
+- **Bwd Data**: 14,562 samples (701 unique shapes)
+- **Bwd Weight**: 18,150 samples (921 unique shapes)
+
+If you need to collect new data:
 
 ```bash
-# Forward with ResNet problems
-python grouped_conv_benchmark.py configs/forward_ci.json --problems resnet --best
+# Full benchmark sweep (all kernels × all problems)
+python grouped_conv_full_benchmark.py \
+  --variant forward \
+  --category full \
+  --workers 256 \
+  --output training_data_forward_bf16.csv
+```
 
-# Backward data with filter
-python grouped_conv_benchmark.py configs/bwd_data.json --problems bwd_data \
-  --filter "c.tile_n >= 128" --csv results.csv
+### 2. Training Models
+
+Models are located in `dispatcher/heuristics/models/`:
+- `grouped_conv_forward_bf16_gfx950/` - **Production-ready** (99.67% efficiency)
+- `grouped_conv_bwd_data_bf16_gfx950/` - Trained, needs hardware validation
+- `grouped_conv_bwd_weight_bf16_gfx950/` - Trained, needs hardware validation
+
+To train new models, see [dispatcher/heuristics/README.md](../../dispatcher/heuristics/README.md).
+
+### 3. Validation
+
+Validate ML model performance on unseen shapes:
+
+```bash
+cd ../../dispatcher/heuristics/validation/grouped_conv
+
+# Forward model validation (hardware)
+python validate_generalization.py --direction forward
+
+# Quick prediction quality check (no GPU)
+python validate_training_shapes.py --direction forward
+
+# Backward models validation
+python validate_backward_models.py
+```
+
+See [dispatcher/heuristics/validation/README.md](../../dispatcher/heuristics/validation/README.md) for details.
+
+---
+
+## Problem Datasets
+
+Located in `problems/`:
+
+### Training Sets
+- **`forward_training.py`** - 2,630 shapes (300 MIOpen + 2,330 synthetic)
+- **`forward_training_miopen.py`** - 300 MIOpen production shapes
+- **`bwd_data_synthetic_extended.py`** - Backward data training set
+- **`bwd_weight_synthetic_extended.py`** - Backward weight training set
+
+### Validation Sets (Unseen)
+- **`bwd_data_test_validation.py`** - 10 unseen backward data shapes
+- **`bwd_weight_test_validation.py`** - 10 unseen backward weight shapes
+
+### Dataset Generator
+- **`create_miopen_training_set.py`** - Extract shapes from MIOpen ALL_CONFIGS_FULL.txt
+
+---
+
+## Benchmarking Usage
+
+### Quick Test (2 Kernels × Few Problems)
+
+```bash
+# Test benchmark pipeline
+python test_batch_benchmark.py
+```
+
+### Full Sweep (All Kernels × All Problems)
+
+```bash
+# Forward: 20 kernels × 200 problems = 4,000 measurements
+python grouped_conv_full_benchmark.py \
+  --variant forward \
+  --category full \
+  --workers 256 \
+  --output sweep_forward.csv
+
+# Backward data
+python grouped_conv_full_benchmark.py \
+  --variant bwd_data \
+  --category full \
+  --workers 256
 
 # Backward weight
-python grouped_conv_benchmark.py configs/bwd_weight.json --problems all \
-  --workers 8 --json results.json --best
-
-# Compile only (no GPU execution)
-python grouped_conv_benchmark.py configs/forward.json --compile-only
-
-# Clean build
-python grouped_conv_benchmark.py configs/forward.json --clean --problems resnet
+python grouped_conv_full_benchmark.py \
+  --variant bwd_weight \
+  --category full \
+  --workers 256
 ```
 
-## Full Benchmark Usage
+**Output**: CSV with columns:
+```
+kernel,problem_idx,N,C,K,G,Hi,Wi,Y,X,stride_h,stride_w,pad_h,pad_w,latency_ms,tflops,non_zero
+```
 
-Systematic sweeps for all kernels × all problems (production testing):
+### Resume Support
 
+Automatically skips completed measurements if CSV exists:
 ```bash
-# Quick test (2 problems × all kernels from config)
-python grouped_conv_full_benchmark.py --variant forward --category quick
-
-# Full sweep (8 problems × all kernels)
-python grouped_conv_full_benchmark.py --variant forward --category full --workers 256
-
-# Backward data with filtering
-python grouped_conv_full_benchmark.py --variant bwd_data --category full \
-  --filter "c.tile_n >= 128" --csv sweep_bwd_data.csv
-
-# Resume from previous run (skip completed measurements)
+# Run fails after 1000 measurements
 python grouped_conv_full_benchmark.py --variant forward --category full
-# (automatically resumes if CSV exists)
+
+# Resume from where it left off (reads existing CSV)
+python grouped_conv_full_benchmark.py --variant forward --category full
 ```
 
-## Problem Presets
-
-### Quick Benchmark
-- `resnet` - ResNet stage configurations (6 problems)
-- `mobilenet` / `grouped` - MobileNet depthwise convolutions (4 problems)
-- `bwd_data` - Backward data problems (3 problems)
-- `bwd_weight` - Backward weight problems (3 problems)
-- `all` - All ResNet + MobileNet problems
-- Custom: `"N,C,K,G,H,W,Y,X,..."` format
-
-### Full Benchmark
-- `quick` - 2 problems for rapid testing
-- `full` - 8+ problems for comprehensive coverage
-
-## Output
-
-- **Console**: Live results with best kernel highlighted
-- **CSV**: Detailed measurements (problem, kernel, latency, TFLOPS, non-zero elements)
-- **JSON**: Full metadata + results
-
-Example CSV columns:
-```
-problem_name,N,C,K,G,Hi,Wi,Y,X,dtype,kernel,variant,pipeline,scheduler,tile,latency_ms,tflops,non_zero
-```
+---
 
 ## Instance Builder
 
-Generate kernel configurations from JSON sweep files:
+Generate kernel configurations from JSON trait files:
 
 ```bash
-# List all kernels from a config
-python grouped_conv_instance_builder.py configs/forward.json --arch gfx950 --list
+# List all kernels matching config
+python grouped_conv_instance_builder.py configs/forward_bf16.json --arch gfx950 --list
 
-# Count kernels only
-python grouped_conv_instance_builder.py configs/receipt0_forward.json --count-only
+# Count kernels
+python grouped_conv_instance_builder.py configs/forward_bf16.json --count-only
 
-# Apply custom filter
-python grouped_conv_instance_builder.py configs/forward.json \
-  --filter "c.tile_n >= 128 and c.pipeline == 'compv4'" --list
+# Apply filter
+python grouped_conv_instance_builder.py configs/forward_bf16.json \
+  --filter "c.tile_n >= 128 and c.pipeline == 'compv5'" --list
 
 # Export to JSON
-python grouped_conv_instance_builder.py configs/forward.json \
+python grouped_conv_instance_builder.py configs/forward_bf16.json \
   --export-json kernels.json
 ```
 
 ### Config Files
 
-- **`forward.json`** - General forward convolution (fp16/bf16, compv3/compv4) - 20 kernels
-- **`bwd_data.json`** - Backward data (fp16/bf16, compv3/mem) - 20 kernels
-- **`bwd_weight.json`** - Backward weight (fp16/bf16, compv3/mem) - 20 kernels
-- **`forward_ci.json`** - CI subset (fp16 only, compv3 only) - 5 kernels
-- **`receipt0_forward.json`** - Full sweep (fp16/bf16/fp32, all pipelines) - 30 kernels
+- **`forward_bf16.json`** - Forward BF16 (compv3/v4/v5, 30 kernels)
+- **`bwd_data.json`** - Backward data (compv3/mem, 20 kernels)
+- **`bwd_weight.json`** - Backward weight (compv3/mem, 20 kernels)
 
-Config structure (trait-based filtering):
+**Trait filtering** (see configs for examples):
 ```json
 {
   "variant": "forward",
   "trait_config": {
-    "data_type": {"values": ["fp16", "bf16"]},
-    "pipeline": {"values": ["compv3", "compv4"]},
-    "scheduler": {"values": ["intrawave"]},
+    "data_type": {"values": ["bf16"]},
+    "pipeline": {"values": ["compv3", "compv4", "compv5"]},
     "ndim_spatial": {"values": [2]}
   }
 }
 ```
 
-**Filtering logic:**
-- **Absent trait** → all values generated (e.g., no `pipeline` filter → generates compv3 + compv4)
-- **Present trait** → only listed values kept (e.g., `"pipeline": {"values": ["compv3"]}` → compv3 only)
+---
 
 ## Architecture
 
-Based on FMHA tile engine design:
+Based on FMHA tile engine design with subprocess isolation:
 
-1. **`grouped_conv_instance_builder.py`** - Expands JSON configs → GroupedConvKernelConfig lists
-2. **Dispatcher integration** - `setup_multiple_grouped_conv_dispatchers()` for parallel JIT
-3. **GPU runners** - `GpuGroupedConvRunner` for actual hardware execution
-4. **Streaming results** - CSV/JSON output written incrementally
-
-## Example Workflow
-
-```bash
-# 1. Quick validation (5 kernels × 6 problems)
-python grouped_conv_benchmark.py configs/forward_ci.json --problems resnet --best
-
-# 2. Full sweep (20 kernels × 8 problems)
-python grouped_conv_full_benchmark.py --variant forward --category full --workers 16
-
-# 3. Analyze results
-head -20 grouped_conv_sweep_results.csv
-
-# 4. Resume if interrupted
-python grouped_conv_full_benchmark.py --variant forward --category full
-# Skips already-completed measurements from CSV
+```
+grouped_conv_full_benchmark.py (orchestrator)
+  ├─> grouped_conv_instance_builder.py (generate kernel configs)
+  ├─> Build phase: JIT compile all kernels (parallel)
+  └─> Benchmark phase: subprocess workers (serial GPU access)
+      └─> run_one_grouped_conv_kernel.py (subprocess)
+          └─> GpuGroupedConvRunner (fresh GPU context per problem)
 ```
 
-## Hardware Validation
+**Key design decisions:**
+1. **Subprocess isolation** - Fresh GPU context prevents memory leaks
+2. **Batch size 20** - Optimal kernels per subprocess
+3. **Path-only build** - Main process never initializes GPU
+4. **Serial GPU access** - Accurate timing, no contention
 
-All benchmarks run actual GPU kernels on hardware (tested on gfx950):
-- Forward: 30.94 TFLOPS peak (ResNet-stage2, 1x64x64 tile)
-- Backward Data: 4.75 TFLOPS peak
-- Backward Weight: 2.00 TFLOPS peak
+**Success rate**: 99.5% (3,760/3,780 measurements succeeded)
 
-Pipelines: compv3, compv4 (forward), compv3/mem (backward)
-Schedulers: intrawave, interwave
-Tile sizes: 64x64, 128x128, 256x256
+---
+
+## Example Workflow: New Data Collection
+
+```bash
+# 1. Generate problem set
+cd problems/
+python create_miopen_training_set.py \
+  --input /path/to/ALL_CONFIGS_FULL.txt \
+  --output forward_training_new.py \
+  --count 500
+
+# 2. Collect training data
+cd ..
+python grouped_conv_full_benchmark.py \
+  --variant forward \
+  --category full \
+  --workers 256 \
+  --output new_training_data.csv
+
+# 3. Convert to parquet
+cd ../../dispatcher/heuristics
+python convert_csv_to_parquet.py \
+  --input ../../tile_engine/ops/grouped_conv/new_training_data.csv \
+  --output data/grouped_conv_forward_bf16_gfx950/new_data.parquet
+
+# 4. Train model
+python train.py \
+  --data_dir data/ \
+  --out_dir models/grouped_conv_forward_bf16_gfx950_v2 \
+  --op grouped_conv \
+  --variant forward
+
+# 5. Validate
+cd validation/grouped_conv
+python validate_generalization.py --direction forward
+```
+
+---
+
+## Performance Results
+
+### Forward Pass (Production-Ready)
+- **Mean efficiency**: 99.67% on 10 unseen MIOpen shapes
+- **Perfect matches**: 70% (7/10 selected exact oracle best)
+- **Min efficiency**: 98.4% (even on edge case: 1×491 spatial)
+- **Selection time**: <1ms (vs 30-60s exhaustive search)
+
+### Backward Passes (Prediction-Validated)
+- **Bwd Data**: 14,562 samples, prediction quality tested
+- **Bwd Weight**: 18,150 samples, prediction quality tested
+- **Status**: Models trained, hardware validation pending
+
+See [dispatcher/heuristics/GROUPED_CONV_ML_SUMMARY.md](../../dispatcher/heuristics/GROUPED_CONV_ML_SUMMARY.md) for full metrics.
+
+---
+
+## Hardware Tested
+
+- **GPU**: AMD MI300 (gfx950)
+- **Datatypes**: BF16 (primary), FP16, FP32
+- **Pipelines**: CompV3, CompV4, CompV5 (forward), CompV3/Mem (backward)
+- **Schedulers**: Intrawave, Interwave
+- **Tile sizes**: 16×64×64, 32×64×64, 64×64×64, 128×128×64, etc.
+
+---
+
+## Related Documentation
+
+- **ML System Overview**: [dispatcher/heuristics/GROUPED_CONV_ML_SUMMARY.md](../../dispatcher/heuristics/GROUPED_CONV_ML_SUMMARY.md)
+- **Training Pipeline**: [dispatcher/heuristics/README.md](../../dispatcher/heuristics/README.md)
+- **Validation Framework**: [dispatcher/heuristics/validation/README.md](../../dispatcher/heuristics/validation/README.md)
+- **Python Examples**: [dispatcher/examples/grouped_conv/python/README_ML_HEURISTIC.md](../../dispatcher/examples/grouped_conv/python/README_ML_HEURISTIC.md)
+
+---
+
+## Next Steps
+
+**For Forward Pass**: Production-ready, integrate into runtime dispatcher
+
+**For Backward Passes**: Run hardware validation
+```bash
+cd ../../dispatcher/heuristics/validation/grouped_conv
+python validate_generalization.py --direction bwd_data
+python validate_generalization.py --direction bwd_weight
+```
+
+Target: >85% mean efficiency on unseen shapes before production deployment.
