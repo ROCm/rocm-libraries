@@ -13,10 +13,10 @@
 namespace hipdnn_frontend::detail
 {
 
-// Unpacks a finalized HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT into
+// Unpacks a finalized HIPDNN_BACKEND_OPERATION_SDPA_FWD_DESCRIPTOR into
 // frontend SdpaAttributes. Required tensors are registered in tensorMap; optional
 // tensors and scalars are set only when present in the descriptor.
-[[nodiscard]] inline Error unpackSdpaFpropOperation(
+[[nodiscard]] inline Error unpackSdpaFwdOperation(
     hipdnnBackendDescriptor_t opDesc,
     std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,
     graph::SdpaAttributes& attributes)
@@ -24,31 +24,31 @@ namespace hipdnn_frontend::detail
     // Unpack q tensor
     std::shared_ptr<graph::TensorAttributes> qTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT, tensorMap, qTensor, "sdpa Q_EXT tensor"));
+        opDesc, HIPDNN_ATTR_OPERATION_SDPA_FWD_QDESC, tensorMap, qTensor, "sdpa Q_EXT tensor"));
     attributes.set_q(qTensor);
 
     // Unpack k tensor
     std::shared_ptr<graph::TensorAttributes> kTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT, tensorMap, kTensor, "sdpa K_EXT tensor"));
+        opDesc, HIPDNN_ATTR_OPERATION_SDPA_FWD_KDESC, tensorMap, kTensor, "sdpa K_EXT tensor"));
     attributes.set_k(kTensor);
 
     // Unpack v tensor
     std::shared_ptr<graph::TensorAttributes> vTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT, tensorMap, vTensor, "sdpa V_EXT tensor"));
+        opDesc, HIPDNN_ATTR_OPERATION_SDPA_FWD_VDESC, tensorMap, vTensor, "sdpa V_EXT tensor"));
     attributes.set_v(vTensor);
 
     // Unpack o tensor
     std::shared_ptr<graph::TensorAttributes> oTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT, tensorMap, oTensor, "sdpa O_EXT tensor"));
+        opDesc, HIPDNN_ATTR_OPERATION_SDPA_FWD_ODESC, tensorMap, oTensor, "sdpa O_EXT tensor"));
     attributes.set_o(oTensor);
 
     // Unpack bias tensor
     std::shared_ptr<graph::TensorAttributes> biasTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_ATTN_MASK_EXT,
                                             tensorMap,
                                             biasTensor,
                                             "sdpa ATTN_MASK_EXT tensor"));
@@ -60,7 +60,7 @@ namespace hipdnn_frontend::detail
     // Unpack attn_scale tensor
     std::shared_ptr<graph::TensorAttributes> attnScaleTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_SCALEDESC,
                                             tensorMap,
                                             attnScaleTensor,
                                             "sdpa SCALE_EXT tensor"));
@@ -72,7 +72,7 @@ namespace hipdnn_frontend::detail
     // Unpack seq_len_q tensor
     std::shared_ptr<graph::TensorAttributes> seqLenQTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_Q_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_SEQ_LEN_QDESC,
                                             tensorMap,
                                             seqLenQTensor,
                                             "sdpa SEQ_LEN_Q_EXT tensor"));
@@ -84,7 +84,7 @@ namespace hipdnn_frontend::detail
     // Unpack seq_len_kv tensor
     std::shared_ptr<graph::TensorAttributes> seqLenKvTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_KV_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_SEQ_LEN_KVDESC,
                                             tensorMap,
                                             seqLenKvTensor,
                                             "sdpa SEQ_LEN_KV_EXT tensor"));
@@ -96,7 +96,7 @@ namespace hipdnn_frontend::detail
     // Unpack seed tensor
     std::shared_ptr<graph::TensorAttributes> seedTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_SEED_EXT,
                                             tensorMap,
                                             seedTensor,
                                             "sdpa SEED_EXT tensor"));
@@ -108,7 +108,7 @@ namespace hipdnn_frontend::detail
     // Unpack offset tensor
     std::shared_ptr<graph::TensorAttributes> offsetTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_OFFSET_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_OFFSET_EXT,
                                             tensorMap,
                                             offsetTensor,
                                             "sdpa OFFSET_EXT tensor"));
@@ -120,7 +120,7 @@ namespace hipdnn_frontend::detail
     // Unpack dropout_mask tensor
     std::shared_ptr<graph::TensorAttributes> dropoutMaskTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_MASK_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_DROPOUT_MASK_EXT,
                                             tensorMap,
                                             dropoutMaskTensor,
                                             "sdpa DROPOUT_MASK_EXT tensor"));
@@ -132,7 +132,7 @@ namespace hipdnn_frontend::detail
     // Unpack dropout_scale tensor
     std::shared_ptr<graph::TensorAttributes> dropoutScaleTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_SCALE_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_DROPOUT_SCALE_EXT,
                                             tensorMap,
                                             dropoutScaleTensor,
                                             "sdpa DROPOUT_SCALE_EXT tensor"));
@@ -144,7 +144,7 @@ namespace hipdnn_frontend::detail
     // Unpack page_table_k tensor
     std::shared_ptr<graph::TensorAttributes> pageTableKTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_K_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_PAGE_TABLE_KDESC,
                                             tensorMap,
                                             pageTableKTensor,
                                             "sdpa PAGE_TABLE_K_EXT tensor"));
@@ -156,7 +156,7 @@ namespace hipdnn_frontend::detail
     // Unpack page_table_v tensor
     std::shared_ptr<graph::TensorAttributes> pageTableVTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_V_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_PAGE_TABLE_VDESC,
                                             tensorMap,
                                             pageTableVTensor,
                                             "sdpa PAGE_TABLE_V_EXT tensor"));
@@ -168,7 +168,7 @@ namespace hipdnn_frontend::detail
     // Unpack block_mask tensor
     std::shared_ptr<graph::TensorAttributes> blockMaskTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_BLOCK_MASK_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_BLOCK_MASK_DESC,
                                             tensorMap,
                                             blockMaskTensor,
                                             "sdpa BLOCK_MASK_EXT tensor"));
@@ -180,7 +180,7 @@ namespace hipdnn_frontend::detail
     // Unpack sink_token tensor
     std::shared_ptr<graph::TensorAttributes> sinkTokenTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SINK_TOKEN_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_SINK_TOKEN_EXT,
                                             tensorMap,
                                             sinkTokenTensor,
                                             "sdpa SINK_TOKEN_EXT tensor"));
@@ -192,7 +192,7 @@ namespace hipdnn_frontend::detail
     // Unpack descale_q tensor
     std::shared_ptr<graph::TensorAttributes> descaleQTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_Q_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_DESCALE_Q_EXT,
                                             tensorMap,
                                             descaleQTensor,
                                             "sdpa DESCALE_Q_EXT tensor"));
@@ -204,7 +204,7 @@ namespace hipdnn_frontend::detail
     // Unpack descale_k tensor
     std::shared_ptr<graph::TensorAttributes> descaleKTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_K_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_DESCALE_K_EXT,
                                             tensorMap,
                                             descaleKTensor,
                                             "sdpa DESCALE_K_EXT tensor"));
@@ -216,7 +216,7 @@ namespace hipdnn_frontend::detail
     // Unpack descale_v tensor
     std::shared_ptr<graph::TensorAttributes> descaleVTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_V_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_DESCALE_V_EXT,
                                             tensorMap,
                                             descaleVTensor,
                                             "sdpa DESCALE_V_EXT tensor"));
@@ -228,7 +228,7 @@ namespace hipdnn_frontend::detail
     // Unpack descale_s tensor
     std::shared_ptr<graph::TensorAttributes> descaleSTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_S_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_DESCALE_S_EXT,
                                             tensorMap,
                                             descaleSTensor,
                                             "sdpa DESCALE_S_EXT tensor"));
@@ -240,7 +240,7 @@ namespace hipdnn_frontend::detail
     // Unpack scale_s tensor
     std::shared_ptr<graph::TensorAttributes> scaleSTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_S_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_SCALE_S_EXT,
                                             tensorMap,
                                             scaleSTensor,
                                             "sdpa SCALE_S_EXT tensor"));
@@ -252,7 +252,7 @@ namespace hipdnn_frontend::detail
     // Unpack scale_o tensor
     std::shared_ptr<graph::TensorAttributes> scaleOTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_O_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_SCALE_O_EXT,
                                             tensorMap,
                                             scaleOTensor,
                                             "sdpa SCALE_O_EXT tensor"));
@@ -264,7 +264,7 @@ namespace hipdnn_frontend::detail
     // Unpack stats tensor
     std::shared_ptr<graph::TensorAttributes> statsTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_STATSDESC,
                                             tensorMap,
                                             statsTensor,
                                             "sdpa STATS_EXT tensor"));
@@ -276,7 +276,7 @@ namespace hipdnn_frontend::detail
     // Unpack max_output tensor
     std::shared_ptr<graph::TensorAttributes> maxOutputTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_MAX_EXT,
                                             tensorMap,
                                             maxOutputTensor,
                                             "sdpa MAX_EXT tensor"));
@@ -288,7 +288,7 @@ namespace hipdnn_frontend::detail
     // Unpack sum_exp tensor
     std::shared_ptr<graph::TensorAttributes> sumExpTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SUM_EXP_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_SUM_EXP_EXT,
                                             tensorMap,
                                             sumExpTensor,
                                             "sdpa SUM_EXP_EXT tensor"));
@@ -300,7 +300,7 @@ namespace hipdnn_frontend::detail
     // Unpack rng_dump tensor
     std::shared_ptr<graph::TensorAttributes> rngDumpTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_RNG_DUMP_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_RNG_DUMP_EXT,
                                             tensorMap,
                                             rngDumpTensor,
                                             "sdpa RNG_DUMP_EXT tensor"));
@@ -312,7 +312,7 @@ namespace hipdnn_frontend::detail
     // Unpack amax_s tensor
     std::shared_ptr<graph::TensorAttributes> amaxSTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_AMAX_S_EXT,
                                             tensorMap,
                                             amaxSTensor,
                                             "sdpa AMAX_S_EXT tensor"));
@@ -324,7 +324,7 @@ namespace hipdnn_frontend::detail
     // Unpack amax_o tensor
     std::shared_ptr<graph::TensorAttributes> amaxOTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT,
+                                            HIPDNN_ATTR_OPERATION_SDPA_FWD_AMAX_O_EXT,
                                             tensorMap,
                                             amaxOTensor,
                                             "sdpa AMAX_O_EXT tensor"));
@@ -338,7 +338,7 @@ namespace hipdnn_frontend::detail
     // would return an error. The attribute is therefore absent when not explicitly set.
     {
         auto [mmaCoreMode, mmaCoreModeErr] = unpackGraphDataType(
-            opDesc, HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, "sdpa mma_core_mode");
+            opDesc, HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT, "sdpa mma_core_mode");
         if(!mmaCoreModeErr.is_bad())
         {
             attributes.set_mma_core_mode(mmaCoreMode);
@@ -348,12 +348,11 @@ namespace hipdnn_frontend::detail
     // Unpack generate_stats (optional)
     {
         std::optional<bool> opt;
-        HIPDNN_CHECK_ERROR(
-            getDescriptorAttrOptionalScalar(opDesc,
-                                            HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT,
-                                            HIPDNN_TYPE_BOOLEAN,
-                                            opt,
-                                            "sdpa generate_stats"));
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                           HIPDNN_ATTR_SDPA_FWD_GENERATE_STATS_EXT,
+                                                           HIPDNN_TYPE_BOOLEAN,
+                                                           opt,
+                                                           "sdpa generate_stats"));
         attributes.generate_stats = opt;
     }
 
@@ -361,7 +360,7 @@ namespace hipdnn_frontend::detail
     {
         std::optional<bool> opt;
         HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
-                                                           HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT,
+                                                           HIPDNN_ATTR_SDPA_FWD_ALIBI_MASK_EXT,
                                                            HIPDNN_TYPE_BOOLEAN,
                                                            opt,
                                                            "sdpa alibi_mask"));
@@ -372,7 +371,7 @@ namespace hipdnn_frontend::detail
     {
         std::optional<bool> opt;
         HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
-                                                           HIPDNN_ATTR_SDPA_FPROP_PADDING_MASK_EXT,
+                                                           HIPDNN_ATTR_SDPA_FWD_PADDING_MASK_EXT,
                                                            HIPDNN_TYPE_BOOLEAN,
                                                            opt,
                                                            "sdpa padding_mask"));
@@ -383,7 +382,7 @@ namespace hipdnn_frontend::detail
     {
         std::optional<bool> opt;
         HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
-                                                           HIPDNN_ATTR_SDPA_FPROP_CAUSAL_MASK_EXT,
+                                                           HIPDNN_ATTR_SDPA_FWD_CAUSAL_MASK_EXT,
                                                            HIPDNN_TYPE_BOOLEAN,
                                                            opt,
                                                            "sdpa causal_mask"));
@@ -395,7 +394,7 @@ namespace hipdnn_frontend::detail
         std::optional<bool> opt;
         HIPDNN_CHECK_ERROR(
             getDescriptorAttrOptionalScalar(opDesc,
-                                            HIPDNN_ATTR_SDPA_FPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT,
+                                            HIPDNN_ATTR_SDPA_FWD_CAUSAL_MASK_BOTTOM_RIGHT_EXT,
                                             HIPDNN_TYPE_BOOLEAN,
                                             opt,
                                             "sdpa causal_mask_bottom_right"));
@@ -403,37 +402,36 @@ namespace hipdnn_frontend::detail
     }
 
     // Unpack dropout_probability (optional)
-    HIPDNN_CHECK_ERROR(
-        getDescriptorAttrOptionalScalar(opDesc,
-                                        HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT,
-                                        HIPDNN_TYPE_FLOAT,
-                                        attributes.dropout_probability,
-                                        "sdpa dropout_probability"));
+    HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                       HIPDNN_ATTR_SDPA_FWD_DROPOUT_PROBABILITY_EXT,
+                                                       HIPDNN_TYPE_FLOAT,
+                                                       attributes.dropout_probability,
+                                                       "sdpa dropout_probability"));
 
     // Unpack attn_scale_value (optional)
     HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
-                                                       HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT,
+                                                       HIPDNN_ATTR_SDPA_FWD_ATTN_SCALE_VALUE_EXT,
                                                        HIPDNN_TYPE_FLOAT,
                                                        attributes.attn_scale_value,
                                                        "sdpa attn_scale_value"));
 
     // Unpack left_bound (optional)
     HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
-                                                       HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT,
+                                                       HIPDNN_ATTR_SDPA_FWD_LEFT_BOUND_EXT,
                                                        HIPDNN_TYPE_INT64,
                                                        attributes.left_bound,
                                                        "sdpa left_bound"));
 
     // Unpack right_bound (optional)
     HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
-                                                       HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT,
+                                                       HIPDNN_ATTR_SDPA_FWD_RIGHT_BOUND_EXT,
                                                        HIPDNN_TYPE_INT64,
                                                        attributes.right_bound,
                                                        "sdpa right_bound"));
 
     // Unpack max_seq_len_kv (optional)
     HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
-                                                       HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT,
+                                                       HIPDNN_ATTR_SDPA_FWD_MAX_SEQ_LEN_KV_EXT,
                                                        HIPDNN_TYPE_INT32,
                                                        attributes.max_seq_len_kv,
                                                        "sdpa max_seq_len_kv"));
@@ -441,8 +439,8 @@ namespace hipdnn_frontend::detail
     // Unpack diagonal_alignment
     hipdnnDiagonalAlignment_t diagonalAlignment{};
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                               HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                                               HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT,
+                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                                diagonalAlignment,
                                                "sdpa diagonal_alignment"));
     auto [diagonalAlignmentResult, diagonalAlignmentErr]
@@ -456,8 +454,8 @@ namespace hipdnn_frontend::detail
     // Unpack implementation
     hipdnnAttentionImplementation_t implementation{};
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                               HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
-                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                                               HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT,
+                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                                implementation,
                                                "sdpa implementation"));
     auto [implementationResult, implementationErr]
@@ -469,8 +467,8 @@ namespace hipdnn_frontend::detail
     attributes.set_implementation(implementationResult);
 
     // Unpack compute data type
-    auto [dt, dtErr] = unpackGraphDataType(
-        opDesc, HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, "sdpa compute data type");
+    auto [dt, dtErr]
+        = unpackGraphDataType(opDesc, HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT, "sdpa compute data type");
     if(dtErr.is_bad())
     {
         return dtErr;

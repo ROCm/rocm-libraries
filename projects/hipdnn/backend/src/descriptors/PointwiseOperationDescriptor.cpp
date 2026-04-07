@@ -295,7 +295,7 @@ void PointwiseOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   "PointwiseOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_POINTWISE,
+        getOperationType(HIPDNN_OPERATION_TYPE_POINTWISE_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,

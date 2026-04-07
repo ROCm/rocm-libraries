@@ -23,7 +23,7 @@ namespace hipdnn_frontend::detail
     // Unpack X (input) tensor
     std::shared_ptr<graph::TensorAttributes> xTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+                                               HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
                                                tensorMap,
                                                xTensor,
                                                "block_scale_quantize X tensor"));
@@ -32,7 +32,7 @@ namespace hipdnn_frontend::detail
     // Unpack Y (output) tensor
     std::shared_ptr<graph::TensorAttributes> yTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT,
+                                               HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_YDESC,
                                                tensorMap,
                                                yTensor,
                                                "block_scale_quantize Y tensor"));
@@ -40,18 +40,19 @@ namespace hipdnn_frontend::detail
 
     // Unpack Scale tensor
     std::shared_ptr<graph::TensorAttributes> scaleTensor;
-    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT,
-                                               tensorMap,
-                                               scaleTensor,
-                                               "block_scale_quantize Scale tensor"));
+    HIPDNN_CHECK_ERROR(
+        unpackAndRegisterTensor(opDesc,
+                                HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_DESC,
+                                tensorMap,
+                                scaleTensor,
+                                "block_scale_quantize Scale tensor"));
     attributes.set_scale(scaleTensor);
 
     // Unpack block_size (INT32)
     int32_t blockSize = 0;
     HIPDNN_CHECK_ERROR(
         getDescriptorAttrScalar(opDesc,
-                                HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
+                                HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE,
                                 HIPDNN_TYPE_INT32,
                                 blockSize,
                                 "block_scale_quantize block_size"));
@@ -82,7 +83,7 @@ namespace hipdnn_frontend::detail
 
     // Unpack compute data type
     auto [dt, dtErr] = unpackGraphDataType(opDesc,
-                                           HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT,
+                                           HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
                                            "block_scale_quantize compute data type");
     if(dtErr.is_bad())
     {

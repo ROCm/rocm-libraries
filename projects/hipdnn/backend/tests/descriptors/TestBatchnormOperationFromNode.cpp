@@ -621,17 +621,17 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
     hipdnnDataType_t computeType = {};
     int64_t dtCount = 0;
     desc->getAttribute(
-        HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
+        HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
     ASSERT_EQ(dtCount, 1);
     EXPECT_EQ(computeType, HIPDNN_DATA_FLOAT);
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM_EXT);
 
     // Verify name (empty default from fixture, count==1 for null terminator)
     int64_t nameCount = 0;
@@ -898,12 +898,12 @@ TEST_F(TestBatchnormOperationFromNode, OperationTypeAttributeReturnsCorrectValue
     auto node = createStandardNode();
     auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
 
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM_EXT);
 }
 
 TEST_F(TestBatchnormOperationFromNode, OptionalTensorReferencesMatchTensorMap)
