@@ -324,12 +324,12 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &convModeCount,
                        &convMode);
-    ASSERT_EQ(convMode, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    ASSERT_EQ(convMode, HIPDNN_CROSS_CORRELATION);
 
     // Verify x tensor
     hipdnn_backend::ScopedDescriptor xScoped;
     int64_t xCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &xCount,
@@ -345,7 +345,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify dy tensor
     hipdnn_backend::ScopedDescriptor dyScoped;
     int64_t dyCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dyCount,
@@ -362,7 +362,7 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify dw tensor
     hipdnn_backend::ScopedDescriptor dwScoped;
     int64_t dwCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dwCount,
@@ -377,12 +377,12 @@ TEST_F(TestConvolutionWrwOperationFromNode, GetAttributeWorksAfterFromNode)
         hipdnn_tests::toVec(K_TENSOR_DW_STRIDES));
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS_EXT);
 }
 
 TEST_F(TestConvolutionWrwOperationFromNode, NamePreservedFromNode)

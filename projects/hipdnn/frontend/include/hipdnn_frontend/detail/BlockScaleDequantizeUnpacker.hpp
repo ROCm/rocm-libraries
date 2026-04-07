@@ -22,7 +22,7 @@ namespace hipdnn_frontend::detail
     // Unpack x tensor
     std::shared_ptr<graph::TensorAttributes> xTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT,
+                                               HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_XDESC,
                                                tensorMap,
                                                xTensor,
                                                "block_scale_dequantize X tensor"));
@@ -32,7 +32,7 @@ namespace hipdnn_frontend::detail
     std::shared_ptr<graph::TensorAttributes> scaleTensor;
     HIPDNN_CHECK_ERROR(
         unpackAndRegisterTensor(opDesc,
-                                HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_EXT,
+                                HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_DESC,
                                 tensorMap,
                                 scaleTensor,
                                 "block_scale_dequantize SCALE tensor"));
@@ -41,7 +41,7 @@ namespace hipdnn_frontend::detail
     // Unpack y tensor
     std::shared_ptr<graph::TensorAttributes> yTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_Y_EXT,
+                                               HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_YDESC,
                                                tensorMap,
                                                yTensor,
                                                "block_scale_dequantize Y tensor"));
@@ -49,29 +49,28 @@ namespace hipdnn_frontend::detail
 
     // Unpack block_size (int32 vector)
     std::vector<int32_t> blockSize;
-    HIPDNN_CHECK_ERROR(
-        getDescriptorAttrVec(opDesc,
-                             HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
-                             HIPDNN_TYPE_INT32,
-                             blockSize,
-                             "block_scale_dequantize block_size"));
+    HIPDNN_CHECK_ERROR(getDescriptorAttrVec(opDesc,
+                                            HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
+                                            HIPDNN_TYPE_INT32,
+                                            blockSize,
+                                            "block_scale_dequantize block_size"));
     attributes.set_block_size(blockSize);
 
     // Unpack is_negative_scale
     {
         bool isNegativeScale = false;
-        HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(
-            opDesc,
-            HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT,
-            HIPDNN_TYPE_BOOLEAN,
-            isNegativeScale,
-            "block_scale_dequantize is_negative_scale"));
+        HIPDNN_CHECK_ERROR(
+            getDescriptorAttrScalar(opDesc,
+                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_NEG_SCALE,
+                                    HIPDNN_TYPE_BOOLEAN,
+                                    isNegativeScale,
+                                    "block_scale_dequantize is_negative_scale"));
         attributes.set_is_negative_scale(isNegativeScale);
     }
 
     // Unpack compute data type
     auto [dt, dtErr] = unpackGraphDataType(opDesc,
-                                           HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT,
+                                           HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC,
                                            "block_scale_dequantize compute data type");
     if(dtErr.is_bad())
     {
