@@ -22,7 +22,8 @@ public:
     virtual std::string knobId() const = 0;
     virtual hipdnn_flatbuffers_sdk::data_objects::KnobValue valueType() const = 0;
 
-    virtual std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT> toKnobSettingT() const = 0;
+    virtual std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>
+        toKnobSettingT() const = 0;
 
     template <typename T>
     const T& valueAs() const
@@ -48,12 +49,13 @@ private:
 class KnobSettingWrapper : public IKnobSetting
 {
 public:
-    explicit KnobSettingWrapper(const hipdnn_flatbuffers_sdk::data_objects::KnobSetting* knobSetting)
+    explicit KnobSettingWrapper(
+        const hipdnn_flatbuffers_sdk::data_objects::KnobSetting* knobSetting)
         : _shallowKnobSetting(knobSetting)
     {
     }
 
-    explicit KnobSettingWrapper(const void* buffer, size_t size)
+    explicit KnobSettingWrapper(const void* buffer, size_t /*size*/)
     {
         if(buffer != nullptr)
         {
@@ -61,7 +63,8 @@ public:
             if(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>())
             {
                 _shallowKnobSetting
-                    = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>(buffer);
+                    = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>(
+                        buffer);
             }
         }
     }
@@ -90,7 +93,8 @@ public:
         return _shallowKnobSetting->value_type();
     }
 
-    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT> toKnobSettingT() const override
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>
+        toKnobSettingT() const override
     {
         throwIfNotValid();
 
@@ -104,8 +108,9 @@ public:
         if(knobValuePtr != nullptr)
         {
             knobSettingT->value.type = knobValueType;
-            knobSettingT->value.value = hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion::UnPack(
-                knobValuePtr, knobValueType, nullptr);
+            knobSettingT->value.value
+                = hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion::UnPack(
+                    knobValuePtr, knobValueType, nullptr);
         }
 
         return knobSettingT;

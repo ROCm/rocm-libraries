@@ -41,7 +41,7 @@ public:
 class GraphWrapper : public IGraph
 {
 public:
-    explicit GraphWrapper(const void* buffer, size_t size)
+    explicit GraphWrapper(const void* buffer, size_t /*size*/)
     {
         if(buffer != nullptr)
         {

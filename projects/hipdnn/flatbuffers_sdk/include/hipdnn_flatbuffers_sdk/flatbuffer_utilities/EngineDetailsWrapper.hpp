@@ -35,7 +35,7 @@ public:
 class EngineDetailsWrapper : public IEngineDetails
 {
 public:
-    explicit EngineDetailsWrapper(const void* buffer, size_t size)
+    explicit EngineDetailsWrapper(const void* buffer, size_t /*size*/)
     {
         if(buffer != nullptr)
         {

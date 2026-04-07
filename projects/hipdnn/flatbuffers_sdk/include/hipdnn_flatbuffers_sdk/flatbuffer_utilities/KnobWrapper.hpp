@@ -34,7 +34,8 @@ public:
     template <typename T>
     const T& defaultValueAs() const
     {
-        if(defaultValueType() != hipdnn_flatbuffers_sdk::data_objects::KnobValueTraits<T>::enum_value)
+        if(defaultValueType()
+           != hipdnn_flatbuffers_sdk::data_objects::KnobValueTraits<T>::enum_value)
         {
             throw std::invalid_argument("Default value is not of the expected type");
         }
@@ -51,7 +52,8 @@ public:
     template <typename T>
     const T& constraintAs() const
     {
-        if(constraintType() != hipdnn_flatbuffers_sdk::data_objects::KnobConstraintTraits<T>::enum_value)
+        if(constraintType()
+           != hipdnn_flatbuffers_sdk::data_objects::KnobConstraintTraits<T>::enum_value)
         {
             throw std::invalid_argument("Constraint is not of the expected type");
         }
@@ -79,14 +81,15 @@ public:
     {
     }
 
-    explicit KnobWrapper(const void* buffer, size_t size)
+    explicit KnobWrapper(const void* buffer, size_t /*size*/)
     {
         if(buffer != nullptr)
         {
             flatbuffers::Verifier verifier(static_cast<const uint8_t*>(buffer), size);
             if(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Knob>())
             {
-                _shallowKnob = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Knob>(buffer);
+                _shallowKnob
+                    = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Knob>(buffer);
             }
         }
     }
