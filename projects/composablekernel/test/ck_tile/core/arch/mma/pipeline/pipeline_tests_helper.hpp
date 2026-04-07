@@ -10,9 +10,9 @@
 #include <gtest/gtest.h>
 
 #include "ck_tile/core/arch/arch.hpp"
-#include <hip/hip_runtime.h>
-#include "ck_tile/host/hip_check_error.hpp"
 #include "ck_tile/core/numeric/type_convert.hpp"
+#include "ck_tile/host/hip_check_error.hpp"
+#include <hip/hip_runtime.h>
 
 #include "../get_wave_size_helper.hpp"
 
