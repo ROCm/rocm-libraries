@@ -10,67 +10,57 @@
 
 using namespace rocRoller;
 
-const int SHUFFLE_M = 16;
-const int SHUFFLE_N = 16;
-const int SHUFFLE_K = 32;
-
-/**
- * @brief Set the required conditions in order to run a provided kernel
- *
- * @param gemmKernel
- */
-void setPredicates(std::shared_ptr<GemmKernel> gemmKernel)
+namespace
 {
+    const int SHUFFLE_M = 16;
+    const int SHUFFLE_N = 16;
+    const int SHUFFLE_K = 32;
+} // namespace
 
-    auto command        = gemmKernel->command;
-    auto commandKernel  = gemmKernel->commandKernel;
-    auto solutionParams = gemmKernel->params;
-
+void RocRollerGemmKernel::setPredicates()
+{
     using namespace rocRoller::Expression;
-    auto params = commandKernel->getCommandParameters();
 
     // predicate building blocks
     // A sizes
-    auto aSizes = std::get<Operations::Tensor>(*(command->findTag(gemmKernel->tagTensorA))).sizes();
+    auto aSizes = std::get<Operations::Tensor>(*(command->findTag(tagTensorA))).sizes();
     std::vector<ExpressionPtr> aSizeExps(aSizes.size());
     std::transform(aSizes.begin(), aSizes.end(), aSizeExps.begin(), [](auto arg) {
         return arg->expression();
     });
     // B sizes
-    auto bSizes = std::get<Operations::Tensor>(*(command->findTag(gemmKernel->tagTensorB))).sizes();
+    auto bSizes = std::get<Operations::Tensor>(*(command->findTag(tagTensorB))).sizes();
     std::vector<ExpressionPtr> bSizeExps(bSizes.size());
     std::transform(bSizes.begin(), bSizes.end(), bSizeExps.begin(), [](auto arg) {
         return arg->expression();
     });
 
     // parameters
-    auto workgroupTileMExp = literal(solutionParams->workgroupTile.m);
-    auto workgroupTileNExp = literal(solutionParams->workgroupTile.n);
-    auto workgroupTileKExp = literal(solutionParams->workgroupTile.k);
+    auto workgroupTileMExp = literal(params->workgroupTile.m);
+    auto workgroupTileNExp = literal(params->workgroupTile.n);
+    auto workgroupTileKExp = literal(params->workgroupTile.k);
 
     // constants
     auto zero = literal(0u);
-    auto one  = literal(1u);
 
     // predicates
     std::stringstream ss;
     auto              unrollXPredicate = (aSizeExps[0] % workgroupTileMExp == zero);
-    ss << "M must be a multiple of workgroupTile.m=" << solutionParams->workgroupTile.m;
-    setComment(unrollXPredicate, ss.str());
+    ss << "M must be a multiple of workgroupTile.m=" << params->workgroupTile.m;
+    rocRoller::Expression::setComment(unrollXPredicate, ss.str());
     commandKernel->addPredicate(unrollXPredicate);
     ss.str("");
 
     auto unrollYPredicate = (bSizeExps[1] % workgroupTileNExp == zero);
-    ss << "N must be a multiple of workgroupTile.n=" << solutionParams->workgroupTile.n;
-    setComment(unrollYPredicate, ss.str());
+    ss << "N must be a multiple of workgroupTile.n=" << params->workgroupTile.n;
+    rocRoller::Expression::setComment(unrollYPredicate, ss.str());
     commandKernel->addPredicate(unrollYPredicate);
     ss.str("");
 
     auto unrollKPredicate = (aSizeExps[1] % workgroupTileKExp == zero);
-    ss << "K must be a multiple of workgroupTile.k=" << solutionParams->workgroupTile.k;
-    setComment(unrollKPredicate, ss.str());
+    ss << "K must be a multiple of workgroupTile.k=" << params->workgroupTile.k;
+    rocRoller::Expression::setComment(unrollKPredicate, ss.str());
     commandKernel->addPredicate(unrollKPredicate);
-    ss.str("");
 }
 
 std::string genScaleModeString(Operations::ScaleMode mode)
@@ -167,7 +157,7 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
     return rv.str();
 }
 
-std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> gemm)
+std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_ptr<SolutionParameters> gemm)
 {
     // -------------------------------------------------------------
     // Create Command object describing problem
@@ -182,11 +172,8 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     std::vector<size_t> oneStridesN = std::vector<size_t>({(size_t)1});
     std::vector<size_t> oneStridesT = std::vector<size_t>({(size_t)0, (size_t)1});
 
-    auto stridesA = gemm->kernelType.swizzleA ? std::vector<size_t>{}
-                                             : gemm->kernelType.transA ? oneStridesT : oneStridesN;
-    
     auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
-        2, dataTypeA, {}, stridesA)); // A
+        2, dataTypeA, {}, gemm->kernelType.transA ? oneStridesT : oneStridesN));
 
     auto loadInputA = tagTensorA;
 
@@ -195,15 +182,12 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         loadInputA = command->addOperation(Operations::SubTileTranspose(
             loadInputA, {SHUFFLE_M, SHUFFLE_K}, gemm->kernelType.transA));
     }
-    
-    auto tagLoadA   = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadInputA));
 
-    auto stridesB = gemm->kernelType.swizzleB ? std::vector<size_t>{}
-                                             : gemm->kernelType.transB ? oneStridesT : oneStridesN;
+    auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadInputA));
 
     auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-        2, dataTypeB, {}, stridesB)); // B
-    
+        2, dataTypeB, {}, gemm->kernelType.transB ? oneStridesT : oneStridesN));
+
     auto loadInputB = tagTensorB;
 
     if(gemm->kernelType.swizzleB)
@@ -212,7 +196,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
             loadInputB, {SHUFFLE_K, SHUFFLE_N}, gemm->kernelType.transB));
     }
 
-    auto tagLoadB   = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadInputB));
+    auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadInputB));
 
     auto mulInputA = tagLoadA;
     auto mulInputB = tagLoadB;
@@ -234,30 +218,22 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
     if(gemm->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate)
     {
+        tagTensorScaleA = command->addOperation(
+            rocRoller::Operations::Tensor(2,
+                                          gemm->kernelType.scaleTypeA.type,
+                                          {},
+                                          gemm->kernelType.transA ? oneStridesT : oneStridesN));
+        Operations::OperationTag loadScaleInputA = *tagTensorScaleA;
         if(gemm->kernelType.scaleTypeA.preTile.size() == 2)
         {
-            // Create 4D tensor for pre-tiled scale A
             AssertFatal(gemm->kernelType.transA, "Can only pre-tile A if it is transposed");
-            size_t stride = gemm->kernelType.scaleTypeA.preTile[1];
-            tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                4,
-                gemm->kernelType.scaleTypeA.type,
-                std::vector<size_t>{0ull,
-                                    0ull,
-                                    gemm->kernelType.scaleTypeA.preTile[0],
-                                    gemm->kernelType.scaleTypeA.preTile[1]},
-                std::vector<size_t>{0ull, 0ull, stride, 1ull}));
-        }
-        else
-        {
-            tagTensorScaleA = command->addOperation(
-                rocRoller::Operations::Tensor(2,
-                                              gemm->kernelType.scaleTypeA.type,
-                                              {},
-                                              gemm->kernelType.transA ? oneStridesT : oneStridesN));
+            loadScaleInputA = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                loadScaleInputA,
+                gemm->kernelType.scaleTypeA.preTile,
+                gemm->kernelType.transA));
         }
         tagLoadScaleA
-            = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleA));
+            = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadScaleInputA));
 
         auto scaleInputA = tagLoadScaleA;
 
@@ -295,30 +271,22 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
     if(gemm->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
     {
+        tagTensorScaleB = command->addOperation(
+            rocRoller::Operations::Tensor(2,
+                                          gemm->kernelType.scaleTypeB.type,
+                                          {},
+                                          gemm->kernelType.transB ? oneStridesT : oneStridesN));
+        Operations::OperationTag loadScaleInputB = *tagTensorScaleB;
         if(gemm->kernelType.scaleTypeB.preTile.size() == 2)
         {
-            // Create 4D tensor for pre-tiled scale B
             AssertFatal(!gemm->kernelType.transB, "Can only pre-tile B if it is not transposed");
-            size_t stride = gemm->kernelType.scaleTypeB.preTile[0];
-            tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                4,
-                gemm->kernelType.scaleTypeB.type,
-                std::vector<size_t>{0ull,
-                                    0ull,
-                                    gemm->kernelType.scaleTypeB.preTile[0],
-                                    gemm->kernelType.scaleTypeB.preTile[1]},
-                std::vector<size_t>{0ull, 0ull, 1ull, stride}));
-        }
-        else
-        {
-            tagTensorScaleB = command->addOperation(
-                rocRoller::Operations::Tensor(2,
-                                              gemm->kernelType.scaleTypeB.type,
-                                              {},
-                                              gemm->kernelType.transB ? oneStridesT : oneStridesN));
+            loadScaleInputB = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                loadScaleInputB,
+                gemm->kernelType.scaleTypeB.preTile,
+                gemm->kernelType.transB));
         }
         tagLoadScaleB
-            = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
+            = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadScaleInputB));
 
         auto scaleInputB = tagLoadScaleB;
 
@@ -632,7 +600,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     // -------------------------------------------------------------
     // Create GemmKernel
 
-    auto gemmKernel           = std::make_shared<GemmKernel>();
+    auto gemmKernel           = std::make_shared<RocRollerGemmKernel>();
     gemmKernel->command       = command;
     gemmKernel->commandKernel = commandKernel;
     gemmKernel->params        = gemm;
@@ -659,7 +627,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     if(tagWGM)
         gemmKernel->tagWGM = *tagWGM;
 
-    setPredicates(gemmKernel);
+    gemmKernel->setPredicates();
 
     auto flatWorkgroupSize = workgroupSizeX;
     int  occupancy;
@@ -672,189 +640,118 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     return gemmKernel;
 }
 
-size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob)
+size_t RocRollerGemmKernel::workspaceRequired(const RocblasltContractionProblem& prob)
 {
-    if (gemm->isCustomKernel())
-        return 0;
+    CommandArguments commandArgs = command->createArguments();
 
-    CommandArguments commandArgs = gemm->command->createArguments();
-
-    if(gemm->params->streamK != StreamKMode::None)
+    if(params->streamK != StreamKMode::None)
     {
         commandArgs.setArgument(
-            gemm->tagSKGrid, ArgumentType::Value, chooseStreamKGridSize(gemm, prob));
+            tagSKGrid, ArgumentType::Value, chooseStreamKGridSize(shared_from_this(), prob));
     }
 
     auto runtimeArgs = commandArgs.runtimeArguments();
 
     // Only return scratch space for ScratchPolicy::None (uses prob.workspace)
-    return gemm->commandKernel->scratchSpaceRequired(Operations::ScratchPolicy::None, runtimeArgs);
+    return commandKernel->scratchSpaceRequired(Operations::ScratchPolicy::None, runtimeArgs);
 }
 
-bool isSupportedProblem(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob)
+bool RocRollerGemmKernel::isSupportedProblem(const RocblasltContractionProblem& prob)
 {
-    auto workSpaceRequired = workspaceRequired(gemm, prob);
+    auto workSpaceRequired = this->workspaceRequired(prob);
 
     if(workSpaceRequired > prob.workspaceSize)
         return false;
 
-    if (gemm->isCustomKernel())
-    {
-        return (prob.m % gemm->params->workgroupTile.m == 0 &&
-                prob.n % gemm->params->workgroupTile.n == 0 &&
-                prob.k % gemm->params->workgroupTile.k == 0);
-    }
-    else
-    {
-        auto commandArgs = createCommandArguments(gemm, prob, DEFAULT_WGM);
-        auto runtimeArgs = commandArgs.runtimeArguments();
+    auto commandArgs = createCommandArguments(prob, DEFAULT_WGM);
+    auto runtimeArgs = commandArgs.runtimeArguments();
 
-        return gemm->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error);
-    }
+    return commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error);
 }
 
-CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
-                                        const RocblasltContractionProblem& prob,
-                                        int                                wgm)
+CommandArguments RocRollerGemmKernel::createCommandArguments(const RocblasltContractionProblem& prob,
+                                                    int                                wgm)
 {
-    CommandArguments commandArgs = gemm->command->createArguments();
+    CommandArguments commandArgs = command->createArguments();
 
     size_t M = prob.m;
     size_t N = prob.n;
     size_t K = prob.k;
 
     TensorDescriptor descA(
-        gemm->params->kernelType.typeA, {M, K}, gemm->params->kernelType.transA ? "T" : "N");
+        params->kernelType.typeA, {M, K}, params->kernelType.transA ? "T" : "N");
     TensorDescriptor descB(
-        gemm->params->kernelType.typeB, {K, N}, gemm->params->kernelType.transB ? "T" : "N");
-
-    if(gemm->params->kernelType.swizzleA)
-    {
-        descA = TensorDescriptor(gemm->params->kernelType.typeA,
-                                 {M, K},
-                                 {static_cast<size_t>((K / SHUFFLE_K) * SHUFFLE_M * SHUFFLE_K),
-                                  static_cast<size_t>(SHUFFLE_M * SHUFFLE_K)});
-    }
-
-    if(gemm->params->kernelType.swizzleB)
-    {
-        descB = TensorDescriptor(gemm->params->kernelType.typeB,
-                                {K, N},
-                                {static_cast<size_t>(SHUFFLE_K * SHUFFLE_N),
-                                static_cast<size_t>((K / SHUFFLE_K) * SHUFFLE_K * SHUFFLE_N)});
-    }
+        params->kernelType.typeB, {K, N}, params->kernelType.transB ? "T" : "N");
 
     // TODO: Have to typecast void* pointer to something that CommandArgumentValue accepts
-    setCommandTensorArg(commandArgs, gemm->tagTensorA, descA, (float*)nullptr);
-    setCommandTensorArg(commandArgs, gemm->tagTensorB, descB, (float*)nullptr);
+    setCommandTensorArg(commandArgs, tagTensorA, descA, (float*)nullptr);
+    setCommandTensorArg(commandArgs, tagTensorB, descB, (float*)nullptr);
 
-    if(gemm->params->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate)
+    if(params->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate)
     {
-        auto const scaleBlockSize = gemm->params->kernelType.scaleTypeA.blockRowSize
-                                    * gemm->params->kernelType.scaleTypeA.blockColSize;
-        TensorDescriptor descAScale;
-        if(gemm->params->kernelType.scaleTypeA.preTile.size() == 2)
-        {
-            // Create 4D tensor descriptor for pre-tiled scale A
-            auto const tileM  = gemm->params->kernelType.scaleTypeA.preTile[0];
-            auto const tileK  = gemm->params->kernelType.scaleTypeA.preTile[1];
-            auto const scaleK = K / scaleBlockSize;
-
-            descAScale = TensorDescriptor(gemm->params->kernelType.scaleTypeA.type,
-                                          {static_cast<size_t>(M / tileM),
-                                           static_cast<size_t>(scaleK / tileK),
-                                           static_cast<size_t>(tileM),
-                                           static_cast<size_t>(tileK)},
-                                          {static_cast<size_t>((scaleK / tileK) * tileM * tileK),
-                                           static_cast<size_t>(tileM * tileK),
-                                           static_cast<size_t>(tileK),
-                                           static_cast<size_t>(1)});
-        }
-        else
-        {
-            descAScale = TensorDescriptor(gemm->params->kernelType.scaleTypeA.type,
-                                          {size_t(M), size_t(K / scaleBlockSize)},
-                                          gemm->params->kernelType.transA ? "T" : "N");
-        }
-        setCommandTensorArg(commandArgs, gemm->tagTensorScaleA, descAScale, (float*)nullptr);
+        auto const scaleBlockSize = params->kernelType.scaleTypeA.blockRowSize
+                                    * params->kernelType.scaleTypeA.blockColSize;
+        TensorDescriptor descAScale(
+            params->kernelType.scaleTypeA.type,
+            {size_t(M), size_t(K / scaleBlockSize)},
+            params->kernelType.transA ? "T" : "N");
+        setCommandTensorArg(commandArgs, tagTensorScaleA, descAScale, (float*)nullptr);
     }
-    if(gemm->params->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
+    if(params->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
     {
-        auto const scaleBlockSize = gemm->params->kernelType.scaleTypeB.blockRowSize
-                                    * gemm->params->kernelType.scaleTypeB.blockColSize;
-        TensorDescriptor descBScale;
-        if(gemm->params->kernelType.scaleTypeB.preTile.size() == 2)
-        {
-            // Create 4D tensor descriptor for pre-tiled scale B
-            // Matches rocRoller client's tensor descriptor setup
-            auto const tileK  = gemm->params->kernelType.scaleTypeB.preTile[0];
-            auto const tileN  = gemm->params->kernelType.scaleTypeB.preTile[1];
-            auto const scaleK = K / scaleBlockSize;
-
-            descBScale = TensorDescriptor(gemm->params->kernelType.scaleTypeB.type,
-                                          {static_cast<size_t>(scaleK / tileK),
-                                           static_cast<size_t>(N / tileN),
-                                           static_cast<size_t>(tileK),
-                                           static_cast<size_t>(tileN)},
-                                          {static_cast<size_t>(tileK * tileN),
-                                           static_cast<size_t>((scaleK / tileK) * tileK * tileN),
-                                           static_cast<size_t>(1),
-                                           static_cast<size_t>(tileK)});
-        }
-        else
-        {
-            descBScale = TensorDescriptor(gemm->params->kernelType.scaleTypeB.type,
-                                          {size_t(K / scaleBlockSize), size_t(N)},
-                                          gemm->params->kernelType.transB ? "T" : "N");
-        }
-        setCommandTensorArg(commandArgs, gemm->tagTensorScaleB, descBScale, (float*)nullptr);
+        auto const scaleBlockSize = params->kernelType.scaleTypeB.blockRowSize
+                                    * params->kernelType.scaleTypeB.blockColSize;
+        TensorDescriptor descBScale(
+            params->kernelType.scaleTypeB.type,
+            {size_t(K / scaleBlockSize), size_t(N)},
+            params->kernelType.transB ? "T" : "N");
+        setCommandTensorArg(commandArgs, tagTensorScaleB, descBScale, (float*)nullptr);
     }
 
-    TensorDescriptor descC(gemm->params->kernelType.typeC, {M, N}, "N");
-    setCommandTensorArg(commandArgs, gemm->tagTensorC, descC, (float*)nullptr);
+    TensorDescriptor descC(params->kernelType.typeC, {M, N}, "N");
+    setCommandTensorArg(commandArgs, tagTensorC, descC, (float*)nullptr);
 
-    commandArgs.setArgument(gemm->tagScalarAlpha, ArgumentType::Value, *((float*)prob.alpha));
-    commandArgs.setArgument(gemm->tagScalarBeta, ArgumentType::Value, *((float*)prob.beta));
+    commandArgs.setArgument(tagScalarAlpha, ArgumentType::Value, *((float*)prob.alpha));
+    commandArgs.setArgument(tagScalarBeta, ArgumentType::Value, *((float*)prob.beta));
 
-    TensorDescriptor descD(gemm->params->kernelType.typeD, {M, N}, "N");
-    setCommandTensorArg(commandArgs, gemm->tagTensorD, descD, (float*)nullptr);
+    TensorDescriptor descD(params->kernelType.typeD, {M, N}, "N");
+    setCommandTensorArg(commandArgs, tagTensorD, descD, (float*)nullptr);
 
-    commandArgs.setArgument(gemm->tagTensorA, ArgumentType::Value, (float*)prob.A);
-    commandArgs.setArgument(gemm->tagTensorB, ArgumentType::Value, (float*)prob.B);
-    commandArgs.setArgument(gemm->tagTensorC, ArgumentType::Value, (float*)prob.C);
-    commandArgs.setArgument(gemm->tagTensorD, ArgumentType::Value, (float*)prob.D);
+    commandArgs.setArgument(tagTensorA, ArgumentType::Value, (float*)prob.A);
+    commandArgs.setArgument(tagTensorB, ArgumentType::Value, (float*)prob.B);
+    commandArgs.setArgument(tagTensorC, ArgumentType::Value, (float*)prob.C);
+    commandArgs.setArgument(tagTensorD, ArgumentType::Value, (float*)prob.D);
 
-    if(gemm->params->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate)
+    if(params->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate)
     {
-        commandArgs.setArgument(gemm->tagTensorScaleA, ArgumentType::Value, (uint8_t*)prob.scaleA);
+        commandArgs.setArgument(tagTensorScaleA, ArgumentType::Value, (uint8_t*)prob.scaleA);
     }
 
-    if(gemm->params->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
+    if(params->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
     {
-        commandArgs.setArgument(gemm->tagTensorScaleB, ArgumentType::Value, (uint8_t*)prob.scaleB);
+        commandArgs.setArgument(tagTensorScaleB, ArgumentType::Value, (uint8_t*)prob.scaleB);
     }
 
-    if(gemm->params->workgroupMappingDim != -1)
+    if(params->workgroupMappingDim != -1)
     {
         AssertFatal(
             wgm > 0, "Workgroup mapping size must be a positive non-zero integer.", ShowValue(wgm));
 
-        commandArgs.setArgument(gemm->tagWGM, ArgumentType::Value, wgm);
+        commandArgs.setArgument(tagWGM, ArgumentType::Value, wgm);
     }
 
-    if(gemm->params->streamK != StreamKMode::None)
+    if(params->streamK != StreamKMode::None)
     {
         commandArgs.setArgument(
-            gemm->tagSKGrid, ArgumentType::Value, chooseStreamKGridSize(gemm, prob));
+            tagSKGrid, ArgumentType::Value, chooseStreamKGridSize(shared_from_this(), prob));
     }
 
     return commandArgs;
 }
 
-rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
-                               const RocblasltContractionProblem& prob)
+rocblaslt_status RocRollerGemmKernel::run(const RocblasltContractionProblem& prob)
 {
-    auto workSpaceRequired = workspaceRequired(gemm, prob);
+    auto workSpaceRequired = this->workspaceRequired(prob);
 
     if(workSpaceRequired > prob.workspaceSize)
     {
@@ -868,29 +765,29 @@ rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
         }
         return rocblaslt_status_invalid_value;
     }
-    auto commandArgs = createCommandArguments(gemm, prob, DEFAULT_WGM);
+    auto commandArgs = createCommandArguments(prob, DEFAULT_WGM);
 
-    if(gemm->params->streamK != StreamKMode::None)
+    if(params->streamK != StreamKMode::None)
     {
         auto runtimeArgs = commandArgs.runtimeArguments();
 
         // Use prob.workspace for ScratchPolicy::None
-        auto noneScratchSize = gemm->commandKernel->scratchSpaceRequired(
+        auto noneScratchSize = commandKernel->scratchSpaceRequired(
             Operations::ScratchPolicy::None, runtimeArgs);
         if(noneScratchSize > 0 && prob.workspace != nullptr)
         {
-            commandArgs.setArgument(gemm->tagScratch.at(Operations::ScratchPolicy::None),
+            commandArgs.setArgument(tagScratch.at(Operations::ScratchPolicy::None),
                                     ArgumentType::Value,
                                     static_cast<unsigned char*>(prob.workspace));
         }
 
         // Use prob.Synchronizer for ScratchPolicy::ZeroedBeforeAndAfter
-        auto zeroedScratchSize = gemm->commandKernel->scratchSpaceRequired(
+        auto zeroedScratchSize = commandKernel->scratchSpaceRequired(
             Operations::ScratchPolicy::ZeroedBeforeAndAfter, runtimeArgs);
         if(zeroedScratchSize > 0 && prob.Synchronizer != nullptr)
         {
             commandArgs.setArgument(
-                gemm->tagScratch.at(Operations::ScratchPolicy::ZeroedBeforeAndAfter),
+                tagScratch.at(Operations::ScratchPolicy::ZeroedBeforeAndAfter),
                 ArgumentType::Value,
                 static_cast<unsigned char*>(prob.Synchronizer));
         }
@@ -898,12 +795,12 @@ rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
 
     auto runtimeArgs = commandArgs.runtimeArguments();
 
-    if(!gemm->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error))
+    if(!commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error))
     {
         return rocblaslt_status_invalid_value;
     }
 
-    gemm->commandKernel->launchKernel(runtimeArgs, prob.stream);
+    commandKernel->launchKernel(runtimeArgs, prob.stream);
 
     return rocblaslt_status_success;
 }

@@ -18,8 +18,9 @@
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
-#include "SdpaBpropOperationDescriptor.hpp"
-#include "SdpaFpropOperationDescriptor.hpp"
+#include "ReductionOperationDescriptor.hpp"
+#include "SdpaBwdOperationDescriptor.hpp"
+#include "SdpaFwdOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <memory>

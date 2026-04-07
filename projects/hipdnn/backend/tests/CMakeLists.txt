@@ -63,19 +63,22 @@ add_executable(
     descriptors/TestGraphDescriptorLifting.cpp
     descriptors/TestGraphDescriptorPointwise.cpp
     descriptors/TestGraphDescriptorRMSNorm.cpp
-    descriptors/TestGraphDescriptorSdpaFprop.cpp
+    descriptors/TestGraphDescriptorSdpaFwd.cpp
     descriptors/TestConvolutionBwdOperationFromNode.cpp
     descriptors/TestLayernormOperationDescriptor.cpp
     descriptors/TestLayernormOperationFromNode.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestPointwiseOperationFromNode.cpp
+    descriptors/TestReductionOperationDescriptor.cpp
+    descriptors/TestReductionOperationFromNode.cpp
+    descriptors/TestGraphDescriptorReduction.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestRMSNormOperationFromNode.cpp
-    descriptors/TestSdpaBpropOperationDescriptor.cpp
-    descriptors/TestSdpaBpropOperationFromNode.cpp
-    descriptors/TestSdpaFpropOperationDescriptor.cpp
-    descriptors/TestSdpaFpropOperationFromNode.cpp
-    descriptors/TestGraphDescriptorSdpaBprop.cpp
+    descriptors/TestSdpaBwdOperationDescriptor.cpp
+    descriptors/TestSdpaBwdOperationFromNode.cpp
+    descriptors/TestSdpaFwdOperationDescriptor.cpp
+    descriptors/TestSdpaFwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorSdpaBwd.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp

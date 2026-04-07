@@ -27,7 +27,7 @@
 typedef enum
 {
     /** @brief Invalid descriptor type - used for error detection */
-    HIPDNN_INVALID_TYPE = 0,
+    HIPDNN_INVALID_TYPE_EXT = 0,
 
     /**
      * @brief Engine descriptor
@@ -182,7 +182,7 @@ typedef enum
      * Represents a backward data convolution operation with output gradient (DY),
      * weight (W), and input gradient (DX) tensors plus convolution parameters.
      */
-    HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR = 19,
+    HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR = 19,
 
     /**
      * @brief Batchnorm backward operation descriptor (extension)
@@ -206,7 +206,7 @@ typedef enum
      * Represents a matrix multiplication operation with input (A),
      * input (B), and output (C) tensors plus a compute data type.
      */
-    HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT = 22,
+    HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR = 22,
 
     /**
      * @brief RMSNorm operation descriptor
@@ -218,13 +218,13 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT = 23,
 
     /**
-     * @brief SDPA forward propagation operation descriptor (extension)
+     * @brief SDPA forward propagation operation descriptor
      *
      * Represents a scaled dot-product attention forward operation with
      * query (Q), key (K), value (V), and output (O) tensors plus
      * attention parameters.
      */
-    HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT = 24,
+    HIPDNN_BACKEND_OPERATION_SDPA_FWD_DESCRIPTOR = 24,
 
     /**
      * @brief Layer normalization operation descriptor
@@ -241,7 +241,7 @@ typedef enum
      * Represents a block scale quantize operation with input (X),
      * output (Y), and scale tensors plus block_size, axis, and transpose parameters.
      */
-    HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT = 26,
+    HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR = 26,
 
     /**
      * @brief Batchnorm training forward operation descriptor (extension)
@@ -258,7 +258,7 @@ typedef enum
      * Represents a block scale dequantize operation with input (X),
      * scale, and output (Y) tensors plus block size parameters.
      */
-    HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT = 28,
+    HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR = 28,
 
     /**
      * @brief Custom operation descriptor
@@ -276,6 +276,14 @@ typedef enum
      * query (Q), key (K), value (V), output (O), gradient output (dO),
      * and stats tensors as inputs, producing gradients dQ, dK, dV.
      */
-    HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT = 30,
+    HIPDNN_BACKEND_OPERATION_SDPA_BWD_DESCRIPTOR_EXT = 30,
+
+    /**
+     * @brief Reduction operation descriptor
+     *
+     * Represents a reduction operation with input (X) and output (Y)
+     * tensors, a reduction operator, and a compute data type.
+     */
+    HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR = 31,
 
 } hipdnnBackendDescriptorType_t;

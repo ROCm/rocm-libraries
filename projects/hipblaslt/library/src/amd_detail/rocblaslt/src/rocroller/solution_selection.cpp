@@ -45,14 +45,21 @@ constexpr std::array<WorkGroupTileSize, possibleSwizzleTileSizesCount> possibleS
         {224, 128, 128}, {224, 256, 128}, {256, 128, 128}, {256, 256, 128}}};
 
 // Helper to generate tile list from a compile-time known tile array
+// For each tile, generates 3 variants with different nontemporal settings:
+// 1. Both A and B non-temporal disabled (cache_hints_a=0, cache_hints_b=0)
+// 2. Only A non-temporal enabled (cache_hints_a=4, cache_hints_b=0)
+// 3. Only B non-temporal enabled (cache_hints_a=0, cache_hints_b=4)
+// Never generates configs where both are enabled simultaneously.
 template <rocRoller::DataType typeA,
           rocRoller::DataType typeB,
           size_t              TileCount,
           const std::array<WorkGroupTileSize, TileCount>& TileArray>
 std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool hasPreTile)
 {
+    // 3 variants per tile: (ntA=0,ntB=0), (ntA=1,ntB=0), (ntA=0,ntB=1)
+    constexpr size_t numNonTemporalVariants = 3;
     std::vector<origami::config_t> tileList;
-    tileList.reserve(TileCount);
+    tileList.reserve(TileCount * numNonTemporalVariants);
 
     for(size_t i = 0; i < TileCount; ++i)
     {
@@ -73,7 +80,9 @@ std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool has
 
         int unroll = preferredUnrolling(typeA, typeB, wgt, hasPreSwizzle, hasPreTile);
 
-        origami::config_t origami_config = {
+        // Generate 3 variants with different nontemporal settings
+        // Variant 1: Both disabled
+        origami::config_t config_both_off = {
             .mt = {static_cast<size_t>(wgt.m),
                    static_cast<size_t>(wgt.n),
                    static_cast<size_t>(wgtk * unroll)},
@@ -82,8 +91,31 @@ std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool has
             .cache_hints_a = 0,
             .cache_hints_b = 0,
         };
+        tileList.push_back(config_both_off);
 
-        tileList.push_back(origami_config);
+        // Variant 2: Only A non-temporal enabled
+        origami::config_t config_a_on = {
+            .mt = {static_cast<size_t>(wgt.m),
+                   static_cast<size_t>(wgt.n),
+                   static_cast<size_t>(wgtk * unroll)},
+            .mi = {static_cast<size_t>(MI.m), static_cast<size_t>(MI.n), static_cast<size_t>(MI.k)},
+            .occupancy     = 1,
+            .cache_hints_a = 4,
+            .cache_hints_b = 0,
+        };
+        tileList.push_back(config_a_on);
+
+        // Variant 3: Only B non-temporal enabled
+        origami::config_t config_b_on = {
+            .mt = {static_cast<size_t>(wgt.m),
+                   static_cast<size_t>(wgt.n),
+                   static_cast<size_t>(wgtk * unroll)},
+            .mi = {static_cast<size_t>(MI.m), static_cast<size_t>(MI.n), static_cast<size_t>(MI.k)},
+            .occupancy     = 1,
+            .cache_hints_a = 0,
+            .cache_hints_b = 4,
+        };
+        tileList.push_back(config_b_on);
     }
 
     return tileList;
@@ -305,7 +337,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             if(kernelType.swizzleA)
                 cu_multiplier = 4;
             if(numTiles * cu_multiplier < analytical_hardware.N_CU && itersPerTile >= 16
-               && !isF6 && !isLargeF8 && !is256Tile)
+               && !isF6 && !isLargeF8)
             {
                 useStreamK = true;
             }
@@ -315,14 +347,18 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             if(useStreamK && wgt.m == 64 && wgt.n == 256)
                 continue;
 
+            // Extract nontemporal hints from the config
+            bool useNonTemporalA = (result.config.cache_hints_a != 0);
+            bool useNonTemporalB = (result.config.cache_hints_b != 0);
+
             // Prefer assembly kernels for swizzleA
             if(kernelType.swizzleA && !useStreamK && ((wgt.m == 32 && wgt.n == 32) ||
                                                       (wgt.m == 64 && wgt.n == 32) ||
                                                       (wgt.m == 64 && wgt.n == 64) ||
                                                       (wgt.m == 128 && wgt.n == 32)))
-                lastParams.push_back({wgt, useWorkgroupMapping, useStreamK, useTailLoops});
+                lastParams.push_back({wgt, useWorkgroupMapping, useStreamK, useTailLoops, useNonTemporalA, useNonTemporalB});
             else
-                params.push_back({wgt, useWorkgroupMapping, useStreamK, useTailLoops});
+                params.push_back({wgt, useWorkgroupMapping, useStreamK, useTailLoops, useNonTemporalA, useNonTemporalB});
         }
     }
 
@@ -348,6 +384,10 @@ int parametersToIndex(const SolutionIndexParameters& params)
     result |= ((params.streamK ? 1 : 0) << pos);
     pos += 1;
     result |= ((params.tailLoops ? 1 : 0) << pos);
+    pos += 1;
+    result |= ((params.nonTemporalA ? 1 : 0) << pos);
+    pos += 1;
+    result |= ((params.nonTemporalB ? 1 : 0) << pos);
 
     // Set top bit indicating it is a rocRoller index
     result |= (1 << 31);
@@ -381,6 +421,10 @@ SolutionIndexParameters indexToParameters(int index)
     result.streamK = (index >> pos) & 1;
     pos += 1;
     result.tailLoops = (index >> pos) & 1;
+    pos += 1;
+    result.nonTemporalA = (index >> pos) & 1;
+    pos += 1;
+    result.nonTemporalB = (index >> pos) & 1;
 
     return result;
 }
