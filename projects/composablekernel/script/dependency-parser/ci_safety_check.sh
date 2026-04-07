@@ -51,14 +51,14 @@ fi
 # Three-dot syntax (...) only shows changes actually made in the PR, not changes from merged develop branch
 if [ -n "$CHANGE_ID" ]; then
     # This is a PR build (CHANGE_ID set by Jenkins Multibranch Pipeline)
-    CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null || echo "")
+    CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}..HEAD 2>/dev/null || echo "")
 else
     # Fallback: Works for both branch builds and PRs without CHANGE_ID
     # Use three-dot syntax to avoid including merge commit changes from develop
-    CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null || echo "")
+    CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}..HEAD 2>/dev/null || echo "")
 fi
 
-if echo "$CHANGED_FILES" | grep -qE "(CMakeLists\.txt|cmake/.*\.cmake)"; then
+if echo "$CHANGED_FILES" | grep -qE "(CMakeLists\.txt|cmake/.*\.cmake|Dockerfile|Jenkinsfile|CMakePresets\.json|script/dependency-parser/)"; then
     FORCE_FULL_BUILD=true
     REASON="build system configuration changed (CMakeLists.txt or cmake/*.cmake)"
 fi
