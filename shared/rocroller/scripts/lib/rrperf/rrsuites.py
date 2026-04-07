@@ -1853,11 +1853,7 @@ def fp4_kernels_wgm():
 
 
 def fp4_kernels_wgm_streamk():
-    # TODO: simplify to addStreamK(fp4_kernels_wgm()) once all tests are working
-    yield from addStreamK(fp4_target_d2lds_mi32x32x64_pf2x1_wgm())
-    # yield from addStreamK(fp4_target_d2lds_mi32x32x64_pf4x1_wgm())
-    # yield from addStreamK(fp4_target_d2lds_mi16x16x128_pf4x1_wgm())
-    yield from addStreamK(fp4_single_scale_target_d2lds_mi16x16x128_pf4x1_wgm())
+    yield from addStreamK(fp4_kernels_wgm())
 
 
 def fp4_16x16x128_scale_options():

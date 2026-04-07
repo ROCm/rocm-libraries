@@ -18,7 +18,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::toVec;
-using namespace hipdnn_tests::constants::integration;
+using namespace hipdnn_tests::constants;
 
 namespace
 {
@@ -77,23 +77,23 @@ protected:
             .set_io_data_type(ioType);
 
         auto x = std::make_shared<TensorAttributes>();
-        x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-        x->set_dim(toVec(K_TENSOR_X_DIMS)).set_stride(toVec(K_TENSOR_X_STRIDES));
+        x->set_uid(K_FPROP_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+        x->set_dim(toVec(K_FPROP_TENSOR_X_DIMS)).set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
 
         auto w = std::make_shared<TensorAttributes>();
-        w->set_uid(K_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
-        w->set_dim(toVec(K_TENSOR_W_DIMS)).set_stride(toVec(K_TENSOR_W_STRIDES));
+        w->set_uid(K_FPROP_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
+        w->set_dim(toVec(K_FPROP_TENSOR_W_DIMS)).set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
         ConvFpropAttributes convAttrs;
         convAttrs.set_name("conv_fprop_op");
-        convAttrs.set_pre_padding(toVec(K_CONV_PRE_PADDING));
-        convAttrs.set_post_padding(toVec(K_CONV_POST_PADDING));
-        convAttrs.set_stride(toVec(K_CONV_STRIDE));
-        convAttrs.set_dilation(toVec(K_CONV_DILATION));
+        convAttrs.set_pre_padding(toVec(K_FPROP_CONV_PADDING));
+        convAttrs.set_post_padding(toVec(K_FPROP_CONV_PADDING));
+        convAttrs.set_stride(toVec(K_FPROP_CONV_STRIDE));
+        convAttrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
         convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
         auto y = graph->conv_fprop(x, w, convAttrs);
-        y->set_uid(K_TENSOR_Y_UID).set_output(true).set_name("Y");
+        y->set_uid(K_FPROP_TENSOR_Y_UID).set_output(true).set_name("Y");
 
         return graph;
     }
@@ -131,30 +131,30 @@ TEST_F(IntegrationConvFpropDescriptorLifting, BasicConvFpropRoundTrip)
     ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors (X, W, Y) in lifted graph";
 
     // Verify X tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
-    auto liftedX = tensorMap[K_TENSOR_X_UID];
-    EXPECT_EQ(liftedX->get_uid(), K_TENSOR_X_UID);
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u);
+    auto liftedX = tensorMap[K_FPROP_TENSOR_X_UID];
+    EXPECT_EQ(liftedX->get_uid(), K_FPROP_TENSOR_X_UID);
     EXPECT_EQ(liftedX->get_name(), "X");
-    EXPECT_EQ(liftedX->get_dim(), toVec(K_TENSOR_X_DIMS));
-    EXPECT_EQ(liftedX->get_stride(), toVec(K_TENSOR_X_STRIDES));
+    EXPECT_EQ(liftedX->get_dim(), toVec(K_FPROP_TENSOR_X_DIMS));
+    EXPECT_EQ(liftedX->get_stride(), toVec(K_FPROP_TENSOR_X_STRIDES));
     EXPECT_EQ(liftedX->get_data_type(), DataType::FLOAT);
 
     // Verify W tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_W_UID), 0u);
-    auto liftedW = tensorMap[K_TENSOR_W_UID];
-    EXPECT_EQ(liftedW->get_uid(), K_TENSOR_W_UID);
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_W_UID), 0u);
+    auto liftedW = tensorMap[K_FPROP_TENSOR_W_UID];
+    EXPECT_EQ(liftedW->get_uid(), K_FPROP_TENSOR_W_UID);
     EXPECT_EQ(liftedW->get_name(), "W");
-    EXPECT_EQ(liftedW->get_dim(), toVec(K_TENSOR_W_DIMS));
-    EXPECT_EQ(liftedW->get_stride(), toVec(K_TENSOR_W_STRIDES));
+    EXPECT_EQ(liftedW->get_dim(), toVec(K_FPROP_TENSOR_W_DIMS));
+    EXPECT_EQ(liftedW->get_stride(), toVec(K_FPROP_TENSOR_W_STRIDES));
     EXPECT_EQ(liftedW->get_data_type(), DataType::FLOAT);
 
     // Verify Y tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u);
-    auto liftedY = tensorMap[K_TENSOR_Y_UID];
-    EXPECT_EQ(liftedY->get_uid(), K_TENSOR_Y_UID);
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_Y_UID), 0u);
+    auto liftedY = tensorMap[K_FPROP_TENSOR_Y_UID];
+    EXPECT_EQ(liftedY->get_uid(), K_FPROP_TENSOR_Y_UID);
     EXPECT_EQ(liftedY->get_name(), "Y");
-    EXPECT_EQ(liftedY->get_dim(), toVec(K_TENSOR_Y_DIMS));
-    EXPECT_EQ(liftedY->get_stride(), toVec(K_TENSOR_Y_STRIDES));
+    EXPECT_EQ(liftedY->get_dim(), toVec(K_FPROP_TENSOR_Y_DIMS));
+    EXPECT_EQ(liftedY->get_stride(), toVec(K_FPROP_TENSOR_Y_STRIDES));
     EXPECT_EQ(liftedY->get_data_type(), DataType::FLOAT);
 
     // Verify 1 sub-node of the correct type
@@ -165,10 +165,10 @@ TEST_F(IntegrationConvFpropDescriptorLifting, BasicConvFpropRoundTrip)
     ASSERT_NE(convNode, nullptr) << "Expected a ConvolutionFpropNode";
 
     // Verify convolution parameters
-    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
-    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_CONV_POST_PADDING));
-    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
-    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_FPROP_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_FPROP_CONV_DILATION));
     EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
     EXPECT_EQ(convNode->attributes.get_name(), "conv_fprop_op");
 }
@@ -188,23 +188,23 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAsymmetricPaddingPreserve
         .set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-    x->set_dim(toVec(K_TENSOR_X_DIMS)).set_stride(toVec(K_TENSOR_X_STRIDES));
+    x->set_uid(K_FPROP_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+    x->set_dim(toVec(K_FPROP_TENSOR_X_DIMS)).set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
 
     auto w = std::make_shared<TensorAttributes>();
-    w->set_uid(K_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
-    w->set_dim(toVec(K_TENSOR_W_DIMS)).set_stride(toVec(K_TENSOR_W_STRIDES));
+    w->set_uid(K_FPROP_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
+    w->set_dim(toVec(K_FPROP_TENSOR_W_DIMS)).set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
     ConvFpropAttributes convAttrs;
     convAttrs.set_name("asym_conv_op");
     convAttrs.set_pre_padding(toVec(K_ASYM_PRE_PADDING));
     convAttrs.set_post_padding(toVec(K_ASYM_POST_PADDING));
-    convAttrs.set_stride(toVec(K_CONV_STRIDE));
-    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+    convAttrs.set_stride(toVec(K_FPROP_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
     convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
     auto y = graph->conv_fprop(x, w, convAttrs);
-    y->set_uid(K_TENSOR_Y_UID).set_output(true).set_name("Y");
+    y->set_uid(K_FPROP_TENSOR_Y_UID).set_output(true).set_name("Y");
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -227,17 +227,17 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAsymmetricPaddingPreserve
 
     EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_ASYM_PRE_PADDING));
     EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_ASYM_POST_PADDING));
-    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
-    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_FPROP_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_FPROP_CONV_DILATION));
 
     // Verify Y tensor dims were inferred correctly with asymmetric padding
-    // X={2,3,14,14}, W={8,3,3,3}, stride={2,2}, pre_pad={2,0}, post_pad={0,3}
-    // H_out = (14 + 2 + 0 - 3) / 2 + 1 = 7 (rounded up)
-    // W_out = (14 + 0 + 3 - 3) / 2 + 1 = 8
-    const std::vector<int64_t> expectedYDims = {2, 8, 7, 8};
+    // X={1,3,32,32}, W={64,3,3,3}, stride={1,1}, pre_pad={2,0}, post_pad={0,3}
+    // H_out = (32 + 2 + 0 - 3) / 1 + 1 = 32
+    // W_out = (32 + 0 + 3 - 3) / 1 + 1 = 33
+    const std::vector<int64_t> expectedYDims = {1, 64, 32, 33};
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_dim(), expectedYDims);
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_Y_UID]->get_dim(), expectedYDims);
 }
 
 // After lifting, verifies tensor objects in the node attributes are the same
@@ -268,9 +268,9 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropTensorSharingPreserved)
     ASSERT_NE(convNode, nullptr);
 
     // Verify UIDs match
-    EXPECT_EQ(convNode->attributes.get_x()->get_uid(), K_TENSOR_X_UID);
-    EXPECT_EQ(convNode->attributes.get_w()->get_uid(), K_TENSOR_W_UID);
-    EXPECT_EQ(convNode->attributes.get_y()->get_uid(), K_TENSOR_Y_UID);
+    EXPECT_EQ(convNode->attributes.get_x()->get_uid(), K_FPROP_TENSOR_X_UID);
+    EXPECT_EQ(convNode->attributes.get_w()->get_uid(), K_FPROP_TENSOR_W_UID);
+    EXPECT_EQ(convNode->attributes.get_y()->get_uid(), K_FPROP_TENSOR_Y_UID);
 
     // Verify tensor names
     EXPECT_EQ(convNode->attributes.get_x()->get_name(), "X");
@@ -278,9 +278,9 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropTensorSharingPreserved)
     EXPECT_EQ(convNode->attributes.get_y()->get_name(), "Y");
 
     // Verify pointer equality: tensor map and node attributes share the same objects
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID].get(), convNode->attributes.get_x().get());
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID].get(), convNode->attributes.get_w().get());
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID].get(), convNode->attributes.get_y().get());
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_X_UID].get(), convNode->attributes.get_x().get());
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_W_UID].get(), convNode->attributes.get_w().get());
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_Y_UID].get(), convNode->attributes.get_y().get());
 }
 
 // Creates tensors without explicit set_uid(), verifies that auto-assigned UIDs
@@ -309,10 +309,10 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAutoAssignedUidsPreserved
 
     ConvFpropAttributes convAttrs;
     convAttrs.set_name("auto_uid_conv_op");
-    convAttrs.set_pre_padding(toVec(K_CONV_PRE_PADDING));
-    convAttrs.set_post_padding(toVec(K_CONV_POST_PADDING));
-    convAttrs.set_stride(toVec(K_CONV_STRIDE));
-    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+    convAttrs.set_pre_padding(toVec(K_FPROP_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_FPROP_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_FPROP_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
     convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
     auto y = graph->conv_fprop(x, w, convAttrs);
@@ -401,10 +401,10 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropLiftWithoutFinalization)
     ASSERT_NE(convNode, nullptr);
 
     // Verify convolution parameters
-    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
-    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_CONV_POST_PADDING));
-    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
-    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_FPROP_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_FPROP_CONV_DILATION));
     EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
     EXPECT_EQ(convNode->attributes.get_name(), "conv_fprop_op");
 
@@ -412,20 +412,20 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropLiftWithoutFinalization)
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 3u);
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_dim(), toVec(K_TENSOR_X_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_stride(), toVec(K_TENSOR_X_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_name(), "X");
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_X_UID]->get_dim(), toVec(K_FPROP_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_X_UID]->get_stride(), toVec(K_FPROP_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_X_UID]->get_name(), "X");
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_W_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_dim(), toVec(K_TENSOR_W_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_stride(), toVec(K_TENSOR_W_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_name(), "W");
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_W_UID), 0u);
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_W_UID]->get_dim(), toVec(K_FPROP_TENSOR_W_DIMS));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_W_UID]->get_stride(), toVec(K_FPROP_TENSOR_W_STRIDES));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_W_UID]->get_name(), "W");
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_dim(), toVec(K_TENSOR_Y_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_stride(), toVec(K_TENSOR_Y_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_name(), "Y");
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_Y_UID]->get_dim(), toVec(K_FPROP_TENSOR_Y_DIMS));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_Y_UID]->get_stride(), toVec(K_FPROP_TENSOR_Y_STRIDES));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_Y_UID]->get_name(), "Y");
 }
 
 } // namespace

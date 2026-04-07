@@ -256,12 +256,12 @@ TEST_F(TestCustomOpOperationFromNode, GetAttributeWorksAfterFromNode)
     EXPECT_STREQ(idBuffer.data(), K_CUSTOM_OP_ID.c_str());
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CUSTOM_OP);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CUSTOM_OP_EXT);
 
     // Verify name (empty default from fixture, count==1 for null terminator)
     int64_t nameCount = 0;

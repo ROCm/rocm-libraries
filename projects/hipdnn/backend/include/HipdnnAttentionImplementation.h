@@ -6,7 +6,7 @@
  * @brief Attention implementation mode enumeration for hipDNN SDPA operations
  *
  * Defines the attention implementation mode used when setting the
- * HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT attribute on SDPA descriptors.
+ * HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT attribute on SDPA descriptors.
  */
 
 #pragma once
@@ -18,7 +18,7 @@
  * Determines which implementation strategy to use for the scaled dot-product
  * attention computation.
  *
- * @see HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT
+ * @see HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT
  * @see hipdnnBackendSetAttribute()
  */
 typedef enum
