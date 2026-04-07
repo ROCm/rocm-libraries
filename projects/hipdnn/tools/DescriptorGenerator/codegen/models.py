@@ -19,7 +19,7 @@ class EnumValue:
 
     Attributes:
         name: Backend C-API suffix appended to ``EnumDef.backend_prefix``
-            (e.g., ``"CROSS_CORRELATION"`` → ``HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION``).
+            (e.g., ``"CROSS_CORRELATION"`` → ``HIPDNN_CROSS_CORRELATION``).
         value: Numeric value in the backend C-API enum typedef.
         sentinel: If True, this value (typically UNSET/NOT_SET) is excluded from the
             backend C-API enum but appears as ``NOT_SET = 0`` in the frontend enum class.

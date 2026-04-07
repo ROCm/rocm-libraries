@@ -205,7 +205,7 @@ operation:
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_POINTWISE_MATH_PREC"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_POINTWISE"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_POINTWISE_EXT"
 
   test_data:
     constants_include: "PointwiseConstants"

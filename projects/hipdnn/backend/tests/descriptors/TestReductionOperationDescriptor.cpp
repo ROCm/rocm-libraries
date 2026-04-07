@@ -701,13 +701,13 @@ TEST_F(TestReductionOperationDescriptor, GetAttributeOperationTypeReturnsCorrect
     makeFinalized();
     auto desc = getDescriptor();
 
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &elementCount, &opType));
 
     ASSERT_EQ(elementCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_REDUCTION);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_REDUCTION_EXT);
 }
 
 TEST_F(TestReductionOperationDescriptor, GetAttributeOperationTypeQueryReturnsOne)

@@ -66,9 +66,9 @@ operation:
   tensor_array_fields: []
 
   has_compute_data_type: true
-  compute_data_type_attr: "HIPDNN_ATTR_MATMUL_MATH_PREC_EXT"
+  compute_data_type_attr: "HIPDNN_ATTR_MATMUL_COMP_TYPE"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_MATMUL"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_MATMUL_EXT"
 
   test_data:
     constants_include: "MatmulConstants"

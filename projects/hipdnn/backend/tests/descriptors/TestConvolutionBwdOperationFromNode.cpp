@@ -92,7 +92,7 @@ TEST_F(TestConvolutionBwdOperationFromNode, CreatesValidFinalizedDescriptor)
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR);
     EXPECT_EQ(desc->getData().dy_tensor_uid, hipdnn_tests::constants::K_DGRAD_TENSOR_DY_UID);
 }
 
@@ -326,12 +326,12 @@ TEST_F(TestConvolutionBwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &convModeCount,
                        &convMode);
-    ASSERT_EQ(convMode, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    ASSERT_EQ(convMode, HIPDNN_CROSS_CORRELATION);
 
     // Verify dy tensor
     hipdnn_backend::ScopedDescriptor dyScoped;
     int64_t dyCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dyCount,
@@ -348,7 +348,7 @@ TEST_F(TestConvolutionBwdOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify w tensor
     hipdnn_backend::ScopedDescriptor wScoped;
     int64_t wCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &wCount,
@@ -365,7 +365,7 @@ TEST_F(TestConvolutionBwdOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify dx tensor
     hipdnn_backend::ScopedDescriptor dxScoped;
     int64_t dxCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dxCount,
@@ -380,12 +380,12 @@ TEST_F(TestConvolutionBwdOperationFromNode, GetAttributeWorksAfterFromNode)
         hipdnn_tests::toVec(K_DGRAD_TENSOR_DX_STRIDES));
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_DATA);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_DATA_EXT);
 }
 
 TEST_F(TestConvolutionBwdOperationFromNode, NamePreservedFromNode)
