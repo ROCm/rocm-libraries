@@ -712,8 +712,9 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     // Transposed non-tunable Winograd solvers
     RegisterWithSolver(
         registry, ++id, conv::TransposedConvWinoFuryRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
-    RegisterWithSolver(
-        registry, ++id, conv::TransposedConvWinoRageRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
+    ++id; // RegisterWithSolver(
+          //     registry, ++id, conv::TransposedConvWinoRageRxS<2, 3>{},
+          //     miopenConvolutionAlgoWinograd);
     RegisterWithSolver(registry,
                        ++id,
                        conv::TransposedConvMPBidirectWinograd<2, 3>{},
