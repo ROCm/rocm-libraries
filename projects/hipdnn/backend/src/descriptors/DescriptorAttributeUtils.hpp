@@ -213,7 +213,7 @@ void getConvMode(hipdnn_data_sdk::data_objects::ConvMode source,
                  void* arrayOfElements,
                  const char* errorPrefix);
 
-void getOperationType(hipdnnOperationType_t source,
+void getOperationType(hipdnnOperationType_ext_t source,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t requestedElementCount,
                       int64_t* elementCount,
