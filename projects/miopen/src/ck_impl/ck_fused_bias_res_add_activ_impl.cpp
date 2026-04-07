@@ -226,8 +226,8 @@ bool CheckCKApplicability(const ProblemDescription& problem)
 template <typename DataType, typename AccumDataType>
 bool CheckIsArgSupported(const ProblemDescription& problem, const std::string& kernel_id)
 {
-    return miopen::solver::IsCKArgsSupported<DeviceOp<DataType, AccumDataType>, CKArgs>(
-        problem, kernel_id);
+    return miopen::solver::IsCKArgsSupported<DeviceOp<DataType, AccumDataType>, CKArgs>(problem,
+                                                                                        kernel_id);
 }
 
 // ---------------------------------------------------------------------------
@@ -351,9 +351,8 @@ ckgrpconv_fused_bias_res_add_activ_get_solution(const miopen::ExecutionContext* 
                 InitAnyInvokerFactory<DeviceOp<float, float>, CKArgs, ParamType>(*problem, kid);
             break;
         case miopenBFloat16:
-            solution =
-                InitAnyInvokerFactory<DeviceOp<ck::bhalf_t, ck::bhalf_t>, CKArgs, ParamType>(
-                    *problem, kid);
+            solution = InitAnyInvokerFactory<DeviceOp<ck::bhalf_t, ck::bhalf_t>, CKArgs, ParamType>(
+                *problem, kid);
             break;
         default: return nullptr;
         }

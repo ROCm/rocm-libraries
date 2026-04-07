@@ -442,11 +442,11 @@ extern "C" bool ckgrpconv_fused_grp_bias_activ_is_applicable(
     }
 }
 
-extern "C" bool ckgrpconv_fused_grp_bias_activ_is_args_supported(
-    const miopen::conv::ProblemDescription* problem,
-    const char* kernel_id,
-    miopenDataType_t data_type,
-    bool /*use_tf32*/)
+extern "C" bool
+ckgrpconv_fused_grp_bias_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
+                                                 const char* kernel_id,
+                                                 miopenDataType_t data_type,
+                                                 bool /*use_tf32*/)
 {
     try
     {
@@ -463,10 +463,10 @@ extern "C" bool ckgrpconv_fused_grp_bias_activ_is_args_supported(
     }
 }
 
-extern "C" size_t ckgrpconv_fused_grp_bias_activ_get_workspace_size(
-    const miopen::conv::ProblemDescription* problem,
-    miopenDataType_t /*data_type*/,
-    bool /*use_tf32*/)
+extern "C" size_t
+ckgrpconv_fused_grp_bias_activ_get_workspace_size(const miopen::conv::ProblemDescription* problem,
+                                                  miopenDataType_t /*data_type*/,
+                                                  bool /*use_tf32*/)
 {
     try
     {
@@ -495,7 +495,7 @@ ckgrpconv_fused_grp_bias_activ_get_solution(const miopen::ExecutionContext* ctx,
         auto solution = MakeSolutionGroupConvImplicitGemmXdlops(
             *problem,
             [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
-                using T = decltype(data_type_val);
+                using T   = decltype(data_type_val);
                 auto ndim = get_ndim();
                 if(ndim == 3)
                 {
@@ -517,7 +517,7 @@ ckgrpconv_fused_grp_bias_activ_get_solution(const miopen::ExecutionContext* ctx,
                 }
             },
             [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
-                using T = decltype(data_type_val);
+                using T   = decltype(data_type_val);
                 auto ndim = get_ndim();
                 if(ndim == 3)
                 {

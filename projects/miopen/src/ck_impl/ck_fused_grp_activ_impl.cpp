@@ -92,21 +92,20 @@ template <ck::index_t NumDimSpatial,
           typename InLayout     = ck::tensor_layout::convolution::NHWGC,
           typename WeiLayout    = ck::tensor_layout::convolution::GKYXC,
           typename OutLayout    = ck::tensor_layout::convolution::NHWGK>
-using DeviceOpGFwdAct =
-    ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NumDimSpatial,
-                                                                  InLayout,
-                                                                  WeiLayout,
-                                                                  ck::Tuple<>,
-                                                                  OutLayout,
-                                                                  InDataType,
-                                                                  WeiDataType,
-                                                                  ck::Tuple<>,
-                                                                  OutDataType,
-                                                                  InElementOp,
-                                                                  WeiElementOp,
-                                                                  OutElementOp,
-                                                                  AComputeType,
-                                                                  BComputeType>;
+using DeviceOpGFwdAct = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NumDimSpatial,
+                                                                                      InLayout,
+                                                                                      WeiLayout,
+                                                                                      ck::Tuple<>,
+                                                                                      OutLayout,
+                                                                                      InDataType,
+                                                                                      WeiDataType,
+                                                                                      ck::Tuple<>,
+                                                                                      OutDataType,
+                                                                                      InElementOp,
+                                                                                      WeiElementOp,
+                                                                                      OutElementOp,
+                                                                                      AComputeType,
+                                                                                      BComputeType>;
 
 template <ck::index_t NumDimSpatial,
           typename DataType,
@@ -368,39 +367,36 @@ template <int NDim, typename DataType>
 std::vector<std::string> FillValidKernels(const ProblemDescription& problem)
 {
     using Layouts = LayoutsSelector<NDim>;
-    return miopen::solver::FillValidKernelsIDs<
-        DeviceOpGFwdActPtrs<NDim,
-                            DataType,
-                            typename Layouts::InLayout,
-                            typename Layouts::WeiLayout,
-                            typename Layouts::OutLayout>,
-        CKArgs<NDim, DataType>>(problem);
+    return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdActPtrs<NDim,
+                                                                   DataType,
+                                                                   typename Layouts::InLayout,
+                                                                   typename Layouts::WeiLayout,
+                                                                   typename Layouts::OutLayout>,
+                                               CKArgs<NDim, DataType>>(problem);
 }
 
 template <int NDim, typename DataType>
 bool CheckCKApplicability(const ProblemDescription& problem)
 {
     using Layouts = LayoutsSelector<NDim>;
-    return miopen::solver::IsCKApplicable<
-        DeviceOpGFwdActPtrs<NDim,
-                            DataType,
-                            typename Layouts::InLayout,
-                            typename Layouts::WeiLayout,
-                            typename Layouts::OutLayout>,
-        CKArgs<NDim, DataType>>(problem);
+    return miopen::solver::IsCKApplicable<DeviceOpGFwdActPtrs<NDim,
+                                                              DataType,
+                                                              typename Layouts::InLayout,
+                                                              typename Layouts::WeiLayout,
+                                                              typename Layouts::OutLayout>,
+                                          CKArgs<NDim, DataType>>(problem);
 }
 
 template <int NDim, typename DataType>
 bool CheckIsArgSupported(const ProblemDescription& problem, const std::string& kernel_id)
 {
     using Layouts = LayoutsSelector<NDim>;
-    return miopen::solver::IsCKArgsSupported<
-        DeviceOpGFwdActPtrs<NDim,
-                            DataType,
-                            typename Layouts::InLayout,
-                            typename Layouts::WeiLayout,
-                            typename Layouts::OutLayout>,
-        CKArgs<NDim, DataType>>(problem, kernel_id);
+    return miopen::solver::IsCKArgsSupported<DeviceOpGFwdActPtrs<NDim,
+                                                                 DataType,
+                                                                 typename Layouts::InLayout,
+                                                                 typename Layouts::WeiLayout,
+                                                                 typename Layouts::OutLayout>,
+                                             CKArgs<NDim, DataType>>(problem, kernel_id);
 }
 
 // ---------------------------------------------------------------------------
@@ -532,16 +528,16 @@ ckgrpconv_fused_grp_activ_get_solution(const miopen::ExecutionContext* ctx,
                 [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
                     (void)data_type_val;
                     using T = decltype(data_type_val);
-                    return InitInvokerFactoryFwdNCHW<NDim,
-                                                     false,
-                                                     DeviceOpGFwdActPtrs<NDim,
-                                                                         T,
-                                                                         typename Layouts::InLayout,
-                                                                         typename Layouts::WeiLayout,
-                                                                         typename Layouts::OutLayout>,
-                                                     CKArgs<NDim, T>,
-                                                     miopen::fusion::FusionInvokeParams>(
-                        *ctx, *problem, kid);
+                    return InitInvokerFactoryFwdNCHW<
+                        NDim,
+                        false,
+                        DeviceOpGFwdActPtrs<NDim,
+                                            T,
+                                            typename Layouts::InLayout,
+                                            typename Layouts::WeiLayout,
+                                            typename Layouts::OutLayout>,
+                        CKArgs<NDim, T>,
+                        miopen::fusion::FusionInvokeParams>(*ctx, *problem, kid);
                 },
                 [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
                     (void)data_type_val;

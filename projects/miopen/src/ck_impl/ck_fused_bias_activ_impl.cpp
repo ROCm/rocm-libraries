@@ -20,11 +20,10 @@
 // CK type aliases and instance function for Conv+Bias+ReLU fusion (FP16)
 // ---------------------------------------------------------------------------
 
-using DeviceConvFwdBiasReluPtr =
-    ck::tensor_operation::device::DeviceConvFwdBiasActivationPtr<
-        ck::tensor_operation::element_wise::PassThrough,
-        ck::tensor_operation::element_wise::PassThrough,
-        ck::tensor_operation::element_wise::AddRelu>;
+using DeviceConvFwdBiasReluPtr = ck::tensor_operation::device::DeviceConvFwdBiasActivationPtr<
+    ck::tensor_operation::element_wise::PassThrough,
+    ck::tensor_operation::element_wise::PassThrough,
+    ck::tensor_operation::element_wise::AddRelu>;
 
 // Forward-declare CK's explicit instance population function.
 namespace ck {
@@ -104,8 +103,8 @@ std::vector<DeviceConvFwdBiasReluPtr> GetConvInstances()
 
 std::vector<std::string> FillValidKernels(const ProblemDescription& problem)
 {
-    const auto args      = CKArgs{problem};
-    auto conv_ptrs       = GetConvInstances();
+    const auto args = CKArgs{problem};
+    auto conv_ptrs  = GetConvInstances();
     std::vector<std::string> valid_kernels;
     valid_kernels.reserve(conv_ptrs.size());
     for(const auto& it : conv_ptrs)
@@ -173,22 +172,22 @@ bool CheckIsArgSupported(const ProblemDescription& problem, const std::string& k
         if(conv_ptrs[i]->GetTypeString() == kernel_id)
         {
             auto argument_ptr = conv_ptrs[i]->MakeArgumentPointer(nullptr,
-                                                                   nullptr,
-                                                                   nullptr,
-                                                                   nullptr,
-                                                                   args.N,
-                                                                   args.K,
-                                                                   args.C,
-                                                                   args.input,
-                                                                   args.filter,
-                                                                   args.output,
-                                                                   args.strides,
-                                                                   args.dilation,
-                                                                   args.lPadding,
-                                                                   args.rPadding,
-                                                                   {},
-                                                                   {},
-                                                                   {});
+                                                                  nullptr,
+                                                                  nullptr,
+                                                                  nullptr,
+                                                                  args.N,
+                                                                  args.K,
+                                                                  args.C,
+                                                                  args.input,
+                                                                  args.filter,
+                                                                  args.output,
+                                                                  args.strides,
+                                                                  args.dilation,
+                                                                  args.lPadding,
+                                                                  args.rPadding,
+                                                                  {},
+                                                                  {},
+                                                                  {});
             return conv_ptrs[i]->IsSupportedArgument(argument_ptr.get());
         }
     }
@@ -202,9 +201,7 @@ bool CheckIsArgSupported(const ProblemDescription& problem, const std::string& k
 // ===========================================================================
 
 extern "C" CKKernelListHandle* ckgrpconv_fused_bias_activ_fill_valid_kernels(
-    const miopen::conv::ProblemDescription* problem,
-    miopenDataType_t data_type,
-    bool /*use_tf32*/)
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool /*use_tf32*/)
 {
     try
     {
@@ -220,10 +217,8 @@ extern "C" CKKernelListHandle* ckgrpconv_fused_bias_activ_fill_valid_kernels(
     }
 }
 
-extern "C" bool
-ckgrpconv_fused_bias_activ_is_applicable(const miopen::conv::ProblemDescription* problem,
-                                         miopenDataType_t data_type,
-                                         bool /*use_tf32*/)
+extern "C" bool ckgrpconv_fused_bias_activ_is_applicable(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool /*use_tf32*/)
 {
     try
     {
@@ -278,70 +273,68 @@ ckgrpconv_fused_bias_activ_get_solution(const miopen::ExecutionContext* ctx,
         std::string kid(kernel_id);
 
         miopen::solver::ConvSolution solution;
-        solution.invoker_factory =
-            [kid, conv_problem = *problem](const std::vector<miopen::Kernel>& kernels) {
-                std::ignore = kernels;
-                return [kid, conv_problem](const miopen::Handle& handle,
-                                           const miopen::AnyInvokeParams& primitive_parameters) {
-                    const auto args = CKArgs{conv_problem};
-                    auto conv_ptrs  = GetConvInstances();
+        solution.invoker_factory = [kid, conv_problem = *problem](
+                                       const std::vector<miopen::Kernel>& kernels) {
+            std::ignore = kernels;
+            return [kid, conv_problem](const miopen::Handle& handle,
+                                       const miopen::AnyInvokeParams& primitive_parameters) {
+                const auto args = CKArgs{conv_problem};
+                auto conv_ptrs  = GetConvInstances();
 
-                    // Find the instance matching the kernel_id.
-                    size_t id = 0;
-                    for(; id < conv_ptrs.size(); ++id)
-                    {
-                        if(conv_ptrs[id]->GetTypeString() == kid)
-                            break;
-                    }
-                    assert(id < conv_ptrs.size());
-                    auto& conv_ck = conv_ptrs.at(id);
+                // Find the instance matching the kernel_id.
+                size_t id = 0;
+                for(; id < conv_ptrs.size(); ++id)
+                {
+                    if(conv_ptrs[id]->GetTypeString() == kid)
+                        break;
+                }
+                assert(id < conv_ptrs.size());
+                auto& conv_ck = conv_ptrs.at(id);
 
-                    // Extract tensors from FusionInvokeParams.
-                    const auto& invoke_ctx =
-                        primitive_parameters.CastTo<miopen::fusion::FusionInvokeParams>();
-                    const auto& wei_buf =
-                        dynamic_cast<miopen::fusion::ConvolutionOpInvokeParam&>(
-                            *invoke_ctx.op_args.params[0])
-                            .weights;
-                    const auto& bias_buf =
-                        dynamic_cast<miopen::fusion::BiasOpInvokeParam&>(
-                            *invoke_ctx.op_args.params[1])
-                            .bdata;
+                // Extract tensors from FusionInvokeParams.
+                const auto& invoke_ctx =
+                    primitive_parameters.CastTo<miopen::fusion::FusionInvokeParams>();
+                const auto& wei_buf = dynamic_cast<miopen::fusion::ConvolutionOpInvokeParam&>(
+                                          *invoke_ctx.op_args.params[0])
+                                          .weights;
+                const auto& bias_buf =
+                    dynamic_cast<miopen::fusion::BiasOpInvokeParam&>(*invoke_ctx.op_args.params[1])
+                        .bdata;
 
-                    auto argument_ptr = conv_ck->MakeArgumentPointer(
-                        const_cast<void*>( // NOLINT (cppcoreguidelines-pro-type-const-cast)
-                            static_cast<const void*>(invoke_ctx.in)),
-                        const_cast<void*>( // NOLINT (cppcoreguidelines-pro-type-const-cast)
-                            static_cast<const void*>(wei_buf)),
-                        invoke_ctx.out,
-                        const_cast<void*>( // NOLINT (cppcoreguidelines-pro-type-const-cast)
-                            static_cast<const void*>(bias_buf)),
-                        args.N,
-                        args.K,
-                        args.C,
-                        args.input,
-                        args.filter,
-                        args.output,
-                        args.strides,
-                        args.dilation,
-                        args.lPadding,
-                        args.rPadding,
-                        {},
-                        {},
-                        {});
+                auto argument_ptr = conv_ck->MakeArgumentPointer(
+                    const_cast<void*>( // NOLINT (cppcoreguidelines-pro-type-const-cast)
+                        static_cast<const void*>(invoke_ctx.in)),
+                    const_cast<void*>( // NOLINT (cppcoreguidelines-pro-type-const-cast)
+                        static_cast<const void*>(wei_buf)),
+                    invoke_ctx.out,
+                    const_cast<void*>( // NOLINT (cppcoreguidelines-pro-type-const-cast)
+                        static_cast<const void*>(bias_buf)),
+                    args.N,
+                    args.K,
+                    args.C,
+                    args.input,
+                    args.filter,
+                    args.output,
+                    args.strides,
+                    args.dilation,
+                    args.lPadding,
+                    args.rPadding,
+                    {},
+                    {},
+                    {});
 
-                    auto invoker_ptr            = conv_ck->MakeInvokerPointer();
-                    const auto enable_profiling = handle.IsProfilingEnabled();
+                auto invoker_ptr            = conv_ck->MakeInvokerPointer();
+                const auto enable_profiling = handle.IsProfilingEnabled();
 
-                    float elapsed_time =
-                        invoker_ptr->Run(argument_ptr.get(), {handle.GetStream(), enable_profiling});
-                    if(enable_profiling)
-                    {
-                        handle.ResetKernelTime();
-                        handle.AccumKernelTime(elapsed_time);
-                    }
-                };
+                float elapsed_time =
+                    invoker_ptr->Run(argument_ptr.get(), {handle.GetStream(), enable_profiling});
+                if(enable_profiling)
+                {
+                    handle.ResetKernelTime();
+                    handle.AccumKernelTime(elapsed_time);
+                }
             };
+        };
 
         return new miopen::solver::ConvSolution(std::move(solution));
     }

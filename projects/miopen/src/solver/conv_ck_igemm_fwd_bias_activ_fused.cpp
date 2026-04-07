@@ -50,8 +50,8 @@ void PerformanceConfigConvCKIgemmFwdBiasActivFused::HeuristicInit(
     const auto conv_problem = fdesc_problem.GetConvProblem(0, miopen::conv::Direction::Forward);
     const auto data_type    = conv_problem.GetInDataType();
 
-    valid_kernels = loader.FillValidKernels(
-        CKSolverType::FusedBiasActiv, conv_problem, data_type, false);
+    valid_kernels =
+        loader.FillValidKernels(CKSolverType::FusedBiasActiv, conv_problem, data_type, false);
 
     if(!valid_kernels.empty())
     {

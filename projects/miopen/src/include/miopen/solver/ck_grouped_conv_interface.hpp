@@ -238,11 +238,11 @@ CK_GROUPED_CONV_API CKKernelListHandle* ckgrpconv_fused_bias_res_add_activ_fill_
 CK_GROUPED_CONV_API bool ckgrpconv_fused_bias_res_add_activ_is_applicable(
     const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
 
-CK_GROUPED_CONV_API bool
-ckgrpconv_fused_bias_res_add_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                                     const char* kernel_id,
-                                                     miopenDataType_t data_type,
-                                                     bool use_tf32);
+CK_GROUPED_CONV_API bool ckgrpconv_fused_bias_res_add_activ_is_args_supported(
+    const miopen::conv::ProblemDescription* problem,
+    const char* kernel_id,
+    miopenDataType_t data_type,
+    bool use_tf32);
 
 CK_GROUPED_CONV_API size_t ckgrpconv_fused_bias_res_add_activ_get_workspace_size(
     const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
@@ -286,9 +286,9 @@ CK_GROUPED_CONV_API bool ckgrpconv_fused_grp_bias_activ_is_applicable(
 
 CK_GROUPED_CONV_API bool
 ckgrpconv_fused_grp_bias_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                                  const char* kernel_id,
-                                                  miopenDataType_t data_type,
-                                                  bool use_tf32);
+                                                 const char* kernel_id,
+                                                 miopenDataType_t data_type,
+                                                 bool use_tf32);
 
 CK_GROUPED_CONV_API size_t ckgrpconv_fused_grp_bias_activ_get_workspace_size(
     const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);

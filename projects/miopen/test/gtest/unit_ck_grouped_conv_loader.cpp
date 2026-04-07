@@ -375,9 +375,8 @@ TEST(CPU_CKGroupedConvLoader_NONE, LoaderReturnsEmptyOnFailure)
         CKSolverType::FusedBiasActiv, problem, "dummy_kernel", miopenHalf, false));
     EXPECT_EQ(loader.GetWorkspaceSize(CKSolverType::FusedBiasActiv, problem, miopenHalf, false),
               0u);
-    EXPECT_EQ(
-        loader.GetSolution(CKSolverType::FusedBiasActiv, ctx, problem, "dummy", false).status,
-        miopenStatusInternalError);
+    EXPECT_EQ(loader.GetSolution(CKSolverType::FusedBiasActiv, ctx, problem, "dummy", false).status,
+              miopenStatusInternalError);
 
     EXPECT_TRUE(
         loader.FillValidKernels(CKSolverType::FusedBiasResAddActiv, problem, miopenHalf, false)
@@ -390,8 +389,7 @@ TEST(CPU_CKGroupedConvLoader_NONE, LoaderReturnsEmptyOnFailure)
         loader.GetWorkspaceSize(CKSolverType::FusedBiasResAddActiv, problem, miopenHalf, false),
         0u);
     EXPECT_EQ(
-        loader.GetSolution(CKSolverType::FusedBiasResAddActiv, ctx, problem, "dummy", false)
-            .status,
+        loader.GetSolution(CKSolverType::FusedBiasResAddActiv, ctx, problem, "dummy", false).status,
         miopenStatusInternalError);
 
     EXPECT_TRUE(
@@ -399,21 +397,17 @@ TEST(CPU_CKGroupedConvLoader_NONE, LoaderReturnsEmptyOnFailure)
     EXPECT_FALSE(loader.IsApplicable(CKSolverType::FusedGrpActiv, problem, miopenHalf, false));
     EXPECT_FALSE(loader.IsArgsSupported(
         CKSolverType::FusedGrpActiv, problem, "dummy_kernel", miopenHalf, false));
-    EXPECT_EQ(loader.GetWorkspaceSize(CKSolverType::FusedGrpActiv, problem, miopenHalf, false),
-              0u);
-    EXPECT_EQ(
-        loader.GetSolution(CKSolverType::FusedGrpActiv, ctx, problem, "dummy", false).status,
-        miopenStatusInternalError);
+    EXPECT_EQ(loader.GetWorkspaceSize(CKSolverType::FusedGrpActiv, problem, miopenHalf, false), 0u);
+    EXPECT_EQ(loader.GetSolution(CKSolverType::FusedGrpActiv, ctx, problem, "dummy", false).status,
+              miopenStatusInternalError);
 
-    EXPECT_TRUE(
-        loader.FillValidKernels(CKSolverType::FusedGrpBiasActiv, problem, miopenHalf, false)
-            .empty());
-    EXPECT_FALSE(
-        loader.IsApplicable(CKSolverType::FusedGrpBiasActiv, problem, miopenHalf, false));
+    EXPECT_TRUE(loader.FillValidKernels(CKSolverType::FusedGrpBiasActiv, problem, miopenHalf, false)
+                    .empty());
+    EXPECT_FALSE(loader.IsApplicable(CKSolverType::FusedGrpBiasActiv, problem, miopenHalf, false));
     EXPECT_FALSE(loader.IsArgsSupported(
         CKSolverType::FusedGrpBiasActiv, problem, "dummy_kernel", miopenHalf, false));
-    EXPECT_EQ(
-        loader.GetWorkspaceSize(CKSolverType::FusedGrpBiasActiv, problem, miopenHalf, false), 0u);
+    EXPECT_EQ(loader.GetWorkspaceSize(CKSolverType::FusedGrpBiasActiv, problem, miopenHalf, false),
+              0u);
     EXPECT_EQ(
         loader.GetSolution(CKSolverType::FusedGrpBiasActiv, ctx, problem, "dummy", false).status,
         miopenStatusInternalError);
