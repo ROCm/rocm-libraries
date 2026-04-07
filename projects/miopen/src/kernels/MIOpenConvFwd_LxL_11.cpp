@@ -38,6 +38,15 @@
 #include "float_types.h"
 #include "math_ops.h"
 
+// float_types.h uses FLOAT / FLOAT_ACCUM for HIP and _FLOAT / _FLOAT_ACCUM for OpenCL.
+// This kernel uses the _FLOAT / _FLOAT_ACCUM names throughout; alias them for HIP.
+#ifdef __HIP_PLATFORM_AMD__
+#ifndef _FLOAT
+#define _FLOAT FLOAT
+#endif
+#define _FLOAT_ACCUM FLOAT_ACCUM
+#endif
+
 // ---------------------------------------------------------------------------
 // Compile-time derived constants (mirror the OpenCL kernel header block)
 // ---------------------------------------------------------------------------
