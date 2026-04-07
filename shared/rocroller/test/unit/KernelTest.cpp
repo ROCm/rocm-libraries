@@ -358,7 +358,7 @@ amdhsa.kernels:
         auto valTag   = command->allocateTag();
         auto val_arg  = command->allocateArgument(floatVal, valTag, ArgumentType::Value);
         auto sizeTag  = command->allocateTag();
-        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
+        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Size);
 
         auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
         auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
@@ -426,7 +426,7 @@ amdhsa.kernels:
 
         commandArgs.setArgument(ptrTag, ArgumentType::Value, ptr.get());
         commandArgs.setArgument(valTag, ArgumentType::Value, val);
-        commandArgs.setArgument(sizeTag, ArgumentType::Limit, size);
+        commandArgs.setArgument(sizeTag, ArgumentType::Size, size);
 
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 

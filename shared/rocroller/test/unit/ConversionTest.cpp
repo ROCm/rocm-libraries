@@ -385,10 +385,12 @@ namespace rocRollerTest
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
 
-        auto macTileVGPR = KernelGraph::CoordinateGraph::MacroTile(
-            {cs.m, cs.n}, MemoryType::VGPR, {cs.threadTileM, cs.threadTileN});
-        auto macTileLDS = KernelGraph::CoordinateGraph::MacroTile(
-            {cs.m, cs.n}, MemoryType::LDS, {cs.threadTileM, cs.threadTileN});
+        auto macTileVGPR = KernelGraph::CoordinateGraph::MacroTile({cs.m, cs.n},
+                                                                   LayoutType::ROW_MAJOR,
+                                                                   {cs.threadTileM, cs.threadTileN},
+                                                                   MemoryType::VGPR);
+        auto macTileLDS  = KernelGraph::CoordinateGraph::MacroTile(
+            {cs.m, cs.n}, LayoutType::ROW_MAJOR, {cs.threadTileM, cs.threadTileN}, MemoryType::LDS);
 
         unsigned int workgroup_size_x = cs.m / cs.threadTileM;
         unsigned int workgroup_size_y = cs.n / cs.threadTileN;
@@ -492,10 +494,12 @@ namespace rocRollerTest
         params->setManualKernelDimension(2);
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
-        auto macTileVGPR = KernelGraph::CoordinateGraph::MacroTile(
-            {cs.m, cs.n}, MemoryType::VGPR, {cs.threadTileM, cs.threadTileN});
-        auto macTileLDS = KernelGraph::CoordinateGraph::MacroTile(
-            {cs.m, cs.n}, MemoryType::LDS, {cs.threadTileM, cs.threadTileN});
+        auto macTileVGPR = KernelGraph::CoordinateGraph::MacroTile({cs.m, cs.n},
+                                                                   LayoutType::ROW_MAJOR,
+                                                                   {cs.threadTileM, cs.threadTileN},
+                                                                   MemoryType::VGPR);
+        auto macTileLDS  = KernelGraph::CoordinateGraph::MacroTile(
+            {cs.m, cs.n}, LayoutType::ROW_MAJOR, {cs.threadTileM, cs.threadTileN}, MemoryType::LDS);
 
         params->setDimensionInfo(tagLoadA, loadLDS_A ? macTileLDS : macTileVGPR);
         // TODO Fix MemoryType promotion (LDS)
