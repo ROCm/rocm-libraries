@@ -33,7 +33,6 @@ if (-not $VsBuildToolsPath) {
 # Version configuration
 $CLANG_VERSION = "20.1.8"
 $CMAKE_VERSION = "3.31.0"
-$THEROCK_VERSION = "7.10.0"  # Base version, will look for latest nightly
 
 # Colors for output
 function Write-Status { param($Message) Write-Host "[$([datetime]::Now.ToString('HH:mm:ss'))] $Message" -ForegroundColor Cyan }
@@ -215,69 +214,9 @@ if (-not $SkipToolchainDownload) {
         }
     }
 
-    # Download and install TheRock
-    Write-Status "Setting up TheRock ROCm SDK..."
-    if (-not (Test-Path "$TheRockPath\bin\hipconfig.exe")) {
-        Write-Status "Downloading TheRock for $Asic..."
-
-        # Determine GFX family
-        $gfxFamily = switch -Regex ($Asic) {
-            "gfx115[0-9]" { "gfx1151" }
-            "gfx110[0-9]" { "gfx110X-all" }
-            "gfx103[0-9]" { "gfx103X-all" }
-            "gfx90[0-9]"  { "gfx90X-all" }
-            default {
-                Write-Warning "Unknown GFX family for $Asic, using gfx110X-all"
-                "gfx110X-all"
-            }
-        }
-
-        Write-Status "Using GFX Family: $gfxFamily"
-
-        # Create directory
-        New-Item -ItemType Directory -Path $TheRockPath -Force | Out-Null
-
-        # Find latest nightly build
-        $baseUrl = "https://therock-nightly-tarball.s3.amazonaws.com"
-        $indexUrl = "$baseUrl/index.html"
-
-        try {
-            Write-Status "Checking for latest TheRock build..."
-            $indexContent = Invoke-WebRequest -Uri $indexUrl -UseBasicParsing
-
-            # Parse for Windows builds matching our GFX family
-            $pattern = "therock-dist-windows-$gfxFamily-.*?\.tar\.gz"
-            $matches = [regex]::Matches($indexContent.Content, $pattern)
-
-            if ($matches.Count -gt 0) {
-                # Get the most recent (last in list usually)
-                $latestFile = $matches[$matches.Count - 1].Value
-                $theRockUrl = "$baseUrl/$latestFile"
-
-                Write-Status "Downloading $latestFile..."
-                $theRockArchive = "$env:TEMP\therock.tar.gz"
-
-                Invoke-WebRequest -Uri $theRockUrl -OutFile $theRockArchive -UseBasicParsing
-                Write-Success "TheRock downloaded"
-
-                Write-Status "Extracting TheRock (this may take several minutes)..."
-                tar -xzf $theRockArchive -C $TheRockPath
-
-                Remove-Item -Path $theRockArchive -Force
-                Write-Success "TheRock installed to $TheRockPath"
-            } else {
-                throw "No Windows builds found for $gfxFamily"
-            }
-        } catch {
-            Write-Error "Failed to download/install TheRock: $_"
-            Write-Host "Please manually download from: $indexUrl"
-            Write-Host "Look for: therock-dist-windows-$gfxFamily-*.tar.gz"
-            Write-Host "Extract to: $TheRockPath"
-            exit 1
-        }
-    } else {
-        Write-Success "TheRock already installed at $TheRockPath"
-    }
+    Write-Status "Skipping TheRock nightly tarball download."
+    Write-Host "TheRock nightly tarball download has been retired."
+    Write-Host "Use the wheel-based setup to install the latest ROCm nightly SDK."
 }
 
 # Section 4: Set System Environment Variables
@@ -285,21 +224,6 @@ if (-not $SkipEnvironmentVariables) {
     Write-Host "`n=== Section 4: Setting System Environment Variables ===" -ForegroundColor Yellow
 
     Write-Status "Setting system environment variables..."
-
-    # Add TheRock bin to system PATH if not already present
-    try {
-        $currentPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-        if (-not $currentPath.Contains("$TheRockPath\bin")) {
-            Write-Status "Adding TheRock to system PATH..."
-            $newPath = "$TheRockPath\bin;" + $currentPath
-            [System.Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
-            Write-Success "Added $TheRockPath\bin to system PATH"
-        } else {
-            Write-Success "TheRock already in system PATH"
-        }
-    } catch {
-        Write-Warning "Could not modify system PATH: $_"
-    }
 
     # Set HIP_PLATFORM
     try {
@@ -326,6 +250,9 @@ if (-not $SkipEnvironmentVariables) {
 Write-Host "`n===================================================" -ForegroundColor Magenta
 Write-Host "  Setup Script Complete" -ForegroundColor Magenta
 Write-Host "===================================================" -ForegroundColor Magenta
+Write-Host "`nTo install the latest ROCm nightly SDK, run:" -ForegroundColor Yellow
+Write-Host "  .\scripts\windows\wheel_build_setup.ps1"
+Write-Host "Use -SHA <commit-sha> to install a specific staging build."
 
 # Prompt for system restart if settings were changed
 if (-not $SkipWindowsConfig) {
