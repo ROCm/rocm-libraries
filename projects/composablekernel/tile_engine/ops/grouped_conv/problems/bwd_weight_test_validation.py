@@ -5,6 +5,13 @@ Validation test set for BWD_WEIGHT - 10 unseen problems for testing ML model per
 These problems are NEVER used in training and represent diverse real-world scenarios.
 """
 
+import sys
+from pathlib import Path
+
+# Add dispatcher/python to path for grouped_conv_utils import
+dispatcher_python = Path(__file__).resolve().parents[4] / "dispatcher" / "python"
+sys.path.insert(0, str(dispatcher_python))
+
 from grouped_conv_utils import GroupedConvProblem
 
 VALIDATION_PROBLEMS_BWD_WEIGHT = [

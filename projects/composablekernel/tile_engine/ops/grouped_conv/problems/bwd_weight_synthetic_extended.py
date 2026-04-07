@@ -9,6 +9,13 @@ Based on validation analysis:
 This set focuses on ~1000-1500 carefully selected problems covering weak areas.
 """
 
+import sys
+from pathlib import Path
+
+# Add dispatcher/python to path for grouped_conv_utils import
+dispatcher_python = Path(__file__).resolve().parents[4] / "dispatcher" / "python"
+sys.path.insert(0, str(dispatcher_python))
+
 from grouped_conv_utils import GroupedConvProblem
 
 TRAINING_PROBLEMS_BWD_WEIGHT_SYNTHETIC = []

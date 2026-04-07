@@ -4,6 +4,13 @@
 # These are NOT in the training set and are sized to avoid GPU crashes
 # Focus on realistic backward data gradient computation scenarios
 
+import sys
+from pathlib import Path
+
+# Add dispatcher/python to path for grouped_conv_utils import
+dispatcher_python = Path(__file__).resolve().parents[4] / "dispatcher" / "python"
+sys.path.insert(0, str(dispatcher_python))
+
 from grouped_conv_utils import GroupedConvProblem
 
 VALIDATION_PROBLEMS_BWD_DATA = [

@@ -141,6 +141,11 @@ def main():
         f.write('# Training problem set from MIOpen production shapes\n')
         f.write(f'# {len(sampled_shapes)} diverse problems sampled from MIOpen ALL_CONFIGS_FULL.txt\n')
         f.write('# Filtered for C >= 64, K >= 64, all channels aligned to 16, N <= 16\n\n')
+        f.write('import sys\n')
+        f.write('from pathlib import Path\n\n')
+        f.write('# Add dispatcher/python to path for grouped_conv_utils import\n')
+        f.write('dispatcher_python = Path(__file__).resolve().parents[4] / "dispatcher" / "python"\n')
+        f.write('sys.path.insert(0, str(dispatcher_python))\n\n')
         f.write('from grouped_conv_utils import GroupedConvProblem\n\n')
         f.write('TRAINING_PROBLEMS_FORWARD_MIOPEN = [\n')
 

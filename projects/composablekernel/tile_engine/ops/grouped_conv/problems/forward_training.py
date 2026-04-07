@@ -15,6 +15,13 @@ Distribution:
 - Various filter sizes (1x1, 3x3, stride 1 and 2)
 """
 
+import sys
+from pathlib import Path
+
+# Add dispatcher/python to path for grouped_conv_utils import
+dispatcher_python = Path(__file__).resolve().parents[4] / "dispatcher" / "python"
+sys.path.insert(0, str(dispatcher_python))
+
 from grouped_conv_utils import GroupedConvProblem
 
 # Import MIOpen real-world shapes
