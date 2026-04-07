@@ -1137,6 +1137,15 @@ public:
         return {std::move(data), std::move(err)};
     }
 
+    /// Serialize a previously built graph to a binary byte vector.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::pair<std::vector<uint8_t>, Error> to_binary() const
+    {
+        std::vector<uint8_t> data;
+        auto err = serialize(data);
+        return {std::move(data), std::move(err)};
+    }
+
     /// Deserialize a graph from a binary byte vector with handle (finalizes).
     Error deserialize(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
@@ -1221,6 +1230,15 @@ public:
         return {std::move(jsonData), std::move(err)};
     }
 
+    /// Serialize a previously built graph to a JSON string.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::pair<std::string, Error> to_json() const
+    {
+        std::string jsonData;
+        auto err = serialize(jsonData);
+        return {std::move(jsonData), std::move(err)};
+    }
+
     /// Deserialize a graph from a JSON string with handle (finalizes).
     Error deserialize(hipdnnHandle_t handle, const std::string& jsonData)
     {
@@ -1275,18 +1293,12 @@ public:
     /// Serialize a graph to a nlohmann::json object, auto-lowering if needed.
     Error serialize(nlohmann::json& j)
     {
-        std::string jsonData;
-        HIPDNN_CHECK_ERROR(serialize(jsonData));
-        try
+        if(!_graphDesc || !_graphDesc->valid())
         {
-            j = nlohmann::json::parse(jsonData);
+            HIPDNN_FE_LOG_INFO("Graph not lowered — auto-lowering for JSON object serialization");
+            HIPDNN_CHECK_ERROR(lower_to_backend());
         }
-        catch(const nlohmann::json::exception& e)
-        {
-            return {ErrorCode::INVALID_VALUE,
-                    std::string("Failed to parse serialized JSON: ") + e.what()};
-        }
-        return {};
+        return std::as_const(*this).serialize(j);
     }
 
     /// Deserialize a graph from a nlohmann::json object with handle (finalizes).

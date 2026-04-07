@@ -436,12 +436,12 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsMatmulPointwise) {
                     hipdnn_frontend::PointwiseMode::SIGMOID_FWD,
                     hipdnn_frontend::PointwiseMode::TANH_FWD,
                     hipdnn_frontend::PointwiseMode::GELU_FWD}) {
-    auto flatbufferGraph = buildMatmulActivGraph(
+    auto serializedGraph = buildMatmulActivGraph(
         /*aDims=*/{4, 8}, /*bDims=*/{8, 5}, /*cDims=*/{4, 5}, mode);
 
     hipdnnPluginConstData_t opGraph;
-    opGraph.ptr = flatbufferGraph.data();
-    opGraph.size = flatbufferGraph.size();
+    opGraph.ptr = serializedGraph.data();
+    opGraph.size = serializedGraph.size();
 
     ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
                   handle, &opGraph, engineIDs.data(), 5, &numEngines),
