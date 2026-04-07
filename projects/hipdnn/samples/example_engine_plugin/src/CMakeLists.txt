@@ -30,6 +30,7 @@ add_dependencies(example_provider_impl example_provider_kernel_embed)
 target_include_directories(example_provider_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(example_provider_impl PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/../kernels)
 target_link_libraries(example_provider_impl PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk hip::host hiprtc::hiprtc)
+target_link_libraries(example_provider_impl PRIVATE example_provider_compile_options)
 
 set_target_properties(example_provider_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden

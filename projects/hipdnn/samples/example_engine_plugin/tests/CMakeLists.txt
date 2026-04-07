@@ -12,31 +12,6 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-# Remove strict warning flags from GTest targets to prevent compilation errors
-# GTest is an external dependency and should not inherit parent project's -Werror flags
-set(GTEST_TARGETS gtest gtest_main gmock gmock_main)
-foreach(target ${GTEST_TARGETS})
-    if(TARGET ${target})
-        get_target_property(target_options ${target} COMPILE_OPTIONS)
-        if(target_options)
-            # Remove -Werror and other strict warning flags
-            list(FILTER target_options EXCLUDE REGEX "^-Werror")
-            list(FILTER target_options EXCLUDE REGEX "^/W[1-4X]")
-            set_target_properties(${target} PROPERTIES COMPILE_OPTIONS "${target_options}")
-        endif()
-
-        get_target_property(interface_options ${target} INTERFACE_COMPILE_OPTIONS)
-        if(interface_options)
-            list(FILTER interface_options EXCLUDE REGEX "^-Werror")
-            list(FILTER interface_options EXCLUDE REGEX "^/W[1-4X]")
-            set_target_properties(${target} PROPERTIES INTERFACE_COMPILE_OPTIONS "${interface_options}")
-        endif()
-
-        # Suppress all warnings for GTest to avoid -Wundef errors
-        target_compile_options(${target} PRIVATE -w)
-    endif()
-endforeach()
-
 add_executable(
     example_provider_tests
     TestExampleProviderContainer.cpp
@@ -53,6 +28,7 @@ target_link_libraries(
         GTest::gtest_main
         GTest::gmock
         example_provider_private
+        example_provider_compile_options
 )
 
 target_include_directories(

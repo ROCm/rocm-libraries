@@ -29,6 +29,7 @@ target_link_libraries(
         hipdnn_frontend
         hipdnn_test_sdk
         hip::host
+        example_provider_compile_options
 )
 
 add_test(NAME example_provider_sample COMMAND example_provider_sample)

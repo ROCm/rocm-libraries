@@ -25,7 +25,10 @@ option(HIPDNN_EXAMPLE_PROVIDER_BUILD_SAMPLE "Build sample application (requires 
 # =============================================================================
 # Compiler flags
 # =============================================================================
-add_compile_options(
+# Use an interface library to apply warning flags only to project targets (not to
+# dependencies like GoogleTest).
+add_library(example_provider_compile_options INTERFACE)
+target_compile_options(example_provider_compile_options INTERFACE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall>
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wextra>
