@@ -153,7 +153,14 @@ void graph_bindings(nb::module_& m)
             },
             nb::arg("handle"),
             nb::arg("json_string"),
-            "Deserialize a graph from a JSON string. "
+            "Deserialize and finalize graph from JSON with a backend handle.\n"
+            "The graph is ready for create_execution_plans() after this call.")
+        .def(
+            "from_json",
+            [](graph::Graph& g, const std::string& jsonStr) { return g.deserialize(jsonStr); },
+            nb::arg("json_string"),
+            "Deserialize graph structure from JSON without a handle.\n"
+            "Only restores the graph topology and attributes (nodes, tensors, parameters).\n"
             "Call build_operation_graph(handle) after to finalize for execution.")
         .def(
             "to_binary",
@@ -178,6 +185,17 @@ void graph_bindings(nb::module_& m)
             },
             nb::arg("handle"),
             nb::arg("data"),
-            "Deserialize a graph from binary bytes. "
+            "Deserialize and finalize graph from binary with a backend handle.\n"
+            "The graph is ready for create_execution_plans() after this call.")
+        .def(
+            "from_binary",
+            [](graph::Graph& g, nb::bytes data) {
+                auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());
+                std::vector<uint8_t> vec(ptr, ptr + data.size());
+                return g.deserialize(vec);
+            },
+            nb::arg("data"),
+            "Deserialize graph structure from binary without a handle.\n"
+            "Only restores the graph topology and attributes (nodes, tensors, parameters).\n"
             "Call build_operation_graph(handle) after to finalize for execution.");
 }

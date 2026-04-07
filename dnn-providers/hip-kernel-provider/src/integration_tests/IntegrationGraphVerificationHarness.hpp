@@ -199,9 +199,9 @@ private:
         }
 
         cpuBundle.tensors.insert(
-            {tensorId, hipdnn_frontend::graph::createTensorFromAttribute(*tensorAttr)});
+            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
         gpuBundle.tensors.insert(
-            {tensorId, hipdnn_frontend::graph::createTensorFromAttribute(*tensorAttr)});
+            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
         _tensorIdToNameMap.insert({tensorId, tensorAttr->get_name()});
 
         return true;

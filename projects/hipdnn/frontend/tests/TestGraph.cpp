@@ -115,6 +115,8 @@ protected:
     // of individual tests (e.g., descriptor creation/finalization setup calls).
     std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>> _mockBackend;
     hipdnnHandle_t _handle;
+    std::array<char, 256> _fakeDescs{};
+    size_t _nextFakeDescIdx = 0;
 
     void SetUp() override
     {
@@ -123,12 +125,11 @@ protected:
         _handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
 
         // Default: all descriptor creation succeeds with unique fake pointers
+        _nextFakeDescIdx = 0;
         ON_CALL(*_mockBackend, backendCreateDescriptor(_, _))
-            .WillByDefault([](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
-                static std::array<char, 256> s_fakeDescs{};
-                static size_t s_nextIdx = 0;
+            .WillByDefault([this](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
                 *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(
-                    &s_fakeDescs[s_nextIdx++ % s_fakeDescs.size()]);
+                    &_fakeDescs[_nextFakeDescIdx++ % _fakeDescs.size()]);
                 return HIPDNN_STATUS_SUCCESS;
             });
 

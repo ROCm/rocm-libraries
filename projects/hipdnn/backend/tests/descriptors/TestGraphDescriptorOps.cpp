@@ -1973,6 +1973,55 @@ TEST_F(TestGraphDescriptorOps, GetAttributeNameCountWhenUnset)
     EXPECT_EQ(elementCount, 1);
 }
 
+TEST_F(TestGraphDescriptorOps, AppendOpsAfterSerialization)
+{
+    // Set a single op, build the serialized buffer, then append more ops
+    auto conv1 = createDefaultConvOp();
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops1 = {conv1.convOp.get()};
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops1.data())));
+
+    // Build the serialized buffer explicitly
+    desc->buildSerializedGraph();
+    auto serialized1 = desc->getSerializedGraph();
+    ASSERT_NE(serialized1.ptr, nullptr);
+    ASSERT_GT(serialized1.size, 0UL);
+
+    // Append a second operation (should succeed and invalidate the cache)
+    auto xDesc2 = createFinalizedTensor(
+        K_ALT_TENSOR_X_UID, toVec(K_TENSOR_X_DIMS), toVec(K_TENSOR_X_STRIDES));
+    auto wDesc2 = createFinalizedTensor(
+        K_ALT_TENSOR_W_UID, toVec(K_TENSOR_W_DIMS), toVec(K_TENSOR_W_STRIDES));
+    auto yDesc2 = createFinalizedTensor(
+        K_ALT_TENSOR_Y_UID, toVec(K_TENSOR_Y_DIMS), toVec(K_TENSOR_Y_STRIDES));
+    auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
+
+    std::array<HipdnnBackendDescriptor*, 1> ops2 = {convOp2.get()};
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops2.data())));
+
+    // Verify operations count is 2
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &elementCount, nullptr));
+    EXPECT_EQ(elementCount, 2);
+
+    // Verify re-serialization reflects both operations
+    desc->buildSerializedGraph();
+    auto serialized2 = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized2.ptr);
+    ASSERT_EQ(graphT->nodes.size(), 2);
+    ASSERT_EQ(graphT->tensors.size(), 6);
+}
+
 TEST_F(TestGraphDescriptorOps, GetAttributeWrongTypeForName)
 {
     auto conv = createDefaultConvOp();

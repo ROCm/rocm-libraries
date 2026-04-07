@@ -157,6 +157,7 @@ class Graph : public INode
 {
 private:
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _graphDesc;
+    bool _graphDescFinalized = false;
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _engineConfigDesc;
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _executionPlanDesc;
 
@@ -225,6 +226,44 @@ private:
         return {ErrorCode::OK, ""};
     }
 
+    /// Set the graph descriptor and its finalization state atomically
+    void setGraphDesc(std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> desc, bool finalized)
+    {
+        _graphDesc = std::move(desc);
+        _graphDescFinalized = finalized;
+    }
+
+    /// Clear the graph descriptor and finalization state
+    void resetGraphDesc()
+    {
+        _graphDesc.reset();
+        _graphDescFinalized = false;
+    }
+
+    /// Finalize an existing unfinalized descriptor by adding a handle and finalizing
+    Error finalizeGraphDescWithHandle(hipdnnHandle_t handle)
+    {
+        auto status
+            = detail::hipdnnBackend()->backendSetAttribute(_graphDesc->get(),
+                                                           HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                                           HIPDNN_TYPE_HANDLE,
+                                                           1,
+                                                           static_cast<const void*>(&handle));
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(status, "Failed to set handle on graph descriptor");
+
+        status = detail::hipdnnBackend()->backendFinalize(_graphDesc->get());
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(status, "Failed to finalize graph descriptor");
+
+        _graphDescFinalized = true;
+        return {};
+    }
+
+    /// Check if we have a usable (valid + finalized) graph descriptor
+    bool hasReadyGraphDesc() const
+    {
+        return _graphDesc && _graphDesc->valid() && _graphDescFinalized;
+    }
+
     Error finalizeExecutionPlanDescriptor()
     {
         // Finalize engine config after knobs have been set
@@ -281,7 +320,7 @@ private:
         {
             HIPDNN_FE_LOG_INFO("Purging existing graph descriptor before re-lowering");
         }
-        _graphDesc.reset();
+        resetGraphDesc();
 
         if(!_preferredEngineId.has_value())
         {
@@ -306,6 +345,7 @@ private:
         // toHipdnnDataType() and are skipped by assembleGraphDescriptor().
         // This is intentional -- graphs can have unset graph-level data types
         // as long as individual tensors have their types set.
+        std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> desc;
         if(handle.has_value())
         {
             HIPDNN_CHECK_ERROR(detail::assembleGraphDescriptor(
@@ -316,7 +356,8 @@ private:
                 toHipdnnDataType(graph_attributes.get_io_data_type()),
                 _preferredEngineId,
                 graph_attributes.get_name(),
-                _graphDesc));
+                desc));
+            setGraphDesc(std::move(desc), true);
         }
         else
         {
@@ -327,7 +368,8 @@ private:
                 toHipdnnDataType(graph_attributes.get_io_data_type()),
                 _preferredEngineId,
                 graph_attributes.get_name(),
-                _graphDesc));
+                desc));
+            setGraphDesc(std::move(desc), false);
         }
 
         return {ErrorCode::OK, ""};
@@ -865,7 +907,7 @@ protected:
         // The frontend state has been fully replaced from the backend descriptor.
         // Any cached backend descriptors are stale and must be cleared. The caller
         // must call build_operation_graph() to rebuild them.
-        _graphDesc.reset();
+        resetGraphDesc();
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
         return {};
@@ -1077,6 +1119,10 @@ public:
         {
             HIPDNN_CHECK_ERROR(build_operation_graph(handle));
         }
+        else if(!_graphDescFinalized)
+        {
+            HIPDNN_CHECK_ERROR(finalizeGraphDescWithHandle(handle));
+        }
 
         detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
@@ -1169,7 +1215,7 @@ public:
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
-        _graphDesc = std::move(graphDesc);
+        setGraphDesc(std::move(graphDesc), handle != nullptr);
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
         return {};
@@ -1270,7 +1316,7 @@ public:
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
-        _graphDesc = std::move(graphDesc);
+        setGraphDesc(std::move(graphDesc), handle != nullptr);
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
         return {};

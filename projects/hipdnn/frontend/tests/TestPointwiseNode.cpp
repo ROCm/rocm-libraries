@@ -17,8 +17,11 @@ namespace
 {
 namespace
 {
-// Update this constant if new PointwiseMode values are added.
+// Must match the last value in the PointwiseMode enum (Types.hpp).
+// If you add a new PointwiseMode, update this constant.
 constexpr auto K_LAST_POINTWISE_MODE = PointwiseMode::TANH_FWD;
+static_assert(static_cast<int>(K_LAST_POINTWISE_MODE) == 47,
+              "PointwiseMode enum changed — update K_LAST_POINTWISE_MODE");
 
 // Generic helper function to generate vectors of pointwise modes based on a checker function
 template <typename CheckerFunc>

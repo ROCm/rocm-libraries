@@ -5,14 +5,15 @@
 
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
 
-// Note: hipdnn_frontend::graph::Utilities.hpp has a parallel implementation.
-// This copy exists because test_sdk cannot depend on the frontend's internal
-// headers. If new data types are added, update both.
+// Conversions between frontend and SDK enum types for use in test utilities.
+// If new data types are added, update the mappings below.
 
 /// Convert frontend DataType to SDK DataType for use in test utilities
 inline hipdnn_data_sdk::data_objects::DataType
@@ -308,6 +309,15 @@ inline hipdnn_frontend::PointwiseMode
     default:
         return hipdnn_frontend::PointwiseMode::NOT_SET;
     }
+}
+
+/// Create a Data SDK ITensor from frontend TensorAttributes
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+    createTensorFromAttribute(const hipdnn_frontend::graph::TensorAttributes& attribute)
+{
+    auto sdkType = frontendToSdkDataType(attribute.get_data_type());
+    return hipdnn_data_sdk::utilities::createTensor(
+        sdkType, attribute.get_dim(), attribute.get_stride());
 }
 
 } // namespace hipdnn_test_sdk::utilities

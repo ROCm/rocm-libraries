@@ -152,8 +152,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "\n--- Building and executing original graph ---\n";
     graph::Graph originalGraph;
     originalGraph.set_name("original_conv_graph");
-    originalGraph.set_io_data_type(inputType).set_compute_data_type(
-        hipdnn_frontend::DataType::FLOAT);
+    originalGraph.set_io_data_type(inputType)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     graph::ConvFpropAttributes convAttrs;
     convAttrs.set_name("conv_fprop")

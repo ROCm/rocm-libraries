@@ -267,6 +267,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
         throwIfNull(graphByteSize);
 
         auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        graphDesc->buildSerializedGraph();
         auto data = graphDesc->getSerializedGraph();
 
         *graphByteSize = data.size;
@@ -304,6 +305,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
         throwIfNull(graphByteSize);
 
         auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        graphDesc->buildSerializedGraph();
         auto jsonStr = graphDesc->getSerializedJsonGraph();
 
         *graphByteSize = jsonStr.size() + 1;
@@ -332,18 +334,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeJsonGraph_
                   jsonByteSize);
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
-        throwIfNull(descriptor);
-        throwIfNull(jsonGraph);
-
-        if(jsonByteSize == 0)
-        {
-            throw hipdnn_backend::HipdnnException(HIPDNN_STATUS_BAD_PARAM, "jsonByteSize is 0");
-        }
-
-        auto graphDescriptor = std::make_shared<hipdnn_backend::GraphDescriptor>();
-        hipdnn_backend::GraphDescriptor::createFromJsonGraph(
-            *graphDescriptor, jsonGraph, jsonByteSize);
-        *descriptor = HipdnnBackendDescriptor::packDescriptor(graphDescriptor);
+        hipdnn_backend::DescriptorFactory::createGraphFromJsonExt(
+            descriptor, jsonGraph, jsonByteSize);
 
         LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
     });
