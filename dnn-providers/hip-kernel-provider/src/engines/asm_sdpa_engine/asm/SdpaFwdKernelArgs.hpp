@@ -10,7 +10,7 @@
 //   - aiter/csrc/include/aiter_hip_common.h (lines 44-54: p2, p3 padding structs)
 //
 // Adaptations:
-//   - Replaced AITER padding types p2/p3 with self-contained SgprPad2/SgprPad3
+//   - Replaced AITER padding types p2/p3 with SgprPad2/SgprPad3 (see SgprPadding.hpp)
 //   - Removed all AITER #include directives
 //   - Added static_assert on sizeof to catch ABI drift
 //   - Added field documentation from cross-reference with CK fmha_fwd_args
@@ -19,30 +19,14 @@
 
 #pragma once
 
+#include "SgprPadding.hpp"
+
 #include <cstdint>
 
 namespace asm_sdpa_engine
 {
 
 // NOLINTBEGIN(readability-identifier-naming)
-
-// SGPR-aligned padding inserted between kernel arguments to satisfy the AMD GPU
-// SGPR allocation ABI.  Each SGPR is 32 bits; pointers occupy 2 SGPRs (64 bits)
-// and scalars occupy 1 SGPR.  The padding structs ensure every field lands on
-// the correct SGPR boundary expected by the pre-compiled ASM kernel.
-
-struct SgprPad2
-{
-    unsigned int _p0;
-    unsigned int _p1;
-};
-
-struct SgprPad3
-{
-    unsigned int _p0;
-    unsigned int _p1;
-    unsigned int _p2;
-};
 
 // Packed kernel argument struct for the AITER Flash Attention v3 forward kernel.
 // This struct is passed directly to the GPU via HIP_LAUNCH_PARAM_BUFFER_POINTER
