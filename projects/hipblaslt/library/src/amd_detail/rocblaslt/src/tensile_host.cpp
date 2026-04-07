@@ -2147,9 +2147,14 @@ namespace
                        /*relpath=*/std::nullopt, default_lib_path))
                     path = std::move(*maybe_path);
                 // Optionally, look for a `processor` sub-directory under the library path.
+                // Only use the subdir if a Tensile mapping file is actually present there;
+                // otherwise the directory may have been created by ExtOp/Transform installs
+                // without a corresponding Tensile library (multi-arch non-TheRock builds).
                 {
-                    auto processor_path = path / processor;
-                    if(std::filesystem::exists(processor_path))
+                    auto processor_path  = path / processor;
+                    auto mapping_msgpack = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
+                    auto mapping_yaml    = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
+                    if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_yaml))
                         path = std::move(processor_path);
                 }
 

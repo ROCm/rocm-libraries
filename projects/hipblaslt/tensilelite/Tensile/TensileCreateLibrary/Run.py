@@ -33,7 +33,7 @@ import pickle
 import zlib
 from pathlib import Path
 from timeit import default_timer as timer
-from typing import List, NamedTuple, Optional, Union
+from typing import Collection, List, NamedTuple, Optional, Union
 
 from Tensile import SOURCE_PATH, LibraryIO
 from Tensile.Common import (
@@ -80,6 +80,20 @@ from Tensile.Utilities.Decorators.Profile import profile
 from Tensile.Utilities.Decorators.Timing import timing
 
 from .ParseArguments import parseArguments
+
+
+def libraryDir(outputPath: Union[str, Path], archs: Collection[str]) -> Path:
+    """Return the library output/input directory for the given target archs.
+
+    Single arch  → <outputPath>/library/<arch>/   (TheRock shard overlay safe)
+    Zero or multiple archs → <outputPath>/library/ (flat)
+    """
+    path = Path(outputPath)
+    archs = list(archs)
+    if len(archs) == 1:
+        return path / "library" / archs[0]
+    return path / "library"
+
 
 class KernelCodeGenResult(NamedTuple):
     err: int
@@ -325,7 +339,7 @@ def writeSolutionsAndKernels(
     with timing_context("python_kernel_setup"):
         outputPath = Path(outputPath)
         destLibPath = ensurePath(
-            outputPath / "library"
+            libraryDir(outputPath, cmdlineArchs)
         )  # Destination for code object library files (.co)
         buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())  #
         assemblyTmpPath = ensurePath(
@@ -440,9 +454,7 @@ def writeSolutionsAndKernelsTCL(
     removeTemporaries: bool=True
 ):
     outputPath = Path(outputPath)
-    destLibPath = ensurePath(
-        outputPath / "library"
-    )  # Destination for code object library files (.co)
+    destLibPath = ensurePath(libraryDir(outputPath, cmdlineArchs))
     buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())
     assemblyTmpPath = ensurePath(
         buildTmpPath / "assembly"
@@ -858,7 +870,7 @@ def run():
         for arch in targetIsas
         if isaInfoMap[arch].asmCaps["SupportedISA"]
     ]
-    newLibraryDir = ensurePath(os.path.join(outputPath, "library"))
+    newLibraryDir = ensurePath(libraryDir(outputPath, archs))
     splitGSU = False
 
     start_pki = timer()

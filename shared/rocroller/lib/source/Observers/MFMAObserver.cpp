@@ -24,8 +24,12 @@ namespace rocRoller
 
         bool MFMAObserver::isTargetedInstruction(Instruction const& inst)
         {
-            return GPUInstructionInfo::isMFMA(inst.getOpCode())
-                   && !MFMACoexecObserver::isTargetedInstruction(inst);
+            return GPUInstructionInfo::isMFMA(inst.getOpCode());
+        }
+
+        bool MFMAObserver::runtimeRequired(ContextPtr const& ctx)
+        {
+            return !MFMACoexecObserver::runtimeRequired(ctx);
         }
 
         InstructionStatus MFMAObserver::peek(Instruction const& inst) const
@@ -61,34 +65,37 @@ namespace rocRoller
                    "v_mfma_f32_32x32x64_f8f6f4",
                    "v_mfma_scale_f32_32x32x64_f8f6f4"};
 
+            auto info = m_context.lock()->targetArchitecture().GetInstructionInfo(inst.getOpCode());
+
+            auto latency = info.getLatency();
+
+            if(variableCycleInsts.contains(inst.getOpCode()))
+            {
+                bool any8Bits = false;
+                for(auto const& src : inst.getSrcs())
+                {
+                    if(!src)
+                        continue;
+                    auto info    = DataTypeInfo::Get(src->variableType());
+                    auto seg     = info.segmentVariableType;
+                    auto segInfo = DataTypeInfo::Get(seg);
+                    if(segInfo.elementBits == 8 && !segInfo.isIntegral)
+                        any8Bits = true;
+                }
+
+                if(any8Bits)
+                {
+                    Log::debug("Found instruction {} with 8-bit src. Targeted: {} coexec {}",
+                               inst.getOpCode(),
+                               isTargetedInstruction(inst),
+                               MFMACoexecObserver::isTargetedInstruction(inst));
+                    latency *= 2;
+                }
+            }
+
             if(isTargetedInstruction(inst))
             {
-                auto info
-                    = m_context.lock()->targetArchitecture().GetInstructionInfo(inst.getOpCode());
-
-                auto latency        = info.getLatency();
                 auto initialLatency = latency;
-
-                if(variableCycleInsts.contains(inst.getOpCode()))
-                {
-                    bool any8Bits = false;
-                    for(auto const& src : inst.getSrcs())
-                    {
-                        if(!src)
-                            continue;
-                        auto info    = DataTypeInfo::Get(src->variableType());
-                        auto seg     = info.segmentVariableType;
-                        auto segInfo = DataTypeInfo::Get(seg);
-                        if(segInfo.elementBits == 8 && !segInfo.isIntegral)
-                            any8Bits = true;
-                    }
-
-                    if(any8Bits)
-                    {
-                        Log::trace("Found instruction {} with 8-bit src.", inst.getOpCode());
-                        latency *= 2;
-                    }
-                }
 
                 m_remainingCycles = latency;
 
@@ -109,28 +116,24 @@ namespace rocRoller
         {
         }
 
-        bool MFMACoexecObserver::isTargetedInstruction(Instruction const& inst)
+        bool MFMACoexecObserver::runtimeRequired(ContextPtr const& ctx)
         {
-            auto isMxInstruction = GPUInstructionInfo::isMFMA(inst.getOpCode())
-                                   && inst.getOpCode().find("f8f6f4") != std::string::npos;
-
-            if(!isMxInstruction)
-                return false;
-
-            if(inst.getOpCode().find("scale") == std::string::npos)
-                return true;
-
             /**
              * TODO: Remove.
              * Right now, this observer gives slower results unless it is
-             * combined with the LinearWeightedSimple cost function. Once we can
-             * make this the default cost function we should be able to remove
-             * this and just always return true for this instruction.
+             * combined with the LinearWeightedSimple or
+             * LinearWeightedSimpleStreamK cost function. Once we can make this
+             * the default cost function we should be able to remove this and
+             * replace the MFMAObserver with this one entirely.
              */
-            if(Settings::Get(Settings::SchedulerCost) == CostFunction::LinearWeightedSimple)
-                return true;
+            auto cost = Settings::Get(Settings::SchedulerCost);
+            return cost == CostFunction::LinearWeightedSimple
+                   || cost == CostFunction::LinearWeightedSimpleStreamK;
+        }
 
-            return false;
+        bool MFMACoexecObserver::isTargetedInstruction(Instruction const& inst)
+        {
+            return GPUInstructionInfo::isMFMA(inst.getOpCode());
         }
 
         DisallowedCycles MFMACoexecObserver::getDisallowedCycles(Instruction const& inst) const
@@ -141,16 +144,47 @@ namespace rocRoller
 
             AssertFatal(isTargetedInstruction(inst));
 
+            auto isHalfSpeed = inst.getAllSrcs()
+                                   .filter([](Register::ValuePtr const& operand) {
+                                       return operand != nullptr
+                                              && (operand->variableType() == DataType::FP8x4
+                                                  || operand->variableType() == DataType::BF8x4);
+                                   })
+                                   .take(1)
+                                   .only()
+                                   .has_value();
+
             bool scaled = inst.getOpCode().find("scale") != std::string::npos;
 
-            DisallowedCycles rv = {{1,
-                                    {CoexecCategory::VMEM,
-                                     CoexecCategory::VALU,
-                                     CoexecCategory::VALU_Trans,
-                                     CoexecCategory::XDL,
-                                     CoexecCategory::XDL_Scale,
-                                     CoexecCategory::LDS}},
-                                   {2, {CoexecCategory::XDL, CoexecCategory::XDL_Scale}}};
+            DisallowedCycles rv;
+
+            if(isHalfSpeed)
+            {
+                EnumBitset<CoexecCategory> scalarOnly = {CoexecCategory::VMEM,
+                                                         CoexecCategory::VALU,
+                                                         CoexecCategory::VALU_Trans,
+                                                         CoexecCategory::XDL,
+                                                         CoexecCategory::XDL_Scale,
+                                                         CoexecCategory::LDS};
+                EnumBitset<CoexecCategory> noVALU     = {CoexecCategory::VALU,
+                                                     CoexecCategory::VALU_Trans,
+                                                     CoexecCategory::XDL,
+                                                     CoexecCategory::XDL_Scale};
+                EnumBitset<CoexecCategory> noXDL = {CoexecCategory::XDL, CoexecCategory::XDL_Scale};
+
+                rv = {{1, scalarOnly}, {2, noVALU}, {3, noXDL}, {4, noXDL}, {5, noXDL}, {6, noXDL}};
+            }
+            else
+            {
+                rv = {{1,
+                       {CoexecCategory::VMEM,
+                        CoexecCategory::VALU,
+                        CoexecCategory::VALU_Trans,
+                        CoexecCategory::XDL,
+                        CoexecCategory::XDL_Scale,
+                        CoexecCategory::LDS}},
+                      {2, {CoexecCategory::XDL, CoexecCategory::XDL_Scale}}};
+            }
 
             if(scaled)
             {

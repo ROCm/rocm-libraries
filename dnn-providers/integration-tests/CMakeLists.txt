@@ -123,6 +123,7 @@ target_compile_options(${INTEGRATION_TESTS_EXE} PRIVATE ${INTEGRATION_TESTS_WARN
 
 clang_tidy_check(${INTEGRATION_TESTS_EXE})
 
+add_subdirectory(gpu_ref)
 add_subdirectory(tests)
 
 # Finalize test targets with prefix to avoid collisions in superbuild mode

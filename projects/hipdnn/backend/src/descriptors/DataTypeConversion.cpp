@@ -36,9 +36,9 @@ hipdnn_data_sdk::data_objects::DataType toSdkDataType(hipdnnDataType_t type)
         return DataType::FP4_E2M1;
     case HIPDNN_DATA_INT4:
         return DataType::INT4;
-    case HIPDNN_DATA_FP6_E2M3:
+    case HIPDNN_DATA_FP6_E2M3_EXT:
         return DataType::FP6_E2M3;
-    case HIPDNN_DATA_FP6_E3M2:
+    case HIPDNN_DATA_FP6_E3M2_EXT:
         return DataType::FP6_E3M2;
     case HIPDNN_DATA_INT64:
         return DataType::INT64;
@@ -78,9 +78,9 @@ hipdnnDataType_t fromSdkDataType(hipdnn_data_sdk::data_objects::DataType type)
     case DataType::INT4:
         return HIPDNN_DATA_INT4;
     case DataType::FP6_E2M3:
-        return HIPDNN_DATA_FP6_E2M3;
+        return HIPDNN_DATA_FP6_E2M3_EXT;
     case DataType::FP6_E3M2:
-        return HIPDNN_DATA_FP6_E3M2;
+        return HIPDNN_DATA_FP6_E3M2_EXT;
     case DataType::INT64:
         return HIPDNN_DATA_INT64;
     default:
@@ -120,9 +120,9 @@ hipdnn_data_sdk::data_objects::ConvMode toSdkConvMode(hipdnnConvolutionMode_t mo
 
     switch(mode)
     {
-    case HIPDNN_CONVOLUTION_MODE_CONVOLUTION:
+    case HIPDNN_CONVOLUTION:
         return ConvMode::CONVOLUTION;
-    case HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION:
+    case HIPDNN_CROSS_CORRELATION:
         return ConvMode::CROSS_CORRELATION;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnConvolutionMode_t value");
@@ -136,9 +136,9 @@ hipdnnConvolutionMode_t fromSdkConvMode(hipdnn_data_sdk::data_objects::ConvMode 
     switch(mode)
     {
     case ConvMode::CONVOLUTION:
-        return HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+        return HIPDNN_CONVOLUTION;
     case ConvMode::CROSS_CORRELATION:
-        return HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+        return HIPDNN_CROSS_CORRELATION;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK ConvMode value");
     }
@@ -431,9 +431,9 @@ hipdnn_data_sdk::data_objects::NormFwdPhase toSdkNormFwdPhase(hipdnnNormFwdPhase
 
     switch(phase)
     {
-    case HIPDNN_NORM_FWD_PHASE_INFERENCE:
+    case HIPDNN_NORM_FWD_INFERENCE:
         return NormFwdPhase::INFERENCE;
-    case HIPDNN_NORM_FWD_PHASE_TRAINING:
+    case HIPDNN_NORM_FWD_TRAINING:
         return NormFwdPhase::TRAINING;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnNormFwdPhase_t value");
@@ -447,9 +447,9 @@ hipdnnNormFwdPhase_t fromSdkNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdP
     switch(phase)
     {
     case NormFwdPhase::INFERENCE:
-        return HIPDNN_NORM_FWD_PHASE_INFERENCE;
+        return HIPDNN_NORM_FWD_INFERENCE;
     case NormFwdPhase::TRAINING:
-        return HIPDNN_NORM_FWD_PHASE_TRAINING;
+        return HIPDNN_NORM_FWD_TRAINING;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK NormFwdPhase value");
     }
