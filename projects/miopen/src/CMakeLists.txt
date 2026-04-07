@@ -249,6 +249,7 @@ set( MIOpen_Source
     solver/conv/gemm_common.cpp
     solver/conv/gemm_wrw.cpp
     solver/conv/conv_ck_grouped_conv_fwd.cpp
+    solver/conv/conv_3d_depthwise_fwd.cpp
     solver/conv_asm_1x1u_bias_activ_fused.cpp
     solver/conv_bin_winoRxS_fused.cpp
     solver/conv_ck_igemm_grp_fwd_activ_fused.cpp
@@ -535,6 +536,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         ${GPU_REFERENCE_KERNEL_ASM}
         ${GPU_BATCHED_TRANSPOSE_KERNEL_HIP}
         ${GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE}
+        kernels/miopen_conv3d_depthwise_fwd.cpp
         kernels/MIOpenAdam.cpp
         kernels/MIOpenAddLayerNorm.cpp
         kernels/MIOpenCat.cpp
