@@ -34,6 +34,10 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchTrLoad
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
     static constexpr bool kQLoadOnce = true;
     static_assert(kQLoadOnce == Policy::QLoadOnce);
+    static_assert(sizeof(KDataType) == sizeof(VDataType) &&
+                      alignof(KDataType) == alignof(VDataType),
+                  "K and V share the same LDS region; their element types must have identical "
+                  "size and alignment.");
 
     static constexpr bool kUseN0Loop       = true;
     static constexpr bool kIgnoreFastExp2  = true;
