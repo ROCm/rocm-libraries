@@ -82,27 +82,112 @@ using bf16x64_t = bfloat16_t __attribute__((ext_vector_type(64)));
 using int32x2_t  = int32_t __attribute__((ext_vector_type(2)));
 using int32x3_t  = int32_t __attribute__((ext_vector_type(3)));
 using int32x4_t  = int32_t __attribute__((ext_vector_type(4)));
+using int32x6_t  = int32_t __attribute__((ext_vector_type(6)));
 using int32x8_t  = int32_t __attribute__((ext_vector_type(8)));
 using int32x16_t = int32_t __attribute__((ext_vector_type(16)));
 using int32x32_t = int32_t __attribute__((ext_vector_type(32)));
 using int32x64_t = int32_t __attribute__((ext_vector_type(64)));
 
-struct int32x3_tt
+// struct int8x12_tt // for int8_t x12
+// {
+//     int32_t data[3];
+// };
+
+// template <>
+// struct impl::ext_vector<int8_t, 12>
+// {
+//     static constexpr index_t N = 12;
+//     using value_type           = int8x12_tt;
+//     using type                 = int8x12_tt;
+// };
+
+struct int32x3_tt // for fp6 x16
 {
     int32_t data[3];
+
+    CK_TILE_HOST_DEVICE int32x3_tt() = default;
+
+    CK_TILE_HOST_DEVICE int32x3_tt(const pk_fp6x16_t& val)
+    {
+        data[0] = val.data_[0];
+        data[1] = val.data_[1];
+        data[2] = val.data_[2];
+    }
+
+    CK_TILE_HOST_DEVICE operator pk_fp6x16_t() const
+    {
+        pk_fp6x16_t result;
+        result.data_[0] = data[0];
+        result.data_[1] = data[1];
+        result.data_[2] = data[2];
+        return result;
+    }
+
+    CK_TILE_HOST_DEVICE int32x3_tt& operator[](index_t i)
+    {
+        (void)i;
+        return *this;
+    }
+
+    CK_TILE_HOST_DEVICE const int32x3_tt& operator[](index_t i) const
+    {
+        (void)i;
+        return *this;
+    }
 };
 
-struct int32x6_tt
+struct int32x6_tt // for fp6 x32
 {
     int32_t data[6];
+
+    // Proxy reference structure is necessary for setting values by subscript.
+    struct reference
+    {
+        int32x6_tt& vec;
+        index_t i;
+
+        CK_TILE_HOST_DEVICE reference& operator=(const int32x3_tt& val)
+        {
+            vec.data[i * 3]     = val.data[0];
+            vec.data[i * 3 + 1] = val.data[1];
+            vec.data[i * 3 + 2] = val.data[2];
+            return *this;
+        }
+
+        CK_TILE_HOST_DEVICE operator int32x3_tt() const
+        {
+            int32x3_tt result;
+            result.data[0] = vec.data[i * 3];
+            result.data[1] = vec.data[i * 3 + 1];
+            result.data[2] = vec.data[i * 3 + 2];
+            return result;
+        }
+    };
+
+    CK_TILE_HOST_DEVICE reference operator[](index_t i) { return {*this, i}; }
+
+    CK_TILE_HOST_DEVICE int32x3_tt operator[](index_t i) const
+    {
+        int32x3_tt result;
+        result.data[0] = data[i * 3];
+        result.data[1] = data[i * 3 + 1];
+        result.data[2] = data[i * 3 + 2];
+        return result;
+    }
 };
 
 template <>
-struct impl::ext_vector<int8_t, 12>
+struct vector_traits<int32x3_tt>
 {
-    static constexpr index_t N = 12;
-    using value_type           = int32x3_tt;
-    using type                 = int32x3_tt;
+    using scalar_type                    = pk_fp6x16_t;
+    static constexpr index_t vector_size = 1;
+};
+
+template <>
+struct vector_traits<int32x6_tt>
+{
+    using scalar_type                    = pk_fp6x16_t;
+    static constexpr index_t vector_size = 2;
 };
 
 // u32

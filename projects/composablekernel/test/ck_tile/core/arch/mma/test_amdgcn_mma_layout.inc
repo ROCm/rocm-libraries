@@ -25,6 +25,7 @@ using namespace mma;
 
 using I4        = pk_int4_t;
 using F4        = pk_fp4_t;
+using F6        = pk_fp6x16_t;
 using F8        = fp8_t;
 using BF8       = bf8_t;
 using I32       = int32_t;
@@ -315,9 +316,11 @@ using Gfx950Intrinsics = ::testing::Types<
     amdgcn_mma<F8,  F8,  F32, 16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
     amdgcn_mma<BF8, BF8, F32, 16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
     amdgcn_mma<F4,  F4,  F32, 16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F6,  F6,  F32, 16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
     amdgcn_mma<F8,  F8,  F32, 32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
     amdgcn_mma<BF8, BF8, F32, 32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
-    amdgcn_mma<F4,  F4,  F32, 32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>   // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F4,  F4,  F32, 32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F6,  F6,  F32, 32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,          Target950, MmaOpFamily::SCALE>   // mfma_scale_f32_32x32x64_f8f6f4
 >;
 using Gfx11Intrinsics = ::testing::Types<
     amdgcn_mma<F16,  F16,  F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags,              Target11,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32
