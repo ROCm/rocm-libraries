@@ -184,3 +184,36 @@ add_fusilli_plugin_test(
   COMPILE_DEFS
     FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
 )
+
+add_fusilli_plugin_test(
+  NAME fusilli_plugin_simple_reduction_test
+  SRCS reduction/simple_reduction.cpp
+  DEPS
+    GTest::gtest_main
+    hip::host
+    hipdnn_frontend
+    hipdnn_plugin_sdk
+    hipdnn_data_sdk
+    hipdnn_test_sdk
+    Threads::Threads
+  COMPILE_DEFS
+    FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
+)
+
+# External integration tests (shared hipDNN integration test binary)
+if(NOT TARGET hipdnn_integration_tests)
+    find_package(hipdnn_integration_tests CONFIG QUIET)
+endif()
+
+if(TARGET hipdnn_integration_tests)
+    add_external_integration_ctest_entry(
+        TEST_NAME          fusilli-plugin-external-integration-check
+        PLUGIN_TARGET      ${FUSILLI_PLUGIN_TARGET}
+        ENGINE_NAME        FUSILLI_ENGINE
+        INSTALLED_CTEST_FILE ${_FUSILLI_PLUGIN_INSTALLED_CTEST_FILE}
+        PLUGIN_INSTALL_SUBDIR ${FUSILLI_PLUGIN_RELATIVE_PATH}
+    )
+    message(STATUS "Registered fusilli-plugin-external-integration-check in installed CTestTestfile")
+else()
+    message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
+endif()
