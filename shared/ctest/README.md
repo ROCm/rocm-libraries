@@ -285,12 +285,12 @@ add_test(
 
 ## Integration Guide
 
-This guide walks through integrating the shared YAML-based test categorization into a GTest based ROCm library project, using MIOpen as the reference implementation.
+This guide walks through integrating the shared YAML-based test categorization into a GTest-based ROCm library project, using MIOpen as the reference implementation.
 
 ## Prerequisites
 
 - A monolithic GTest binary (single executable containing all tests)
-- Python 3 available in the build environment
+- Python 3 which is available in the build environment
 - The `PyYAML` Python package installed
 - `ROCM_LIBRARIES_ROOT` set to the repository root in your CMake
 
@@ -417,7 +417,7 @@ exclude_gpu:
 | gfx950         | `exclude_gpu_gfx950`                         |
 
 
-**Important:** The `labels` list in each `exclude_gpu` entry must include every test category that the exclusion applies to. The parser matches these labels against `category_data` keys to determine which categories get the GPU-specific test variants.
+**Important:** The `labels` list in each `exclude_gpu` entry must include every test category that the exclusion applies to. The parser matches these labels against `category_data` keys to determine which categories receive the GPU-specific test variants.
 
 ## Step 2: Integrate in CMakeLists.txt
 
@@ -471,7 +471,7 @@ install(
 
 ### Excluding Category Suites from `make check`
 
-All YAML-generated tests are named with a `_suite` suffix. If your project has a `check` target that runs `ctest`, the newly generated tests may be excluded to avoid extended run times:
+All YAML-generated tests are named with a `_suite` suffix. If your project has a `check` target that runs `ctest`, the newly generated tests can be excluded to avoid extended run times:
 
 ```cmake
 add_custom_target(check
