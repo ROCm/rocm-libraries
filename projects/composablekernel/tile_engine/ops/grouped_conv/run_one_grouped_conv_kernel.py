@@ -19,7 +19,6 @@ Output JSON format (one line per kernel):
 import json
 import os
 import sys
-from pathlib import Path
 
 # Add dispatcher python paths from environment (can be multiple paths separated by os.pathsep)
 gconv_pypath = os.environ.get("GCONV_PYPATH", "")

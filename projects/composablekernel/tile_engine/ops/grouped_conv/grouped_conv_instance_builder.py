@@ -19,7 +19,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import List, Set, Tuple
 
 _THIS_DIR = Path(__file__).resolve().parent
 _DISPATCHER_ROOT = _THIS_DIR.parents[2] / "dispatcher"

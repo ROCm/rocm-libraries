@@ -21,7 +21,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
 
 _THIS_DIR = Path(__file__).resolve().parent
 _DISPATCHER_ROOT = _THIS_DIR.parents[2] / "dispatcher"

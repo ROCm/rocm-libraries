@@ -22,7 +22,6 @@ from pathlib import Path
 dispatcher_python = Path(__file__).resolve().parents[4] / "dispatcher" / "python"
 sys.path.insert(0, str(dispatcher_python))
 
-from grouped_conv_utils import GroupedConvProblem
 
 # Import MIOpen real-world shapes
 from forward_training_miopen import TRAINING_PROBLEMS_FORWARD_MIOPEN

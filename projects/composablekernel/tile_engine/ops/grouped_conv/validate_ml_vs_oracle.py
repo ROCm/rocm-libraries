@@ -268,7 +268,7 @@ def main():
             print("Please run the oracle benchmark first.")
             sys.exit(1)
         print(f"  ⚠  Oracle results not yet available: {oracle_csv}")
-        print(f"  ⚠  Will only show ML predictions (waiting for oracle benchmark to complete)")
+        print("  ⚠  Will only show ML predictions (waiting for oracle benchmark to complete)")
         print()
         mode = "prediction_only"
     else:

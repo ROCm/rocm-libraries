@@ -29,8 +29,6 @@ Usage:
 
 import argparse
 import csv
-import json
-import subprocess
 import sys
 import tempfile
 from collections import defaultdict
@@ -155,7 +153,7 @@ def run_end_to_end_workflow(args):
         oracle_csv = oracle_f.name
         ml_csv = ml_f.name
 
-        print(f"Temp files:")
+        print("Temp files:")
         print(f"  Oracle: {oracle_csv}")
         print(f"  ML:     {ml_csv}")
         print()
@@ -226,9 +224,9 @@ Examples:
     else:
         parser.error("Must specify either (--oracle-csv and --ml-csv) OR (--shapes or --problem-set)")
 
-    print(f"=" * 80)
+    print("=" * 80)
     print("ML vs Oracle Comparison")
-    print(f"=" * 80)
+    print("=" * 80)
     print(f"Oracle: {args.oracle_csv}")
     print(f"ML:     {args.ml_csv}")
     print()
@@ -309,9 +307,9 @@ Examples:
         max_eff = max(efficiencies)
 
         print()
-        print(f"=" * 80)
+        print("=" * 80)
         print("Summary Statistics")
-        print(f"=" * 80)
+        print("=" * 80)
         print(f"Total problems:        {total_problems}")
         print(f"Mean Efficiency:       {mean_eff:.2f}%")
         print(f"P10 Efficiency:        {p10_eff:.2f}%")

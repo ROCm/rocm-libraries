@@ -112,7 +112,7 @@ def validate_variant(variant, test_problems, model_dir):
 
     # Summary statistics
     print()
-    print(f"  SUMMARY STATISTICS:")
+    print("  SUMMARY STATISTICS:")
     print(f"  {'Metric':<30} {'Value':>15}")
     print("  " + "-" * 47)
 

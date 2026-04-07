@@ -150,7 +150,7 @@ def main():
         f.write('TRAINING_PROBLEMS_FORWARD_MIOPEN = [\n')
 
         for prob in sampled_shapes:
-            f.write(f'    GroupedConvProblem(')
+            f.write('    GroupedConvProblem(')
             f.write(f'N={prob["N"]}, ')
             f.write(f'C={prob["C"]}, ')
             f.write(f'K={prob["K"]}, ')
@@ -163,7 +163,7 @@ def main():
             f.write(f'stride_w={prob["stride_w"]}, ')
             f.write(f'pad_h={prob["pad_h"]}, ')
             f.write(f'pad_w={prob["pad_w"]}, ')
-            f.write(f'direction="forward"),\n')
+            f.write('direction="forward"),\n')
 
         f.write(']\n\n')
         f.write(f'assert len(TRAINING_PROBLEMS_FORWARD_MIOPEN) == {len(sampled_shapes)}, ')
