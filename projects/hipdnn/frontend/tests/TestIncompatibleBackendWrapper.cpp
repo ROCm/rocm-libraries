@@ -87,14 +87,14 @@ TEST(TestIncompatibleBackendWrapper, BackendGetAttribute)
     hipdnnBackendDescriptor_t descriptor = nullptr;
     int64_t elementCount = 0;
     void* arrayOfElements = nullptr;
-    EXPECT_EQ(backendWrapper.backendGetAttribute(
-                  descriptor,
-                  hipdnnBackendAttributeName_t::HIPDNN_ATTR_KNOB_INFO_TYPE_EXT,
-                  hipdnnBackendAttributeType_t::HIPDNN_TYPE_DATA_TYPE,
-                  1,
-                  &elementCount,
-                  arrayOfElements),
-              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+    EXPECT_EQ(
+        backendWrapper.backendGetAttribute(descriptor,
+                                           hipdnnBackendAttributeName_t::HIPDNN_ATTR_KNOB_INFO_TYPE,
+                                           hipdnnBackendAttributeType_t::HIPDNN_TYPE_DATA_TYPE,
+                                           1,
+                                           &elementCount,
+                                           arrayOfElements),
+        hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
 TEST(TestIncompatibleBackendWrapper, BackendSetAttribute)
@@ -102,13 +102,13 @@ TEST(TestIncompatibleBackendWrapper, BackendSetAttribute)
     IncompatibleBackendWrapper backendWrapper;
     hipdnnBackendDescriptor_t descriptor = nullptr;
     int64_t value = 0;
-    EXPECT_EQ(backendWrapper.backendSetAttribute(
-                  descriptor,
-                  hipdnnBackendAttributeName_t::HIPDNN_ATTR_KNOB_INFO_TYPE_EXT,
-                  hipdnnBackendAttributeType_t::HIPDNN_TYPE_DATA_TYPE,
-                  1,
-                  &value),
-              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+    EXPECT_EQ(
+        backendWrapper.backendSetAttribute(descriptor,
+                                           hipdnnBackendAttributeName_t::HIPDNN_ATTR_KNOB_INFO_TYPE,
+                                           hipdnnBackendAttributeType_t::HIPDNN_TYPE_DATA_TYPE,
+                                           1,
+                                           &value),
+        hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
 TEST(TestIncompatibleBackendWrapper, BackendCreateAndDeserializeGraphExt)

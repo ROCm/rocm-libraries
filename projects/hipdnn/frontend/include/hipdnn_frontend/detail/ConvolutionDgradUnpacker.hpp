@@ -20,7 +20,7 @@ namespace hipdnn_frontend::detail
     // Unpack dy tensor
     std::shared_ptr<graph::TensorAttributes> dyTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                                tensorMap,
                                                dyTensor,
                                                "convolutionbwd DY tensor"));
@@ -29,7 +29,7 @@ namespace hipdnn_frontend::detail
     // Unpack w tensor
     std::shared_ptr<graph::TensorAttributes> wTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W,
+                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W,
                                                tensorMap,
                                                wTensor,
                                                "convolutionbwd W tensor"));
@@ -38,7 +38,7 @@ namespace hipdnn_frontend::detail
     // Unpack dx tensor
     std::shared_ptr<graph::TensorAttributes> dxTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX,
+                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX,
                                                tensorMap,
                                                dxTensor,
                                                "convolutionbwd DX tensor"));

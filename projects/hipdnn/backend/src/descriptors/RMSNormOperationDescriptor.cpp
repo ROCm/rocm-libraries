@@ -106,7 +106,7 @@ void RMSNormOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                         arrayOfElements,
                         "RMSNormOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT:
+    case HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -199,7 +199,7 @@ void RMSNormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
                         arrayOfElements,
                         "RMSNormOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT:
+    case HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
@@ -216,7 +216,7 @@ void RMSNormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
                   "RMSNormOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_RMSNORM,
+        getOperationType(HIPDNN_OPERATION_TYPE_RMSNORM_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,
