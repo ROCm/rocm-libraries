@@ -213,9 +213,16 @@ public:
         xt_output.reset();
     }
 
-    size_t vram_footprint() override
+    std::vector<size_t> vram_footprint() override
     {
-        size_t val = fft_params::vram_footprint();
+        auto footprint = fft_params::io_vram_footprint();
+
+        // hipFFT work memory is for the current HIP device
+        int device = hipInvalidDeviceId;
+        if(hipGetDevice(&device) != hipSuccess)
+            throw std::runtime_error("hipGetDevice failed");
+        size_t& val = footprint[device];
+
         // auto-allocated plans fail here if not enough VRAM, skip these tests
         try
         {
@@ -234,7 +241,7 @@ public:
         }
         val += auto_allocated_extra_vram_footprint();
         val += externally_managed_extra_vram_footprint();
-        return val;
+        return footprint;
     }
 
     fft_status setup_structs()

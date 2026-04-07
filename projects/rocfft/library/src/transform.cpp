@@ -68,8 +68,6 @@ rocfft_status rocfft_execution_info_set_work_buffer(rocfft_execution_info info,
 try
 {
     log_trace(__func__, "info", info, "work_buffer", work_buffer, "size_in_bytes", size_in_bytes);
-    if(!work_buffer)
-        return rocfft_status_invalid_work_buffer;
 
     if(!info)
         return rocfft_status_invalid_arg_value;
@@ -79,7 +77,18 @@ try
     if(hipGetDevice(&deviceid) != hipSuccess)
         return rocfft_status_failure;
 
-    info->workBuffers[deviceid] = gpubuf::make_nonowned(work_buffer, size_in_bytes);
+    if(size_in_bytes)
+    {
+        if(!work_buffer)
+            return rocfft_status_invalid_work_buffer;
+
+        info->workBuffers[deviceid] = gpubuf::make_nonowned(work_buffer, size_in_bytes);
+    }
+    else
+    {
+        // clear out any buffer that was set
+        info->workBuffers[deviceid] = {};
+    }
 
     return rocfft_status_success;
 }

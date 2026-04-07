@@ -27,6 +27,14 @@
 class rocfft_scoped_device
 {
 public:
+    static int device_count()
+    {
+        int count = 0;
+        if(hipGetDeviceCount(&count) != hipSuccess)
+            throw std::runtime_error("failed to get device count");
+        return count;
+    }
+
     rocfft_scoped_device(int device)
     {
         if(hipGetDevice(&orig_device) != hipSuccess)
