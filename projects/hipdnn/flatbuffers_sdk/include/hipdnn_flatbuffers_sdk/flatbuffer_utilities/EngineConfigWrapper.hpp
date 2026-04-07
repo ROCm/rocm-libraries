@@ -38,7 +38,7 @@ public:
 class EngineConfigWrapper : public IEngineConfig
 {
 public:
-    explicit EngineConfigWrapper(const void* buffer, size_t /*size*/)
+    explicit EngineConfigWrapper(const void* buffer, size_t size)
     {
         if(buffer != nullptr)
         {

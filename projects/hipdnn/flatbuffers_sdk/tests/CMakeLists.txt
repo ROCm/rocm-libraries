@@ -29,11 +29,14 @@ add_executable(
 
 target_compile_options(hipdnn_flatbuffers_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 
+get_target_property(_fb_include_dirs flatbuffers::flatbuffers INTERFACE_INCLUDE_DIRECTORIES)
+
 target_include_directories(
     hipdnn_flatbuffers_sdk_tests
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../../test_sdk/include
+        ${_fb_include_dirs}
 )
 
 target_link_libraries(
@@ -48,4 +51,18 @@ target_link_libraries(
 )
 
 clang_tidy_check(hipdnn_flatbuffers_sdk_tests)
+
+# clang-tidy's CXX_CLANG_TIDY does not receive the HIP extra-args that batch
+# run-clang-tidy gets (e.g. -isystem /opt/rocm/include). Flatbuffers headers
+# live under that path, so we add them here so clang-tidy can resolve them.
+if(ENABLE_CLANG_TIDY AND _fb_include_dirs)
+    get_target_property(_tidy_cmd hipdnn_flatbuffers_sdk_tests CXX_CLANG_TIDY)
+    if(_tidy_cmd)
+        foreach(_include IN LISTS _fb_include_dirs)
+            list(APPEND _tidy_cmd "-extra-arg=-isystem" "-extra-arg=${_include}")
+        endforeach()
+        set_target_properties(hipdnn_flatbuffers_sdk_tests PROPERTIES CXX_CLANG_TIDY "${_tidy_cmd}")
+    endif()
+endif()
+
 add_unit_test_target(hipdnn_flatbuffers_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})

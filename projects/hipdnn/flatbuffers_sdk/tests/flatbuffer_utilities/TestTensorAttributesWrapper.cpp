@@ -5,16 +5,16 @@
 #include <gtest/gtest.h>
 #include <set>
 
+#include "FlatbufferTestUtils.hpp"
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp>
-#include "FlatbufferTestUtils.hpp"
 
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 
 TEST(TestTensorAttributesWrapper, NullBufferIsInvalid)
 {
-    EXPECT_THROW(TensorAttributesWrapper wrapper(nullptr), std::invalid_argument);
+    EXPECT_THROW(const TensorAttributesWrapper wrapper(nullptr), std::invalid_argument);
 }
 
 TEST(TestTensorAttributesWrapper, EnsureTheTensorAttributesIsWrappedCorrectly)
@@ -29,7 +29,7 @@ TEST(TestTensorAttributesWrapper, EnsureTheTensorAttributesIsWrappedCorrectly)
     const float value = 1.0f;
 
     flatbuffers::FlatBufferBuilder builder;
-    Float32Value floatValue(value);
+    const Float32Value floatValue(value);
     auto valueOffset = builder.CreateStruct(floatValue).Union();
     auto attributeOffset = CreateTensorAttributesDirect(
         builder, uid, name.c_str(), dataType, &strides, &dims, isVirtual, valueType, valueOffset);
@@ -38,7 +38,7 @@ TEST(TestTensorAttributesWrapper, EnsureTheTensorAttributesIsWrappedCorrectly)
     auto shallowTensorAttributes
         = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
-    TensorAttributesWrapper wrapper(shallowTensorAttributes);
+    const TensorAttributesWrapper wrapper(shallowTensorAttributes);
 
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.uid(), uid);

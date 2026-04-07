@@ -55,7 +55,7 @@ public:
     {
     }
 
-    explicit KnobSettingWrapper(const void* buffer, size_t /*size*/)
+    explicit KnobSettingWrapper(const void* buffer, size_t size)
     {
         if(buffer != nullptr)
         {
