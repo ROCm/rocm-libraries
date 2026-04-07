@@ -98,24 +98,18 @@ class GemmMultiABDProfiler
         // Create device buffers and copy
         std::vector<ck_tile::DeviceMem> a_dev_bufs(NumATensors), b_dev_bufs(NumBTensors),
             d_dev_bufs(NumDTensors);
-        // a_dev_bufs.reserve(NumATensors);
-        // b_dev_bufs.reserve(NumBTensors);
-        // d_dev_bufs.reserve(NumDTensors);
         for(std::size_t i = 0; i < NumATensors; i++)
         {
-            // a_dev_bufs.emplace_back(a_tensors[i].get_element_space_size_in_bytes());
             a_dev_bufs[i].Realloc(a_tensors[i].get_element_space_size_in_bytes());
             a_dev_bufs[i].ToDevice(a_tensors[i].mData.data());
         }
         for(std::size_t i = 0; i < NumBTensors; i++)
         {
-            // b_dev_bufs.emplace_back(b_tensors[i].get_element_space_size_in_bytes());
             b_dev_bufs[i].Realloc(b_tensors[i].get_element_space_size_in_bytes());
             b_dev_bufs[i].ToDevice(b_tensors[i].mData.data());
         }
         for(std::size_t i = 0; i < NumDTensors; i++)
         {
-            // d_dev_bufs.emplace_back(d_tensors[i].get_element_space_size_in_bytes());
             d_dev_bufs[i].Realloc(d_tensors[i].get_element_space_size_in_bytes());
             d_dev_bufs[i].ToDevice(d_tensors[i].mData.data());
         }
