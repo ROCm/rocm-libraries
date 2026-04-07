@@ -298,6 +298,89 @@ namespace ExecuteMaskGeneratorTest
         }
     }
 
+    /**
+     * Like buildConditionalGraphWithStore, but adds a nested ConditionalOp inside the
+     * true body that overwrites destVGPR with 4u for lanes whose workitem ID is
+     * divisible by 4 (workitemId & 3u == 0u).
+     *
+     * True-body execution sequence for a given lane:
+     *   1. Assign 1u  to destVGPR  (outer true body).
+     *   2. If (workitemId & 3u) == 0u, assign 4u to destVGPR (inner conditional).
+     *
+     * Expected per-lane result:
+     *   workitemId % 4 == 0  -> 4u   (divisible by 4: outer + inner true)
+     *   workitemId % 2 == 0  -> 1u   (even, not div-by-4: outer true only)
+     *   odd workitemId       -> 0u   (or 2u for Exec mode with else body)
+     */
+    kg::KernelGraph buildNestedConditionalGraphWithStore(OpMode             mode,
+                                                         bool               withElseBody,
+                                                         Register::ValuePtr workitemIdReg,
+                                                         uint32_t           wavefrontSize)
+    {
+        kg::KernelGraph kgraph;
+
+        auto zero  = Expression::literal(0u);
+        auto one   = Expression::literal(1u);
+        auto two   = Expression::literal(2u);
+        auto three = Expression::literal(3u);
+        auto four  = Expression::literal(4u);
+
+        auto workitemId = workitemIdReg->expression();
+        auto isEven     = (workitemId & one) == zero;
+        auto isDivBy4   = (workitemId & three) == zero;
+
+        // Destination VGPR written by all assign ops.
+        auto destVGPR = kgraph.coordinates.addElement(VGPR());
+
+        // Pre-initialize destVGPR to 0.
+        auto initOp = kgraph.control.addElement(Assign{Register::Type::Vector, zero});
+        kgraph.mapper.connect(initOp, destVGPR, NaryArgument::DEST);
+
+        // Outer true body: assign 1 to destVGPR.
+        auto trueOp = kgraph.control.addElement(Assign{Register::Type::Vector, one});
+        kgraph.mapper.connect(trueOp, destVGPR, NaryArgument::DEST);
+
+        // Inner conditional (nested inside outer true body): assign 4 for div-by-4 lanes.
+        auto innerTrueOp = kgraph.control.addElement(Assign{Register::Type::Vector, four});
+        kgraph.mapper.connect(innerTrueOp, destVGPR, NaryArgument::DEST);
+
+        auto innerConditional
+            = kgraph.control.addElement(ConditionalOp{isDivBy4, mode, "DivBy4 Conditional"});
+        kgraph.control.addElement(Body(), {innerConditional}, {innerTrueOp});
+
+        auto conditional
+            = kgraph.control.addElement(ConditionalOp{isEven, mode, "Exec Conditional"});
+
+        auto kernel = kgraph.control.addElement(Kernel());
+        kgraph.control.addElement(Body(), {kernel}, {initOp});
+        kgraph.control.addElement(Sequence(), {initOp}, {conditional});
+        // True body: trueOp then innerConditional.
+        kgraph.control.addElement(Body(), {conditional}, {trueOp});
+        kgraph.control.addElement(Sequence(), {trueOp}, {innerConditional});
+
+        if(withElseBody)
+        {
+            // False body: assign 2 to destVGPR.
+            auto falseOp = kgraph.control.addElement(Assign{Register::Type::Vector, two});
+            kgraph.mapper.connect(falseOp, destVGPR, NaryArgument::DEST);
+            kgraph.control.addElement(Else(), {conditional}, {falseOp});
+        }
+
+        // Store each lane's result to output[workitemId].
+        auto wfSizeExpr = Expression::literal(wavefrontSize);
+        auto workitem0  = kgraph.coordinates.addElement(Workitem(0, wfSizeExpr));
+        auto user       = kgraph.coordinates.addElement(User({}, "output"));
+        kgraph.coordinates.addElement(PassThrough(), {workitem0}, {user});
+        kgraph.coordinates.addElement(PassThrough(), {user}, {destVGPR});
+
+        auto storeOp = kgraph.control.addElement(StoreVGPR{});
+        kgraph.mapper.connect<User>(storeOp, user);
+        kgraph.mapper.connect<VGPR>(storeOp, destVGPR);
+        kgraph.control.addElement(Sequence(), {conditional}, {storeOp});
+
+        return kgraph;
+    }
+
     // Helper used by the GPU execution tests below.
     void runGPUExecutionTest(OpMode mode, bool withElseBody)
     {
@@ -378,6 +461,93 @@ namespace ExecuteMaskGeneratorTest
               "[exec-mask][gpu]")
     {
         runGPUExecutionTest(OpMode::BranchAndExec, true);
+    }
+
+    // Helper used by the nested-conditional GPU execution tests below.
+    void runGPUExecutionTestNested(OpMode mode, bool withElseBody)
+    {
+        auto testCtx = TestContext::ForTestDevice();
+        auto ctx     = testCtx.get();
+        auto k       = ctx->kernel();
+
+        auto wfSize = static_cast<uint32_t>(k->wavefront_size());
+
+        k->addArgument(
+            {"output", {DataType::UInt32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+        k->setKernelDimensions(1);
+        k->setWorkitemCount(
+            {Expression::literal(wfSize), Expression::literal(1u), Expression::literal(1u)});
+        k->setWorkgroupSize({wfSize, 1, 1});
+
+        ctx->schedule(k->preamble());
+        ctx->schedule(k->prolog());
+        auto kgraph = buildNestedConditionalGraphWithStore(
+            mode, withElseBody, k->workitemIndex()[0], wfSize);
+        ctx->schedule(rocRoller::KernelGraph::generate(kgraph, k));
+        ctx->schedule(k->postamble());
+        ctx->schedule(k->amdgpu_metadata());
+
+        if(ctx->hipDeviceIndex() < 0)
+            return;
+
+        auto deviceOutput = make_shared_device<uint32_t>(wfSize, 0u);
+
+        KernelArguments kargs(false);
+        kargs.append("output", deviceOutput.get());
+
+        KernelInvocation kinv;
+        kinv.workitemCount = {wfSize, 1, 1};
+        kinv.workgroupSize = {wfSize, 1, 1};
+
+        ctx->instructions()->getExecutableKernel()->executeKernel(kargs, kinv);
+
+        std::vector<uint32_t> hostOutput(wfSize);
+        REQUIRE_THAT(
+            hipMemcpy(
+                hostOutput.data(), deviceOutput.get(), wfSize * sizeof(uint32_t), hipMemcpyDefault),
+            HasHipSuccess(0));
+
+        // workitemId % 4 == 0: outer true + inner true -> 4.
+        // workitemId % 2 == 0 (not div-by-4): outer true, inner false -> 1.
+        // Odd: outer false -> 0 (or 2 for Exec mode with else body).
+        bool                  elseBodyRunsPerLane = withElseBody && (mode == OpMode::Exec);
+        std::vector<uint32_t> expected(wfSize);
+        for(uint32_t i = 0; i < wfSize; ++i)
+        {
+            if(i % 4 == 0)
+                expected[i] = 4u;
+            else if(i % 2 == 0)
+                expected[i] = 1u;
+            else
+                expected[i] = elseBodyRunsPerLane ? 2u : 0u;
+        }
+
+        CHECK(hostOutput == expected);
+    }
+
+    TEST_CASE("ExecuteMaskGenerator - Exec mode, nested conditional (GPU execution)",
+              "[exec-mask][gpu]")
+    {
+        runGPUExecutionTestNested(OpMode::Exec, false);
+    }
+
+    TEST_CASE("ExecuteMaskGenerator - Exec mode, nested conditional with else (GPU execution)",
+              "[exec-mask][gpu]")
+    {
+        runGPUExecutionTestNested(OpMode::Exec, true);
+    }
+
+    TEST_CASE("ExecuteMaskGenerator - BranchAndExec mode, nested conditional (GPU execution)",
+              "[exec-mask][gpu]")
+    {
+        runGPUExecutionTestNested(OpMode::BranchAndExec, false);
+    }
+
+    TEST_CASE(
+        "ExecuteMaskGenerator - BranchAndExec mode, nested conditional with else (GPU execution)",
+        "[exec-mask][gpu]")
+    {
+        runGPUExecutionTestNested(OpMode::BranchAndExec, true);
     }
 
 } // namespace ExecuteMaskGeneratorTest

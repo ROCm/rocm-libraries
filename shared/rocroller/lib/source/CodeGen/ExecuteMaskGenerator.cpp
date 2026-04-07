@@ -82,10 +82,40 @@ namespace rocRoller
                     Register::AllocationOptions::FullyContiguous());
                 co_yield_(Instruction("s_and_saveexec_b32", {sgpr}, {vcc}, {}, ""));
             }
+
+            auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
+
+            // If there is an else body, save VCC into an SGPR now, before generating the
+            // true body.  Nested conditionals inside the true body may overwrite VCC, making
+            // the original condition unavailable for the s_andn1_saveexec transition.
+            Register::ValuePtr savedVcc;
+            if(!elseBody.empty())
+            {
+                if(wavefrontSize == 64)
+                {
+                    savedVcc = std::make_shared<Register::Value>(
+                        m_context,
+                        Register::Type::Scalar,
+                        DataType::Bool64,
+                        1,
+                        Register::AllocationOptions::FullyContiguous());
+                }
+                else
+                {
+                    savedVcc = std::make_shared<Register::Value>(
+                        m_context,
+                        Register::Type::Scalar,
+                        DataType::Bool32,
+                        1,
+                        Register::AllocationOptions::FullyContiguous());
+                }
+                co_yield m_context->copier()->copy(
+                    savedVcc, vcc, "Save condition for else transition");
+            }
+
             auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
             co_yield generateFn(trueBody);
 
-            auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
             if(!elseBody.empty())
             {
                 // restore the original EXEC mask from the scalar destination register.
@@ -97,13 +127,15 @@ namespace rocRoller
                 // store the calculated result into the EXEC mask,
                 // set SCC iff the calculated result is nonzero and
                 // store the original value of the EXEC mask into the scalar destination register.
+                // Use savedVcc (not vcc) so that nested conditionals in the true body cannot
+                // corrupt the condition used here.
                 if(wavefrontSize == 64)
                 {
-                    co_yield_(Instruction("s_andn1_saveexec_b64", {sgpr}, {vcc}, {}, ""));
+                    co_yield_(Instruction("s_andn1_saveexec_b64", {sgpr}, {savedVcc}, {}, ""));
                 }
                 else
                 {
-                    co_yield_(Instruction("s_andn1_saveexec_b32", {sgpr}, {vcc}, {}, ""));
+                    co_yield_(Instruction("s_andn1_saveexec_b32", {sgpr}, {savedVcc}, {}, ""));
                 }
                 co_yield generateFn(elseBody);
             }
@@ -182,12 +214,42 @@ namespace rocRoller
                 EXECZ,
                 concatenate("If EXECZ is set(1), jump to ", elseLabel->toString()));
             auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+
+            auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
+
+            // If there is an else body, save VCC into an SGPR now, before generating the
+            // true body.  Nested conditionals inside the true body may overwrite VCC, making
+            // the original condition unavailable for the s_andn1_saveexec transition.
+            Register::ValuePtr savedVcc;
+            if(!elseBody.empty())
+            {
+                if(wavefrontSize == 64)
+                {
+                    savedVcc = std::make_shared<Register::Value>(
+                        m_context,
+                        Register::Type::Scalar,
+                        DataType::Bool64,
+                        1,
+                        Register::AllocationOptions::FullyContiguous());
+                }
+                else
+                {
+                    savedVcc = std::make_shared<Register::Value>(
+                        m_context,
+                        Register::Type::Scalar,
+                        DataType::Bool32,
+                        1,
+                        Register::AllocationOptions::FullyContiguous());
+                }
+                co_yield m_context->copier()->copy(
+                    savedVcc, vcc, "Save condition for else transition");
+            }
+
             co_yield generateFn(trueBody);
             co_yield m_context->brancher()->branch(
                 exitLabel, concatenate("THEN: Done, jump to ", exitLabel->toString()));
 
             co_yield Instruction::Label(elseLabel);
-            auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
             if(!elseBody.empty())
             {
                 // restore the original EXEC mask from the scalar destination register.
@@ -199,13 +261,15 @@ namespace rocRoller
                 // store the calculated result into the EXEC mask,
                 // set SCC iff the calculated result is nonzero and
                 // store the original value of the EXEC mask into the scalar destination register.
+                // Use savedVcc (not vcc) so that nested conditionals in the true body cannot
+                // corrupt the condition used here.
                 if(wavefrontSize == 64)
                 {
-                    co_yield_(Instruction("s_andn1_saveexec_b64", {sgpr}, {vcc}, {}, ""));
+                    co_yield_(Instruction("s_andn1_saveexec_b64", {sgpr}, {savedVcc}, {}, ""));
                 }
                 else
                 {
-                    co_yield_(Instruction("s_andn1_saveexec_b32", {sgpr}, {vcc}, {}, ""));
+                    co_yield_(Instruction("s_andn1_saveexec_b32", {sgpr}, {savedVcc}, {}, ""));
                 }
 
                 auto EXECZ = m_context->getEXECZ();

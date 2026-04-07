@@ -287,6 +287,20 @@ namespace rocRoller
                 co_yield_(Instruction("s_mov_b32", {dest}, {src}, {}, comment));
             }
         }
+        // VCC -> Scalar
+        else if((src->isVCC()) && dest->regType() == Register::Type::Scalar
+                && ((dest->registerCount() == 2 && context->kernel()->wavefront_size() == 64)
+                    || (dest->registerCount() == 1 && context->kernel()->wavefront_size() == 32)))
+        {
+            if(context->kernel()->wavefront_size() == 64)
+            {
+                co_yield_(Instruction("s_mov_b64", {dest}, {src}, {}, comment));
+            }
+            else
+            {
+                co_yield_(Instruction("s_mov_b32", {dest}, {src}, {}, comment));
+            }
+        }
         // Vector -> Scalar
         else if(dest->regType() == Register::Type::Scalar
                 && src->regType() == Register::Type::Vector)
