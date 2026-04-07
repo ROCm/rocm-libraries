@@ -109,7 +109,7 @@ inline std::shared_ptr<TestableGraphLifting>
                         hipdnn_frontend::DataType ioType = hipdnn_frontend::DataType::FLOAT)
 {
     using namespace hipdnn_frontend::graph;
-    using namespace constants::integration;
+    using namespace constants;
 
     auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name(graphName)
@@ -118,23 +118,23 @@ inline std::shared_ptr<TestableGraphLifting>
         .set_io_data_type(ioType);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
-    x->set_dim(toVec(K_TENSOR_X_DIMS)).set_stride(toVec(K_TENSOR_X_STRIDES));
+    x->set_uid(K_FPROP_TENSOR_X_UID).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    x->set_dim(toVec(K_FPROP_TENSOR_X_DIMS)).set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
 
     auto w = std::make_shared<TensorAttributes>();
-    w->set_uid(K_TENSOR_W_UID).set_name("W").set_data_type(hipdnn_frontend::DataType::FLOAT);
-    w->set_dim(toVec(K_TENSOR_W_DIMS)).set_stride(toVec(K_TENSOR_W_STRIDES));
+    w->set_uid(K_FPROP_TENSOR_W_UID).set_name("W").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    w->set_dim(toVec(K_FPROP_TENSOR_W_DIMS)).set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
     ConvFpropAttributes convAttrs;
     convAttrs.set_name("conv_fprop_op");
-    convAttrs.set_pre_padding(toVec(K_CONV_PRE_PADDING));
-    convAttrs.set_post_padding(toVec(K_CONV_POST_PADDING));
-    convAttrs.set_stride(toVec(K_CONV_STRIDE));
-    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+    convAttrs.set_pre_padding(toVec(K_FPROP_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_FPROP_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_FPROP_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
     convAttrs.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
     auto y = graph->conv_fprop(x, w, convAttrs);
-    y->set_uid(K_TENSOR_Y_UID).set_output(true).set_name("Y");
+    y->set_uid(K_FPROP_TENSOR_Y_UID).set_output(true).set_name("Y");
 
     return graph;
 }

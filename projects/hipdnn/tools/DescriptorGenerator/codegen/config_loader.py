@@ -135,6 +135,7 @@ def load_config(path: Path) -> OperationConfig:
             )
         test_data.field_values = td_raw.get("field_values", {})
         test_data.constants_include = td_raw.get("constants_include", "")
+        test_data.tensor_const_prefix = td_raw.get("tensor_const_prefix", None)
 
     # Data fields helper (shared pack/unpack functions)
     data_fields_helper = _parse_data_fields_helper(op.get("data_fields_helper"))

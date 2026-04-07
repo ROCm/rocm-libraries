@@ -17,7 +17,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::toVec;
-using namespace hipdnn_tests::constants::integration;
+using namespace hipdnn_tests::constants;
 using hipdnn_tests::buildConvFpropGraph;
 using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::liftGraph;
@@ -54,25 +54,25 @@ TEST_F(IntegrationGraphLifting, ConvFpropRoundTripViaCApi)
         << "Expected 3 tensors (X, W, Y) in lifted graph"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify X tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
-    auto liftedX = tensorMap[K_TENSOR_X_UID];
-    EXPECT_EQ(liftedX->get_dim(), toVec(K_TENSOR_X_DIMS));
-    EXPECT_EQ(liftedX->get_stride(), toVec(K_TENSOR_X_STRIDES));
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u);
+    auto liftedX = tensorMap[K_FPROP_TENSOR_X_UID];
+    EXPECT_EQ(liftedX->get_dim(), toVec(K_FPROP_TENSOR_X_DIMS));
+    EXPECT_EQ(liftedX->get_stride(), toVec(K_FPROP_TENSOR_X_STRIDES));
     EXPECT_EQ(liftedX->get_data_type(), DataType::FLOAT);
 
     // Verify W tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_W_UID), 0u);
-    auto liftedW = tensorMap[K_TENSOR_W_UID];
-    EXPECT_EQ(liftedW->get_dim(), toVec(K_TENSOR_W_DIMS));
-    EXPECT_EQ(liftedW->get_stride(), toVec(K_TENSOR_W_STRIDES));
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_W_UID), 0u);
+    auto liftedW = tensorMap[K_FPROP_TENSOR_W_UID];
+    EXPECT_EQ(liftedW->get_dim(), toVec(K_FPROP_TENSOR_W_DIMS));
+    EXPECT_EQ(liftedW->get_stride(), toVec(K_FPROP_TENSOR_W_STRIDES));
     EXPECT_EQ(liftedW->get_data_type(), DataType::FLOAT);
 
     // Verify Y tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u);
-    auto liftedY = tensorMap[K_TENSOR_Y_UID];
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_Y_UID), 0u);
+    auto liftedY = tensorMap[K_FPROP_TENSOR_Y_UID];
     EXPECT_EQ(liftedY->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(liftedY->get_dim(), toVec(K_TENSOR_Y_DIMS));
-    EXPECT_EQ(liftedY->get_stride(), toVec(K_TENSOR_Y_STRIDES));
+    EXPECT_EQ(liftedY->get_dim(), toVec(K_FPROP_TENSOR_Y_DIMS));
+    EXPECT_EQ(liftedY->get_stride(), toVec(K_FPROP_TENSOR_Y_STRIDES));
 
     // Verify the lifted graph has the correct number of sub-nodes
     auto& subNodes = liftedGraph->getSubNodes();
@@ -84,10 +84,10 @@ TEST_F(IntegrationGraphLifting, ConvFpropRoundTripViaCApi)
     ASSERT_NE(convNode, nullptr)
         << "Expected a ConvolutionFpropNode"; // NOLINT(readability-implicit-bool-conversion)
 
-    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
-    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_CONV_POST_PADDING));
-    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
-    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_FPROP_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_FPROP_CONV_DILATION));
     EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
     EXPECT_EQ(convNode->attributes.get_name(), "conv_fprop_op");
 }
@@ -103,12 +103,9 @@ TEST_F(IntegrationGraphLifting, ConvFpropTensorSharingPreserved)
 
     // All tensors should be accessible by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    EXPECT_NE(tensorMap.count(K_TENSOR_X_UID), 0u)
-        << "X tensor not found by UID"; // NOLINT(readability-implicit-bool-conversion)
-    EXPECT_NE(tensorMap.count(K_TENSOR_W_UID), 0u)
-        << "W tensor not found by UID"; // NOLINT(readability-implicit-bool-conversion)
-    EXPECT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u)
-        << "Y tensor not found by UID"; // NOLINT(readability-implicit-bool-conversion)
+    EXPECT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u) << "X tensor not found by UID";
+    EXPECT_NE(tensorMap.count(K_FPROP_TENSOR_W_UID), 0u) << "W tensor not found by UID";
+    EXPECT_NE(tensorMap.count(K_FPROP_TENSOR_Y_UID), 0u) << "Y tensor not found by UID";
 
     // Verify the node references the same tensor objects via UID
     auto& subNodes = liftedGraph->getSubNodes();
@@ -117,14 +114,14 @@ TEST_F(IntegrationGraphLifting, ConvFpropTensorSharingPreserved)
     auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
     ASSERT_NE(convNode, nullptr);
 
-    EXPECT_EQ(convNode->attributes.get_x()->get_uid(), K_TENSOR_X_UID);
-    EXPECT_EQ(convNode->attributes.get_w()->get_uid(), K_TENSOR_W_UID);
-    EXPECT_EQ(convNode->attributes.get_y()->get_uid(), K_TENSOR_Y_UID);
+    EXPECT_EQ(convNode->attributes.get_x()->get_uid(), K_FPROP_TENSOR_X_UID);
+    EXPECT_EQ(convNode->attributes.get_w()->get_uid(), K_FPROP_TENSOR_W_UID);
+    EXPECT_EQ(convNode->attributes.get_y()->get_uid(), K_FPROP_TENSOR_Y_UID);
 
     // Verify tensor objects are shared between the tensorMap and conv node attributes
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID].get(), convNode->attributes.get_x().get());
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID].get(), convNode->attributes.get_w().get());
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID].get(), convNode->attributes.get_y().get());
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_X_UID].get(), convNode->attributes.get_x().get());
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_W_UID].get(), convNode->attributes.get_w().get());
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_Y_UID].get(), convNode->attributes.get_y().get());
 }
 
 // Builds a graph with set_preferred_engine_id_ext(42), lowers, lifts, and verifies
@@ -191,19 +188,19 @@ TEST_F(IntegrationGraphLifting, ConvFpropLiftWithoutFinalization)
     ASSERT_NE(convNode, nullptr);
 
     // Verify convolution parameters
-    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
-    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_CONV_POST_PADDING));
-    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
-    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_FPROP_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_FPROP_CONV_DILATION));
     EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
 
     // Verify tensor dims and strides
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 3u);
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_dim(), toVec(K_TENSOR_X_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_stride(), toVec(K_TENSOR_X_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_dim(), toVec(K_TENSOR_W_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_stride(), toVec(K_TENSOR_W_STRIDES));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_X_UID]->get_dim(), toVec(K_FPROP_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_X_UID]->get_stride(), toVec(K_FPROP_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_W_UID]->get_dim(), toVec(K_FPROP_TENSOR_W_DIMS));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_W_UID]->get_stride(), toVec(K_FPROP_TENSOR_W_STRIDES));
 }
 
 // Exercises the deserialize_via_backend() path with a handle (full finalization).
@@ -237,16 +234,16 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithHandle)
     ASSERT_NE(convNode, nullptr);
 
     // Verify convolution parameters
-    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
-    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_CONV_POST_PADDING));
-    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
-    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_FPROP_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_FPROP_CONV_DILATION));
 
     // Verify tensor dims
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 3u);
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_dim(), toVec(K_TENSOR_X_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_dim(), toVec(K_TENSOR_W_DIMS));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_X_UID]->get_dim(), toVec(K_FPROP_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_W_UID]->get_dim(), toVec(K_FPROP_TENSOR_W_DIMS));
 }
 
 // Exercises the deserialize_via_backend() path without a handle (no finalization).
@@ -275,23 +272,23 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithoutHandle)
     // Verify tensors are present
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 3u);
-    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_dim(), toVec(K_TENSOR_X_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_stride(), toVec(K_TENSOR_X_STRIDES));
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_X_UID]->get_dim(), toVec(K_FPROP_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_X_UID]->get_stride(), toVec(K_FPROP_TENSOR_X_STRIDES));
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_W_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_dim(), toVec(K_TENSOR_W_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_stride(), toVec(K_TENSOR_W_STRIDES));
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_W_UID), 0u);
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_W_UID]->get_dim(), toVec(K_FPROP_TENSOR_W_DIMS));
+    EXPECT_EQ(tensorMap[K_FPROP_TENSOR_W_UID]->get_stride(), toVec(K_FPROP_TENSOR_W_STRIDES));
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u);
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_Y_UID), 0u);
 
     // Verify conv node
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
     auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
     ASSERT_NE(convNode, nullptr);
-    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
-    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_FPROP_CONV_STRIDE));
 }
 
 // Verifies that fromBackendDescriptor returns an error (not a crash) when given
