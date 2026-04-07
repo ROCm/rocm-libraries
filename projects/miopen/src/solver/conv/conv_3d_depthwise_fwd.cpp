@@ -129,7 +129,7 @@ ConvSolution ConvDepthwiseFwd3D::GetSolution(const ExecutionContext&,
     kernel.g_wk.push_back(256 * kCase3Batch);
     kernel.g_wk.push_back(kCase3Channels);
     kernel.g_wk.push_back(kCase3OutD);
-    // Same source, two HIPRTC/hipcc builds: see miopen_conv3d_depthwise_fwd.cpp #ifndef IO_DTYPE.
+
     if(problem.IsFp16())
         kernel.comp_options = std::string(" -DIO_DTYPE=__half");
     else
