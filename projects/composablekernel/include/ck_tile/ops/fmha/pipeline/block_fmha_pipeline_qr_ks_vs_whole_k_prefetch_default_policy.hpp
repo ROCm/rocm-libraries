@@ -759,6 +759,11 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSizeDropout()
     {
+        static_assert(!Problem::kHasDropout,
+                      "BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy does not "
+                      "account for dropout LDS scratch space. Either use a policy "
+                      "that implements dropout shared-memory sizing or disable dropout "
+                      "for this pipeline.");
         return 0;
     };
 
