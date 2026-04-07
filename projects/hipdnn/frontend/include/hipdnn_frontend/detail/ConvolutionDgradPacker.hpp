@@ -17,7 +17,8 @@ inline Error createConvDgradOperation(
     std::vector<ScopedHipdnnBackendDescriptor>& operations)
 {
     // Create operation descriptor
-    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR);
+    ScopedHipdnnBackendDescriptor opDesc(
+        HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -26,17 +27,17 @@ inline Error createConvDgradOperation(
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                              attributes.get_dy(),
                                              tensorDescs,
                                              "conv dgrad DY"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W,
                                              attributes.get_w(),
                                              tensorDescs,
                                              "conv dgrad W"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX,
                                              attributes.get_dx(),
                                              tensorDescs,
                                              "conv dgrad DX"));
@@ -81,6 +82,14 @@ inline Error createConvDgradOperation(
                                                  HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,
                                                  attributes.compute_data_type,
                                                  "conv dgrad compute data type"));
+
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(
+            opDesc.get(), HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "convolutionbwd operation name"));
+    }
 
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "conv dgrad operation descriptor"));

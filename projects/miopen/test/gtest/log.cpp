@@ -385,7 +385,7 @@ void TestLogBufferEnvEnabled()
         }
     }
 
-    // test log dump after throw
+    // test log dump after 2nd error
     MIOPEN_LOG_W("warn 2nd");
     MIOPEN_LOG_I("info 2nd");
     MIOPEN_LOG_I2("info2 2nd");
