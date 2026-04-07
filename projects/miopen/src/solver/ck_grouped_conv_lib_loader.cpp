@@ -128,7 +128,7 @@ std::string GetDynamicLoadError()
 #else
     // NOLINTNEXTLINE(concurrency-mt-unsafe)
     const char* err = dlerror();
-    return err ? err : "unknown error";
+    return err != nullptr ? err : "unknown error";
 #endif
 }
 
