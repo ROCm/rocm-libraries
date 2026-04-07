@@ -41,6 +41,4 @@ namespace hip_kernel_provider
 
 // NOLINTEND(cppcoreguidelines-macro-usage)
 
-std::string getDeviceString(hipStream_t stream);
-
 } // namespace hip_kernel_provider

@@ -10,7 +10,7 @@
 #include "HipKernelHandle.hpp"
 #include "HipKernelSettings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
-#include "hip/HipUtils.hpp"
+#include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 
 namespace asm_sdpa_engine
 {
@@ -84,7 +84,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
 {
     using namespace hipdnn_data_sdk::data_objects;
 
-    if(hip_kernel_provider::getDeviceString(_handle.getStream()) != "gfx942")
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
         GTEST_SKIP();
     }

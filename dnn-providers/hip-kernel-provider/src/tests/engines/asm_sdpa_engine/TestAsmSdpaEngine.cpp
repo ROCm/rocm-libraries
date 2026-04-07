@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Types.hpp>
@@ -11,7 +12,6 @@
 #include "HipKernelHandle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
-#include "hip/HipUtils.hpp"
 
 namespace asm_sdpa_engine
 {
@@ -43,7 +43,7 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsFalseForNonSdpaGraph)
 
 TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForSdpaGraph)
 {
-    if(hip_kernel_provider::getDeviceString(_handle.getStream()) != "gfx942")
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
         GTEST_SKIP();
     }

@@ -4,11 +4,11 @@
 #include "plans/SdpaFwdPlanBuilder.hpp"
 #include "HipKernelUtils.hpp"
 #include "asm/AsmKernelPath.hpp"
-#include "hip/HipUtils.hpp"
 #include "plans/SdpaFwdPlan.hpp"
 
 #include <cmath>
 #include <hip/hip_runtime.h>
+#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace asm_sdpa_engine
@@ -26,7 +26,7 @@ bool SdpaFwdPlanBuilder::isApplicable(
 
     try
     {
-        auto deviceString = hip_kernel_provider::getDeviceString(handle.getStream());
+        auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
         HIP_KERNEL_RETURN_FALSE_IF(
             deviceString != "gfx942",
             "Device string does not match gfx942 (Actual value: " + deviceString + ")");

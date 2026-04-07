@@ -8,7 +8,7 @@
 #include "HipKernelContainer.hpp"
 #include "HipKernelHandle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
-#include "hip/HipUtils.hpp"
+#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -60,7 +60,7 @@ TEST(TestHipKernelContainer, GetApplicableEngineIdsSdpaGraph)
     using namespace hipdnn_data_sdk::data_objects;
 
     HipKernelHandle handle;
-    if(getDeviceString(handle.getStream()) != "gfx942")
+    if(hip_kernel_provider_common::getDeviceString(handle.getStream()) != "gfx942")
     {
         GTEST_SKIP();
     }
