@@ -9,8 +9,9 @@ add_library(
     HipKernelPluginPublic.cpp
     HipKernelUtils.cpp
     engines/HipKernelEngine.cpp
-    hip/HipProgram.cpp
     hip/HipKernel.cpp
+    hip/HipProgram.cpp
+    hip/HipUtils.cpp
     ${KERNEL_GENERATED_SOURCES}
     engines/plans/BatchnormPlanBuilder.cpp
     engines/plans/BatchnormFwdInferencePlan.cpp

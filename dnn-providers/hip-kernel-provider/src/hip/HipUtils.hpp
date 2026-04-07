@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #pragma once
+#include <hip/hip_runtime.h>
 #include <hip/hiprtc.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <stdexcept>
@@ -39,5 +40,7 @@ namespace hip_kernel_provider
     } while(0)
 
 // NOLINTEND(cppcoreguidelines-macro-usage)
+
+std::string getDeviceString(hipStream_t stream);
 
 } // namespace hip_kernel_provider
