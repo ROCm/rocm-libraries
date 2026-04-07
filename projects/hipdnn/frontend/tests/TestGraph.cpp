@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -5966,3 +5967,332 @@ TEST_F(TestGraph, DeserializeFromJsonObjectWithHandle)
 }
 
 #endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+// ============================================================================
+// Error-path tests for to_binary / to_json
+// ============================================================================
+
+TEST_F(TestGraph, ToBinaryPropagatesSerializationSizeQueryError)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // The size-query call (requestedSize==0, data==nullptr) returns an error
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    auto [data, err] = graph.to_binary();
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_TRUE(data.empty());
+}
+
+TEST_F(TestGraph, ToBinaryPropagatesSerializationDataError)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Size query succeeds, but the actual data-fetch call fails
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault(
+            [](hipdnnBackendDescriptor_t, size_t requestedSize, size_t* graphByteSize, uint8_t*) {
+                *graphByteSize = 16;
+                if(requestedSize > 0)
+                {
+                    return HIPDNN_STATUS_INTERNAL_ERROR;
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    auto [data, err] = graph.to_binary();
+    EXPECT_TRUE(err.is_bad());
+}
+
+TEST_F(TestGraph, ToJsonPropagatesSerializationSizeQueryError)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    ON_CALL(*_mockBackend, backendGetSerializedJsonGraphExt(_, _, _, _))
+        .WillByDefault(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    auto [jsonData, err] = graph.to_json();
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_TRUE(jsonData.empty());
+}
+
+TEST_F(TestGraph, ToJsonPropagatesSerializationDataError)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    ON_CALL(*_mockBackend, backendGetSerializedJsonGraphExt(_, _, _, _))
+        .WillByDefault(
+            [](hipdnnBackendDescriptor_t, size_t requestedSize, size_t* graphByteSize, char*) {
+                *graphByteSize = 32;
+                if(requestedSize > 0)
+                {
+                    return HIPDNN_STATUS_INTERNAL_ERROR;
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    auto [jsonData, err] = graph.to_json();
+    EXPECT_TRUE(err.is_bad());
+}
+
+// ============================================================================
+// Round-trip serialization tests
+// ============================================================================
+
+// Helper: create a pointwise ReLU graph
+static void createPointwiseReluGraph(Graph& graph)
+{
+    graph.set_name("PointwiseReluGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_dim({1, 3, 8, 8})
+        .set_stride({192, 64, 8, 1})
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes attrs;
+    attrs.set_name("Relu");
+    attrs.set_mode(PointwiseMode::RELU_FWD);
+
+    auto y = graph.pointwise(x, attrs);
+    y->set_output(true).set_uid(2);
+}
+
+// Helper: create a conv fprop graph
+static void createConvFpropGraph(Graph& graph)
+{
+    graph.set_name("ConvFpropGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_dim({1, 3, 32, 32})
+        .set_stride({3072, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(2)
+        .set_name("W")
+        .set_dim({64, 3, 3, 3})
+        .set_stride({27, 9, 3, 1})
+        .set_data_type(DataType::FLOAT);
+
+    ConvFpropAttributes attrs;
+    attrs.set_name("ConvFwd");
+    attrs.set_pre_padding({1, 1});
+    attrs.set_post_padding({1, 1});
+    attrs.set_stride({1, 1});
+    attrs.set_dilation({1, 1});
+
+    auto y = graph.conv_fprop(x, w, attrs);
+    y->set_output(true).set_uid(3);
+}
+
+// Helper: create a pointwise ADD graph (binary op)
+static void createPointwiseAddGraph(Graph& graph)
+{
+    graph.set_name("PointwiseAddGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_dim({2, 4, 16, 16})
+        .set_stride({1024, 256, 16, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto y = std::make_shared<TensorAttributes>();
+    y->set_uid(2)
+        .set_name("Y")
+        .set_dim({2, 4, 16, 16})
+        .set_stride({1024, 256, 16, 1})
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes attrs;
+    attrs.set_name("Add");
+    attrs.set_mode(PointwiseMode::ADD);
+
+    auto out = graph.pointwise(x, y, attrs);
+    out->set_output(true).set_uid(3);
+}
+
+// Helper: create a conv dgrad graph
+static void createConvDgradGraph(Graph& graph)
+{
+    graph.set_name("ConvDgradGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_uid(1)
+        .set_name("DY")
+        .set_dim({1, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(2)
+        .set_name("W")
+        .set_dim({64, 3, 3, 3})
+        .set_stride({27, 9, 3, 1})
+        .set_data_type(DataType::FLOAT);
+
+    ConvDgradAttributes attrs;
+    attrs.set_name("ConvDgrad");
+    attrs.set_pre_padding({1, 1});
+    attrs.set_post_padding({1, 1});
+    attrs.set_stride({1, 1});
+    attrs.set_dilation({1, 1});
+
+    auto dx = graph.conv_dgrad(dy, w, attrs);
+    dx->set_output(true).set_uid(3);
+}
+
+// Type to hold a graph builder function and a descriptive name
+struct GraphTopologyParam
+{
+    std::string name;
+    std::function<void(Graph&)> builder;
+
+    friend std::ostream& operator<<(std::ostream& os, const GraphTopologyParam& p)
+    {
+        return os << p.name;
+    }
+};
+
+class TestGraphSerializationRoundTrip : public TestGraph,
+                                        public ::testing::WithParamInterface<GraphTopologyParam>
+{
+};
+
+TEST_P(TestGraphSerializationRoundTrip, BinaryRoundTrip)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    const auto& param = GetParam();
+
+    // Build the graph
+    Graph graph;
+    param.builder(graph);
+
+    // Mock binary serialization to return deterministic fake data
+    const std::vector<uint8_t> fakeSerializedData = {0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE};
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault([&fakeSerializedData](hipdnnBackendDescriptor_t,
+                                             size_t requestedSize,
+                                             size_t* graphByteSize,
+                                             uint8_t* data) {
+            *graphByteSize = fakeSerializedData.size();
+            if(data != nullptr && requestedSize >= fakeSerializedData.size())
+            {
+                std::memcpy(data, fakeSerializedData.data(), fakeSerializedData.size());
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Serialize
+    auto [data, serErr] = graph.to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    ASSERT_FALSE(data.empty());
+    EXPECT_EQ(data, fakeSerializedData);
+
+    // Mock deserialization to capture what gets forwarded
+    std::vector<uint8_t> capturedData;
+
+    ON_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillByDefault([&capturedData](hipdnnBackendDescriptor_t*,
+                                       const uint8_t* serializedGraph,
+                                       size_t graphByteSize) {
+            capturedData.assign(serializedGraph, serializedGraph + graphByteSize);
+            // Return error so we don't need to mock the full unpack chain
+            return HIPDNN_STATUS_INTERNAL_ERROR;
+        });
+
+    // Deserialize via from_binary
+    Graph graph2;
+    auto desErr = graph2.from_binary(_handle, data);
+
+    // The data should be forwarded correctly to the backend even if unpack fails
+    EXPECT_EQ(capturedData, fakeSerializedData);
+}
+
+TEST_P(TestGraphSerializationRoundTrip, JsonRoundTrip)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    const auto& param = GetParam();
+
+    // Build the graph
+    Graph graph;
+    param.builder(graph);
+
+    // Mock JSON serialization to return fake JSON
+    const char* fakeJsonStr = R"({"topology": "test", "name": "round-trip"})";
+
+    ON_CALL(*_mockBackend, backendGetSerializedJsonGraphExt(_, _, _, _))
+        .WillByDefault([fakeJsonStr](hipdnnBackendDescriptor_t,
+                                     size_t requestedSize,
+                                     size_t* graphByteSize,
+                                     char* data) {
+            auto len = std::strlen(fakeJsonStr) + 1;
+            *graphByteSize = len;
+            if(data != nullptr && requestedSize >= len)
+            {
+                std::strcpy(data, fakeJsonStr);
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Serialize
+    auto [jsonData, serErr] = graph.to_json();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    ASSERT_FALSE(jsonData.empty());
+    EXPECT_EQ(jsonData, fakeJsonStr);
+
+    // Mock deserialization to capture what gets forwarded
+    std::string capturedJson;
+
+    ON_CALL(*_mockBackend, backendCreateAndDeserializeJsonGraphExt(_, _, _))
+        .WillByDefault([&capturedJson](
+                           hipdnnBackendDescriptor_t*, const char* jsonGraph, size_t jsonByteSize) {
+            capturedJson = std::string(jsonGraph, jsonByteSize);
+            return HIPDNN_STATUS_INTERNAL_ERROR;
+        });
+
+    // Deserialize via from_json
+    Graph graph2;
+    auto desErr = graph2.from_json(_handle, jsonData);
+
+    // The data should be forwarded correctly to the backend even if unpack fails
+    EXPECT_EQ(capturedJson, jsonData);
+}
+
+// NOLINTNEXTLINE(cert-err58-cpp)
+INSTANTIATE_TEST_SUITE_P(
+    GraphTopologies,
+    TestGraphSerializationRoundTrip,
+    ::testing::Values(GraphTopologyParam{"BatchnormInference",
+                                         [](Graph& g) { createBasicBatchnormGraph(g); }},
+                      GraphTopologyParam{"PointwiseRelu", createPointwiseReluGraph},
+                      GraphTopologyParam{"ConvFprop", createConvFpropGraph},
+                      GraphTopologyParam{"PointwiseAdd", createPointwiseAddGraph},
+                      GraphTopologyParam{"ConvDgrad", createConvDgradGraph}),
+    [](const ::testing::TestParamInfo<GraphTopologyParam>& info) { return info.param.name; });

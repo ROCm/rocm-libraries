@@ -213,7 +213,7 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, BlockScaleDequantizeTen
 // Builds a BlockScaleDequantize graph, serializes to binary, creates a
 // backend descriptor from bytes (no handle, no finalize), calls
 // fromBackendDescriptor(), and verifies all fields survive the
-// FlatBuffer-direct path.
+// backend binary serialization path.
 TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting,
        BlockScaleDequantizeLiftWithoutFinalization)
 {

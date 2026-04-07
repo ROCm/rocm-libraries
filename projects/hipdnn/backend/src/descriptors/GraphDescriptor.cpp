@@ -453,7 +453,14 @@ std::string GraphDescriptor::getSerializedJsonGraph() const
     }
 
     auto data = getSerializedGraph();
-    auto* graph = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Graph>(data.ptr);
+
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(data.ptr), data.size);
+    THROW_IF_FALSE(hipdnn_data_sdk::data_objects::VerifyGraphBuffer(verifier),
+                   HIPDNN_STATUS_INTERNAL_ERROR,
+                   "GraphDescriptor::getSerializedJsonGraph: serialized graph failed verification");
+
+    auto* graph = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Graph>(
+        static_cast<const uint8_t*>(data.ptr));
     const nlohmann::json j = *graph;
     _cachedJsonGraph = j.dump();
     return _cachedJsonGraph;

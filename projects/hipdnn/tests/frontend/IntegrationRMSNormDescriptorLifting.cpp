@@ -327,7 +327,7 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormTensorSharingPreserved)
 
 // Builds an rmsnorm graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// the rmsnorm operation survives the FlatBuffer-direct deserialization path.
+// the rmsnorm operation survives the backend binary serialization path.
 TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormLiftWithoutFinalization)
 {
     auto graph = buildTrainingGraph();

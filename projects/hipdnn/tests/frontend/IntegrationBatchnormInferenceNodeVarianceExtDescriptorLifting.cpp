@@ -289,7 +289,7 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
 
 // Builds a BatchnormInferenceVarianceExt graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all fields survive the FlatBuffer-direct path.
+// all fields survive the backend binary serialization path.
 TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
        BatchnormInferenceVarianceExtLiftWithoutFinalization)
 {

@@ -19,6 +19,7 @@
 
 #include "attributes/TensorAttributes.hpp"
 #include <hipdnn_backend.h>
+#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <numeric>

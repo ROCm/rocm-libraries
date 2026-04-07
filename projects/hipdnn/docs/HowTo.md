@@ -268,7 +268,7 @@ If you used `--mode full`, the generator produces frontend attributes, node, and
 
 2. **Create Attribute Classes**
    - Add corresponding attribute classes in [`frontend/include/hipdnn_frontend/attributes/`](../frontend/include/hipdnn_frontend/attributes/)
-   - These wrap the FlatBuffer-generated structures
+   - These define operation-specific parameters for the frontend
 
 3. **Update Frontend Tests**
    - Add tests for your new node and attributes

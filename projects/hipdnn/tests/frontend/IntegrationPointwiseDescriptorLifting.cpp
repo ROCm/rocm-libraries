@@ -292,7 +292,7 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseTernarySelectRoundTrip)
 
 // Builds a pointwise graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle), calls fromBackendDescriptor(), and verifies the
-// pointwise operation survives the FlatBuffer-direct deserialization path.
+// pointwise operation survives the backend binary serialization path.
 TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseLiftWithoutFinalization)
 {
     auto graph = std::make_shared<TestableGraph>();

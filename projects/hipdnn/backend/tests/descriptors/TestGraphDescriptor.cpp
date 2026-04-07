@@ -34,6 +34,17 @@ public:
         EXPECT_EQ(graph.tensors.size(), 0);
         EXPECT_EQ(graph.nodes.size(), 0);
     }
+
+    static void verifyGraphsEquivalent(const hipdnn_data_sdk::data_objects::GraphT& graph1,
+                                       const hipdnn_data_sdk::data_objects::GraphT& graph2)
+    {
+        EXPECT_EQ(graph1.name, graph2.name);
+        EXPECT_EQ(graph1.compute_data_type, graph2.compute_data_type);
+        EXPECT_EQ(graph1.intermediate_data_type, graph2.intermediate_data_type);
+        EXPECT_EQ(graph1.io_data_type, graph2.io_data_type);
+        EXPECT_EQ(graph1.tensors.size(), graph2.tensors.size());
+        EXPECT_EQ(graph1.nodes.size(), graph2.nodes.size());
+    }
 };
 
 TEST_F(TestGraphDescriptor, SerializeDeserializeGraph)
@@ -214,12 +225,7 @@ TEST_F(TestGraphDescriptor, JsonRoundTrip)
     auto graph2
         = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary2.ptr));
 
-    EXPECT_EQ(graph1->name, graph2->name);
-    EXPECT_EQ(graph1->compute_data_type, graph2->compute_data_type);
-    EXPECT_EQ(graph1->intermediate_data_type, graph2->intermediate_data_type);
-    EXPECT_EQ(graph1->io_data_type, graph2->io_data_type);
-    EXPECT_EQ(graph1->tensors.size(), graph2->tensors.size());
-    EXPECT_EQ(graph1->nodes.size(), graph2->nodes.size());
+    verifyGraphsEquivalent(*graph1, *graph2);
 }
 
 // ============================================================================
@@ -313,7 +319,7 @@ TEST_F(TestGraphDescriptor, JsonSerializeOversizedBuffer)
 TEST_F(TestGraphDescriptor, JsonDeserializeNullInput)
 {
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto status = hipdnnBackendCreateAndDeserializeJsonGraph_ext(&desc, nullptr, 0);
+    auto status = hipdnnBackendCreateAndDeserializeJsonGraph_ext(&desc, nullptr, 1);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -368,12 +374,7 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaApi)
     auto graph2
         = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary2.ptr));
 
-    EXPECT_EQ(graph1->name, graph2->name);
-    EXPECT_EQ(graph1->compute_data_type, graph2->compute_data_type);
-    EXPECT_EQ(graph1->intermediate_data_type, graph2->intermediate_data_type);
-    EXPECT_EQ(graph1->io_data_type, graph2->io_data_type);
-    EXPECT_EQ(graph1->tensors.size(), graph2->tensors.size());
-    EXPECT_EQ(graph1->nodes.size(), graph2->nodes.size());
+    verifyGraphsEquivalent(*graph1, *graph2);
 
     hipdnnBackendDestroyDescriptor(desc1);
     hipdnnBackendDestroyDescriptor(desc2);
@@ -426,4 +427,47 @@ TEST_F(TestGraphDescriptor, JsonCacheInvalidatedOnDeserialize)
     // Verify the JSON reflects graph B, not the stale graph A
     auto parsed = nlohmann::json::parse(jsonB);
     EXPECT_EQ(parsed["name"], "graphB");
+}
+
+// ============================================================================
+// Binary/JSON serialization error-path tests
+// ============================================================================
+
+TEST_F(TestGraphDescriptor, BinarySerializeNullDescriptor)
+{
+    size_t size = 0;
+    auto status = hipdnnBackendGetSerializedBinaryGraph_ext(nullptr, 0, &size, nullptr);
+    EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST_F(TestGraphDescriptor, BinarySerializeEmptyGraph)
+{
+    // Create a graph descriptor with no operations via the C API
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto status = hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &desc);
+    ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
+    ASSERT_NE(desc, nullptr);
+
+    // Attempting to serialize a graph with no operations should fail
+    size_t size = 0;
+    status = hipdnnBackendGetSerializedBinaryGraph_ext(desc, 0, &size, nullptr);
+    EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
+
+    hipdnnBackendDestroyDescriptor(desc);
+}
+
+TEST_F(TestGraphDescriptor, JsonSerializeEmptyGraph)
+{
+    // Create a graph descriptor with no operations via the C API
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto status = hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &desc);
+    ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
+    ASSERT_NE(desc, nullptr);
+
+    // Attempting to serialize a graph with no operations should fail
+    size_t size = 0;
+    status = hipdnnBackendGetSerializedJsonGraph_ext(desc, 0, &size, nullptr);
+    EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
+
+    hipdnnBackendDestroyDescriptor(desc);
 }

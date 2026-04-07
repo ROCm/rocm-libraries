@@ -329,7 +329,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, AutoAssignedUidsPreserved
 
 // Builds a BSQ graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all BSQ fields survive the FlatBuffer-direct path.
+// all BSQ fields survive the backend binary serialization path.
 TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BsqLiftWithoutFinalization)
 {
     auto originalGraph = buildBsqGraph();

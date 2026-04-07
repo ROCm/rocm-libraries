@@ -349,7 +349,7 @@ TEST_F(IntegrationCustomOpDescriptorLifting, AutoAssignedUidsPreservedInRoundTri
 
 // Builds a custom op graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all custom op fields survive the FlatBuffer-direct path.
+// all custom op fields survive the backend binary serialization path.
 TEST_F(IntegrationCustomOpDescriptorLifting, CustomOpLiftWithoutFinalization)
 {
     auto originalGraph = buildCustomOpGraph();

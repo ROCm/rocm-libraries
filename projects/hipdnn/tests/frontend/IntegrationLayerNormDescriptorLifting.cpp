@@ -364,7 +364,7 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormTensorSharingPreserved)
 
 // Builds a layernorm graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// the layernorm operation survives the FlatBuffer-direct deserialization path.
+// the layernorm operation survives the backend binary serialization path.
 TEST_F(IntegrationLayerNormDescriptorLifting, LayernormLiftWithoutFinalization)
 {
     auto graph = buildTrainingGraph();

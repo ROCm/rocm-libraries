@@ -368,7 +368,7 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAutoAssignedUidsPreserved
 
 // Builds a conv fprop graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all conv fprop fields survive the FlatBuffer-direct path.
+// all conv fprop fields survive the backend binary serialization path.
 TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropLiftWithoutFinalization)
 {
     auto originalGraph = buildConvFpropGraph();

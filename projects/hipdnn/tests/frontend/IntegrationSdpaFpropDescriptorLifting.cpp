@@ -224,7 +224,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropTensorSharingPreserved)
 
 // Builds a SdpaFprop graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all fields survive the FlatBuffer-direct path.
+// all fields survive the backend binary serialization path.
 TEST_F(IntegrationSdpaFpropDescriptorLifting, SdpaFpropLiftWithoutFinalization)
 {
     auto originalGraph = buildGraph();

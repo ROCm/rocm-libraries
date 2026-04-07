@@ -132,7 +132,6 @@ void graph_bindings(nb::module_& m)
         .def("tensor", &graph::Graph::tensor, nb::rv_policy::reference)
         .def_static(
             "tensor_like", &graph::Graph::tensor_like, nb::arg("tensor"), nb::arg("name") = "")
-#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
         .def(
             "to_json",
             [](graph::Graph& g) {
@@ -146,12 +145,39 @@ void graph_bindings(nb::module_& m)
             "Serialize the graph to a JSON string")
         .def(
             "from_json",
-            [](graph::Graph& g, const std::string& jsonStr) {
-                return g.deserialize(nullptr, jsonStr);
+            [](graph::Graph& g, nb::object handle, const std::string& jsonStr) {
+                auto handlePtr = handle.attr("get")();
+                hipdnnHandle_t rawHandle
+                    = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+                return g.deserialize(rawHandle, jsonStr);
             },
+            nb::arg("handle"),
             nb::arg("json_string"),
             "Deserialize a graph from a JSON string. "
             "Call build_operation_graph(handle) after to finalize for execution.")
-#endif
-        ;
+        .def(
+            "to_binary",
+            [](graph::Graph& g) {
+                auto [data, err] = g.to_binary();
+                if(err.is_bad())
+                {
+                    throw std::runtime_error(err.get_message());
+                }
+                return nb::bytes(reinterpret_cast<const char*>(data.data()), data.size());
+            },
+            "Serialize the graph to binary bytes")
+        .def(
+            "from_binary",
+            [](graph::Graph& g, nb::object handle, nb::bytes data) {
+                auto handlePtr = handle.attr("get")();
+                hipdnnHandle_t rawHandle
+                    = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+                auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());
+                std::vector<uint8_t> vec(ptr, ptr + data.size());
+                return g.deserialize(rawHandle, vec);
+            },
+            nb::arg("handle"),
+            nb::arg("data"),
+            "Deserialize a graph from binary bytes. "
+            "Call build_operation_graph(handle) after to finalize for execution.");
 }

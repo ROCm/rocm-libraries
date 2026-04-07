@@ -1087,8 +1087,6 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    /// @cond INTERNAL
-
     // ── Binary serialization (always available) ─────────────────────────
 
     /// Serialize a graph to a binary byte vector, auto-lowering if needed.
@@ -1144,6 +1142,14 @@ public:
         std::vector<uint8_t> data;
         auto err = serialize(data);
         return {std::move(data), std::move(err)};
+    }
+
+    /// Convenience wrapper around deserialize() for API symmetry with to_binary().
+    /// Deserializes a graph from a binary byte vector, finalizing with the given handle.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error from_binary(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
+    {
+        return deserialize(handle, data);
     }
 
     /// Deserialize a graph from a binary byte vector with handle (finalizes).
@@ -1239,6 +1245,14 @@ public:
         return {std::move(jsonData), std::move(err)};
     }
 
+    /// Convenience wrapper around deserialize() for API symmetry with to_json().
+    /// Deserializes a graph from a JSON string, finalizing with the given handle.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error from_json(hipdnnHandle_t handle, const std::string& json)
+    {
+        return deserialize(handle, json);
+    }
+
     /// Deserialize a graph from a JSON string with handle (finalizes).
     Error deserialize(hipdnnHandle_t handle, const std::string& jsonData)
     {
@@ -1331,8 +1345,6 @@ public:
         }
     }
 #endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
-
-    /// @endcond
 
     /**
      * @brief Finalize the execution plan

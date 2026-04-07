@@ -393,7 +393,7 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormTensorSharingPreserved)
 
 // Builds a full batchnorm graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all batchnorm fields survive the FlatBuffer-direct path.
+// all batchnorm fields survive the backend binary serialization path.
 TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormLiftWithoutFinalization)
 {
     auto originalGraph = buildBatchnormGraph();

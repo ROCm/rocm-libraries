@@ -45,7 +45,7 @@
 
 #### Third-Party Libraries
 The following libraries are automatically managed by CMake (see [Dependencies.cmake](../cmake/Dependencies.cmake)):
-- [FlatBuffers](https://github.com/google/flatbuffers) - Serialization library
+- [FlatBuffers](https://github.com/google/flatbuffers) - Serialization library (used by backend and data_sdk)
 - [Google Test](https://github.com/google/googletest) - Unit testing framework
 - [spdlog](https://github.com/gabime/spdlog) - Logging library
 - [nlohmann_json](https://github.com/nlohmann/json) - JSON serialization (optional, see [Disabling JSON Support](#disabling-json-support))
