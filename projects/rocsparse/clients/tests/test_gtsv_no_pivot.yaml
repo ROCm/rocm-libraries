@@ -134,6 +134,24 @@ Tests:
   denseld: [768164]
   matrix: [rocsparse_matrix_random]
 
+- name: gtsv_no_pivot
+  category: nightly
+  function: gtsv_no_pivot
+  precision: *double_only_precisions
+  M: [17123456, 24134524]
+  N: [8]
+  denseld: [24134524]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot
+  category: nightly
+  function: gtsv_no_pivot
+  precision: *single_only_precisions
+  M: [100500200]
+  N: [1]
+  denseld: [100500200]
+  matrix: [rocsparse_matrix_random]
+
 # Stress
 - name: gtsv_no_pivot
   category: stress
@@ -260,4 +278,14 @@ Tests:
   M: [2048]
   N: [1125000]
   denseld: [2048]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot
+  category: stress
+  hardware: [gfx942, gfx950]
+  function: gtsv_no_pivot
+  precision: *single_only_precisions
+  M: [1005002000]
+  N: [1]
+  denseld: [1005002000]
   matrix: [rocsparse_matrix_random]

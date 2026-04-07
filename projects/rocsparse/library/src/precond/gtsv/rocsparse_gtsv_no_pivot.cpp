@@ -626,6 +626,8 @@ namespace rocsparse
                                                    gtsv_no_pivot_buffer_data<T>* buffer_data,
                                                    int                           level)
     {
+        std::cout << "level: " << level << std::endl;
+
         ROCSPARSE_ROUTINE_TRACE;
 
         constexpr int BLOCKSIZE  = determine_spike_solver_blocksize();
