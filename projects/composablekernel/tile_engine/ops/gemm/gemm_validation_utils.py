@@ -4,7 +4,7 @@
 import logging
 from typing import Tuple, List
 
-GEMM_PIPELINES = ["mem", "compv3", "compv4"]
+GEMM_PIPELINES = ["mem", "compv3", "compv4", "regv1"]
 
 GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2"]
 

@@ -44,6 +44,9 @@ def normalize_gpu_targets(raw_targets):
 
 class FlatmmKernelBuilder(GemmKernelBuilder):
     SUPPORTED_GPU_TARGETS = ["gfx90a", "gfx942", "gfx950"]
+    DEFAULT_VECTOR_LOAD_SIZE_BYTES = 16
+    DEFAULT_SMEM_CAPACITY_BYTES = 65536
+    GFX950_SMEM_CAPACITY_BYTES = 163840
 
     def __init__(self, working_path, gpu_target, datatype, layout, config_json):
         self.gpu_targets = normalize_gpu_targets(gpu_target)
@@ -62,6 +65,123 @@ class FlatmmKernelBuilder(GemmKernelBuilder):
         config["target_archs"] = list(target_archs)
         return config
 
+    @staticmethod
+    def _get_wave_size(gpu_target):
+        if gpu_target.startswith("gfx9"):
+            return 64
+        return 32
+
+    @staticmethod
+    def _get_element_size_bytes(datatype):
+        element_sizes = {
+            "fp16": 2,
+            "bf16": 2,
+            "fp8": 1,
+            "bf8": 1,
+            "int8": 1,
+            "fp32": 4,
+            "fp64": 8,
+        }
+        return element_sizes.get(datatype)
+
+    @staticmethod
+    def _get_smem_capacity_bytes(gpu_target):
+        if gpu_target == "gfx950":
+            return FlatmmKernelBuilder.GFX950_SMEM_CAPACITY_BYTES
+        return FlatmmKernelBuilder.DEFAULT_SMEM_CAPACITY_BYTES
+
+    def _get_k_per_thread(self, warp_tile_m, warp_tile_k, gpu_target):
+        return (warp_tile_m * warp_tile_k) // self._get_wave_size(gpu_target)
+
+    def _is_valid_flatmm_vector_load(self, warp_tile_m, warp_tile_k, gpu_target):
+        element_size = self._get_element_size_bytes(self.datatype)
+        if element_size is None:
+            return True
+
+        dsread_bytes_per_wave = (
+            warp_tile_m
+            * warp_tile_k
+            * element_size
+            // self._get_wave_size(gpu_target)
+        )
+        return (
+            dsread_bytes_per_wave % self.DEFAULT_VECTOR_LOAD_SIZE_BYTES == 0
+        )
+
+    def _get_flatmm_pipeline_smem_bytes(
+        self, tile_m, tile_k, warp_tile_m, warp_tile_n, warp_tile_k, gpu_target
+    ):
+        element_size = self._get_element_size_bytes(self.datatype)
+        if element_size is None:
+            return 0
+
+        vector_load_elements = self.DEFAULT_VECTOR_LOAD_SIZE_BYTES // element_size
+        k_per_thread = self._get_k_per_thread(warp_tile_m, warp_tile_k, gpu_target)
+        k_pack = min(k_per_thread, vector_load_elements)
+
+        if warp_tile_m == 16 and warp_tile_n == 16:
+            smem_elements = tile_m * tile_k
+        else:
+            smem_elements = (tile_m + 1) * tile_k - k_pack
+
+        return smem_elements * element_size
+
+    def _is_valid_flatmm_lds_capacity(
+        self,
+        tile_m,
+        tile_k,
+        warp_tile_m,
+        warp_tile_n,
+        warp_tile_k,
+        gpu_target,
+    ):
+        flatmm_pipeline_smem = self._get_flatmm_pipeline_smem_bytes(
+            tile_m, tile_k, warp_tile_m, warp_tile_n, warp_tile_k, gpu_target
+        )
+        total_smem = 2 * flatmm_pipeline_smem
+        return total_smem <= self._get_smem_capacity_bytes(gpu_target)
+
+    def _validate_tile_config(
+        self,
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_k,
+        warp_tile_m,
+        warp_tile_n,
+        warp_tile_k,
+        pipeline,
+    ):
+        if not super()._validate_tile_config(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            pipeline,
+        ):
+            return False
+
+        gpu_target = self.gpu_targets[0] if self.gpu_targets else self.gpu_target
+        if not self._is_valid_flatmm_vector_load(
+            warp_tile_m, warp_tile_k, gpu_target
+        ):
+            return False
+
+        return self._is_valid_flatmm_lds_capacity(
+            tile_m,
+            tile_k,
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            gpu_target,
+        )
 
 def parse_tile_config(tile_config_str):
     tile_dims, warp_dims, warp_tile_dims = tile_config_str.split("_")
@@ -148,7 +268,7 @@ def main():
     if args.list_kernels:
         builder._list_kernels()
     elif args.gen_single:
-      # Generate a single kernel file input validation
+        # Generate a single kernel file input validation
         if not args.kernel_name or not args.tile_config or not args.trait_combo:
             parser.error(
                 "--gen_single requires --kernel_name, --tile_config, and --trait_combo"
@@ -157,18 +277,18 @@ def main():
         tile_config = parse_tile_config(args.tile_config)
         trait_combo = parse_trait_combo(args.trait_combo)
 
-        # Generate the kernel
+        # expected_name = builder._format_kernel_name(trait_combo, tile_config)
+        # if args.kernel_name != expected_name:
+        #     raise ValueError(
+        #         f"Kernel name mismatch: expected {expected_name}, got {args.kernel_name}"
+        #     )
+
         builder._generate_kernel_instance(
             tile_config,
             trait_combo,
         )
-    elif args.gen_all_individual:
-        # Generate all individual kernel files
-        builder._generate_all_individual(args.num_workers)
     else:
-        parser.error(
-            "Must specify one of: --list_kernels, --gen_all_individual, or --gen_single"
-        )
+        parser.error("Must specify one of: --list_kernels or --gen_single")
 
 
 if __name__ == "__main__":
