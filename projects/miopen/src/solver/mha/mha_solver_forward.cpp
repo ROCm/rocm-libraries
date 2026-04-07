@@ -210,21 +210,21 @@ ConvSolution MhaForward::GetSolution(const ExecutionContext& context,
                  fp32_ws,
                  true);
 
-            decltype(auto) softmax_kernel = handle_.Run(kernels.front());
-            softmax_kernel(fp32_ws,
-                           fp8_ws,
-                           dataFwd.mData,
-                           dataFwd.zInvData,
-                           dataFwd.biasData,
-                           dataFwd.amaxSData,
-                           dataFwd.descaleQData,
-                           dataFwd.descaleKData,
-                           dataFwd.scaleSData,
-                           dataFwd.dropoutSeedData,
-                           dataFwd.dropoutOffsetData,
-                           dataFwd.dropoutProbabilityData,
-                           seq_len,
-                           nhs);
+            decltype(auto) softmax_kernel_ = handle_.Run(kernels.front());
+            softmax_kernel_(fp32_ws,
+                            fp8_ws,
+                            dataFwd.mData,
+                            dataFwd.zInvData,
+                            dataFwd.biasData,
+                            dataFwd.amaxSData,
+                            dataFwd.descaleQData,
+                            dataFwd.descaleKData,
+                            dataFwd.scaleSData,
+                            dataFwd.dropoutSeedData,
+                            dataFwd.dropoutOffsetData,
+                            dataFwd.dropoutProbabilityData,
+                            seq_len,
+                            nhs);
 
             gemm(handle_,
                  false,
