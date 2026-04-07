@@ -4,7 +4,8 @@
 #include "pooling_common.hpp"
 
 // Matches legacy switch semantics:
-// TEST_GET_INPUT_TENSOR=0 uses predefined dataset inputs, TEST_GET_INPUT_TENSOR=1 uses get_inputs().
+// TEST_GET_INPUT_TENSOR=0 uses predefined dataset inputs, TEST_GET_INPUT_TENSOR=1 uses
+// get_inputs().
 #define TEST_GET_INPUT_TENSOR 0
 
 namespace {
