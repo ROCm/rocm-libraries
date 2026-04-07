@@ -251,6 +251,11 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getBnFwdInference3dTestCases())));
 
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInference3dFp32,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnFwdInference3dFullTestCases())));
+
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference3dBfp16);
 TEST_P(IntegrationGpuBatchnormForwardInference3dBfp16, Correctness)
 {
@@ -262,6 +267,11 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getBnFwdInference3dTestCases())));
 
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInference3dBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnFwdInference3dFullTestCases())));
+
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference3dFp16);
 TEST_P(IntegrationGpuBatchnormForwardInference3dFp16, Correctness)
 {
@@ -272,3 +282,8 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormForwardInference3dFp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getBnFwdInference3dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInference3dFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnFwdInference3dFullTestCases())));

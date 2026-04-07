@@ -318,6 +318,11 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getBnBwd3dTestCases())));
 
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackward3dFp32,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnBwd3dFullTestCases())));
+
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackward3dBfp16);
 TEST_P(IntegrationGpuBatchnormBackward3dBfp16, Correctness)
 {
@@ -329,6 +334,11 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getBnBwd3dTestCases())));
 
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackward3dBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnBwd3dFullTestCases())));
+
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackward3dFp16);
 TEST_P(IntegrationGpuBatchnormBackward3dFp16, Correctness)
 {
@@ -339,6 +349,11 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormBackward3dFp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getBnBwd3dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackward3dFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnBwd3dFullTestCases())));
 
 // ============================================================================
 // 1D Tests - CalcStats (no saved mean/inv_variance)
@@ -429,6 +444,11 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getBnBwd3dTestCases())));
 
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackwardCalcStats3dFp32,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnBwd3dFullTestCases())));
+
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardCalcStats3dBfp16);
 TEST_P(IntegrationGpuBatchnormBackwardCalcStats3dBfp16, Correctness)
 {
@@ -440,6 +460,11 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getBnBwd3dTestCases())));
 
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackwardCalcStats3dBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnBwd3dFullTestCases())));
+
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardCalcStats3dFp16);
 TEST_P(IntegrationGpuBatchnormBackwardCalcStats3dFp16, Correctness)
 {
@@ -450,3 +475,8 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormBackwardCalcStats3dFp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getBnBwd3dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackwardCalcStats3dFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnBwd3dFullTestCases())));

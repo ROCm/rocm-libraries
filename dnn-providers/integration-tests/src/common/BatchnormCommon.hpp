@@ -150,6 +150,16 @@ inline std::vector<BatchnormTestCase> getBnFwdInference3dTestCases()
     };
 }
 
+inline std::vector<BatchnormTestCase> getBnFwdInference3dFullTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 16, 8, 112, 112}, seed},
+        {{5, 256, 4, 14, 14}, seed},
+    };
+}
+
 inline std::vector<BatchnormTestCase> getBnBwdTestCases()
 {
     unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
@@ -180,6 +190,16 @@ inline std::vector<BatchnormTestCase> getBnBwd3dTestCases()
     return {
         {{2, 3, 3, 1, 1}, seed},
         {{16, 3, 8, 14, 14}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwd3dFullTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 16, 8, 112, 112}, seed},
+        {{5, 256, 4, 14, 14}, seed},
     };
 }
 
