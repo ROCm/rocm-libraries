@@ -23,10 +23,10 @@ PerformanceConfigLayernorm LayernormBase::GetDefaultPerformanceConfig(
 {
     PerformanceConfigLayernorm config;
     config.HeuristicInit(problem);
-    config.local_size           = PerformanceConfigLayernorm::default_local_size;
+    config.local_size           = PerformanceConfigLayernorm::default_local_size(problem);
     config.vectorized           = PerformanceConfigLayernorm::default_vectorized(problem);
-    config.separate_stride      = PerformanceConfigLayernorm::default_separate_stride;
-    config.stride_in_local_size = PerformanceConfigLayernorm::default_stride_in_local_size;
+    config.separate_stride      = PerformanceConfigLayernorm::default_separate_stride(problem);
+    config.stride_in_local_size = PerformanceConfigLayernorm::default_stride_in_local_size(problem);
     MIOPEN_LOG_I(config.ToString());
     return config;
 }
