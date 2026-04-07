@@ -435,7 +435,7 @@ If your project already calls `enable_testing()` (or uses `include(CTest)`, whic
 
 ### Integration with Install Support
 
-For projects that distribute test binaries (e.g., via TheRock), generate an install-time CTestTestfile.cmake, so that it can be installed to wherever the final test binaries are present.
+For projects that distribute test binaries (for example, via TheRock), generate an install-time CTestTestfile.cmake, so that it can be installed wherever the final test binaries are present.
 
 ```cmake
 set(ROCM_LIBRARIES_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
