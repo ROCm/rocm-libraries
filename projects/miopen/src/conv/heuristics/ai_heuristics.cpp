@@ -784,8 +784,7 @@ public:
 
         // Use fdeep to run TunaNet3D inference
         const std::string model_path = Model3DPath(device_name);
-        const auto model             = fdeep::load_model(model_path);
-
+        const auto model             = fdeep::load_model(model_path, true, fdeep::dev_null_logger);
         // Convert features to fdeep tensor
         const auto input_tensor = fdeep::tensor(fdeep::tensor_shape(features.size()), features);
         const auto result       = model.predict({input_tensor});

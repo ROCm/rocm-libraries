@@ -125,7 +125,7 @@ void LayernormOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                         arrayOfElements,
                         "LayernormOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT:
+    case HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -234,7 +234,7 @@ void LayernormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                         arrayOfElements,
                         "LayernormOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT:
+    case HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
@@ -260,7 +260,7 @@ void LayernormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   "LayernormOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_LAYERNORM,
+        getOperationType(HIPDNN_OPERATION_TYPE_LAYERNORM_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,
