@@ -81,10 +81,10 @@ public:
     int VerifyForward() override;
     ~ActivationDriver() override
     {
-
+        miopenDestroyTensorDescriptor(dOutputTensor);
+        miopenDestroyTensorDescriptor(dInputTensor);
         miopenDestroyTensorDescriptor(outputTensor);
         miopenDestroyTensorDescriptor(inputTensor);
-
         miopenDestroyActivationDescriptor(activDesc);
     }
 

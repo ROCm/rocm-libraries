@@ -4,6 +4,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 4.4.0 for ROCm 7.13
 
+### Added
+
+* Added type trait definitions for `__hip_bfloat16`. This should resolve issues where this type did not work with radix-based algorithms.
+
 ### Changed
 
 * Building benchmarks on Windows is not currently possible because of the dependency on AMD SMI. 

@@ -138,13 +138,13 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvFpropNode)
 
     const auto* convAttrs = graphT->nodes[0]->attributes.AsConvolutionFwdAttributes();
     ASSERT_NE(convAttrs, nullptr);
-    EXPECT_EQ(convAttrs->x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(convAttrs->w_tensor_uid, K_TENSOR_W_UID);
-    EXPECT_EQ(convAttrs->y_tensor_uid, K_TENSOR_Y_UID);
-    EXPECT_EQ(convAttrs->pre_padding, toVec(K_CONV_PADDING));
-    EXPECT_EQ(convAttrs->post_padding, toVec(K_CONV_PADDING));
-    EXPECT_EQ(convAttrs->stride, toVec(K_CONV_STRIDE));
-    EXPECT_EQ(convAttrs->dilation, toVec(K_CONV_DILATION));
+    EXPECT_EQ(convAttrs->x_tensor_uid, K_FPROP_TENSOR_X_UID);
+    EXPECT_EQ(convAttrs->w_tensor_uid, K_FPROP_TENSOR_W_UID);
+    EXPECT_EQ(convAttrs->y_tensor_uid, K_FPROP_TENSOR_Y_UID);
+    EXPECT_EQ(convAttrs->pre_padding, toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convAttrs->post_padding, toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convAttrs->stride, toVec(K_FPROP_CONV_STRIDE));
+    EXPECT_EQ(convAttrs->dilation, toVec(K_FPROP_CONV_DILATION));
 }
 
 TEST_F(TestGraphDescriptorLifting, DeserializePreservesMultipleNodes)
@@ -152,11 +152,11 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesMultipleNodes)
     auto conv1 = createDefaultConvOp();
 
     auto xDesc2 = createFinalizedTensor(
-        K_TENSOR_X2_UID, toVec(K_TENSOR_X2_DIMS), toVec(K_TENSOR_X2_STRIDES));
+        K_FPROP_TENSOR_X2_UID, toVec(K_FPROP_TENSOR_X2_DIMS), toVec(K_FPROP_TENSOR_X2_STRIDES));
     auto wDesc2 = createFinalizedTensor(
-        K_TENSOR_W2_UID, toVec(K_TENSOR_W2_DIMS), toVec(K_TENSOR_W2_STRIDES));
+        K_FPROP_TENSOR_W2_UID, toVec(K_FPROP_TENSOR_W2_DIMS), toVec(K_FPROP_TENSOR_W2_STRIDES));
     auto yDesc2 = createFinalizedTensor(
-        K_TENSOR_Y2_UID, toVec(K_TENSOR_Y2_DIMS), toVec(K_TENSOR_Y2_STRIDES));
+        K_FPROP_TENSOR_Y2_UID, toVec(K_FPROP_TENSOR_Y2_DIMS), toVec(K_FPROP_TENSOR_Y2_STRIDES));
     auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
 
     const std::vector<HipdnnBackendDescriptor*> ops = {conv1.convOp.get(), convOp2.get()};
@@ -174,15 +174,15 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesMultipleNodes)
 
     const auto* conv1Attrs = graphT->nodes[0]->attributes.AsConvolutionFwdAttributes();
     ASSERT_NE(conv1Attrs, nullptr);
-    EXPECT_EQ(conv1Attrs->x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(conv1Attrs->w_tensor_uid, K_TENSOR_W_UID);
-    EXPECT_EQ(conv1Attrs->y_tensor_uid, K_TENSOR_Y_UID);
+    EXPECT_EQ(conv1Attrs->x_tensor_uid, K_FPROP_TENSOR_X_UID);
+    EXPECT_EQ(conv1Attrs->w_tensor_uid, K_FPROP_TENSOR_W_UID);
+    EXPECT_EQ(conv1Attrs->y_tensor_uid, K_FPROP_TENSOR_Y_UID);
 
     const auto* conv2Attrs = graphT->nodes[1]->attributes.AsConvolutionFwdAttributes();
     ASSERT_NE(conv2Attrs, nullptr);
-    EXPECT_EQ(conv2Attrs->x_tensor_uid, K_TENSOR_X2_UID);
-    EXPECT_EQ(conv2Attrs->w_tensor_uid, K_TENSOR_W2_UID);
-    EXPECT_EQ(conv2Attrs->y_tensor_uid, K_TENSOR_Y2_UID);
+    EXPECT_EQ(conv2Attrs->x_tensor_uid, K_FPROP_TENSOR_X2_UID);
+    EXPECT_EQ(conv2Attrs->w_tensor_uid, K_FPROP_TENSOR_W2_UID);
+    EXPECT_EQ(conv2Attrs->y_tensor_uid, K_FPROP_TENSOR_Y2_UID);
 }
 
 TEST_F(TestGraphDescriptorLifting, DeserializePreservesTensorData)
@@ -200,25 +200,25 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesTensorData)
     ASSERT_EQ(graphT->tensors.size(), 3);
 
     // Find the X tensor by UID and verify its attributes
-    auto* xTensor = findTensorByUid(*graphT, K_TENSOR_X_UID);
+    auto* xTensor = findTensorByUid(*graphT, K_FPROP_TENSOR_X_UID);
     ASSERT_NE(xTensor, nullptr);
     EXPECT_EQ(xTensor->data_type, DataType::FLOAT);
-    EXPECT_EQ(xTensor->dims, toVec(K_TENSOR_X_DIMS));
-    EXPECT_EQ(xTensor->strides, toVec(K_TENSOR_X_STRIDES));
+    EXPECT_EQ(xTensor->dims, toVec(K_FPROP_TENSOR_X_DIMS));
+    EXPECT_EQ(xTensor->strides, toVec(K_FPROP_TENSOR_X_STRIDES));
 
     // Find the W tensor by UID and verify its attributes
-    auto* wTensor = findTensorByUid(*graphT, K_TENSOR_W_UID);
+    auto* wTensor = findTensorByUid(*graphT, K_FPROP_TENSOR_W_UID);
     ASSERT_NE(wTensor, nullptr);
     EXPECT_EQ(wTensor->data_type, DataType::FLOAT);
-    EXPECT_EQ(wTensor->dims, toVec(K_TENSOR_W_DIMS));
-    EXPECT_EQ(wTensor->strides, toVec(K_TENSOR_W_STRIDES));
+    EXPECT_EQ(wTensor->dims, toVec(K_FPROP_TENSOR_W_DIMS));
+    EXPECT_EQ(wTensor->strides, toVec(K_FPROP_TENSOR_W_STRIDES));
 
     // Find the Y tensor by UID and verify its attributes
-    auto* yTensor = findTensorByUid(*graphT, K_TENSOR_Y_UID);
+    auto* yTensor = findTensorByUid(*graphT, K_FPROP_TENSOR_Y_UID);
     ASSERT_NE(yTensor, nullptr);
     EXPECT_EQ(yTensor->data_type, DataType::FLOAT);
-    EXPECT_EQ(yTensor->dims, toVec(K_TENSOR_Y_DIMS));
-    EXPECT_EQ(yTensor->strides, toVec(K_TENSOR_Y_STRIDES));
+    EXPECT_EQ(yTensor->dims, toVec(K_FPROP_TENSOR_Y_DIMS));
+    EXPECT_EQ(yTensor->strides, toVec(K_FPROP_TENSOR_Y_STRIDES));
 }
 
 TEST_F(TestGraphDescriptorLifting, DeserializePreservesGraphLevelAttributes)
@@ -310,9 +310,9 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesNodeTensorUids)
     // Verify the node has ConvolutionFwdAttributes with correct tensor UIDs
     const auto* convAttrs = graphT->nodes[0]->attributes.AsConvolutionFwdAttributes();
     ASSERT_NE(convAttrs, nullptr);
-    EXPECT_EQ(convAttrs->x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(convAttrs->w_tensor_uid, K_TENSOR_W_UID);
-    EXPECT_EQ(convAttrs->y_tensor_uid, K_TENSOR_Y_UID);
+    EXPECT_EQ(convAttrs->x_tensor_uid, K_FPROP_TENSOR_X_UID);
+    EXPECT_EQ(convAttrs->w_tensor_uid, K_FPROP_TENSOR_W_UID);
+    EXPECT_EQ(convAttrs->y_tensor_uid, K_FPROP_TENSOR_Y_UID);
 
     // Verify the tensor UIDs in the tensor list
     std::set<int64_t> tensorUids;
@@ -320,20 +320,20 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesNodeTensorUids)
     {
         tensorUids.insert(tensor->uid);
     }
-    EXPECT_EQ(tensorUids.count(K_TENSOR_X_UID), 1u);
-    EXPECT_EQ(tensorUids.count(K_TENSOR_W_UID), 1u);
-    EXPECT_EQ(tensorUids.count(K_TENSOR_Y_UID), 1u);
+    EXPECT_EQ(tensorUids.count(K_FPROP_TENSOR_X_UID), 1u);
+    EXPECT_EQ(tensorUids.count(K_FPROP_TENSOR_W_UID), 1u);
+    EXPECT_EQ(tensorUids.count(K_FPROP_TENSOR_Y_UID), 1u);
     EXPECT_EQ(tensorUids.size(), 3u);
 }
 
 TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionParameters)
 {
     // Create a conv op with non-default parameters
-    auto xDesc = createFinalizedTensor(K_TENSOR_X_UID);
-    auto wDesc
-        = createFinalizedTensor(K_TENSOR_W_UID, toVec(K_TENSOR_W_DIMS), toVec(K_TENSOR_W_STRIDES));
-    auto yDesc
-        = createFinalizedTensor(K_TENSOR_Y_UID, toVec(K_TENSOR_Y_DIMS), toVec(K_TENSOR_Y_STRIDES));
+    auto xDesc = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
+    auto wDesc = createFinalizedTensor(
+        K_FPROP_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
+    auto yDesc = createFinalizedTensor(
+        K_FPROP_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
 
     auto convWrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
     auto convDesc = convWrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
@@ -372,7 +372,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionParameters)
     auto computeType = HIPDNN_DATA_HALF;
     convDesc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    hipdnnConvolutionMode_t convMode = HIPDNN_CROSS_CORRELATION;
     convDesc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     convDesc->finalize();
@@ -400,13 +400,13 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionParameters)
 
 TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionModeConvolution)
 {
-    // Verify HIPDNN_CONVOLUTION_MODE_CONVOLUTION round-trips correctly
+    // Verify HIPDNN_CONVOLUTION round-trips correctly
     // (contrasting with CROSS_CORRELATION tested in DeserializePreservesConvolutionParameters)
-    auto xDesc = createFinalizedTensor(K_TENSOR_X_UID);
-    auto wDesc
-        = createFinalizedTensor(K_TENSOR_W_UID, toVec(K_TENSOR_W_DIMS), toVec(K_TENSOR_W_STRIDES));
-    auto yDesc
-        = createFinalizedTensor(K_TENSOR_Y_UID, toVec(K_TENSOR_Y_DIMS), toVec(K_TENSOR_Y_STRIDES));
+    auto xDesc = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
+    auto wDesc = createFinalizedTensor(
+        K_FPROP_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
+    auto yDesc = createFinalizedTensor(
+        K_FPROP_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
 
     auto convWrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
     auto convDesc = convWrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
@@ -446,7 +446,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionModeConvolutio
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     // Use CONVOLUTION mode (not CROSS_CORRELATION)
-    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION;
     convDesc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     convDesc->finalize();
@@ -628,9 +628,9 @@ TEST_F(TestGraphDescriptorLifting, FlatBufferFlowFinalizePreservesSerialization)
     ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
 
     // Spot-check tensor dims
-    auto* xTensor = findTensorByUid(*graphT, K_TENSOR_X_UID);
+    auto* xTensor = findTensorByUid(*graphT, K_FPROP_TENSOR_X_UID);
     ASSERT_NE(xTensor, nullptr);
-    EXPECT_EQ(xTensor->dims, toVec(K_TENSOR_X_DIMS));
+    EXPECT_EQ(xTensor->dims, toVec(K_FPROP_TENSOR_X_DIMS));
 }
 
 TEST_F(TestGraphDescriptorLifting, GetAttributeWrongTypeForOpsOnCApiFlow)
@@ -672,11 +672,11 @@ TEST_F(TestGraphDescriptorLifting, GetAttributeRequestedCountTooSmallOnCApiFlow)
     auto conv1 = createDefaultConvOp();
 
     auto xDesc2 = createFinalizedTensor(
-        K_TENSOR_X2_UID, toVec(K_TENSOR_X2_DIMS), toVec(K_TENSOR_X2_STRIDES));
+        K_FPROP_TENSOR_X2_UID, toVec(K_FPROP_TENSOR_X2_DIMS), toVec(K_FPROP_TENSOR_X2_STRIDES));
     auto wDesc2 = createFinalizedTensor(
-        K_TENSOR_W2_UID, toVec(K_TENSOR_W2_DIMS), toVec(K_TENSOR_W2_STRIDES));
+        K_FPROP_TENSOR_W2_UID, toVec(K_FPROP_TENSOR_W2_DIMS), toVec(K_FPROP_TENSOR_W2_STRIDES));
     auto yDesc2 = createFinalizedTensor(
-        K_TENSOR_Y2_UID, toVec(K_TENSOR_Y2_DIMS), toVec(K_TENSOR_Y2_STRIDES));
+        K_FPROP_TENSOR_Y2_UID, toVec(K_FPROP_TENSOR_Y2_DIMS), toVec(K_FPROP_TENSOR_Y2_STRIDES));
     auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
 
     auto graphWrapper = createDescriptor<GraphDescriptor>();

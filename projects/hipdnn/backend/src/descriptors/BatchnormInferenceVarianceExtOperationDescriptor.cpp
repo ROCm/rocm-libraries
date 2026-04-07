@@ -236,7 +236,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::getAttribute(
                   "BatchnormInferenceVarianceExtOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE,
+        getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,

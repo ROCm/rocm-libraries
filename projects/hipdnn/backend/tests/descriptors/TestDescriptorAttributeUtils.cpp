@@ -402,7 +402,7 @@ TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnNullErrorPrefix)
 {
     using hipdnn_data_sdk::data_objects::ConvMode;
     auto target = ConvMode::UNSET;
-    auto value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    auto value = HIPDNN_CROSS_CORRELATION;
 
     ASSERT_THROW_HIPDNN_STATUS(
         setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &value, nullptr),
@@ -413,7 +413,7 @@ TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnWrongAttributeType)
 {
     using hipdnn_data_sdk::data_objects::ConvMode;
     auto target = ConvMode::UNSET;
-    auto value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    auto value = HIPDNN_CROSS_CORRELATION;
 
     ASSERT_THROW_HIPDNN_STATUS(setConvMode(target, HIPDNN_TYPE_INT64, 1, &value, "test"),
                                HIPDNN_STATUS_BAD_PARAM);
@@ -423,7 +423,7 @@ TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnWrongElementCount)
 {
     using hipdnn_data_sdk::data_objects::ConvMode;
     auto target = ConvMode::UNSET;
-    auto value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    auto value = HIPDNN_CROSS_CORRELATION;
 
     ASSERT_THROW_HIPDNN_STATUS(setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 2, &value, "test"),
                                HIPDNN_STATUS_BAD_PARAM);
@@ -433,7 +433,7 @@ TEST(TestDescriptorAttributeUtils, SetConvModeSuccessCrossCorrelation)
 {
     using hipdnn_data_sdk::data_objects::ConvMode;
     auto target = ConvMode::UNSET;
-    auto value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    auto value = HIPDNN_CROSS_CORRELATION;
 
     ASSERT_NO_THROW(setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &value, "test"));
     ASSERT_EQ(target, ConvMode::CROSS_CORRELATION);
@@ -443,7 +443,7 @@ TEST(TestDescriptorAttributeUtils, SetConvModeSuccessConvolution)
 {
     using hipdnn_data_sdk::data_objects::ConvMode;
     auto target = ConvMode::UNSET;
-    auto value = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    auto value = HIPDNN_CONVOLUTION;
 
     ASSERT_NO_THROW(setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &value, "test"));
     ASSERT_EQ(target, ConvMode::CONVOLUTION);
@@ -465,7 +465,7 @@ TEST(TestDescriptorAttributeUtils, GetConvModeQueryReturnsOneOnZeroRequestedCoun
 {
     using hipdnn_data_sdk::data_objects::ConvMode;
     int64_t count = 0;
-    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION;
 
     ASSERT_NO_THROW(getConvMode(
         ConvMode::CROSS_CORRELATION, HIPDNN_TYPE_CONVOLUTION_MODE, 0, &count, &output, "test"));
@@ -486,7 +486,7 @@ TEST(TestDescriptorAttributeUtils, GetConvModeThrowsOnNullErrorPrefix)
 {
     using hipdnn_data_sdk::data_objects::ConvMode;
     int64_t count = 0;
-    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION;
 
     ASSERT_THROW_HIPDNN_STATUS(
         getConvMode(
@@ -498,7 +498,7 @@ TEST(TestDescriptorAttributeUtils, GetConvModeThrowsOnWrongAttributeType)
 {
     using hipdnn_data_sdk::data_objects::ConvMode;
     int64_t count = 0;
-    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION;
 
     ASSERT_THROW_HIPDNN_STATUS(
         getConvMode(ConvMode::CROSS_CORRELATION, HIPDNN_TYPE_INT64, 1, &count, &output, "test"),
@@ -509,22 +509,22 @@ TEST(TestDescriptorAttributeUtils, GetConvModeSuccessCrossCorrelation)
 {
     using hipdnn_data_sdk::data_objects::ConvMode;
     int64_t count = 0;
-    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION;
 
     ASSERT_NO_THROW(getConvMode(
         ConvMode::CROSS_CORRELATION, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &count, &output, "test"));
-    ASSERT_EQ(output, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    ASSERT_EQ(output, HIPDNN_CROSS_CORRELATION);
 }
 
 TEST(TestDescriptorAttributeUtils, GetConvModeSuccessConvolution)
 {
     using hipdnn_data_sdk::data_objects::ConvMode;
     int64_t count = 0;
-    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    hipdnnConvolutionMode_t output = HIPDNN_CROSS_CORRELATION;
 
     ASSERT_NO_THROW(getConvMode(
         ConvMode::CONVOLUTION, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &count, &output, "test"));
-    ASSERT_EQ(output, HIPDNN_CONVOLUTION_MODE_CONVOLUTION);
+    ASSERT_EQ(output, HIPDNN_CONVOLUTION);
 }
 
 // --- getOperationType ---
@@ -533,7 +533,7 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnNullArray)
 {
     int64_t count = 0;
 
-    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                      HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                      1,
                                      &count,
@@ -545,9 +545,9 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnNullArray)
 TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnZeroRequestedCount)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                      HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                      0,
                                      &count,
@@ -558,7 +558,7 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnZeroRequeste
 
 TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryThrowsWhenBothPointersNull)
 {
-    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                                 HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                                 1,
                                                 nullptr,
@@ -570,9 +570,9 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryThrowsWhenBothPointersNu
 TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnNullErrorPrefix)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                                 HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                                 1,
                                                 &count,
@@ -584,9 +584,9 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnNullErrorPrefix)
 TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnWrongAttributeType)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                                 HIPDNN_TYPE_INT64,
                                                 1,
                                                 &count,
@@ -598,29 +598,29 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnWrongAttributeType)
 TEST(TestDescriptorAttributeUtils, GetOperationTypeSuccessConvForward)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                      HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                      1,
                                      &count,
                                      &output,
                                      "test"));
-    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
+    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT);
 }
 
 TEST(TestDescriptorAttributeUtils, GetOperationTypeSuccessBatchnormInference)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE,
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT,
                                      HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                      1,
                                      &count,
                                      &output,
                                      "test"));
-    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE);
+    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT);
 }
 
 // --- setTensorDescriptor ---
@@ -1346,7 +1346,7 @@ TEST(TestDescriptorAttributeUtils, SetNormFwdPhaseSuccess)
 {
     using hipdnn_data_sdk::data_objects::NormFwdPhase;
     auto target = NormFwdPhase::NOT_SET;
-    auto value = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    auto value = HIPDNN_NORM_FWD_TRAINING;
 
     ASSERT_NO_THROW(setNormFwdPhase(target, HIPDNN_TYPE_NORM_FWD_PHASE, 1, &value, "test"));
     ASSERT_EQ(target, NormFwdPhase::TRAINING);
@@ -1356,7 +1356,7 @@ TEST(TestDescriptorAttributeUtils, SetNormFwdPhaseThrowsOnWrongType)
 {
     using hipdnn_data_sdk::data_objects::NormFwdPhase;
     auto target = NormFwdPhase::NOT_SET;
-    auto value = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    auto value = HIPDNN_NORM_FWD_TRAINING;
 
     ASSERT_THROW_HIPDNN_STATUS(setNormFwdPhase(target, HIPDNN_TYPE_INT64, 1, &value, "test"),
                                HIPDNN_STATUS_BAD_PARAM);
@@ -1376,7 +1376,7 @@ TEST(TestDescriptorAttributeUtils, SetNormFwdPhaseThrowsOnWrongElementCount)
 {
     using hipdnn_data_sdk::data_objects::NormFwdPhase;
     auto target = NormFwdPhase::NOT_SET;
-    auto value = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    auto value = HIPDNN_NORM_FWD_TRAINING;
 
     ASSERT_THROW_HIPDNN_STATUS(
         setNormFwdPhase(target, HIPDNN_TYPE_NORM_FWD_PHASE, 2, &value, "test"),
@@ -1387,19 +1387,19 @@ TEST(TestDescriptorAttributeUtils, GetNormFwdPhaseSuccess)
 {
     using hipdnn_data_sdk::data_objects::NormFwdPhase;
     int64_t count = 0;
-    hipdnnNormFwdPhase_t output = HIPDNN_NORM_FWD_PHASE_INFERENCE;
+    hipdnnNormFwdPhase_t output = HIPDNN_NORM_FWD_INFERENCE;
 
     ASSERT_NO_THROW(getNormFwdPhase(
         NormFwdPhase::TRAINING, HIPDNN_TYPE_NORM_FWD_PHASE, 1, &count, &output, "test"));
     ASSERT_EQ(count, 1);
-    ASSERT_EQ(output, HIPDNN_NORM_FWD_PHASE_TRAINING);
+    ASSERT_EQ(output, HIPDNN_NORM_FWD_TRAINING);
 }
 
 TEST(TestDescriptorAttributeUtils, GetNormFwdPhaseThrowsOnWrongType)
 {
     using hipdnn_data_sdk::data_objects::NormFwdPhase;
     int64_t count = 0;
-    hipdnnNormFwdPhase_t output = HIPDNN_NORM_FWD_PHASE_INFERENCE;
+    hipdnnNormFwdPhase_t output = HIPDNN_NORM_FWD_INFERENCE;
 
     ASSERT_THROW_HIPDNN_STATUS(
         getNormFwdPhase(NormFwdPhase::TRAINING, HIPDNN_TYPE_INT64, 1, &count, &output, "test"),
@@ -1420,7 +1420,7 @@ TEST(TestDescriptorAttributeUtils, GetNormFwdPhaseQueryReturnsSizeOnZeroCount)
 {
     using hipdnn_data_sdk::data_objects::NormFwdPhase;
     int64_t count = 0;
-    hipdnnNormFwdPhase_t output = HIPDNN_NORM_FWD_PHASE_INFERENCE;
+    hipdnnNormFwdPhase_t output = HIPDNN_NORM_FWD_INFERENCE;
 
     ASSERT_NO_THROW(getNormFwdPhase(
         NormFwdPhase::TRAINING, HIPDNN_TYPE_NORM_FWD_PHASE, 0, &count, &output, "test"));
@@ -1615,7 +1615,7 @@ TEST(TestDescriptorAttributeUtils, SetDiagonalAlignmentSuccess)
     auto value = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
 
     ASSERT_NO_THROW(
-        setDiagonalAlignment(target, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1, &value, "test"));
+        setDiagonalAlignment(target, HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, 1, &value, "test"));
     ASSERT_EQ(target, DiagonalAlignment::BOTTOM_RIGHT);
 }
 
@@ -1635,7 +1635,7 @@ TEST(TestDescriptorAttributeUtils, SetDiagonalAlignmentThrowsOnNullArray)
     auto target = DiagonalAlignment::TOP_LEFT;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        setDiagonalAlignment(target, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1, nullptr, "test"),
+        setDiagonalAlignment(target, HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, 1, nullptr, "test"),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -1646,7 +1646,7 @@ TEST(TestDescriptorAttributeUtils, SetDiagonalAlignmentThrowsOnWrongElementCount
     auto value = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        setDiagonalAlignment(target, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 2, &value, "test"),
+        setDiagonalAlignment(target, HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, 2, &value, "test"),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -1657,7 +1657,7 @@ TEST(TestDescriptorAttributeUtils, GetDiagonalAlignmentSuccess)
     hipdnnDiagonalAlignment_t output = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
 
     ASSERT_NO_THROW(getDiagonalAlignment(DiagonalAlignment::BOTTOM_RIGHT,
-                                         HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                                         HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                          1,
                                          &count,
                                          &output,
@@ -1683,8 +1683,12 @@ TEST(TestDescriptorAttributeUtils, GetDiagonalAlignmentQueryReturnsSizeOnNullArr
     using hipdnn_data_sdk::data_objects::DiagonalAlignment;
     int64_t count = 0;
 
-    ASSERT_NO_THROW(getDiagonalAlignment(
-        DiagonalAlignment::TOP_LEFT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1, &count, nullptr, "test"));
+    ASSERT_NO_THROW(getDiagonalAlignment(DiagonalAlignment::TOP_LEFT,
+                                         HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                         1,
+                                         &count,
+                                         nullptr,
+                                         "test"));
     ASSERT_EQ(count, 1);
 }
 
@@ -1694,8 +1698,12 @@ TEST(TestDescriptorAttributeUtils, GetDiagonalAlignmentQueryReturnsSizeOnZeroCou
     int64_t count = 0;
     hipdnnDiagonalAlignment_t output = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
 
-    ASSERT_NO_THROW(getDiagonalAlignment(
-        DiagonalAlignment::TOP_LEFT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 0, &count, &output, "test"));
+    ASSERT_NO_THROW(getDiagonalAlignment(DiagonalAlignment::TOP_LEFT,
+                                         HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                         0,
+                                         &count,
+                                         &output,
+                                         "test"));
     ASSERT_EQ(count, 1);
 }
 
@@ -1708,7 +1716,7 @@ TEST(TestDescriptorAttributeUtils, SetAttentionImplementationSuccess)
     auto value = HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
 
     ASSERT_NO_THROW(setAttentionImplementation(
-        target, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, 1, &value, "test"));
+        target, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, 1, &value, "test"));
     ASSERT_EQ(target, AttentionImplementation::UNIFIED);
 }
 
@@ -1730,7 +1738,7 @@ TEST(TestDescriptorAttributeUtils, SetAttentionImplementationThrowsOnNullArray)
 
     ASSERT_THROW_HIPDNN_STATUS(
         setAttentionImplementation(
-            target, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, 1, nullptr, "test"),
+            target, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, 1, nullptr, "test"),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -1741,7 +1749,8 @@ TEST(TestDescriptorAttributeUtils, SetAttentionImplementationThrowsOnWrongElemen
     auto value = HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        setAttentionImplementation(target, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, 2, &value, "test"),
+        setAttentionImplementation(
+            target, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, 2, &value, "test"),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -1752,7 +1761,7 @@ TEST(TestDescriptorAttributeUtils, GetAttentionImplementationSuccess)
     hipdnnAttentionImplementation_t output = HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
 
     ASSERT_NO_THROW(getAttentionImplementation(AttentionImplementation::COMPOSITE,
-                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                                1,
                                                &count,
                                                &output,
@@ -1779,7 +1788,7 @@ TEST(TestDescriptorAttributeUtils, GetAttentionImplementationQueryReturnsSizeOnN
     int64_t count = 0;
 
     ASSERT_NO_THROW(getAttentionImplementation(AttentionImplementation::AUTO,
-                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                                1,
                                                &count,
                                                nullptr,
@@ -1794,7 +1803,7 @@ TEST(TestDescriptorAttributeUtils, GetAttentionImplementationQueryReturnsSizeOnZ
     hipdnnAttentionImplementation_t output = HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
 
     ASSERT_NO_THROW(getAttentionImplementation(AttentionImplementation::AUTO,
-                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                                0,
                                                &count,
                                                &output,

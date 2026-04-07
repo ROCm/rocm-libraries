@@ -199,8 +199,6 @@ namespace rocRoller
             , miTileSizes{miTileSizes.empty() ? subTileSizes : miTileSizes}
             , swizzleTileSizes{swizzleTileSizes.empty() ? subTileSizes : swizzleTileSizes}
         {
-            if(this->memoryType == MemoryType::LDS)
-                this->memoryType = MemoryType::WAVE_LDS;
             AssertFatal(layoutType != LayoutType::None, "Invalid layout type.");
         }
 

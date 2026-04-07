@@ -76,33 +76,31 @@ TEST_CASE("SortArguments transform works as expected", "[kernel-graph][SortArgum
                                               "user_Float_Value_6",
                                               "Tensor_0_stride_1",
                                               "Tensor_0_pointer",
-                                              "Tensor_0_extent",
+                                              "Tensor_0_size_1",
                                               "Tensor_2_stride_0",
                                               "Tensor_2_pointer",
-                                              "Tensor_2_extent",
-                                              "Tensor_0_size_1",
+                                              "Tensor_2_size_0",
                                               "Tensor_4_stride_1",
                                               "Tensor_4_pointer",
-                                              "Tensor_4_extent",
+                                              "Tensor_4_size_1",
                                               "Tensor_15_stride_1",
                                               "Tensor_15_pointer",
-                                              "Tensor_15_extent"};
+                                              "Tensor_15_size_1"};
 
     std::vector<std::string> argNamesByUseAndSize = {"Tensor_0_stride_1",
                                                      "Tensor_0_pointer",
-                                                     "Tensor_0_extent",
+                                                     "Tensor_0_size_1",
                                                      "Tensor_2_stride_0",
                                                      "Tensor_2_pointer",
-                                                     "Tensor_2_extent",
+                                                     "Tensor_2_size_0",
                                                      "user_Float_Value_8",
                                                      "user_Float_Value_6",
-                                                     "Tensor_0_size_1",
                                                      "Tensor_4_stride_1",
                                                      "Tensor_4_pointer",
-                                                     "Tensor_4_extent",
+                                                     "Tensor_4_size_1",
                                                      "Tensor_15_stride_1",
                                                      "Tensor_15_pointer",
-                                                     "Tensor_15_extent"};
+                                                     "Tensor_15_size_1"};
 
     SECTION("sortArgumentsByFirstUse function reorders kernel arguments by first use")
     {
