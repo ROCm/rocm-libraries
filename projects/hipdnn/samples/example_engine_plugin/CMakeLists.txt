@@ -29,10 +29,10 @@ option(HIPDNN_EXAMPLE_PROVIDER_BUILD_SAMPLE "Build sample application (requires 
 # dependencies like GoogleTest).
 add_library(example_provider_compile_options INTERFACE)
 target_compile_options(example_provider_compile_options INTERFACE
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall>
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wextra>
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wpedantic>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Werror>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wextra>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wpedantic>
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
     $<$<CXX_COMPILER_ID:MSVC>:/WX>
 )

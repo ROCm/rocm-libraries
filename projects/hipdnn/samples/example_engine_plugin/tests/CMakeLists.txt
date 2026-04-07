@@ -12,6 +12,15 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+# Suppress warnings in GoogleTest targets (GoogleTest uses #if instead of #ifdef for
+# GTEST_LINKED_AS_SHARED_LIBRARY which triggers -Wundef warnings)
+set(_gtest_targets gtest gtest_main gmock gmock_main)
+foreach(_target ${_gtest_targets})
+    if(TARGET ${_target})
+        target_compile_options(${_target} PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang>:-Wno-undef>)
+    endif()
+endforeach()
+
 add_executable(
     example_provider_tests
     TestExampleProviderContainer.cpp
