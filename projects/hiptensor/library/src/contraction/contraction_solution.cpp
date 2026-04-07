@@ -285,10 +285,10 @@ namespace hiptensor
 
     size_t ContractionSolution::uid() const
     {
-        // Platform-stable uid: hash the kernel type string together with the
-        // data-type / op parameters so that distinct CK template instantiations
-        // that share the same geometry (GetTypeString) but differ in data types
-        // still produce distinct uids.
+        // Platform-stable uid: hash the kernel type string (via FNV-1a in Hash{})
+        // together with the data-type / op parameters so that distinct CK template
+        // instantiations that share the same geometry (GetTypeString) but differ in
+        // data types still produce distinct uids.
         auto const& params = mParams;
         return Hash{}(mDeviceOp->GetTypeString(),
                       params->typeA(),

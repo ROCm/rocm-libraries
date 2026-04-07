@@ -7,7 +7,7 @@
 #include "TestMacros.hpp"
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/NodeFactory.hpp"
-#include "descriptors/SdpaFpropOperationDescriptor.hpp"
+#include "descriptors/SdpaFwdOperationDescriptor.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
 #include "mocks/MockHandle.hpp"
@@ -17,7 +17,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_test_sdk/constants/SdpaFpropConstants.hpp>
+#include <hipdnn_test_sdk/constants/SdpaFwdConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <array>
@@ -34,156 +34,155 @@ using hipdnn_tests::toVec;
 namespace
 {
 
-// Helper: create a finalized SdpaFpropOperationDescriptor from tensor descriptors
+// Helper: create a finalized SdpaFwdOperationDescriptor from tensor descriptors
 inline std::unique_ptr<HipdnnBackendDescriptor>
-    createFinalizedSdpaFpropOp(HipdnnBackendDescriptor* qDesc,
-                               HipdnnBackendDescriptor* kDesc,
-                               HipdnnBackendDescriptor* vDesc,
-                               HipdnnBackendDescriptor* oDesc,
-                               HipdnnBackendDescriptor* attnMaskDesc,
-                               HipdnnBackendDescriptor* scaleDesc,
-                               HipdnnBackendDescriptor* seqLenQDesc,
-                               HipdnnBackendDescriptor* seqLenKvDesc,
-                               HipdnnBackendDescriptor* seedDesc,
-                               HipdnnBackendDescriptor* offsetDesc,
-                               HipdnnBackendDescriptor* dropoutMaskDesc,
-                               HipdnnBackendDescriptor* dropoutScaleDesc,
-                               HipdnnBackendDescriptor* pageTableKDesc,
-                               HipdnnBackendDescriptor* pageTableVDesc,
-                               HipdnnBackendDescriptor* blockMaskDesc,
-                               HipdnnBackendDescriptor* sinkTokenDesc,
-                               HipdnnBackendDescriptor* descaleQDesc,
-                               HipdnnBackendDescriptor* descaleKDesc,
-                               HipdnnBackendDescriptor* descaleVDesc,
-                               HipdnnBackendDescriptor* descaleSDesc,
-                               HipdnnBackendDescriptor* scaleSDesc,
-                               HipdnnBackendDescriptor* scaleODesc,
-                               HipdnnBackendDescriptor* statsDesc,
-                               HipdnnBackendDescriptor* maxDesc,
-                               HipdnnBackendDescriptor* sumExpDesc,
-                               HipdnnBackendDescriptor* rngDumpDesc,
-                               HipdnnBackendDescriptor* amaxSDesc,
-                               HipdnnBackendDescriptor* amaxODesc,
-                               hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
-                               const std::string& name = "")
+    createFinalizedSdpaFwdOp(HipdnnBackendDescriptor* qDesc,
+                             HipdnnBackendDescriptor* kDesc,
+                             HipdnnBackendDescriptor* vDesc,
+                             HipdnnBackendDescriptor* oDesc,
+                             HipdnnBackendDescriptor* attnMaskDesc,
+                             HipdnnBackendDescriptor* scaleDesc,
+                             HipdnnBackendDescriptor* seqLenQDesc,
+                             HipdnnBackendDescriptor* seqLenKvDesc,
+                             HipdnnBackendDescriptor* seedDesc,
+                             HipdnnBackendDescriptor* offsetDesc,
+                             HipdnnBackendDescriptor* dropoutMaskDesc,
+                             HipdnnBackendDescriptor* dropoutScaleDesc,
+                             HipdnnBackendDescriptor* pageTableKDesc,
+                             HipdnnBackendDescriptor* pageTableVDesc,
+                             HipdnnBackendDescriptor* blockMaskDesc,
+                             HipdnnBackendDescriptor* sinkTokenDesc,
+                             HipdnnBackendDescriptor* descaleQDesc,
+                             HipdnnBackendDescriptor* descaleKDesc,
+                             HipdnnBackendDescriptor* descaleVDesc,
+                             HipdnnBackendDescriptor* descaleSDesc,
+                             HipdnnBackendDescriptor* scaleSDesc,
+                             HipdnnBackendDescriptor* scaleODesc,
+                             HipdnnBackendDescriptor* statsDesc,
+                             HipdnnBackendDescriptor* maxDesc,
+                             HipdnnBackendDescriptor* sumExpDesc,
+                             HipdnnBackendDescriptor* rngDumpDesc,
+                             HipdnnBackendDescriptor* amaxSDesc,
+                             HipdnnBackendDescriptor* amaxODesc,
+                             hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
+                             const std::string& name = "")
 {
-    auto wrapper = createDescriptor<SdpaFpropOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<SdpaFpropOperationDescriptor>();
+    auto wrapper = createDescriptor<SdpaFwdOperationDescriptor>();
+    auto desc = wrapper->asDescriptor<SdpaFwdOperationDescriptor>();
 
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_QDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&qDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_KDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&kDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_VDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&vDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_ODESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&oDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_ATTN_MASK_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&attnMaskDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_SCALEDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&scaleDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_Q_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_SEQ_LEN_QDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&seqLenQDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_KV_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_SEQ_LEN_KVDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&seqLenKvDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_SEED_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&seedDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_OFFSET_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_OFFSET_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&offsetDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_MASK_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_DROPOUT_MASK_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&dropoutMaskDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_SCALE_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_DROPOUT_SCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&dropoutScaleDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_K_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_PAGE_TABLE_KDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&pageTableKDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_V_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_PAGE_TABLE_VDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&pageTableVDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_BLOCK_MASK_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_BLOCK_MASK_DESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&blockMaskDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SINK_TOKEN_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_SINK_TOKEN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&sinkTokenDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_Q_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_DESCALE_Q_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&descaleQDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_K_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_DESCALE_K_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&descaleKDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_V_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_DESCALE_V_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&descaleVDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_S_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_DESCALE_S_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&descaleSDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_S_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_SCALE_S_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&scaleSDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_O_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_SCALE_O_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&scaleODesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_STATSDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&statsDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_MAX_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&maxDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SUM_EXP_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_SUM_EXP_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&sumExpDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_RNG_DUMP_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_RNG_DUMP_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&rngDumpDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_AMAX_S_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&amaxSDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_AMAX_O_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&amaxODesc));
-    desc->setAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     if(!name.empty())
     {
@@ -198,34 +197,33 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
 }
 
 inline std::unique_ptr<HipdnnBackendDescriptor>
-    createFinalizedSdpaFpropOpRequiredOnly(HipdnnBackendDescriptor* qDesc,
-                                           HipdnnBackendDescriptor* kDesc,
-                                           HipdnnBackendDescriptor* vDesc,
-                                           HipdnnBackendDescriptor* oDesc,
-                                           hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
-                                           const std::string& name = "")
+    createFinalizedSdpaFwdOpRequiredOnly(HipdnnBackendDescriptor* qDesc,
+                                         HipdnnBackendDescriptor* kDesc,
+                                         HipdnnBackendDescriptor* vDesc,
+                                         HipdnnBackendDescriptor* oDesc,
+                                         hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
+                                         const std::string& name = "")
 {
-    auto wrapper = createDescriptor<SdpaFpropOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<SdpaFpropOperationDescriptor>();
+    auto wrapper = createDescriptor<SdpaFwdOperationDescriptor>();
+    auto desc = wrapper->asDescriptor<SdpaFwdOperationDescriptor>();
 
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_QDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&qDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_KDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&kDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_VDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&vDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_ODESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&oDesc));
-    desc->setAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     if(!name.empty())
     {
@@ -239,7 +237,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     return wrapper;
 }
 
-class TestGraphDescriptorSdpaFprop : public ::testing::Test
+class TestGraphDescriptorSdpaFwd : public ::testing::Test
 {
 public:
     static const TensorAttributesT* findTensorByUid(const GraphT& graphT, int64_t uid)
@@ -299,7 +297,7 @@ protected:
     }
 };
 
-TEST_F(TestGraphDescriptorSdpaFprop, BuildFromSingleOperation)
+TEST_F(TestGraphDescriptorSdpaFwd, BuildFromSingleOperation)
 {
     auto qDesc = createFinalizedTensor(
         K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
@@ -333,34 +331,34 @@ TEST_F(TestGraphDescriptorSdpaFprop, BuildFromSingleOperation)
     auto rngDumpDesc = createFinalizedTensor(K_SDPA_TENSOR_RNG_DUMP_UID);
     auto amaxSDesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_S_UID);
     auto amaxODesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_O_UID);
-    auto opDesc = createFinalizedSdpaFpropOp(qDesc.get(),
-                                             kDesc.get(),
-                                             vDesc.get(),
-                                             oDesc.get(),
-                                             attnMaskDesc.get(),
-                                             scaleDesc.get(),
-                                             seqLenQDesc.get(),
-                                             seqLenKvDesc.get(),
-                                             seedDesc.get(),
-                                             offsetDesc.get(),
-                                             dropoutMaskDesc.get(),
-                                             dropoutScaleDesc.get(),
-                                             pageTableKDesc.get(),
-                                             pageTableVDesc.get(),
-                                             blockMaskDesc.get(),
-                                             sinkTokenDesc.get(),
-                                             descaleQDesc.get(),
-                                             descaleKDesc.get(),
-                                             descaleVDesc.get(),
-                                             descaleSDesc.get(),
-                                             scaleSDesc.get(),
-                                             scaleODesc.get(),
-                                             statsDesc.get(),
-                                             maxDesc.get(),
-                                             sumExpDesc.get(),
-                                             rngDumpDesc.get(),
-                                             amaxSDesc.get(),
-                                             amaxODesc.get());
+    auto opDesc = createFinalizedSdpaFwdOp(qDesc.get(),
+                                           kDesc.get(),
+                                           vDesc.get(),
+                                           oDesc.get(),
+                                           attnMaskDesc.get(),
+                                           scaleDesc.get(),
+                                           seqLenQDesc.get(),
+                                           seqLenKvDesc.get(),
+                                           seedDesc.get(),
+                                           offsetDesc.get(),
+                                           dropoutMaskDesc.get(),
+                                           dropoutScaleDesc.get(),
+                                           pageTableKDesc.get(),
+                                           pageTableVDesc.get(),
+                                           blockMaskDesc.get(),
+                                           sinkTokenDesc.get(),
+                                           descaleQDesc.get(),
+                                           descaleKDesc.get(),
+                                           descaleVDesc.get(),
+                                           descaleSDesc.get(),
+                                           scaleSDesc.get(),
+                                           scaleODesc.get(),
+                                           statsDesc.get(),
+                                           maxDesc.get(),
+                                           sumExpDesc.get(),
+                                           rngDumpDesc.get(),
+                                           amaxSDesc.get(),
+                                           amaxODesc.get());
 
     auto desc = getDescriptor();
     setHandle();
@@ -453,7 +451,7 @@ TEST_F(TestGraphDescriptorSdpaFprop, BuildFromSingleOperation)
     EXPECT_EQ(attrs->causal_mask_bottom_right, false);
 }
 
-TEST_F(TestGraphDescriptorSdpaFprop, ComputeDataTypePreserved)
+TEST_F(TestGraphDescriptorSdpaFwd, ComputeDataTypePreserved)
 {
     auto qDesc = createFinalizedTensor(
         K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
@@ -463,7 +461,7 @@ TEST_F(TestGraphDescriptorSdpaFprop, ComputeDataTypePreserved)
         K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
     auto oDesc = createFinalizedTensor(
         K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
-    auto opDesc = createFinalizedSdpaFpropOpRequiredOnly(
+    auto opDesc = createFinalizedSdpaFwdOpRequiredOnly(
         qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get(), HIPDNN_DATA_HALF);
 
     auto desc = getDescriptor();
@@ -483,7 +481,7 @@ TEST_F(TestGraphDescriptorSdpaFprop, ComputeDataTypePreserved)
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
 }
 
-TEST_F(TestGraphDescriptorSdpaFprop, BuildFromRequiredTensorsOnly)
+TEST_F(TestGraphDescriptorSdpaFwd, BuildFromRequiredTensorsOnly)
 {
     auto qDesc = createFinalizedTensor(
         K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
@@ -494,8 +492,8 @@ TEST_F(TestGraphDescriptorSdpaFprop, BuildFromRequiredTensorsOnly)
     auto oDesc = createFinalizedTensor(
         K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
 
-    auto opDesc = createFinalizedSdpaFpropOpRequiredOnly(
-        qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get());
+    auto opDesc
+        = createFinalizedSdpaFwdOpRequiredOnly(qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get());
 
     auto desc = getDescriptor();
     setHandle();
@@ -574,7 +572,7 @@ TEST_F(TestGraphDescriptorSdpaFprop, BuildFromRequiredTensorsOnly)
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::FLOAT);
 }
 
-TEST_F(TestGraphDescriptorSdpaFprop, OperationNamePreservedInSerialization)
+TEST_F(TestGraphDescriptorSdpaFwd, OperationNamePreservedInSerialization)
 {
     auto qDesc = createFinalizedTensor(
         K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
@@ -585,7 +583,7 @@ TEST_F(TestGraphDescriptorSdpaFprop, OperationNamePreservedInSerialization)
     auto oDesc = createFinalizedTensor(
         K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
 
-    auto opDesc = createFinalizedSdpaFpropOpRequiredOnly(
+    auto opDesc = createFinalizedSdpaFwdOpRequiredOnly(
         qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get(), HIPDNN_DATA_FLOAT, "my_sdpa_op");
 
     auto desc = getDescriptor();
@@ -605,7 +603,7 @@ TEST_F(TestGraphDescriptorSdpaFprop, OperationNamePreservedInSerialization)
     EXPECT_EQ(graphT->nodes[0]->name, "my_sdpa_op");
 }
 
-TEST_F(TestGraphDescriptorSdpaFprop, OperationNameRoundTripThroughLifting)
+TEST_F(TestGraphDescriptorSdpaFwd, OperationNameRoundTripThroughLifting)
 {
     auto qDesc = createFinalizedTensor(
         K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
@@ -616,7 +614,7 @@ TEST_F(TestGraphDescriptorSdpaFprop, OperationNameRoundTripThroughLifting)
     auto oDesc = createFinalizedTensor(
         K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
 
-    auto opDesc = createFinalizedSdpaFpropOpRequiredOnly(
+    auto opDesc = createFinalizedSdpaFwdOpRequiredOnly(
         qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get(), HIPDNN_DATA_FLOAT, "round_trip_name");
 
     auto desc = getDescriptor();
