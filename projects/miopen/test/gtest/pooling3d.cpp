@@ -20,6 +20,9 @@ std::vector<PoolingTestCase> GetPooling3dTestCases()
     std::vector<PoolingTestCase> test_cases;
 
     // Dataset 0: Default dataset (various tensor sizes)
+    // Legacy test_drive coverage:
+    //   forward path:  test_pooling3d --all
+    //   backward path: test_pooling3d --forw 0
     std::vector<std::vector<int>> dataset0_inputs = {{16, 64, 3, 4, 4},
                                                      {16, 32, 4, 9, 9},
                                                      {8, 512, 3, 14, 14},

@@ -22,6 +22,9 @@ std::vector<PoolingTestCase> GetAsymPooling2dTestCases()
     std::vector<PoolingTestCase> test_cases;
 
     // Dataset 1: Asymmetric dataset
+    // Legacy test_drive coverage:
+    //   forward path:  test_pooling2d --all --dataset 1 --limit 0
+    //   backward path: test_pooling2d --forw 0
     std::vector<std::vector<int>> dataset1_inputs  = {{1, 4, 4, 4}};
     std::vector<std::vector<int>> dataset1_lens    = {{2, 2}, {1, 2}, {2, 1}};
     std::vector<std::vector<int>> dataset1_strides = {{1, 1}, {2, 1}, {1, 2}, {2, 2}};
