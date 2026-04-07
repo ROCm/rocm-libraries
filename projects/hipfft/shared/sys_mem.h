@@ -169,6 +169,69 @@ public:
         return ss.str();
     }
 
+    // Structure effectively reserving a chunk of system memory by a given amount, estimated
+    // for untracked/nonowned needs, e.g., by some black-box dependency.
+    struct nonowned_reservation_t
+    {
+        nonowned_reservation_t(size_t block_byte_size = 0)
+            : byte_size(0)
+        {
+            if(block_byte_size > 0)
+                set_desired_size(block_byte_size);
+        }
+        // disable copies
+        nonowned_reservation_t(const nonowned_reservation_t&) = delete;
+        nonowned_reservation_t& operator=(const nonowned_reservation_t&) = delete;
+
+        void release()
+        {
+            if(byte_size > 0)
+            {
+                auto&            accountant = system_memory::singleton();
+                std::unique_lock lock(accountant.sys_memory_mutex);
+                accountant.limit_bytes += byte_size;
+                byte_size = 0;
+            }
+        }
+
+        // An std::invalid_argument exception is thrown if the desired size cannot be reserved reliably.
+        void set_desired_size(size_t desired_byte_size)
+        {
+            release();
+            auto&      accountant   = system_memory::singleton();
+            const auto usable_bytes = accountant.get_usable_bytes();
+            if(desired_byte_size > usable_bytes)
+            {
+                throw std::invalid_argument(
+                    "Desired reservation of " + byte_size_to_str(desired_byte_size)
+                    + " of system memory cannot be honored reliably as only "
+                    + byte_size_to_str(usable_bytes) + " of system memory is usable.\n"
+                    + accountant.get_details());
+            }
+            std::unique_lock lock(accountant.sys_memory_mutex);
+            accountant.limit_bytes -= desired_byte_size;
+            byte_size = desired_byte_size;
+        }
+
+        size_t size() const
+        {
+            return byte_size;
+        }
+
+        ~nonowned_reservation_t()
+        {
+            release();
+        }
+
+        void swap(nonowned_reservation_t& other)
+        {
+            std::swap(byte_size, other.byte_size);
+        }
+
+    private:
+        size_t byte_size;
+    };
+
 private:
     const size_t total_bytes;
     size_t       free_bytes;
