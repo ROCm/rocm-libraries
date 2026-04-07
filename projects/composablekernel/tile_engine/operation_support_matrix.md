@@ -7,7 +7,7 @@
 | GEMM | gemm_preshuffle [4]<br>engine: gemm_preshuffle/ | ✅ | ✅ | ✅ | ✅ | | | | ✅ | | | | ✅ | ✅ | ✅ | ❌ |
 | GEMM | streamk_gemm [5][6][7]<br>engine: gemm_streamk/<br>example: 40_streamk_gemm/ | ✅ | ✅ | ❌ | ❌ | | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | GEMM | batched_gemm<br>example: 16_batched_gemm/ | ❌ | | | | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
-| GEMM | batched_contraction<br>example: 41_batched_contraction/ | ❌ | | | | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
+| GEMM | batched_contraction<br>example: 41_batched_contraction/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ✅ |
 | GEMM | block_scale_gemm<br>example: 38_block_scale_gemm/ | | ❌ | ❌ | ❌ | | ❌ | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
 | GEMM | flatmm<br>example: 18_flatmm/ | ❌ | ❌ | ❌ | ❌ | | ❌ | ❌ | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
 | GEMM | gemm_multi_abd<br>example: 22_gemm_multi_abd/ | ❌ | | | | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
