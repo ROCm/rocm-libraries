@@ -219,7 +219,7 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
     fi
 
 RUN if [ "$BUILD_JOBS" = "0" ]; then \
-        cmake --build . -j64; \
+        cmake --build .; \
     else \
         echo "Building with $BUILD_JOBS parallel jobs"; \
         cmake --build . -j$BUILD_JOBS; \
