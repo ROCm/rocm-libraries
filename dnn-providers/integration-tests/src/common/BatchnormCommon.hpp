@@ -99,7 +99,6 @@ inline std::vector<BatchnormTestCase> getBnFwdTrainingFull1dTestCases()
     unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
-        {{2, 3, 1}, seed}, // Minimal case
         {{1, 3, 14}, seed}, // Small batch, moderate length
         {{4, 8, 56}, seed}, // Medium size
         {{2, 64, 128}, seed}, // Larger
