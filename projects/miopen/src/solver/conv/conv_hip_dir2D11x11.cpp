@@ -25,6 +25,9 @@ bool ConvHipDirectFwd11x11::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(!ctx.use_hip_kernels)
         return false;
+    const auto& name = ctx.GetStream().GetDeviceName();
+    if(!(StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
+        return false;
     if(!problem.Is2d())
         return false;
     if(problem.HasNonPackedTensors())
