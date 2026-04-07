@@ -4960,6 +4960,27 @@ extern template struct TransposedConvMPBidirectWinograd_xdlops<6, 3>;
 #pragma clang diagnostic pop
 #endif
 
+/// Placeholder forward 3D depthwise convolution (FP16/BF16, default/NCDHW layout); stub kernel.
+struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<ConvDepthwiseFwd3D>(); }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return false; }
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
+    {
+        return 0.02f;
+    }
+    size_t GetWorkspaceSize(const ExecutionContext&,
+                            const miopen::conv::ProblemDescription&) const override
+    {
+        return 0;
+    }
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&) const override;
+};
+
 // Test helper functions for metadata validation
 // These functions return all CK kernel TypeStrings without problem-based filtering
 // Declared here but implemented in the respective solver .cpp files
