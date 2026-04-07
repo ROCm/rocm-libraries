@@ -155,7 +155,7 @@ def run_kernel_on_hw(so_path: Path, problem: dict, kernel_name: str) -> dict:
         result = json.loads(stdout.decode().strip())
         return result
     except:
-        return {"ok": False, "error": f"Failed to parse output"}
+        return {"ok": False, "error": "Failed to parse output"}
 
 
 def is_shape_in_training(problem: dict, training_df: pd.DataFrame) -> bool:
@@ -246,7 +246,7 @@ def main():
     print(f"Loaded ML model from {model_dir}")
 
     # Load MIOpen production shapes and convert to dicts
-    print(f"\nLoading MIOpen production shapes...")
+    print("\nLoading MIOpen production shapes...")
     miopen_shapes = []
     for prob in TRAINING_PROBLEMS_FORWARD_MIOPEN:
         shape_dict = {
@@ -312,13 +312,13 @@ def main():
         )
 
         if not oracle_spec:
-            print(f"  ❌ SKIP: No kernels succeeded\n")
+            print("  ❌ SKIP: No kernels succeeded\n")
             continue
 
         print(f"  ✓ Oracle best: {oracle_spec.name} ({oracle_tflops:.2f} TFLOPS)")
 
         # Step 2: ML prediction
-        print(f"\n  Step 2: ML prediction...")
+        print("\n  Step 2: ML prediction...")
         kernel_dicts = [
             {
                 "kernel_name": s.name,

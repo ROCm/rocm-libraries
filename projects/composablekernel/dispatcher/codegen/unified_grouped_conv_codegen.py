@@ -17,7 +17,6 @@ Based on the GEMM codegen pattern.
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 from dataclasses import dataclass

@@ -17,7 +17,6 @@ import subprocess
 import os
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python"))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # heuristics
@@ -122,7 +121,7 @@ def run_kernel_on_hw(so_path: Path, problem: dict, kernel_name: str) -> dict:
         result = json.loads(stdout.decode().strip())
         return result
     except:
-        return {"ok": False, "error": f"Failed to parse output"}
+        return {"ok": False, "error": "Failed to parse output"}
 
 
 def create_kernel_spec_from_row(row: pd.Series) -> KernelSpec:
@@ -243,7 +242,7 @@ def main():
         ml_so = build_kernel(ml_spec, "bf16", "gfx950", verbose=False)
 
         if not oracle_so or not ml_so:
-            print(f"  SKIP: Failed to build kernels")
+            print("  SKIP: Failed to build kernels")
             continue
 
         # Run both on hardware
@@ -256,7 +255,7 @@ def main():
         ml_result = run_kernel_on_hw(ml_so, problem, ml_kernel_name)
 
         if not oracle_result.get("ok") or not ml_result.get("ok"):
-            print(f"  SKIP: Failed to run kernels")
+            print("  SKIP: Failed to run kernels")
             continue
 
         oracle_hw_tflops = oracle_result["tflops"]

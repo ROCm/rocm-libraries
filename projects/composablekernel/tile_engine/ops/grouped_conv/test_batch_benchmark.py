@@ -12,9 +12,9 @@ _THIS_DIR = Path(__file__).resolve().parent
 
 print("Testing batch benchmark with small dataset")
 print("=" * 80)
-print(f"Config: forward_bf16.json (limited to first 2 kernels)")
-print(f"Problems: Using forward_training_small (5 problems)")
-print(f"Batch size: 2 (both kernels in one subprocess per problem)")
+print("Config: forward_bf16.json (limited to first 2 kernels)")
+print("Problems: Using forward_training_small (5 problems)")
+print("Batch size: 2 (both kernels in one subprocess per problem)")
 print()
 
 # Run benchmark

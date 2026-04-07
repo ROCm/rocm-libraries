@@ -41,7 +41,6 @@ from typing import List
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python"))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "heuristics"))
 
-import numpy as np
 
 from predict import Predictor
 from feature_engine_grouped_conv import GroupedConvFeatureEngine
