@@ -18,8 +18,8 @@
 #   CHANGE_TARGET - Base branch for PR builds (set by Jenkins Multibranch Pipeline)
 #
 # Note: CHANGE_ID may not be set even for PR builds if Jenkins job is not
-# configured as Multibranch Pipeline. Script uses three-dot git diff syntax
-# to correctly detect PR changes regardless of CHANGE_ID availability.
+# configured as Multibranch Pipeline. Script uses two-dot git diff syntax
+# to detect PR changes regardless of CHANGE_ID availability.
 #
 # Manual override (set by developer/admin if needed):
 #   DISABLE_SMART_BUILD - Set to "true" to force full build
@@ -48,15 +48,9 @@ fi
 
 # 3. Force full build if CMakeLists.txt or cmake/ configuration changed
 # Always compare against base branch (not consecutive commits) to avoid false positives from merge commits
-# Three-dot syntax (...) only shows changes actually made in the PR, not changes from merged develop branch
-if [ -n "$CHANGE_ID" ]; then
-    # This is a PR build (CHANGE_ID set by Jenkins Multibranch Pipeline)
-    CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}..HEAD 2>/dev/null || echo "")
-else
-    # Fallback: Works for both branch builds and PRs without CHANGE_ID
-    # Use two-dot syntax to get all files that differ between develop and the branch
-    CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}..HEAD 2>/dev/null || echo "")
-fi
+# Two-dot syntax (..) compares current state against base branch
+# Note: This includes merged changes from develop, which is conservative but safe (catches all potentially affected files)
+CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}..HEAD 2>/dev/null || echo "")
 
 # Comprehensive pattern for build/infrastructure files that require full build:
 # - CMake: CMakeLists.txt, *.cmake, *.cmake.in, CMakePresets.json
