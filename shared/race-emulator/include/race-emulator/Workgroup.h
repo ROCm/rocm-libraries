@@ -4,6 +4,7 @@
 #pragma once
 #include "LDS.h"
 #include "RaceDetector.h"
+#include "RunConfig.h"
 #include "Types.h"
 #include "Wave.h"
 #include <cassert>

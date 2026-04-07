@@ -4,6 +4,7 @@
 #pragma once
 #include "Arch.h"
 #include "Profiler.h"
+#include "RunConfig.h"
 #include "Util.h"
 #include "Wave.h"
 #include "Workgroup.h"
