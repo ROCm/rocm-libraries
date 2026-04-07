@@ -59,6 +59,10 @@ public:
     // Set plugin unloading mode (lazy keeps plugins loaded until app exit or path change)
     static void setPluginUnloadingMode(hipdnnPluginUnloadingMode_ext_t mode);
 
+    // Set the log level on all currently loaded plugins.
+    // This is a no-op if no plugins are loaded or if plugins don't support the API.
+    static void setPluginLogLevel(hipdnnSeverity_t level);
+
     static std::shared_ptr<EnginePluginResourceManager> create();
 
     EnginePluginResourceManager(std::shared_ptr<EnginePluginManager> pm);
@@ -75,7 +79,8 @@ public:
     // MT-unsafe instance methods
     // virtual for gMock testing
     virtual void setStream(hipStream_t stream) const;
-    virtual std::vector<int64_t> getApplicableEngineIds(const GraphDescriptor* graphDesc) const;
+    virtual std::vector<int64_t> getApplicableEngineIds(const GraphDescriptor* graphDesc,
+                                                        bool findFirst = false) const;
     virtual size_t getWorkspaceSize(int64_t engineId,
                                     const hipdnnPluginConstData_t* engineConfig,
                                     const GraphDescriptor* graphDesc) const;

@@ -33,13 +33,23 @@ namespace hipdnn_frontend::graph
  * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
  * @endcode
  *
+ * **Tensor Shapes (BHSD ordering):**
+ * - **Q** (query): `(B, H, S_q, D)` — batch, heads, query sequence length, head dimension
+ * - **K** (key): `(B, H_k, S_kv, D)` — batch, key heads, key/value sequence length, head dimension
+ * - **V** (value): `(B, H_v, S_kv, D_v)` — batch, value heads, key/value sequence length, value head dimension
+ * - **O** (output): `(B, H, S_q, D_v)` — batch, heads, query sequence length, value head dimension
+ * - **Stats** (optional): `(B, H, S_q, 1)` — softmax statistics (when generate_stats is true)
+ *
+ * Memory layout is controlled via strides. Use `TensorLayout::BHSD` for row-major or
+ * `TensorLayout::BSHD` for sequence-major layout.
+ *
  * **Required inputs:**
- * - Q: Query tensor [B, H, S_q, D]
- * - K: Key tensor [B, H, S_kv, D]
- * - V: Value tensor [B, H, S_kv, D]
+ * - Q: Query tensor
+ * - K: Key tensor (num_heads must divide evenly into Q's num_heads for GQA/MQA)
+ * - V: Value tensor (seq_kv must match K)
  *
  * **Outputs:**
- * - O: Attention output tensor [B, H, S_q, D]
+ * - O: Attention output tensor
  * - Stats: Softmax statistics (optional, when generate_stats is set)
  *
  * **Optional features:**
@@ -62,6 +72,8 @@ namespace hipdnn_frontend::graph
 class SdpaAttributes : public Attributes<SdpaAttributes>
 {
 public:
+    SdpaAttributes() = default;
+
     // NOLINTBEGIN(readability-identifier-naming)
     enum class InputNames
     {
@@ -601,6 +613,12 @@ public:
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_dropout_probability(float probability)
+    {
+        dropout_probability = probability;
+        return *this;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_attn_scale_value(float value)
     {
         attn_scale_value = value;
@@ -624,6 +642,7 @@ public:
         max_seq_len_kv = value;
         return *this;
     }
+    /// @brief Set the diagonal alignment for causal masking
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_diagonal_alignment(DiagonalAlignment value)
     {
@@ -636,6 +655,7 @@ public:
         mma_core_mode = value;
         return *this;
     }
+    /// @brief Set the execution strategy for SDPA
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_implementation(AttentionImplementation value)
     {
@@ -651,55 +671,48 @@ public:
             return t ? flatbuffers::Optional<int64_t>(t->get_uid()) : flatbuffers::nullopt;
         };
 
-        return hipdnn_data_sdk::data_objects::CreateSdpaAttributes(
-            builder,
-            get_q()->get_uid(),
-            get_k()->get_uid(),
-            get_v()->get_uid(),
-            get_o()->get_uid(),
-            optUid(get_bias()),
-            optUid(get_attn_scale()),
-            optUid(get_seq_len_q()),
-            optUid(get_seq_len_kv()),
-            optUid(get_seed()),
-            optUid(get_offset()),
-            optUid(get_dropout_mask()),
-            optUid(get_dropout_scale()),
-            optUid(get_page_table_k()),
-            optUid(get_page_table_v()),
-            optUid(get_block_mask()),
-            optUid(get_sink_token()),
-            optUid(get_descale_q()),
-            optUid(get_descale_k()),
-            optUid(get_descale_v()),
-            optUid(get_descale_s()),
-            optUid(get_scale_s()),
-            optUid(get_scale_o()),
-            optUid(get_stats()),
-            optUid(get_max()),
-            optUid(get_sum_exp()),
-            optUid(get_rng_dump()),
-            optUid(get_amax_s()),
-            optUid(get_amax_o()),
-            generate_stats.has_value() ? flatbuffers::Optional<bool>(*generate_stats)
-                                       : flatbuffers::nullopt,
-            alibi_mask,
-            padding_mask,
-            causal_mask,
-            causal_mask_bottom_right,
-            dropout_probability.has_value() ? flatbuffers::Optional<float>(*dropout_probability)
-                                            : flatbuffers::nullopt,
-            attn_scale_value.has_value() ? flatbuffers::Optional<float>(*attn_scale_value)
-                                         : flatbuffers::nullopt,
-            left_bound.has_value() ? flatbuffers::Optional<int64_t>(*left_bound)
-                                   : flatbuffers::nullopt,
-            right_bound.has_value() ? flatbuffers::Optional<int64_t>(*right_bound)
-                                    : flatbuffers::nullopt,
-            max_seq_len_kv.has_value() ? flatbuffers::Optional<int32_t>(*max_seq_len_kv)
-                                       : flatbuffers::nullopt,
-            toSdkType(diagonal_alignment),
-            toSdkType(mma_core_mode),
-            toSdkType(implementation));
+        return hipdnn_data_sdk::data_objects::CreateSdpaAttributes(builder,
+                                                                   get_q()->get_uid(),
+                                                                   get_k()->get_uid(),
+                                                                   get_v()->get_uid(),
+                                                                   get_o()->get_uid(),
+                                                                   optUid(get_bias()),
+                                                                   optUid(get_attn_scale()),
+                                                                   optUid(get_seq_len_q()),
+                                                                   optUid(get_seq_len_kv()),
+                                                                   optUid(get_seed()),
+                                                                   optUid(get_offset()),
+                                                                   optUid(get_dropout_mask()),
+                                                                   optUid(get_dropout_scale()),
+                                                                   optUid(get_page_table_k()),
+                                                                   optUid(get_page_table_v()),
+                                                                   optUid(get_block_mask()),
+                                                                   optUid(get_sink_token()),
+                                                                   optUid(get_descale_q()),
+                                                                   optUid(get_descale_k()),
+                                                                   optUid(get_descale_v()),
+                                                                   optUid(get_descale_s()),
+                                                                   optUid(get_scale_s()),
+                                                                   optUid(get_scale_o()),
+                                                                   optUid(get_stats()),
+                                                                   optUid(get_max()),
+                                                                   optUid(get_sum_exp()),
+                                                                   optUid(get_rng_dump()),
+                                                                   optUid(get_amax_s()),
+                                                                   optUid(get_amax_o()),
+                                                                   generate_stats,
+                                                                   alibi_mask,
+                                                                   padding_mask,
+                                                                   causal_mask,
+                                                                   causal_mask_bottom_right,
+                                                                   dropout_probability,
+                                                                   attn_scale_value,
+                                                                   left_bound,
+                                                                   right_bound,
+                                                                   max_seq_len_kv,
+                                                                   toSdkType(diagonal_alignment),
+                                                                   toSdkType(mma_core_mode),
+                                                                   toSdkType(implementation));
     }
 
     static SdpaAttributes fromFlatBuffer(
@@ -810,35 +823,17 @@ public:
             attr.set_amax_o(tensorMap.at(fb->amax_o_tensor_uid().value()));
         }
 
-        if(fb->generate_stats().has_value())
-        {
-            attr.generate_stats = fb->generate_stats().value();
-        }
+        attr.generate_stats = fb->generate_stats();
         attr.alibi_mask = fb->alibi_mask();
         attr.padding_mask = fb->padding_mask();
         attr.causal_mask = fb->causal_mask();
         attr.causal_mask_bottom_right = fb->causal_mask_bottom_right();
 
-        if(fb->dropout_probability().has_value())
-        {
-            attr.dropout_probability = fb->dropout_probability().value();
-        }
-        if(fb->attn_scale_value().has_value())
-        {
-            attr.attn_scale_value = fb->attn_scale_value().value();
-        }
-        if(fb->left_bound().has_value())
-        {
-            attr.left_bound = fb->left_bound().value();
-        }
-        if(fb->right_bound().has_value())
-        {
-            attr.right_bound = fb->right_bound().value();
-        }
-        if(fb->max_seq_len_kv().has_value())
-        {
-            attr.max_seq_len_kv = fb->max_seq_len_kv().value();
-        }
+        attr.dropout_probability = fb->dropout_probability();
+        attr.attn_scale_value = fb->attn_scale_value();
+        attr.left_bound = fb->left_bound();
+        attr.right_bound = fb->right_bound();
+        attr.max_seq_len_kv = fb->max_seq_len_kv();
 
         attr.diagonal_alignment = fromSdkType(fb->diagonal_alignment());
         attr.mma_core_mode = fromSdkType(fb->mma_core_mode());

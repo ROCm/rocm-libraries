@@ -1,6 +1,19 @@
 name: clang-tidy
 
 on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
+    paths:
+      - 'projects/hipdnn/**/*.[ch]p?p?'
+      - 'projects/hipdnn/cmake/ClangTidy.cmake'
+      - 'projects/hipdnn/.clang-tidy'
+      # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
+      # - 'dnn-providers/miopen-provider/**/*.[ch]p?p?'
+      # - 'dnn-providers/miopen-provider/cmake/ClangTidy.cmake'
+      # - 'dnn-providers/miopen-provider/.clang-tidy'
+      - '.github/workflows/clang-tidy.yml'
   pull_request:
     paths:
       - 'projects/hipdnn/**/*.[ch]p?p?'
@@ -13,15 +26,23 @@ on:
       - '.github/workflows/clang-tidy.yml'
   workflow_dispatch:
 
+concurrency:
+  # For PRs, group by PR number so a new commit cancels any in-progress run
+  # for the same PR. For postsubmits, group by commit SHA (unique per commit)
+  # so runs never cancel each other. The workflow name is prepended to avoid
+  # conflicts between different workflows.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   clang-tidy:
     runs-on: azure-linux-scale-rocm
     steps:
       - name: Checkout rocm-libraries
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Detect changed projects
-        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: changes
         with:
           filters: |
@@ -32,7 +53,7 @@ jobs:
             #   - 'dnn-providers/miopen-provider/**'
 
       - name: Checkout TheRock
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ROCm/TheRock
           path: TheRock

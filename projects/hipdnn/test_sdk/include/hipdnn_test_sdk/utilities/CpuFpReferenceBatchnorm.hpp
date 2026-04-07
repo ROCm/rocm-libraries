@@ -140,7 +140,7 @@ public:
                 "Batchnorm training requires at least 2D tensor (batch and channel).");
         }
 
-        int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
+        const int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
 
         auto nhw = static_cast<ComputeDataType>(elementsPerChannel);
         auto epsilonCompute = static_cast<ComputeDataType>(epsilon);
@@ -225,7 +225,7 @@ public:
 
         // Build dimensions for parallel iteration
         auto nChannels = x.dims().at(1);
-        std::vector<int64_t> parallelDims = {nChannels};
+        const std::vector<int64_t> parallelDims = {nChannels};
 
         auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
             batchnormFwdTrainingFunc, parallelDims);
@@ -285,7 +285,7 @@ public:
                                      "provided, or neither.");
         }
 
-        int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
+        const int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
         auto nhwF = static_cast<ComputeDataType>(elementsPerChannel);
         auto epsilonCompute = static_cast<ComputeDataType>(epsilon);
 
@@ -379,7 +379,7 @@ public:
 
         // Build dimensions for parallel iteration - only channels
         auto nChannels = x.dims().at(1);
-        std::vector<int64_t> parallelDims = {nChannels};
+        const std::vector<int64_t> parallelDims = {nChannels};
 
         auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(batchnormBwdFunc, parallelDims);

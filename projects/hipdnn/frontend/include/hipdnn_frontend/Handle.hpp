@@ -20,8 +20,9 @@
  * // handle is destroyed automatically at end of scope
  * @endcode
  *
- * If you need to target a specific HIP stream, pass it at creation
- * time or call setHipdnnHandleStream().
+ * By default the handle uses the default HIP stream. To enqueue work
+ * on a stream you created with `hipStreamCreate()`, pass the stream to
+ * createHipdnnHandle() or call setHipdnnHandleStream() afterwards.
  */
 
 #pragma once
@@ -72,11 +73,11 @@ using HipdnnHandlePtr = std::unique_ptr<hipdnnHandle_t, HipdnnHandleDeleter>;
 /**
  * @brief Create a hipDNN handle (output-parameter style)
  *
- * Initializes the backend and returns a handle that must be passed to
- * Graph::build() and Graph::execute(). Optionally binds the handle to a
- * HIP stream so all work is enqueued there.
+ * Initializes the backend and populates @p handle with a newly created
+ * hipDNN handle. On failure, @p handle is unchanged if backend
+ * creation fails, or reset to empty if stream binding fails.
  *
- * @param handle Output smart pointer that will own the created handle
+ * @param handle Output smart pointer that receives the created handle
  * @param stream HIP stream to bind (nullptr = default stream)
  * @return Error indicating success or failure
  *
@@ -87,6 +88,8 @@ using HipdnnHandlePtr = std::unique_ptr<hipdnnHandle_t, HipdnnHandleDeleter>;
  *     // handle error
  * }
  * @endcode
+ *
+ * @see createHipdnnHandle(hipStream_t) for structured-binding style
  */
 inline Error createHipdnnHandle(HipdnnHandlePtr& handle, hipStream_t stream = nullptr)
 {
@@ -135,7 +138,7 @@ inline std::pair<HipdnnHandlePtr, Error> createHipdnnHandle(hipStream_t stream =
 }
 
 /**
- * @brief Bind a different HIP stream to an existing handle
+ * @brief Bind a HIP stream to an existing handle
  *
  * All subsequent operations using this handle will be enqueued on
  * the given stream.
@@ -150,7 +153,7 @@ inline Error setHipdnnHandleStream(const HipdnnHandlePtr& handle, hipStream_t st
     {
         return {ErrorCode::INVALID_VALUE, "Cannot set stream on null handle"};
     }
-    auto status = detail::hipdnnBackend()->setStream(*handle, stream);
+    const auto status = detail::hipdnnBackend()->setStream(*handle, stream);
     HIPDNN_RETURN_ON_BACKEND_FAILURE(status, "Failed to set stream on hipdnn handle");
     return {};
 }
@@ -171,7 +174,7 @@ inline Error getHipdnnHandleStream(const HipdnnHandlePtr& handle, hipStream_t* s
     {
         return {ErrorCode::INVALID_VALUE, "Stream output pointer is null"};
     }
-    auto status = detail::hipdnnBackend()->getStream(*handle, stream);
+    const auto status = detail::hipdnnBackend()->getStream(*handle, stream);
     HIPDNN_RETURN_ON_BACKEND_FAILURE(status, "Failed to get stream from hipdnn handle");
     return {};
 }
@@ -181,22 +184,26 @@ using hipdnn_handle_deleter = HipdnnHandleDeleter;
 /// @brief snake_case alias for HipdnnHandlePtr
 using hipdnn_handle_ptr = HipdnnHandlePtr;
 
+/// @brief snake_case alias for createHipdnnHandle() (structured-binding style)
 inline auto create_hipdnn_handle(hipStream_t stream // NOLINT(readability-identifier-naming)
                                  = nullptr)
 {
     return createHipdnnHandle(stream);
 }
+/// @brief snake_case alias for createHipdnnHandle() (output-parameter style)
 inline Error create_hipdnn_handle(HipdnnHandlePtr& handle, // NOLINT(readability-identifier-naming)
                                   hipStream_t stream = nullptr)
 {
     return createHipdnnHandle(handle, stream);
 }
+/// @brief snake_case alias for setHipdnnHandleStream()
 inline Error
     set_hipdnn_handle_stream(const HipdnnHandlePtr& h, // NOLINT(readability-identifier-naming)
                              hipStream_t s)
 {
     return setHipdnnHandleStream(h, s);
 }
+/// @brief snake_case alias for getHipdnnHandleStream()
 inline Error
     get_hipdnn_handle_stream(const HipdnnHandlePtr& h, // NOLINT(readability-identifier-naming)
                              hipStream_t* s)

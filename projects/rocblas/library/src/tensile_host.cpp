@@ -798,7 +798,23 @@ namespace
             static int         determined_path = determine_tensile_base_path(base_path);
 
             path = base_path;
-            if(TestPath(path + "/" + processor))
+            // Probe subdirectories from most-specific to least-specific so that shard
+            // overlays compose correctly regardless of how TheRock splits arch builds:
+            //   1. library/<arch>-<xnack>/  – split single-xnack-variant shard
+            //   2. library/<arch>/          – combined xnack or no-xnack single-arch shard
+            //   3. library/                 – flat multi-arch build (no subdir)
+            bool        found_subdir = false;
+            std::string xnack_mode   = rocblas_internal_get_xnack_mode();
+            if(!xnack_mode.empty())
+            {
+                std::string processor_xnack = processor + "-" + xnack_mode;
+                if(TestPath(path + "/" + processor_xnack))
+                {
+                    path += "/" + processor_xnack;
+                    found_subdir = true;
+                }
+            }
+            if(!found_subdir && TestPath(path + "/" + processor))
                 path += "/" + processor;
 
 #ifdef TENSILE_YAML
@@ -1178,7 +1194,7 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
         }
     }
 
-    bool batched = prob.batch_A != nullptr;
+    bool batched = !prob.strided_batch;
     return prob.handle->tryHipBLASLt(batched);
 #else
     return false;

@@ -86,25 +86,25 @@ public:
             return;
         }
 
-        std::lock_guard<std::mutex> lock(_logsMutex);
+        const std::lock_guard<std::mutex> lock(_logsMutex);
         _recordedLogs.push_back({severity, message});
     }
 
     void clearLogs()
     {
-        std::lock_guard<std::mutex> lock(_logsMutex);
+        const std::lock_guard<std::mutex> lock(_logsMutex);
         _recordedLogs.clear();
     }
 
     std::vector<RecordedLog> getRecordedLogs() const
     {
-        std::lock_guard<std::mutex> lock(_logsMutex);
+        const std::lock_guard<std::mutex> lock(_logsMutex);
         return _recordedLogs;
     }
 
     size_t getRecordedLogCount() const
     {
-        std::lock_guard<std::mutex> lock(_logsMutex);
+        const std::lock_guard<std::mutex> lock(_logsMutex);
         return _recordedLogs.size();
     }
 
@@ -328,7 +328,7 @@ public:
         }
 
         std::ostringstream oss;
-        size_t logsToOutput = (maxLogs == 0 || maxLogs > logs.size()) ? logs.size() : maxLogs;
+        const size_t logsToOutput = (maxLogs == 0 || maxLogs > logs.size()) ? logs.size() : maxLogs;
 
         for(size_t i = 0; i < logsToOutput; ++i)
         {
@@ -337,7 +337,7 @@ public:
 
         if(maxLogs > 0 && logs.size() > maxLogs)
         {
-            size_t skipped = logs.size() - maxLogs;
+            const size_t skipped = logs.size() - maxLogs;
             oss << "(Skipped " << skipped << " additional log" << (skipped > 1 ? "s" : "")
                 << ".)\n";
         }
@@ -348,6 +348,14 @@ public:
     std::vector<RecordedLog> getRecordedLogs() const
     {
         return LogRecording::instance(_recordingId).getRecordedLogs();
+    }
+
+    /**
+     * @brief Clear all recorded logs for the current log recorder.
+     */
+    void clearLogs()
+    {
+        LogRecording::instance(_recordingId).clearLogs();
     }
 
 protected:
@@ -402,7 +410,7 @@ public:
      */
     static SharedLogRecorder withCurrentLevel()
     {
-        hipdnnSeverity_t currentLevel = hipdnn_data_sdk::logging::getLogLevel();
+        const hipdnnSeverity_t currentLevel = hipdnn_data_sdk::logging::getLogLevel();
         return {currentLevel, false}; // Don't change level
     }
 
@@ -454,7 +462,7 @@ public:
      */
     static IsolatedLogRecorder withCurrentLevel()
     {
-        hipdnnSeverity_t currentLevel = hipdnn_data_sdk::logging::getLogLevel();
+        const hipdnnSeverity_t currentLevel = hipdnn_data_sdk::logging::getLogLevel();
         return {currentLevel, false}; // Don't change level
     }
 
