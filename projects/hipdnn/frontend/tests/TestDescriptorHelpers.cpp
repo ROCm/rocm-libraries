@@ -213,16 +213,16 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrVecReturnsErrorOnFailure)
 
 TEST_F(TestDescriptorHelpers, SetDescriptorAttrScalarSucceeds)
 {
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_,
-                                    HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
-                                    HIPDNN_TYPE_CONVOLUTION_MODE,
-                                    1,
-                                    pointsToScalar<hipdnnConvolutionMode_t>(
-                                        HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION)))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(_,
+                            HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
+                            HIPDNN_TYPE_CONVOLUTION_MODE,
+                            1,
+                            pointsToScalar<hipdnnConvolutionMode_t>(HIPDNN_CROSS_CORRELATION)))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    const hipdnnConvolutionMode_t value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    const hipdnnConvolutionMode_t value = HIPDNN_CROSS_CORRELATION;
     hipdnnBackendDescriptor_t desc = nullptr;
     auto err = setDescriptorAttrScalar(desc,
                                        HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
@@ -287,7 +287,7 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrScalarReturnsErrorOnFailure)
     EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
         .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
-    const hipdnnConvolutionMode_t value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    const hipdnnConvolutionMode_t value = HIPDNN_CROSS_CORRELATION;
     hipdnnBackendDescriptor_t desc = nullptr;
     auto err = setDescriptorAttrScalar(desc,
                                        HIPDNN_ATTR_CONVOLUTION_CONV_MODE,

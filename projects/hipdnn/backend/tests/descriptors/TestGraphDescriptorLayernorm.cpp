@@ -82,12 +82,17 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                            1,
                            static_cast<const void*>(&invVarianceDesc));
     }
-    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    auto forwardPhase = HIPDNN_NORM_FWD_TRAINING;
     desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
                        HIPDNN_TYPE_NORM_FWD_PHASE,
                        1,
                        &forwardPhase);
+    int64_t normalizedDimCount = 3;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &normalizedDimCount);
 
     desc->finalize();
     return wrapper;
@@ -201,6 +206,7 @@ TEST_F(TestGraphDescriptorLayernorm, BuildFromSingleOperation)
     EXPECT_TRUE(attrs->inv_variance_tensor_uid.has_value());
     EXPECT_EQ(attrs->inv_variance_tensor_uid.value(), K_LAYERNORM_TENSOR_INV_VARIANCE_UID);
     EXPECT_EQ(attrs->forward_phase, NormFwdPhase::TRAINING);
+    EXPECT_EQ(attrs->normalized_dim_count, 3);
 }
 
 TEST_F(TestGraphDescriptorLayernorm, ComputeDataTypePreserved)

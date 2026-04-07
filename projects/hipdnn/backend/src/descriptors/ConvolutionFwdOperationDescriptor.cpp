@@ -237,7 +237,7 @@ void ConvolutionFwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
                   "ConvolutionFwdOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+        getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,

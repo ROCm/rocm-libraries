@@ -50,10 +50,19 @@ enum class ErrorCode
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline std::string to_string(ErrorCode code)
 {
-    static std::vector<std::string> s_errorCodes{
-        "OK", "INVALID_VALUE", "HIPDNN_BACKEND_ERROR", "ATTRIBUTE_NOT_SET"};
-
-    return s_errorCodes[static_cast<size_t>(code)];
+    switch(code)
+    {
+    case ErrorCode::OK:
+        return "OK";
+    case ErrorCode::INVALID_VALUE:
+        return "INVALID_VALUE";
+    case ErrorCode::HIPDNN_BACKEND_ERROR:
+        return "HIPDNN_BACKEND_ERROR";
+    case ErrorCode::ATTRIBUTE_NOT_SET:
+        return "ATTRIBUTE_NOT_SET";
+    default:
+        return "UNKNOWN_ERROR";
+    }
 }
 
 inline std::ostream& operator<<(std::ostream& os, const ErrorCode& error)
@@ -239,5 +248,20 @@ typedef Error error_t; ///< @brief Type alias for Error
         {                                                \
             return {error_status, message};              \
         }                                                \
+    } while(0)
+
+/// Evaluate an expression that returns Error and early-return
+/// \c {err, {}} when the error is bad. Works with any function whose
+/// return type is \c std::pair<Error, T> because \c {} value-initialises
+/// the second element (std::nullopt for optionals, default-constructed
+/// pairs, etc.).
+#define HIPDNN_FE_TRY(expr)           \
+    do                                \
+    {                                 \
+        auto _fe_try_err = (expr);    \
+        if(_fe_try_err.is_bad())      \
+        {                             \
+            return {_fe_try_err, {}}; \
+        }                             \
     } while(0)
 }

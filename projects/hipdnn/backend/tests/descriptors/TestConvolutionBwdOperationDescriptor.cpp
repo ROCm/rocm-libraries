@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/ConvDgradConstants.hpp>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
@@ -22,6 +23,7 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
+using hipdnn_tests::toVec;
 
 class TestConvolutionBwdOperationDescriptor : public ::testing::Test
 {
@@ -34,15 +36,15 @@ public:
     void setTensors() const
     {
         auto desc = getDescriptor();
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_dyDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_wDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_dxDesc);
@@ -73,7 +75,7 @@ public:
         auto computeType = HIPDNN_DATA_FLOAT;
         getDescriptor()->setAttribute(
             HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-        auto convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+        auto convMode = HIPDNN_CROSS_CORRELATION;
         getDescriptor()->setAttribute(
             HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     }
@@ -94,9 +96,15 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<ConvolutionBwdOperationDescriptor>();
-        _dyDesc = createFinalizedTensor(10, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-        _wDesc = createFinalizedTensor(11, {64, 3, 3, 3}, {27, 9, 3, 1});
-        _dxDesc = createFinalizedTensor(12, {1, 3, 32, 32}, {3072, 1024, 32, 1});
+        namespace dgrad = hipdnn_tests::constants::dgrad;
+        _dyDesc = createFinalizedTensor(dgrad::K_TENSOR_DY_UID,
+                                        toVec(dgrad::K_TENSOR_DY_DIMS),
+                                        toVec(dgrad::K_TENSOR_DY_STRIDES));
+        _wDesc = createFinalizedTensor(
+            dgrad::K_TENSOR_W_UID, toVec(dgrad::K_TENSOR_W_DIMS), toVec(dgrad::K_TENSOR_W_STRIDES));
+        _dxDesc = createFinalizedTensor(dgrad::K_TENSOR_DX_UID,
+                                        toVec(dgrad::K_TENSOR_DX_DIMS),
+                                        toVec(dgrad::K_TENSOR_DX_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
@@ -119,7 +127,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, CreateDescriptor)
     auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR);
 }
 
 TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeWithRequiredAttributes)
@@ -133,9 +141,9 @@ TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWithoutDyTensor)
 {
     auto desc = getDescriptor();
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_wDesc);
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_wDesc);
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc);
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc);
     setConvolutionBwdParams();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -145,9 +153,9 @@ TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWithoutWTensor)
 {
     auto desc = getDescriptor();
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc);
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc);
     setConvolutionBwdParams();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -157,9 +165,9 @@ TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWithoutDxTensor)
 {
     auto desc = getDescriptor();
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_wDesc);
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_wDesc);
     setConvolutionBwdParams();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -235,7 +243,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWithoutComputeType)
 {
     setTensors();
     setConvolutionBwdParams();
-    auto convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    auto convMode = HIPDNN_CROSS_CORRELATION;
     getDescriptor()->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -258,7 +266,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWithoutConvMode)
 TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorDescriptorDy)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_dyDesc));
@@ -272,7 +280,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorDescriptorW)
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_wDesc));
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_wDesc));
 
     ASSERT_EQ(desc->getData().w_tensor_uid, 11);
     ASSERT_NE(desc->getWDesc(), nullptr);
@@ -281,7 +289,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorDescriptorW)
 TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorDescriptorDx)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_dxDesc));
@@ -293,7 +301,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorDescriptorDx)
 TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorFailsNotFinalized)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   &_unfinalizedTensor),
@@ -305,14 +313,14 @@ TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorFailsWrongType)
     auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY, HIPDNN_TYPE_INT64, 1, &_dyDesc),
+            HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY, HIPDNN_TYPE_INT64, 1, &_dyDesc),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorFailsWrongElementCount)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   2,
                                                   &_dyDesc),
@@ -322,7 +330,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorFailsWrongElementCount)
 TEST_F(TestConvolutionBwdOperationDescriptor, SetTensorFailsNullPointer)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr),
@@ -392,7 +400,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, SetDilation)
 TEST_F(TestConvolutionBwdOperationDescriptor, SetConvMode)
 {
     auto desc = getDescriptor();
-    auto convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    auto convMode = HIPDNN_CROSS_CORRELATION;
 
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode));
@@ -403,7 +411,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, SetConvMode)
 TEST_F(TestConvolutionBwdOperationDescriptor, SetConvModeWrongElementCount)
 {
     auto desc = getDescriptor();
-    auto convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    auto convMode = HIPDNN_CROSS_CORRELATION;
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -453,7 +461,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, SetAttributeFailsAfterFinalize)
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   &_dyDesc),
@@ -481,7 +489,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeTensorDescriptor)
 
     HipdnnBackendDescriptor* rawDy = nullptr;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
@@ -541,7 +549,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeConvolutionBwdParams)
     EXPECT_EQ(dilation, (std::vector<int64_t>{1, 1}));
 
     // conv mode
-    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION;
     int64_t convModeCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
                                        HIPDNN_TYPE_CONVOLUTION_MODE,
@@ -549,7 +557,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeConvolutionBwdParams)
                                        &convModeCount,
                                        &convMode));
     ASSERT_EQ(convModeCount, 1);
-    EXPECT_EQ(convMode, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    EXPECT_EQ(convMode, HIPDNN_CROSS_CORRELATION);
 }
 
 TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeComputeType)
@@ -579,7 +587,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeFailsBeforeFinalize)
     setRequiredAttributes();
 
     HipdnnBackendDescriptor* dummy = nullptr;
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr,
@@ -592,7 +600,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeFailsNullPointer)
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr,
@@ -621,7 +629,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeTensorDyQueryReturnsOn
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -635,7 +643,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeTensorWQueryReturnsOne
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -649,7 +657,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeTensorDxQueryReturnsOn
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -721,7 +729,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeTensorQueryFailsNullEl
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   0,
                                                   nullptr,
