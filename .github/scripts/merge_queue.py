@@ -328,16 +328,30 @@ def update_pr_branch(
     if not pr_data:
         return False
 
-    # Check if already up to date — several mergeable_state values mean
-    # the branch doesn't need updating (clean, unstable, has_hooks, etc.)
-    behind = pr_data.get("mergeable_state", "") == "behind"
-    if not behind:
+    # Check if actually behind using the compare API.
+    # mergeable_state can be "clean" even when behind (it only indicates
+    # conflict status, not whether the branch is up-to-date).
+    head_branch = pr_data.get("head", {}).get("ref", "")
+    base_branch = pr_data.get("base", {}).get("ref", "")
+    if head_branch and base_branch:
+        compare = client._get_json(
+            f"https://api.github.com/repos/{repo}/compare/{base_branch}...{head_branch}",
+            f"compare {base_branch}...{head_branch}",
+        )
+        behind_by = compare.get("behind_by", 0) if compare else 0
+    else:
+        behind_by = 0
+
+    if behind_by == 0:
         logger.info(
-            f"PR #{pr_number} branch does not need updating "
-            f"(mergeable_state={pr_data.get('mergeable_state')})"
+            f"PR #{pr_number} branch is up to date with {base_branch}"
         )
         return True
 
+    logger.info(
+        f"PR #{pr_number} is {behind_by} commit(s) behind {base_branch}, "
+        f"updating branch"
+    )
     return client.update_pr_branch(repo, pr_number)
 
 

@@ -116,7 +116,18 @@ def main() -> None:
             # updated branch, or the PR was ejected).
             continue
 
-        # Already active — check CI
+        # Already active — ensure branch is up to date before checking CI
+        success = update_pr_branch(client, repo, pr_number)
+        if not success:
+            dequeue_pr(
+                client,
+                repo,
+                pr_number,
+                "Merge conflict with the base branch. "
+                "Please rebase and re-enqueue with `/merge`.",
+            )
+            continue
+
         ci = check_ci_status(client, repo, pr_number)
         logger.info(f"PR #{pr_number} CI status: {ci}")
 
