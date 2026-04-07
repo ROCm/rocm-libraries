@@ -122,6 +122,7 @@ target_compile_options(hipdnn_integration_tests PRIVATE ${INTEGRATION_TESTS_WARN
 
 clang_tidy_check(hipdnn_integration_tests)
 
+add_subdirectory(gpu_ref)
 add_subdirectory(tests)
 
 # Finalize test targets with prefix to avoid collisions in superbuild mode

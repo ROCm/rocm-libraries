@@ -123,7 +123,7 @@ void ConvolutionFwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
         getConvolutionAttribute(_data,
                                 _computeDataType,
                                 _name,
-                                HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+                                HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                 attributeName,
                                 attributeType,
                                 requestedElementCount,

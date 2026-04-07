@@ -21,7 +21,7 @@ namespace hipdnn_frontend::detail
     // Unpack x tensor
     std::shared_ptr<graph::TensorAttributes> xTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X,
+                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X,
                                                tensorMap,
                                                xTensor,
                                                "conv wgrad X tensor"));
@@ -30,7 +30,7 @@ namespace hipdnn_frontend::detail
     // Unpack dy tensor
     std::shared_ptr<graph::TensorAttributes> dyTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY,
+                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY,
                                                tensorMap,
                                                dyTensor,
                                                "conv wgrad DY tensor"));
@@ -39,7 +39,7 @@ namespace hipdnn_frontend::detail
     // Unpack dw tensor
     std::shared_ptr<graph::TensorAttributes> dwTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW,
+                                               HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW,
                                                tensorMap,
                                                dwTensor,
                                                "conv wgrad DW tensor"));
