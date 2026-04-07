@@ -125,35 +125,32 @@ TEST_F(TestKnobUnpacker, UnpackIntKnobWithConstraints)
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
 
     // Mock: knob ID
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, "test.int_knob");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, "test.int_knob");
 
     // Mock: description
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, "An integer knob");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, "An integer knob");
 
     // Mock: deprecated flag
-    mockScalarAttr<bool>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, HIPDNN_TYPE_BOOLEAN, false);
+    mockScalarAttr<bool>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, false);
 
     // Mock: default value type = INT64
     mockScalarAttr<int64_t>(fakeDesc,
-                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
                             HIPDNN_TYPE_INT64,
                             static_cast<int64_t>(HIPDNN_TYPE_INT64));
 
     // Mock: default value = 50
-    mockScalarAttr<int64_t>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, HIPDNN_TYPE_INT64, 50);
+    mockScalarAttr<int64_t>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, HIPDNN_TYPE_INT64, 50);
 
     // Mock: int constraints (min=0, max=100, stride=10)
     mockOptionalScalarAttr<int64_t>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT, HIPDNN_TYPE_INT64, 0);
+        fakeDesc, HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_INT64, 0);
     mockOptionalScalarAttr<int64_t>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT, HIPDNN_TYPE_INT64, 100);
-    mockOptionalScalarAttr<int64_t>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT, HIPDNN_TYPE_INT64, 10);
+        fakeDesc, HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_INT64, 100);
+    mockOptionalScalarAttr<int64_t>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64, 10);
 
     // Mock: valid values (empty)
-    mockEmptyVecAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT);
+    mockEmptyVecAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT);
 
     auto [err, knob] = unpackKnobDescriptor(fakeDesc);
     ASSERT_TRUE(err.is_good()) << err.get_message();
@@ -181,26 +178,24 @@ TEST_F(TestKnobUnpacker, UnpackFloatKnobWithConstraints)
 {
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
 
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, "test.float_knob");
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, "A float knob");
-    mockScalarAttr<bool>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, HIPDNN_TYPE_BOOLEAN, false);
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, "test.float_knob");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, "A float knob");
+    mockScalarAttr<bool>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, false);
 
     // Default value type = DOUBLE
     mockScalarAttr<int64_t>(fakeDesc,
-                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
                             HIPDNN_TYPE_INT64,
                             static_cast<int64_t>(HIPDNN_TYPE_DOUBLE));
 
     // Default value = 0.5
-    mockScalarAttr<double>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, HIPDNN_TYPE_DOUBLE, 0.5);
+    mockScalarAttr<double>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, HIPDNN_TYPE_DOUBLE, 0.5);
 
     // Float constraints: min=0.0, max=1.0
     mockOptionalScalarAttr<double>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT, HIPDNN_TYPE_DOUBLE, 0.0);
+        fakeDesc, HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_DOUBLE, 0.0);
     mockOptionalScalarAttr<double>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT, HIPDNN_TYPE_DOUBLE, 1.0);
+        fakeDesc, HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_DOUBLE, 1.0);
 
     auto [err, knob] = unpackKnobDescriptor(fakeDesc);
     ASSERT_TRUE(err.is_good()) << err.get_message();
@@ -224,23 +219,22 @@ TEST_F(TestKnobUnpacker, UnpackStringKnobWithValidValues)
 {
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
 
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, "test.string_knob");
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, "A string knob");
-    mockScalarAttr<bool>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, HIPDNN_TYPE_BOOLEAN, false);
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, "test.string_knob");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, "A string knob");
+    mockScalarAttr<bool>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, false);
 
     // Default value type = CHAR
     mockScalarAttr<int64_t>(fakeDesc,
-                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
                             HIPDNN_TYPE_INT64,
                             static_cast<int64_t>(HIPDNN_TYPE_CHAR));
 
     // Default value = "fast"
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, "fast");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, "fast");
 
     // String constraints: max length = 20
     mockOptionalScalarAttr<int32_t>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT, HIPDNN_TYPE_INT32, 20);
+        fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH, HIPDNN_TYPE_INT32, 20);
 
     // Valid values string: "fast\0accurate\0balanced\0"
     const std::string validValBuf
@@ -248,19 +242,16 @@ TEST_F(TestKnobUnpacker, UnpackStringKnobWithValidValues)
     const auto validValBufLen = static_cast<int64_t>(validValBuf.size());
 
     // Size query
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(fakeDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
-                                    HIPDNN_TYPE_CHAR,
-                                    0,
-                                    _,
-                                    nullptr))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(
+            fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, _, nullptr))
         .WillOnce(DoAll(SetArgPointee<4>(validValBufLen), Return(HIPDNN_STATUS_SUCCESS)));
 
     // Data read
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(fakeDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
                                     HIPDNN_TYPE_CHAR,
                                     validValBufLen,
                                     _,
@@ -303,26 +294,25 @@ TEST_F(TestKnobUnpacker, UnpackDeprecatedKnob)
 {
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
 
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, "test.deprecated_knob");
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, "A deprecated knob");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, "test.deprecated_knob");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, "A deprecated knob");
 
     // Deprecated = true
-    mockScalarAttr<bool>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, HIPDNN_TYPE_BOOLEAN, true);
+    mockScalarAttr<bool>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, true);
 
     // Default value type = INT64
     mockScalarAttr<int64_t>(fakeDesc,
-                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
                             HIPDNN_TYPE_INT64,
                             static_cast<int64_t>(HIPDNN_TYPE_INT64));
     // Default value = 0
-    mockScalarAttr<int64_t>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, HIPDNN_TYPE_INT64, 0);
+    mockScalarAttr<int64_t>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, HIPDNN_TYPE_INT64, 0);
 
     // No constraints
-    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT, HIPDNN_TYPE_INT64);
-    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT, HIPDNN_TYPE_INT64);
-    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT, HIPDNN_TYPE_INT64);
-    mockEmptyVecAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT);
+    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_INT64);
+    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_INT64);
+    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64);
+    mockEmptyVecAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT);
 
     auto [err, knob] = unpackKnobDescriptor(fakeDesc);
     ASSERT_TRUE(err.is_good()) << err.get_message();
@@ -335,34 +325,29 @@ TEST_F(TestKnobUnpacker, UnpackStringKnobIgnoresEmptyValidValueEntries)
 {
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
 
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, "test.sparse_string_knob");
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, "String knob with gaps");
-    mockScalarAttr<bool>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, HIPDNN_TYPE_BOOLEAN, false);
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, "test.sparse_string_knob");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, "String knob with gaps");
+    mockScalarAttr<bool>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, false);
     mockScalarAttr<int64_t>(fakeDesc,
-                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
                             HIPDNN_TYPE_INT64,
                             static_cast<int64_t>(HIPDNN_TYPE_CHAR));
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, "fast");
-    mockOptionalScalarAbsent(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT, HIPDNN_TYPE_INT32);
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, "fast");
+    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH, HIPDNN_TYPE_INT32);
 
     // Buffer contains an empty entry between valid values.
     const std::string validValBuf = std::string("fast") + '\0' + '\0' + "balanced" + '\0';
     const auto validValBufLen = static_cast<int64_t>(validValBuf.size());
 
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(fakeDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
-                                    HIPDNN_TYPE_CHAR,
-                                    0,
-                                    _,
-                                    nullptr))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(
+            fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, _, nullptr))
         .WillOnce(DoAll(SetArgPointee<4>(validValBufLen), Return(HIPDNN_STATUS_SUCCESS)));
 
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(fakeDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
                                     HIPDNN_TYPE_CHAR,
                                     validValBufLen,
                                     _,
@@ -391,34 +376,26 @@ TEST_F(TestKnobUnpacker, UnpackStringKnobFailsWhenValidValuesReadFails)
 {
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
 
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, "test.bad_string_knob");
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, "String knob read failure");
-    mockScalarAttr<bool>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, HIPDNN_TYPE_BOOLEAN, false);
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, "test.bad_string_knob");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, "String knob read failure");
+    mockScalarAttr<bool>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, false);
     mockScalarAttr<int64_t>(fakeDesc,
-                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
                             HIPDNN_TYPE_INT64,
                             static_cast<int64_t>(HIPDNN_TYPE_CHAR));
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, "fast");
-    mockOptionalScalarAbsent(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT, HIPDNN_TYPE_INT32);
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, "fast");
+    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH, HIPDNN_TYPE_INT32);
 
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(fakeDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
-                                    HIPDNN_TYPE_CHAR,
-                                    0,
-                                    _,
-                                    nullptr))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(
+            fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, _, nullptr))
         .WillOnce(DoAll(SetArgPointee<4>(int64_t{8}), Return(HIPDNN_STATUS_SUCCESS)));
 
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(fakeDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
-                                    HIPDNN_TYPE_CHAR,
-                                    8,
-                                    _,
-                                    NotNull()))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(
+            fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 8, _, NotNull()))
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     auto [err, knob] = unpackKnobDescriptor(fakeDesc);
@@ -431,25 +408,20 @@ TEST_F(TestKnobUnpacker, UnpackStringKnobWithNotSupportedValidValuesGetsEmptyCon
 {
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
 
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, "test.legacy_string_knob");
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, "Legacy string knob");
-    mockScalarAttr<bool>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, HIPDNN_TYPE_BOOLEAN, false);
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, "test.legacy_string_knob");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, "Legacy string knob");
+    mockScalarAttr<bool>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, false);
     mockScalarAttr<int64_t>(fakeDesc,
-                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
                             HIPDNN_TYPE_INT64,
                             static_cast<int64_t>(HIPDNN_TYPE_CHAR));
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, "fast");
-    mockOptionalScalarAbsent(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT, HIPDNN_TYPE_INT32);
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, "fast");
+    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH, HIPDNN_TYPE_INT32);
 
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(fakeDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
-                                    HIPDNN_TYPE_CHAR,
-                                    0,
-                                    _,
-                                    nullptr))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(
+            fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, _, nullptr))
         .WillOnce(Return(HIPDNN_STATUS_NOT_SUPPORTED));
 
     auto [err, knob] = unpackKnobDescriptor(fakeDesc);
@@ -464,23 +436,21 @@ TEST_F(TestKnobUnpacker, UnpackKnobWithNoConstraintsGetsEmptyConstraint)
 {
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
 
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, "test.unconstrained");
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, "Unconstrained knob");
-    mockScalarAttr<bool>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, HIPDNN_TYPE_BOOLEAN, false);
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, "test.unconstrained");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, "Unconstrained knob");
+    mockScalarAttr<bool>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, false);
 
     mockScalarAttr<int64_t>(fakeDesc,
-                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
                             HIPDNN_TYPE_INT64,
                             static_cast<int64_t>(HIPDNN_TYPE_INT64));
-    mockScalarAttr<int64_t>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, HIPDNN_TYPE_INT64, 42);
+    mockScalarAttr<int64_t>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, HIPDNN_TYPE_INT64, 42);
 
     // All optional constraints absent
-    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT, HIPDNN_TYPE_INT64);
-    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT, HIPDNN_TYPE_INT64);
-    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT, HIPDNN_TYPE_INT64);
-    mockEmptyVecAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT);
+    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_INT64);
+    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_INT64);
+    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64);
+    mockEmptyVecAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT);
 
     auto [err, knob] = unpackKnobDescriptor(fakeDesc);
     ASSERT_TRUE(err.is_good()) << err.get_message();
@@ -497,9 +467,9 @@ TEST_F(TestKnobUnpacker, UnpackFailsWithEmptyKnobId)
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
 
     // Mock: knob ID size query returns 0
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(
-                    fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, HIPDNN_TYPE_CHAR, 0, _, nullptr))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, HIPDNN_TYPE_CHAR, 0, _, nullptr))
         .WillOnce(DoAll(SetArgPointee<4>(0), Return(HIPDNN_STATUS_SUCCESS)));
 
     auto [err, knob] = unpackKnobDescriptor(fakeDesc);
@@ -512,14 +482,13 @@ TEST_F(TestKnobUnpacker, UnpackFailsWithUnknownValueType)
 {
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
 
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, "test.bad_type");
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, "Bad type knob");
-    mockScalarAttr<bool>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, HIPDNN_TYPE_BOOLEAN, false);
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, "test.bad_type");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, "Bad type knob");
+    mockScalarAttr<bool>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, false);
 
     // Default value type = some unknown type (9999)
     mockScalarAttr<int64_t>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT, HIPDNN_TYPE_INT64, 9999);
+        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE, HIPDNN_TYPE_INT64, 9999);
 
     auto [err, knob] = unpackKnobDescriptor(fakeDesc);
     EXPECT_TRUE(err.is_bad());
@@ -531,22 +500,20 @@ TEST_F(TestKnobUnpacker, UnpackIntKnobWithValidValues)
 {
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
 
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, "test.valid_values_knob");
-    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, "Knob with valid values");
-    mockScalarAttr<bool>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, HIPDNN_TYPE_BOOLEAN, false);
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, "test.valid_values_knob");
+    mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, "Knob with valid values");
+    mockScalarAttr<bool>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, false);
 
     mockScalarAttr<int64_t>(fakeDesc,
-                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                            HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
                             HIPDNN_TYPE_INT64,
                             static_cast<int64_t>(HIPDNN_TYPE_INT64));
-    mockScalarAttr<int64_t>(
-        fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, HIPDNN_TYPE_INT64, 8);
+    mockScalarAttr<int64_t>(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, HIPDNN_TYPE_INT64, 8);
 
     // No min/max/stride
-    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT, HIPDNN_TYPE_INT64);
-    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT, HIPDNN_TYPE_INT64);
-    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT, HIPDNN_TYPE_INT64);
+    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_INT64);
+    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_INT64);
+    mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64);
 
     // Valid values: {8, 16, 32, 64}
     std::vector<int64_t> validValues = {8, 16, 32, 64};
@@ -554,14 +521,14 @@ TEST_F(TestKnobUnpacker, UnpackIntKnobWithValidValues)
     EXPECT_CALL(
         *_mockBackend,
         backendGetAttribute(
-            fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT, HIPDNN_TYPE_INT64, 0, _, nullptr))
+            fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT, HIPDNN_TYPE_INT64, 0, _, nullptr))
         .WillOnce(DoAll(SetArgPointee<4>(static_cast<int64_t>(validValues.size())),
                         Return(HIPDNN_STATUS_SUCCESS)));
 
     // Data read
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(fakeDesc,
-                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT,
                                     HIPDNN_TYPE_INT64,
                                     static_cast<int64_t>(validValues.size()),
                                     _,
@@ -655,22 +622,20 @@ protected:
     /// Fully mock unpackKnobDescriptor for an int knob on fakeDesc.
     void expectIntKnobMocks(hipdnnBackendDescriptor_t fakeDesc, const std::string& knobId)
     {
-        mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, knobId);
-        mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, "desc");
+        mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, knobId);
+        mockStringAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, "desc");
         mockScalarAttr<bool>(
-            fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, HIPDNN_TYPE_BOOLEAN, false);
+            fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, false);
         mockScalarAttr<int64_t>(fakeDesc,
-                                HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                                HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
                                 HIPDNN_TYPE_INT64,
                                 static_cast<int64_t>(HIPDNN_TYPE_INT64));
         mockScalarAttr<int64_t>(
-            fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, HIPDNN_TYPE_INT64, 0);
-        mockOptionalScalarAbsent(
-            fakeDesc, HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT, HIPDNN_TYPE_INT64);
-        mockOptionalScalarAbsent(
-            fakeDesc, HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT, HIPDNN_TYPE_INT64);
-        mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT, HIPDNN_TYPE_INT64);
-        mockEmptyVecAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT);
+            fakeDesc, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, HIPDNN_TYPE_INT64, 0);
+        mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_INT64);
+        mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_INT64);
+        mockOptionalScalarAbsent(fakeDesc, HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64);
+        mockEmptyVecAttr(fakeDesc, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT);
     }
 };
 
@@ -735,7 +700,7 @@ TEST_F(TestUnpackKnobsFromDescriptors, MidArrayFailureSkipsInvalidKnob)
     // Second knob fails — knob ID query returns empty string → triggers "empty knob ID" error
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(
-                    _fakeDesc2, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, HIPDNN_TYPE_CHAR, 0, _, nullptr))
+                    _fakeDesc2, HIPDNN_ATTR_KNOB_INFO_TYPE, HIPDNN_TYPE_CHAR, 0, _, nullptr))
         .WillOnce(DoAll(SetArgPointee<4>(int64_t{0}), Return(HIPDNN_STATUS_SUCCESS)));
 
     EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_fakeDesc1))

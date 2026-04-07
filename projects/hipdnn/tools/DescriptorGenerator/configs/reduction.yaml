@@ -101,7 +101,7 @@ operation:
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_REDUCTION_COMP_TYPE"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_REDUCTION"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_REDUCTION_EXT"
 
   test_data:
     tensor_uids: { x: 90, y: 91 }
