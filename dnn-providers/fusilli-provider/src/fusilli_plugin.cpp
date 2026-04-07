@@ -512,8 +512,8 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
     FUSILLI_PLUGIN_ASSIGN_OR_RETURN(
         auto elementType,
         fusilliDataTypeToIreeHalDataType(tensorAttr->getDataType()));
-    size_t sizeBytes = iree_hal_element_dense_byte_count(elementType) *
-                       static_cast<size_t>(tensorAttr->getVolume());
+    size_t sizeBytes = iree_hal_element_packed_byte_count(
+        elementType, static_cast<size_t>(tensorAttr->getVolume()));
     std::vector<int64_t> dims = tensorAttr->getPhysicalDim();
     std::vector<iree_hal_dim_t> shape(dims.begin(), dims.end());
     FUSILLI_PLUGIN_ASSIGN_OR_RETURN(
