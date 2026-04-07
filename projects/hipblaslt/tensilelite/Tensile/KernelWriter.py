@@ -456,8 +456,7 @@ class CodeModules:
   perIterGlobalRead: Optional[List[Module]]                           = None
   perIterLocalWrite: Optional[List[Tuple[List[int], Module]]]         = None
   perIterLocalWriteCodeNGLL: Optional[List[Tuple[List[int], Module]]] = None
-  clusterBarrierSignal: Optional[List[Module]]                        = None
-  clusterBarrierWait: Optional[List[Module]]                          = None
+  clusterBarrier: Optional[List[Module]]                              = None
 
 @dataclass
 class ExternClasses:
@@ -656,8 +655,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       globalReadIncBCode  = Module()
 
     if kernel["ClusterBarrier"]:
-      self.codes.clusterBarrierSignal = [ Module() for i in range (kernel["LoopIters"]) ]
-      self.codes.clusterBarrierWait = [ Module() for i in range (kernel["LoopIters"]) ]
+      self.codes.clusterBarrier = [ Module() for i in range (kernel["LoopIters"]) ]
 
     siaComponent = Component.SIA.find(self)
     if siaComponent:
@@ -869,8 +867,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     localWriteCodeCounts = self.codes.perIterLocalWrite[iteration][0]
     localWriteCode       = self.codes.perIterLocalWrite[iteration][1]
     if kernel["ClusterBarrier"]:
-      clusterBarrierSignalCode = self.codes.clusterBarrierSignal[iteration]
-      clusterBarrierWaitCode   = self.codes.clusterBarrierWait[iteration]
+      clusterBarrierCode   = self.codes.clusterBarrier[iteration]
     isBarrier            = kernel["LoopIters"] - self.states.numItersPLR
     if self.states.doFullPackCodePrefetch and kernel["ForceUnrollSubIter"]:
       # hack for doFullPackCodePrefetch and SubIter
@@ -888,13 +885,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
         assert len(packCode.flatitems()) == 0, "Pack code should be empty for half PLR case"
         if kernel["PrefetchGlobalRead"] < 2: 
           if kernel["ClusterBarrier"]:
-            iterCode.add(clusterBarrierWaitCode)
+            iterCode.add(clusterBarrierCode)
           iterCode.add(globalReadCode)
         iterCode.add(waitLWCode)
         iterCode.add(syncCode)
         iterCode.add(localReadCode)
-        if kernel["ClusterBarrier"]:
-          iterCode.add(clusterBarrierSignalCode)
         iterCode.add(localWriteCode)
         iterCode.add(waitCode)
         macCnt = countMFMA(macIterCode)
@@ -920,7 +915,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         iterCode.add(pointerLRCode)
         if kernel["PrefetchGlobalRead"] >= 2: 
           if kernel["ClusterBarrier"]:
-            iterCode.add(clusterBarrierWaitCode)
+            iterCode.add(clusterBarrierCode)
           iterCode.add(globalReadCode)
         # add rest of the mac here
         iterCode.addItems(macItems)
@@ -929,13 +924,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
           iterCode.add(waitLWCode)
           iterCode.add(syncCode)
           iterCode.add(localReadCode)
-          if kernel["ClusterBarrier"]:
-            iterCode.add(clusterBarrierSignalCode)
           iterCode.add(localWriteCode)
           iterCode.add(pointerLWCode)
           iterCode.add(pointerLRCode)
           if kernel["ClusterBarrier"]:
-            iterCode.add(clusterBarrierWaitCode)
+            iterCode.add(clusterBarrierCode)
           iterCode.add(globalReadCode)
           iterCode.add(waitCode)
           # iterCode.add(packPreCode)
@@ -943,13 +936,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
           iterCode.add(macIterCode)
         else:
           if kernel["ClusterBarrier"]:
-            iterCode.add(clusterBarrierWaitCode)
+            iterCode.add(clusterBarrierCode)
           iterCode.add(globalReadCode)
           iterCode.add(waitLWCode)
           iterCode.add(syncCode)
           iterCode.add(localReadCode)
-          if kernel["ClusterBarrier"]:
-            iterCode.add(clusterBarrierSignalCode)
           iterCode.add(localWriteCode)
           iterCode.add(pointerLWCode)
           iterCode.add(pointerLRCode)
@@ -3069,8 +3060,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if isNGLL:
       self.codes.perIterGlobalRead = [ Module() for i in range (kernel["LoopIters"]) ]
-      self.codes.clusterBarrierSignal = [ Module() for i in range (kernel["LoopIters"]) ]
-      self.codes.clusterBarrierWait = [ Module() for i in range (kernel["LoopIters"]) ]
+      self.codes.clusterBarrier = [ Module() for i in range (kernel["LoopIters"]) ]
 
     for uIdx in range(0, kernel["LoopIters"]):
       u = uIdx % kernel["LoopIters"]    #   u: index in compute loop (in contrast to the notion of global read loop)
@@ -3789,7 +3779,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       unrollLoopHeaderCodeScheduled = True
       self.makeSchedule(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter=firstIter)
       module.add(self.codes.unrollLoopHeader)
-    print("unrollLoopHeaderCodeScheduled = ", unrollLoopHeaderCodeScheduled)
+
     # if not prefetch global, localWrite before mac's
     if not kernel["PrefetchGlobalRead"]:
       # unrolled loop: local write A, B
@@ -3822,7 +3812,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       """
 
     tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
-    module.addComment1("before plr")
+
     # unrolled loop: prefetch local
     if self.states.numItersPLR and not kernel["PrefetchGlobalRead"]:
       for plrIdx in range(0, self.states.numItersPLR):
@@ -3939,10 +3929,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.codes.localWriteMXSB = Module()
           self.codes.localWriteB = Module()
 
-        module.addComment1("before unrollLoopHeaderCodeScheduled")
         if not unrollLoopHeaderCodeScheduled:
           if kernel["PrefetchGlobalRead"] != 2 and kernel["ClusterBarrier"]:
+            module.add(SBarrier(comment="sync within cluster before clustr barrier"))
             module.add(SBarrier(True, True, True, "cluster_barrier wait"))
+            module.add(self.clusterBarrierPreSignal(kernel))
           self.makeSchedule(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter=firstIter, lastLoop=False, lastLc=(lc==loopCopies-1))
           module.add(self.codes.unrollLoopHeader)
 
@@ -4179,11 +4170,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
             PackCodeBAllIters[uIdx].add(packCodeB)
 
         if kernel["ClusterBarrier"] and u == 0 and kernel["PrefetchGlobalRead"] == 2:
-          self.codes.clusterBarrierWait[u].add(SBarrier(True, True, True, "cluster_barrier wait"))
-
-        if uIdx == (kernel["LoopIters"] - 1):
-          if kernel["ClusterBarrier"]:
-            self.codes.clusterBarrierSignal[u].add(self.clusterBarrierPreSignal(kernel))
+          self.codes.clusterBarrier[u].add(SBarrier(comment="sync within cluster before cluster barrier"))
+          self.codes.clusterBarrier[u].add(SBarrier(True, True, True, "cluster_barrier wait"))
+          self.codes.clusterBarrier[u].add(self.clusterBarrierPreSignal(kernel))
 
         # Don't increment the LRO if we are going to reset them below:
         if not isResetLroIter or iui != kernel["InnerUnroll"]-1:
