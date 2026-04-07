@@ -650,6 +650,7 @@ TEST(ExternalDiscreteDistributionTests, Philox4x32_10WithUIN4OutputTest)
 
     delete [] host_output;
     HIP_CHECK(hipFree(device_output));
+    HIP_CHECK(hipFree(device_states));
 }
 
 /* #################################################
@@ -730,6 +731,10 @@ void run_internal_host_test(const DiscreteFunc& df)
             actual_prob[i] = histogram[i] / static_cast<double>(test_size);
 
         ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
+
+        rocrand_err = discrete_distribution_factory<discrete_method::DISCRETE_METHOD_UNIVERSAL,
+												true>::deallocate(discrete_dis);
+        ROCRAND_CHECK(rocrand_err);
     }
 }
 
@@ -873,6 +878,9 @@ void run_host_test(const DiscreteFunc& df)
 
         ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
 
+        rocrand_err = discrete_distribution_factory<discrete_method::DISCRETE_METHOD_UNIVERSAL,
+                                            true>::deallocate(discrete_dis);
+        ROCRAND_CHECK(rocrand_err);
     }
 }
 

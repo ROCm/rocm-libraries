@@ -366,13 +366,18 @@ public:
         return *this;
     }
 
-    ~mtgp32_generator_template()
-    {
+	void free_engines()
+	{
         if(m_engines != nullptr)
         {
             system_type::free(m_engines);
             m_engines = nullptr;
         }
+	}
+
+    ~mtgp32_generator_template()
+    {
+        free_engines();
     }
 
     static constexpr rocrand_rng_type type()
@@ -382,6 +387,7 @@ public:
 
     void reset() override final
     {
+        free_engines();
         m_engines_initialized = false;
     }
 

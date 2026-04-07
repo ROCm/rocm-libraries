@@ -754,6 +754,11 @@ void hiprand_kernel_h_hiprand_sobol_init_test()
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(states));
+    HIP_CHECK(hipFree(d_vector));
+    if(is_sobol_scrambled<state_type>::value)
+    {
+        HIP_CHECK(hipFree(d_constants));
+    }
 }
 
 template<class state_type>
@@ -772,6 +777,7 @@ void hiprand_kernel_h_hiprand_mtgp_init_test()
         hiprandMakeMTGP32KernelState(states, mtgp32dc_params_fast_11213, k, states_size, seed));
 
     HIP_CHECK(hipFree(states));
+    HIP_CHECK(hipFree(k));
 }
 
 TEST(hiprand_kernel_h_philox4x32_10, hiprand_init)
@@ -977,7 +983,12 @@ void hiprand_kernel_h_hiprand_sobol_test()
                         hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
-
+    HIP_CHECK(hipFree(d_vector));
+    if(is_sobol_scrambled<state_type>::value)
+    {
+        HIP_CHECK(hipFree(d_constants));
+    }
+    
     double mean = 0;
     for(auto v : output_host)
     {
@@ -1019,6 +1030,7 @@ void hiprand_kernel_h_hiprand_mtgp_test()
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(states));
+    HIP_CHECK(hipFree(k));
 
     double mean = 0;
     for(auto v : output_host)
@@ -1136,6 +1148,11 @@ void hiprand_kernel_h_hiprand_uniform_sobol_test()
         hipMemcpy(output_host.data(), output, output_size * sizeof(float), hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
+    HIP_CHECK(hipFree(d_vector));
+    if(is_sobol_scrambled<state_type>::value)
+    {
+        HIP_CHECK(hipFree(d_constants));
+    }
 
     double mean = 0;
     for(auto v : output_host)
@@ -1176,6 +1193,7 @@ void hiprand_kernel_h_hiprand_uniform_mtgp_test()
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(states));
+    HIP_CHECK(hipFree(k));
 
     double mean = 0;
     for(auto v : output_host)
@@ -1301,6 +1319,11 @@ void hiprand_kernel_h_hiprand_normal_sobol_test()
         hipMemcpy(output_host.data(), output, output_size * sizeof(float), hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
+    HIP_CHECK(hipFree(d_vector));
+    if(is_sobol_scrambled<state_type>::value)
+    {
+        HIP_CHECK(hipFree(d_constants));
+    }
 
     double mean = 0;
     for(auto v : output_host)
@@ -1354,6 +1377,7 @@ void hiprand_kernel_h_hiprand_normal_mtgp_test()
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(states));
+    HIP_CHECK(hipFree(k));
 
     double mean = 0;
     for(auto v : output_host)
@@ -1491,7 +1515,11 @@ void hiprand_kernel_h_hiprand_log_normal_sobol_test()
         hipMemcpy(output_host.data(), output, output_size * sizeof(float), hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
-
+    HIP_CHECK(hipFree(d_vector));
+    if(is_sobol_scrambled<state_type>::value)
+    {
+        HIP_CHECK(hipFree(d_constants));
+    }
     double mean = 0;
     for(auto v : output_host)
     {
@@ -1548,6 +1576,7 @@ void hiprand_kernel_h_hiprand_log_normal_mtgp_test()
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(states));
+    HIP_CHECK(hipFree(k));
 
     double mean = 0;
     for(auto v : output_host)
@@ -1801,7 +1830,11 @@ void hiprand_kernel_h_hiprand_poisson_sobol_test(double lambda)
                         hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
-
+    HIP_CHECK(hipFree(d_vector));
+    if(is_sobol_scrambled<state_type>::value)
+    {
+        HIP_CHECK(hipFree(d_constants));
+    }
     double mean = 0;
     for(auto v : output_host)
     {
@@ -1852,7 +1885,7 @@ void hiprand_kernel_h_hiprand_poisson_mtgp_test(double lambda)
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(states));
-
+    HIP_CHECK(hipFree(k));
     double mean = 0;
     for(auto v : output_host)
     {
@@ -1961,6 +1994,11 @@ void hiprand_kernel_h_hiprand_discrete_sobol_test(double lambda)
                         hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
+    HIP_CHECK(hipFree(d_vector));
+    if(is_sobol_scrambled<state_type>::value)
+    {
+        HIP_CHECK(hipFree(d_constants));
+    }
     ASSERT_EQ(hiprandDestroyDistribution(discrete_distribution), HIPRAND_STATUS_SUCCESS);
 
     double mean = 0;
@@ -2017,6 +2055,7 @@ void hiprand_kernel_h_hiprand_discrete_mtgp_test(double lambda)
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(states));
+    HIP_CHECK(hipFree(k));
     ASSERT_EQ(hiprandDestroyDistribution(discrete_distribution), HIPRAND_STATUS_SUCCESS);
 
     double mean = 0;
