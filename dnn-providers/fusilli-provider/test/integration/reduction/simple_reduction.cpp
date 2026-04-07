@@ -109,15 +109,31 @@ TEST_F(ReductionIntegrationTest, SimpleSumReduction) {
   result = graph->build_plans();
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
 
+  // Query workspace size.
+  int64_t workspaceSize = 0;
+  result = graph->get_workspace_size(workspaceSize);
+  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+
+  // Allocate workspace if needed.
+  void *workspace = nullptr;
+  if (workspaceSize > 0) {
+    ASSERT_EQ(hipMalloc(&workspace, static_cast<size_t>(workspaceSize)),
+              hipSuccess);
+  }
+
   // Create variant pack.
   std::unordered_map<int64_t, void *> variantPack;
   variantPack[inputUID] = inputTensor.memory().deviceData();
   variantPack[outputUID] = outputTensor.memory().deviceData();
 
   // Execute graph.
-  result = graph->execute(handle, variantPack, nullptr);
+  result = graph->execute(handle, variantPack, workspace);
   ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
   outputTensor.memory().markDeviceModified();
+
+  if (workspace) {
+    ASSERT_EQ(hipFree(workspace), hipSuccess);
+  }
 
   // Check results.
   CpuFpReferenceValidation<float> validator(1e-5f, 1e-5f);
