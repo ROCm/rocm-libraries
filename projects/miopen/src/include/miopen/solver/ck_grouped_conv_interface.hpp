@@ -26,7 +26,7 @@ struct ConvSolution;
 
 /// API version constant. Bump when the set of extern "C" symbols or their
 /// semantics change.  The loader checks this at dlopen time.
-#define CK_GROUPED_CONV_API_VERSION 2
+#define CK_GROUPED_CONV_API_VERSION 3
 
 /// Opaque handle wrapping a list of valid kernel ID strings.
 /// Allocated by the impl library, freed by the caller via
@@ -206,6 +206,98 @@ ckgrpconv_3d_wrw_get_solution(const miopen::ExecutionContext* ctx,
                               const miopen::conv::ProblemDescription* problem,
                               const char* kernel_id,
                               bool use_tf32);
+
+// -- Fused Conv+Bias+ReLU (non-grouped, FP16) ---------------------------------
+
+CK_GROUPED_CONV_API CKKernelListHandle* ckgrpconv_fused_bias_activ_fill_valid_kernels(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
+
+CK_GROUPED_CONV_API bool ckgrpconv_fused_bias_activ_is_applicable(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
+
+CK_GROUPED_CONV_API bool
+ckgrpconv_fused_bias_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
+                                             const char* kernel_id,
+                                             miopenDataType_t data_type,
+                                             bool use_tf32);
+
+CK_GROUPED_CONV_API size_t ckgrpconv_fused_bias_activ_get_workspace_size(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
+
+CK_GROUPED_CONV_API miopen::solver::ConvSolution*
+ckgrpconv_fused_bias_activ_get_solution(const miopen::ExecutionContext* ctx,
+                                        const miopen::conv::ProblemDescription* problem,
+                                        const char* kernel_id,
+                                        bool use_tf32);
+
+// -- Fused Conv+ScaleAdd+Bias+ReLU --------------------------------------------
+
+CK_GROUPED_CONV_API CKKernelListHandle* ckgrpconv_fused_bias_res_add_activ_fill_valid_kernels(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
+
+CK_GROUPED_CONV_API bool ckgrpconv_fused_bias_res_add_activ_is_applicable(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
+
+CK_GROUPED_CONV_API bool
+ckgrpconv_fused_bias_res_add_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
+                                                     const char* kernel_id,
+                                                     miopenDataType_t data_type,
+                                                     bool use_tf32);
+
+CK_GROUPED_CONV_API size_t ckgrpconv_fused_bias_res_add_activ_get_workspace_size(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
+
+CK_GROUPED_CONV_API miopen::solver::ConvSolution*
+ckgrpconv_fused_bias_res_add_activ_get_solution(const miopen::ExecutionContext* ctx,
+                                                const miopen::conv::ProblemDescription* problem,
+                                                const char* kernel_id,
+                                                bool use_tf32);
+
+// -- Fused Grouped Conv+Activation(Clamp) -------------------------------------
+
+CK_GROUPED_CONV_API CKKernelListHandle* ckgrpconv_fused_grp_activ_fill_valid_kernels(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
+
+CK_GROUPED_CONV_API bool ckgrpconv_fused_grp_activ_is_applicable(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
+
+CK_GROUPED_CONV_API bool
+ckgrpconv_fused_grp_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
+                                            const char* kernel_id,
+                                            miopenDataType_t data_type,
+                                            bool use_tf32);
+
+CK_GROUPED_CONV_API size_t ckgrpconv_fused_grp_activ_get_workspace_size(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
+
+CK_GROUPED_CONV_API miopen::solver::ConvSolution*
+ckgrpconv_fused_grp_activ_get_solution(const miopen::ExecutionContext* ctx,
+                                       const miopen::conv::ProblemDescription* problem,
+                                       const char* kernel_id,
+                                       bool use_tf32);
+
+// -- Fused Grouped Conv+Bias+Activation(AddClamp) -----------------------------
+
+CK_GROUPED_CONV_API CKKernelListHandle* ckgrpconv_fused_grp_bias_activ_fill_valid_kernels(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
+
+CK_GROUPED_CONV_API bool ckgrpconv_fused_grp_bias_activ_is_applicable(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
+
+CK_GROUPED_CONV_API bool
+ckgrpconv_fused_grp_bias_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
+                                                  const char* kernel_id,
+                                                  miopenDataType_t data_type,
+                                                  bool use_tf32);
+
+CK_GROUPED_CONV_API size_t ckgrpconv_fused_grp_bias_activ_get_workspace_size(
+    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool use_tf32);
+
+CK_GROUPED_CONV_API miopen::solver::ConvSolution*
+ckgrpconv_fused_grp_bias_activ_get_solution(const miopen::ExecutionContext* ctx,
+                                            const miopen::conv::ProblemDescription* problem,
+                                            const char* kernel_id,
+                                            bool use_tf32);
 
 // -- Get all kernel type strings (for test/metadata validation) -----------------
 

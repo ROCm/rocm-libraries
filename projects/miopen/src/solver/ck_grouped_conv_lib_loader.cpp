@@ -342,7 +342,11 @@ bool CKGroupedConvLibLoader::LoadSymbols()
         {CKSolverType::GrpConvWrw, "wrw"},
         {CKSolverType::GrpConv3dFwd, "3d_fwd"},
         {CKSolverType::GrpConv3dBwd, "3d_bwd"},
-        {CKSolverType::GrpConv3dWrw, "3d_wrw"}};
+        {CKSolverType::GrpConv3dWrw, "3d_wrw"},
+        {CKSolverType::FusedBiasActiv, "fused_bias_activ"},
+        {CKSolverType::FusedBiasResAddActiv, "fused_bias_res_add_activ"},
+        {CKSolverType::FusedGrpActiv, "fused_grp_activ"},
+        {CKSolverType::FusedGrpBiasActiv, "fused_grp_bias_activ"}};
 
     for(const auto& binding : solver_bindings)
         BindSolverSymbols(binding.solver, binding.prefix, missing);

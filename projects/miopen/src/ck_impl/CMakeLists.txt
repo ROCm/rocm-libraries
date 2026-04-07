@@ -17,6 +17,10 @@ set(CK_IMPL_SOURCES
     ck_grouped_conv_3d_fwd_impl.cpp
     ck_grouped_conv_3d_bwd_impl.cpp
     ck_grouped_conv_3d_wrw_impl.cpp
+    ck_fused_bias_activ_impl.cpp
+    ck_fused_bias_res_add_activ_impl.cpp
+    ck_fused_grp_activ_impl.cpp
+    ck_fused_grp_bias_activ_impl.cpp
 )
 
 # Strip target features (e.g. ":sramecc+:xnack-") to get the base arch name.

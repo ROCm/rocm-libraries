@@ -30,13 +30,17 @@ struct ConvSolution;
 
 enum class CKSolverType
 {
-    GrpConvFwd   = 0,
-    GrpConvBwd   = 1,
-    GrpConvWrw   = 2,
-    GrpConv3dFwd = 3,
-    GrpConv3dBwd = 4,
-    GrpConv3dWrw = 5,
-    Count        = 6
+    GrpConvFwd            = 0,
+    GrpConvBwd            = 1,
+    GrpConvWrw            = 2,
+    GrpConv3dFwd          = 3,
+    GrpConv3dBwd          = 4,
+    GrpConv3dWrw          = 5,
+    FusedBiasActiv        = 6,
+    FusedBiasResAddActiv  = 7,
+    FusedGrpActiv         = 8,
+    FusedGrpBiasActiv     = 9,
+    Count                 = 10
 };
 
 /// Query the HIP runtime for the current device's architecture name.
