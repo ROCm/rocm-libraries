@@ -50,7 +50,7 @@ void BlockScaleQuantizeOperationDescriptor::setAttribute(hipdnnBackendAttributeN
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC:
         setTensorDescriptor(_xDesc,
                             _data.x_tensor_uid,
                             attributeType,
@@ -58,7 +58,7 @@ void BlockScaleQuantizeOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BlockScaleQuantizeOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_YDESC:
         setTensorDescriptor(_yDesc,
                             _data.y_tensor_uid,
                             attributeType,
@@ -66,7 +66,7 @@ void BlockScaleQuantizeOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BlockScaleQuantizeOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_DESC:
         setTensorDescriptor(_scaleDesc,
                             _data.scale_tensor_uid,
                             attributeType,
@@ -74,7 +74,7 @@ void BlockScaleQuantizeOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BlockScaleQuantizeOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE:
         setScalar(_data.block_size,
                   HIPDNN_TYPE_INT32,
                   attributeType,
@@ -98,7 +98,7 @@ void BlockScaleQuantizeOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                   arrayOfElements,
                   "BlockScaleQuantizeOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -136,7 +136,7 @@ void BlockScaleQuantizeOperationDescriptor::getAttribute(hipdnnBackendAttributeN
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC:
         getTensorDescriptor(_xDesc,
                             attributeType,
                             requestedElementCount,
@@ -144,7 +144,7 @@ void BlockScaleQuantizeOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BlockScaleQuantizeOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_YDESC:
         getTensorDescriptor(_yDesc,
                             attributeType,
                             requestedElementCount,
@@ -152,7 +152,7 @@ void BlockScaleQuantizeOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BlockScaleQuantizeOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_DESC:
         getTensorDescriptor(_scaleDesc,
                             attributeType,
                             requestedElementCount,
@@ -160,7 +160,7 @@ void BlockScaleQuantizeOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BlockScaleQuantizeOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE:
         getScalar(_data.block_size,
                   HIPDNN_TYPE_INT32,
                   attributeType,
@@ -187,7 +187,7 @@ void BlockScaleQuantizeOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                   arrayOfElements,
                   "BlockScaleQuantizeOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT:
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
@@ -204,7 +204,7 @@ void BlockScaleQuantizeOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                   "BlockScaleQuantizeOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE,
+        getOperationType(HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,
@@ -241,7 +241,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
 
 hipdnnBackendDescriptorType_t BlockScaleQuantizeOperationDescriptor::getStaticType()
 {
-    return HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT;
+    return HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR;
 }
 
 std::string BlockScaleQuantizeOperationDescriptor::toString() const

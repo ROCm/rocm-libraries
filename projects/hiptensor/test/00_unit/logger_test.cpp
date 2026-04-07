@@ -121,6 +121,12 @@ bool hiptensorLoggerSetFileTest()
     //Check size after API call
     fseek(fp, 0, SEEK_END);
     fileSizeAfter = ftell(fp);
+
+    // Redirect the logger away from fp before closing it. The logger holds mWriteStream = fp
+    // with mOwnsStream = false (caller-owned), so it will not close fp itself. If we close fp
+    // first, any subsequent logAPITrace call (e.g. at the start of the next test) would
+    // fprintf to a dangling pointer, causing intermittent heap corruption on Linux.
+    hiptensorLoggerSetFile(stdout);
     fclose(fp);
     std::remove(fname.c_str());
 
@@ -137,39 +143,45 @@ bool hiptensorLoggerOpenFileTest()
     std::string fname   = hiptensor::test::generateTempFilename();
     const char* fname_c = fname.c_str();
 
-    long fileSizeOrig = 0, fileSizeAfter = 0;
-
-    FILE* fp = hiptensor::test::safeFopen(fname_c, "w");
-    if(fp == NULL)
+    // Create the file to verify write permissions, then close it immediately.
+    // On Windows, fopen("w") holds an exclusive lock; we must not keep it open
+    // while calling hiptensorLoggerOpenFile, which opens the same path internally.
     {
-        std::cout << " Failed to Open File. Check Permissions!";
-        return false;
-    }
-    else
-    {
-        fseek(fp, 0, SEEK_END);
-        fileSizeOrig = ftell(fp);
-        fseek(fp, 0, SEEK_SET);
+        FILE* fp = hiptensor::test::safeFopen(fname_c, "w");
+        if(fp == NULL)
+        {
+            std::cout << " Failed to Open File. Check Permissions!";
+            return false;
+        }
+        fclose(fp);
     }
 
-    //Write logs to fname_c.
+    // Switch the logger's write stream to fname_c.
     if(hiptensorLoggerOpenFile(fname_c) != HIPTENSOR_STATUS_SUCCESS)
     {
+        std::remove(fname.c_str());
         return false;
     }
 
-    //Check size after API call
-    fseek(fp, 0, SEEK_END);
-    fileSizeAfter = ftell(fp);
-    fclose(fp);
+    // Trigger a log write to fname_c via a public API call.
+    hiptensorLoggerSetCallback(nullptr);
+
+    // Redirect the logger to stdout; this closes (and flushes) the logger's handle to fname_c,
+    // ensuring all buffered content is written before we read the file size.
+    hiptensorLoggerSetFile(stdout);
+
+    // Verify that something was written to fname_c.
+    long  fileSize = 0;
+    FILE* fp       = hiptensor::test::safeFopen(fname_c, "r");
+    if(fp != NULL)
+    {
+        fseek(fp, 0, SEEK_END);
+        fileSize = ftell(fp);
+        fclose(fp);
+    }
     std::remove(fname.c_str());
 
-    if(fileSizeAfter <= fileSizeOrig)
-    {
-        return false;
-    }
-
-    return true;
+    return fileSize > 0;
 }
 
 bool hiptensorLoggerSetLevelTest()
