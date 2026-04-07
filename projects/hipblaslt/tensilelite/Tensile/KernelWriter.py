@@ -4939,7 +4939,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["ExpertSchedulingMode"] > 0:
       module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
-
+    if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
+      module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="disable expert scheduling mode = 0"))
     module.addComment1("Before NLL: Check VGPR.checkin for INT8 LW")
 
     # swap local write, read again before noLoadLoop if PrefetchGlobalRead and DirectToLds is enabled
