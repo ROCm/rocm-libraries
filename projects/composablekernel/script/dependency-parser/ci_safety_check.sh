@@ -58,9 +58,25 @@ else
     CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}..HEAD 2>/dev/null || echo "")
 fi
 
-if echo "$CHANGED_FILES" | grep -qE "(CMakeLists\.txt|cmake/.*\.cmake|Dockerfile|Jenkinsfile|CMakePresets\.json|script/dependency-parser/)"; then
+# Comprehensive pattern for build/infrastructure files that require full build:
+# - CMake: CMakeLists.txt, *.cmake, *.cmake.in, CMakePresets.json
+# - Docker: Dockerfile*, docker-compose*
+# - CI/CD: Jenkinsfile, .github/, .gitlab-ci.yml, .pre-commit-config.yaml, .readthedocs.yaml
+# - Scripts: script/ directory (cmake, dependency-parser, build utilities)
+# - Compiler: .clang-format, .clang-tidy
+# - Python: setup.py, pyproject.toml, requirements*.txt
+BUILD_INFRA_PATTERN="(CMakeLists\.txt"
+BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|\.cmake$|\.cmake\.in$|CMakePresets\.json"
+BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|Dockerfile|docker-compose"
+BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|Jenkinsfile|\.github/|\.gitlab-ci\.yml"
+BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|\.pre-commit-config\.yaml|\.readthedocs\.yaml"
+BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|script/"
+BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|\.clang-format|\.clang-tidy"
+BUILD_INFRA_PATTERN="${BUILD_INFRA_PATTERN}|setup\.py|pyproject\.toml|requirements.*\.txt)"
+
+if echo "$CHANGED_FILES" | grep -qE "${BUILD_INFRA_PATTERN}"; then
     FORCE_FULL_BUILD=true
-    REASON="build system configuration changed (CMakeLists.txt or cmake/*.cmake)"
+    REASON="build system configuration changed"
 fi
 
 # 4. Force full build if dependency cache is older than 7 days
