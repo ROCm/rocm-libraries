@@ -37,6 +37,7 @@ To perform a transform, follow these steps:
 
       * Create an execution info object using :cpp:func:`rocfft_execution_info_create`.
       * Allocate a buffer using ``hipMalloc`` and pass the allocated buffer to :cpp:func:`rocfft_execution_info_set_work_buffer`.
+   *  If the plan uses multiple HIP devices for input or output, :ref:`repeat the above steps<multi_device_work_mem>` for each HIP device.
 
 #. Execute the plan:
 
@@ -99,6 +100,8 @@ Example
 
 	   // Check if the plan requires a work buffer
 	   size_t work_buf_size = 0;
+           // This is a single-device plan that uses the current HIP device,
+           // so any work buffer would be on that device.
 	   rocfft_plan_get_work_buffer_size(plan, &work_buf_size);
 	   void* work_buf = nullptr;
 	   rocfft_execution_info info = nullptr;
@@ -183,6 +186,60 @@ memory regions on the device, it expects you to manage the work buffers. The siz
 :cpp:func:`rocfft_plan_get_work_buffer_size`. After allocation, it can be passed to the library using
 :cpp:func:`rocfft_execution_info_set_work_buffer`. The `GitHub repository <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocfft/clients/samples>`_
 provide some samples and examples.
+
+The :cpp:func:`rocfft_plan_get_work_buffer_size` and
+:cpp:func:`rocfft_execution_info_set_work_buffer` functions query and
+set work buffers for the current HIP device.  By default, rocFFT
+plans run on the HIP device that is current when
+:cpp:func:`rocfft_plan_create` is called, and work buffers may only
+be required on the same device.
+
+.. _multi_device_work_mem:
+
+If the plan uses multiple HIP devices by decomposing the input or
+output into :ref:`fields<input_output_fields>`, work memory may be
+required on any of the devices used by the input or output fields.
+In this case, the steps to query and set work buffers need to be
+repeated for each HIP device, as illustrated by the following code fragment:
+
+.. code-block:: c++
+
+  rocfft_plan plan = nullptr;
+  rocfft_execution_info info = nullptr;
+
+  // For brevity, the steps to create the plan and execution info have been omitted
+
+  // Get the number of HIP devices
+  int ndevices = 0;
+  hipGetDeviceCount(&ndevices);
+
+  // Loop over each device, checking work memory requirements for each one
+  std::vector<void*> workbufs(ndevices);
+  for(int device = 0; device < ndevices; ++device)
+  {
+      hipSetDevice(device);
+      size_t worksize = 0;
+      // Get work memory size required for the current device
+      rocfft_plan_get_work_buffer_size(plan, &worksize);
+      if(worksize)
+      {
+          // Allocate and set the work buffer for the current device
+          hipMalloc(&workbufs[device], worksize);
+          rocfft_execution_info_set_work_buffer(info, workbufs[device], worksize);
+      }
+  }
+
+  // Execution of the plan with the execution info would happen here
+
+  // Free the work buffers that were allocated
+  for(int device = 0; device < ndevices; ++device)
+  {
+      if(workbufs[device])
+      {
+          hipSetDevice(device);
+          hipFree(workbufs[device]);
+      }
+  }
 
 Transform and array types 
 =========================

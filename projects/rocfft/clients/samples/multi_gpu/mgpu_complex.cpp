@@ -244,22 +244,25 @@ int main(int argc, char* argv[])
     if(fftrc != rocfft_status_success)
         throw std::runtime_error("failed to create plan");
 
-    // Get execution information and allocate work buffer
-    rocfft_execution_info planinfo      = nullptr;
-    size_t                work_buf_size = 0;
-    if(rocfft_plan_get_work_buffer_size(gpu_plan, &work_buf_size) != rocfft_status_success)
-        throw std::runtime_error("rocfft_plan_get_work_buffer_size failed.");
-    void* work_buf = nullptr;
-
-    if(work_buf_size)
+    // Get execution information and allocate work buffer for each device
+    rocfft_execution_info planinfo = nullptr;
+    std::vector<void*>    work_bufs(nDevices);
+    for(int device = 0; device < nDevices; ++device)
     {
-        if(rocfft_execution_info_create(&planinfo) != rocfft_status_success)
-            throw std::runtime_error("failed to create execution info");
-        if(hipMalloc(&work_buf, work_buf_size) != hipSuccess)
-            throw std::runtime_error("hipMalloc failed");
-        if(rocfft_execution_info_set_work_buffer(planinfo, work_buf, work_buf_size)
-           != rocfft_status_success)
-            throw std::runtime_error("rocfft_execution_info_set_work_buffer failed.");
+        size_t work_buf_size = 0;
+        if(rocfft_plan_get_work_buffer_size(gpu_plan, &work_buf_size) != rocfft_status_success)
+            throw std::runtime_error("rocfft_plan_get_work_buffer_size failed.");
+
+        if(work_buf_size)
+        {
+            if(rocfft_execution_info_create(&planinfo) != rocfft_status_success)
+                throw std::runtime_error("failed to create execution info");
+            if(hipMalloc(&work_bufs[device], work_buf_size) != hipSuccess)
+                throw std::runtime_error("hipMalloc failed");
+            if(rocfft_execution_info_set_work_buffer(planinfo, work_bufs[device], work_buf_size)
+               != rocfft_status_success)
+                throw std::runtime_error("rocfft_execution_info_set_work_buffer failed.");
+        }
     }
 
     // Execute plan:
@@ -311,13 +314,18 @@ int main(int argc, char* argv[])
     if(rocfft_cleanup() != rocfft_status_success)
         throw std::runtime_error("rocfft_cleanup failed.");
 
-    for(size_t idx = 0; idx < gpu_in.size(); ++idx)
+    for(auto buf : work_bufs)
     {
-        (void)hipFree(gpu_in[idx]);
+        if(buf)
+            (void)hipFree(buf);
     }
-    for(size_t idx = 0; idx < gpu_out.size(); ++idx)
+    for(auto buf : gpu_in)
     {
-        (void)hipFree(gpu_out[idx]);
+        (void)hipFree(buf);
+    }
+    for(auto buf : gpu_out)
+    {
+        (void)hipFree(buf);
     }
 
     return 0;
