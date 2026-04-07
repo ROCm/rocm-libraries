@@ -134,9 +134,9 @@ operation:
       test_label: "PeerStats"
 
   has_compute_data_type: true
-  compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT"
+  compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_EXT"
 
   test_data:
     constants_include: "BatchnormConstants"

@@ -59,8 +59,8 @@ add_executable(
     TestOperationUnpacker.cpp
     TestSdpaAttributes.cpp
     TestSdpaBackwardAttributes.cpp
-    TestSdpaBpropNode.cpp
-    TestSdpaFpropNode.cpp
+    TestSdpaBwdNode.cpp
+    TestSdpaFwdNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
     TestReductionAttributes.cpp

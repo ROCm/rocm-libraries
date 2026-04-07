@@ -11,7 +11,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_test_sdk/constants/SdpaFpropConstants.hpp>
+#include <hipdnn_test_sdk/constants/SdpaFwdConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -126,7 +126,7 @@ hipdnn_data_sdk::data_objects::GraphT buildAndDeserializeSdpaGraph(hipdnnHandle_
 
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
-class IntegrationSdpaFpropDescriptorLowering : public ::testing::Test
+class IntegrationSdpaFwdDescriptorLowering : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -159,10 +159,10 @@ protected:
 // via build_operation_graph_via_descriptors, retrieves the serialized graph,
 // and verifies all tensor and operation attributes match the values set
 // in the frontend.
-TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropGraphRoundTrip)
+TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdGraphRoundTrip)
 {
     auto graph = std::make_shared<TestableGraph>();
-    graph->set_name("TestSdpaFpropGraph")
+    graph->set_name("TestSdpaFwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
@@ -180,7 +180,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropGraphRoundTrip)
     v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
 
     SdpaAttributes sdpaAttrs;
-    sdpaAttrs.set_name("sdpa_fprop_op");
+    sdpaAttrs.set_name("sdpa_fwd_op");
 
     auto [o, stats] = graph->sdpa(q, k, v, std::move(sdpaAttrs));
     o->set_uid(K_SDPA_TENSOR_O_UID).set_output(true).set_name("O");
@@ -283,7 +283,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropGraphRoundTrip)
 
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved
 // through the lowering round-trip.
-TEST_F(IntegrationSdpaFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
+TEST_F(IntegrationSdpaFwdDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
     auto graph = std::make_shared<TestableGraph>();
     graph->set_name("AutoUidSdpaGraph")
@@ -361,10 +361,10 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 
 // Verifies that an SDPA graph with stats output generates and preserves
 // the stats tensor through the round-trip.
-TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropWithStatsRoundTrip)
+TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithStatsRoundTrip)
 {
     auto graph = std::make_shared<TestableGraph>();
-    graph->set_name("TestSdpaFpropWithStatsGraph")
+    graph->set_name("TestSdpaFwdWithStatsGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
@@ -448,7 +448,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropWithStatsRoundTrip)
 // Exercises packer code paths for optional input tensors (attn_mask, seed,
 // offset, dropout_mask), stats output, non-default booleans, optional float
 // and int64 scalars, and non-default enum values.
-TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropWithOptionalTensorsAndScalars)
+TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalars)
 {
     auto attnMask = std::make_shared<TensorAttributes>();
     attnMask->set_uid(K_SDPA_TENSOR_ATTN_MASK_UID).set_name("ATTN_MASK");
@@ -563,7 +563,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropWithOptionalTensorsAndSc
 // Exercises packer code paths for FP8 descale/scale tensors, amax output
 // tensors, the optional int32 max_seq_len_kv scalar, and the conditional
 // mma_core_mode enum branch.
-TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropWithFp8Tensors)
+TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
 {
     auto descaleQ = std::make_shared<TensorAttributes>();
     descaleQ->set_uid(K_SDPA_TENSOR_DESCALE_Q_UID).set_name("DESCALE_Q");

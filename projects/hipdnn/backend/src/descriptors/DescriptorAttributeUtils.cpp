@@ -419,7 +419,7 @@ void getReductionMode(hipdnn_data_sdk::data_objects::ReductionMode source,
     }
 }
 
-void getOperationType(hipdnnOperationType_t source,
+void getOperationType(hipdnnOperationType_ext_t source,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t requestedElementCount,
                       int64_t* elementCount,
@@ -440,7 +440,7 @@ void getOperationType(hipdnnOperationType_t source,
     THROW_IF_FALSE(requestedElementCount >= 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": requestedElementCount < 1");
-    std::memcpy(arrayOfElements, &source, sizeof(hipdnnOperationType_t));
+    std::memcpy(arrayOfElements, &source, sizeof(hipdnnOperationType_ext_t));
     if(elementCount != nullptr)
     {
         *elementCount = 1;
@@ -629,7 +629,7 @@ void setDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment& targ
                           const void* arrayOfElements,
                           const char* errorPrefix)
 {
-    checkSetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT, attributeType, arrayOfElements, errorPrefix);
+    checkSetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
@@ -645,7 +645,7 @@ void getDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment sourc
                           void* arrayOfElements,
                           const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT, attributeType, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, attributeType, errorPrefix);
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -673,7 +673,8 @@ void setAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
                                 const void* arrayOfElements,
                                 const char* errorPrefix)
 {
-    checkSetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, attributeType, arrayOfElements, errorPrefix);
+    checkSetArgs(
+        HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
@@ -689,7 +690,7 @@ void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
                                 void* arrayOfElements,
                                 const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, attributeType, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, attributeType, errorPrefix);
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {

@@ -27,17 +27,17 @@ inline Error createConvWgradOperation(
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X,
                                              attributes.get_x(),
                                              tensorDescs,
                                              "conv wgrad X"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY,
                                              attributes.get_dy(),
                                              tensorDescs,
                                              "conv wgrad DY"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW,
                                              attributes.get_dw(),
                                              tensorDescs,
                                              "conv wgrad DW"));
