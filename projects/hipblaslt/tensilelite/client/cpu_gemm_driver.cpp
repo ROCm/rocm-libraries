@@ -384,7 +384,7 @@ int main(int argc, char* argv[])
         "N", po::value<size_t>()->default_value(128), "Matrix N dimension")(
         "K", po::value<size_t>()->default_value(128), "Matrix K dimension")(
         "transA", po::value<bool>()->default_value(false), "Transpose A")(
-        "transB", po::value<bool>()->default_value(true), "Transpose B")(
+        "transB", po::value<bool>()->default_value(false), "Transpose B")(
         "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
         "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
         "type", po::value<std::string>()->default_value("f32"), "Data type (f32, f16, bf16)")(
