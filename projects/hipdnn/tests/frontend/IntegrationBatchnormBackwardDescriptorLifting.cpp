@@ -75,42 +75,38 @@ protected:
             .set_io_data_type(DataType::FLOAT);
 
         auto dy = std::make_shared<TensorAttributes>();
-        dy->set_uid(K_BN_BWD_INTEG_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
-        dy->set_dim(toVec(K_BN_BWD_INTEG_DATA_DIMS)).set_stride(toVec(K_BN_BWD_INTEG_DATA_STRIDES));
+        dy->set_uid(K_BN_BWD_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
+        dy->set_dim(toVec(K_BN_BWD_TENSOR_DY_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_DY_STRIDES));
 
         auto x = std::make_shared<TensorAttributes>();
-        x->set_uid(K_BN_BWD_INTEG_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-        x->set_dim(toVec(K_BN_BWD_INTEG_DATA_DIMS)).set_stride(toVec(K_BN_BWD_INTEG_DATA_STRIDES));
+        x->set_uid(K_BN_BWD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+        x->set_dim(toVec(K_BN_BWD_TENSOR_X_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_X_STRIDES));
 
         auto scale = std::make_shared<TensorAttributes>();
-        scale->set_uid(K_BN_BWD_INTEG_TENSOR_SCALE_UID)
-            .set_name("Scale")
-            .set_data_type(DataType::FLOAT);
-        scale->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+        scale->set_uid(K_BN_BWD_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
+        scale->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
         auto mean = std::make_shared<TensorAttributes>();
-        mean->set_uid(K_BN_BWD_INTEG_TENSOR_MEAN_UID)
-            .set_name("Mean")
-            .set_data_type(DataType::FLOAT);
-        mean->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+        mean->set_uid(K_BN_BWD_TENSOR_MEAN_UID).set_name("Mean").set_data_type(DataType::FLOAT);
+        mean->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
         auto invVar = std::make_shared<TensorAttributes>();
-        invVar->set_uid(K_BN_BWD_INTEG_TENSOR_INV_VARIANCE_UID)
+        invVar->set_uid(K_BN_BWD_TENSOR_INV_VARIANCE_UID)
             .set_name("InvVariance")
             .set_data_type(DataType::FLOAT);
-        invVar->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+        invVar->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
         BatchnormBackwardAttributes bnBwdAttrs;
         bnBwdAttrs.set_name("bn_bwd_op");
         bnBwdAttrs.set_saved_mean_and_inv_variance(mean, invVar);
 
         auto [dxOut, dscaleOut, dbiasOut] = graph->batchnorm_backward(dy, x, scale, bnBwdAttrs);
-        dxOut->set_uid(K_BN_BWD_INTEG_TENSOR_DX_UID).set_output(true).set_name("DX");
-        dscaleOut->set_uid(K_BN_BWD_INTEG_TENSOR_DSCALE_UID).set_output(true).set_name("DScale");
-        dbiasOut->set_uid(K_BN_BWD_INTEG_TENSOR_DBIAS_UID).set_output(true).set_name("DBias");
+        dxOut->set_uid(K_BN_BWD_TENSOR_DX_UID).set_output(true).set_name("DX");
+        dscaleOut->set_uid(K_BN_BWD_TENSOR_DSCALE_UID).set_output(true).set_name("DScale");
+        dbiasOut->set_uid(K_BN_BWD_TENSOR_DBIAS_UID).set_output(true).set_name("DBias");
 
         return graph;
     }
@@ -125,47 +121,43 @@ protected:
             .set_io_data_type(DataType::FLOAT);
 
         auto dy = std::make_shared<TensorAttributes>();
-        dy->set_uid(K_BN_BWD_INTEG_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
-        dy->set_dim(toVec(K_BN_BWD_INTEG_DATA_DIMS)).set_stride(toVec(K_BN_BWD_INTEG_DATA_STRIDES));
+        dy->set_uid(K_BN_BWD_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
+        dy->set_dim(toVec(K_BN_BWD_TENSOR_DY_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_DY_STRIDES));
 
         auto x = std::make_shared<TensorAttributes>();
-        x->set_uid(K_BN_BWD_INTEG_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-        x->set_dim(toVec(K_BN_BWD_INTEG_DATA_DIMS)).set_stride(toVec(K_BN_BWD_INTEG_DATA_STRIDES));
+        x->set_uid(K_BN_BWD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+        x->set_dim(toVec(K_BN_BWD_TENSOR_X_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_X_STRIDES));
 
         auto scale = std::make_shared<TensorAttributes>();
-        scale->set_uid(K_BN_BWD_INTEG_TENSOR_SCALE_UID)
-            .set_name("Scale")
-            .set_data_type(DataType::FLOAT);
-        scale->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+        scale->set_uid(K_BN_BWD_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
+        scale->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
         auto mean = std::make_shared<TensorAttributes>();
-        mean->set_uid(K_BN_BWD_INTEG_TENSOR_MEAN_UID)
-            .set_name("Mean")
-            .set_data_type(DataType::FLOAT);
-        mean->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+        mean->set_uid(K_BN_BWD_TENSOR_MEAN_UID).set_name("Mean").set_data_type(DataType::FLOAT);
+        mean->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
         auto invVar = std::make_shared<TensorAttributes>();
-        invVar->set_uid(K_BN_BWD_INTEG_TENSOR_INV_VARIANCE_UID)
+        invVar->set_uid(K_BN_BWD_TENSOR_INV_VARIANCE_UID)
             .set_name("InvVariance")
             .set_data_type(DataType::FLOAT);
-        invVar->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+        invVar->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
         auto peerStat0 = std::make_shared<TensorAttributes>();
-        peerStat0->set_uid(K_BN_BWD_INTEG_TENSOR_PEER_STAT_0_UID)
+        peerStat0->set_uid(K_BN_BWD_TENSOR_PEER_STAT_0_UID)
             .set_name("PeerStat0")
             .set_data_type(DataType::FLOAT);
-        peerStat0->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+        peerStat0->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
         auto peerStat1 = std::make_shared<TensorAttributes>();
-        peerStat1->set_uid(K_BN_BWD_INTEG_TENSOR_PEER_STAT_1_UID)
+        peerStat1->set_uid(K_BN_BWD_TENSOR_PEER_STAT_1_UID)
             .set_name("PeerStat1")
             .set_data_type(DataType::FLOAT);
-        peerStat1->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+        peerStat1->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
         BatchnormBackwardAttributes bnBwdAttrs;
         bnBwdAttrs.set_name("bn_bwd_peer_stats_op");
@@ -173,9 +165,9 @@ protected:
         bnBwdAttrs.set_peer_stats({peerStat0, peerStat1});
 
         auto [dxOut, dscaleOut, dbiasOut] = graph->batchnorm_backward(dy, x, scale, bnBwdAttrs);
-        dxOut->set_uid(K_BN_BWD_INTEG_TENSOR_DX_UID).set_output(true).set_name("DX");
-        dscaleOut->set_uid(K_BN_BWD_INTEG_TENSOR_DSCALE_UID).set_output(true).set_name("DScale");
-        dbiasOut->set_uid(K_BN_BWD_INTEG_TENSOR_DBIAS_UID).set_output(true).set_name("DBias");
+        dxOut->set_uid(K_BN_BWD_TENSOR_DX_UID).set_output(true).set_name("DX");
+        dscaleOut->set_uid(K_BN_BWD_TENSOR_DSCALE_UID).set_output(true).set_name("DScale");
+        dbiasOut->set_uid(K_BN_BWD_TENSOR_DBIAS_UID).set_output(true).set_name("DBias");
 
         return graph;
     }
@@ -191,18 +183,18 @@ protected:
 
         auto dy = std::make_shared<TensorAttributes>();
         dy->set_uid(K_BN_BWD_MINIMAL_TENSOR_DY_UID).set_name("DY").set_data_type(DataType::FLOAT);
-        dy->set_dim(toVec(K_BN_BWD_INTEG_DATA_DIMS)).set_stride(toVec(K_BN_BWD_INTEG_DATA_STRIDES));
+        dy->set_dim(toVec(K_BN_BWD_TENSOR_DY_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_DY_STRIDES));
 
         auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_BN_BWD_MINIMAL_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-        x->set_dim(toVec(K_BN_BWD_INTEG_DATA_DIMS)).set_stride(toVec(K_BN_BWD_INTEG_DATA_STRIDES));
+        x->set_dim(toVec(K_BN_BWD_TENSOR_X_DIMS)).set_stride(toVec(K_BN_BWD_TENSOR_X_STRIDES));
 
         auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_BN_BWD_MINIMAL_TENSOR_SCALE_UID)
             .set_name("Scale")
             .set_data_type(DataType::FLOAT);
-        scale->set_dim(toVec(K_BN_BWD_INTEG_PARAM_DIMS))
-            .set_stride(toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+        scale->set_dim(toVec(K_BN_BWD_TENSOR_SCALE_DIMS))
+            .set_stride(toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
 
         BatchnormBackwardAttributes bnBwdAttrs;
         bnBwdAttrs.set_name("minimal_bn_bwd_op");
@@ -249,70 +241,70 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
     ASSERT_EQ(tensorMap.size(), 8u) << "Expected 8 tensors in lifted graph";
 
     // DY tensor
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DY_UID), 0u);
-    auto liftedDy = tensorMap[K_BN_BWD_INTEG_TENSOR_DY_UID];
-    EXPECT_EQ(liftedDy->get_uid(), K_BN_BWD_INTEG_TENSOR_DY_UID);
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DY_UID), 0u);
+    auto liftedDy = tensorMap[K_BN_BWD_TENSOR_DY_UID];
+    EXPECT_EQ(liftedDy->get_uid(), K_BN_BWD_TENSOR_DY_UID);
     EXPECT_EQ(liftedDy->get_name(), "DY");
-    EXPECT_EQ(liftedDy->get_dim(), toVec(K_BN_BWD_INTEG_DATA_DIMS));
-    EXPECT_EQ(liftedDy->get_stride(), toVec(K_BN_BWD_INTEG_DATA_STRIDES));
+    EXPECT_EQ(liftedDy->get_dim(), toVec(K_BN_BWD_TENSOR_DY_DIMS));
+    EXPECT_EQ(liftedDy->get_stride(), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
     EXPECT_EQ(liftedDy->get_data_type(), DataType::FLOAT);
 
     // X tensor
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_X_UID), 0u);
-    auto liftedX = tensorMap[K_BN_BWD_INTEG_TENSOR_X_UID];
-    EXPECT_EQ(liftedX->get_uid(), K_BN_BWD_INTEG_TENSOR_X_UID);
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_X_UID), 0u);
+    auto liftedX = tensorMap[K_BN_BWD_TENSOR_X_UID];
+    EXPECT_EQ(liftedX->get_uid(), K_BN_BWD_TENSOR_X_UID);
     EXPECT_EQ(liftedX->get_name(), "X");
-    EXPECT_EQ(liftedX->get_dim(), toVec(K_BN_BWD_INTEG_DATA_DIMS));
-    EXPECT_EQ(liftedX->get_stride(), toVec(K_BN_BWD_INTEG_DATA_STRIDES));
+    EXPECT_EQ(liftedX->get_dim(), toVec(K_BN_BWD_TENSOR_X_DIMS));
+    EXPECT_EQ(liftedX->get_stride(), toVec(K_BN_BWD_TENSOR_X_STRIDES));
     EXPECT_EQ(liftedX->get_data_type(), DataType::FLOAT);
 
     // Scale tensor
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_SCALE_UID), 0u);
-    auto liftedScale = tensorMap[K_BN_BWD_INTEG_TENSOR_SCALE_UID];
-    EXPECT_EQ(liftedScale->get_uid(), K_BN_BWD_INTEG_TENSOR_SCALE_UID);
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_SCALE_UID), 0u);
+    auto liftedScale = tensorMap[K_BN_BWD_TENSOR_SCALE_UID];
+    EXPECT_EQ(liftedScale->get_uid(), K_BN_BWD_TENSOR_SCALE_UID);
     EXPECT_EQ(liftedScale->get_name(), "Scale");
-    EXPECT_EQ(liftedScale->get_dim(), toVec(K_BN_BWD_INTEG_PARAM_DIMS));
-    EXPECT_EQ(liftedScale->get_stride(), toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(liftedScale->get_dim(), toVec(K_BN_BWD_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(liftedScale->get_stride(), toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
     EXPECT_EQ(liftedScale->get_data_type(), DataType::FLOAT);
 
     // Mean tensor (optional, set in this graph)
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_MEAN_UID), 0u);
-    auto liftedMean = tensorMap[K_BN_BWD_INTEG_TENSOR_MEAN_UID];
-    EXPECT_EQ(liftedMean->get_uid(), K_BN_BWD_INTEG_TENSOR_MEAN_UID);
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_MEAN_UID), 0u);
+    auto liftedMean = tensorMap[K_BN_BWD_TENSOR_MEAN_UID];
+    EXPECT_EQ(liftedMean->get_uid(), K_BN_BWD_TENSOR_MEAN_UID);
     EXPECT_EQ(liftedMean->get_name(), "Mean");
-    EXPECT_EQ(liftedMean->get_dim(), toVec(K_BN_BWD_INTEG_PARAM_DIMS));
-    EXPECT_EQ(liftedMean->get_stride(), toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(liftedMean->get_dim(), toVec(K_BN_BWD_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(liftedMean->get_stride(), toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
     EXPECT_EQ(liftedMean->get_data_type(), DataType::FLOAT);
 
     // InvVariance tensor (optional, set in this graph)
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_INV_VARIANCE_UID), 0u);
-    auto liftedInvVar = tensorMap[K_BN_BWD_INTEG_TENSOR_INV_VARIANCE_UID];
-    EXPECT_EQ(liftedInvVar->get_uid(), K_BN_BWD_INTEG_TENSOR_INV_VARIANCE_UID);
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_INV_VARIANCE_UID), 0u);
+    auto liftedInvVar = tensorMap[K_BN_BWD_TENSOR_INV_VARIANCE_UID];
+    EXPECT_EQ(liftedInvVar->get_uid(), K_BN_BWD_TENSOR_INV_VARIANCE_UID);
     EXPECT_EQ(liftedInvVar->get_name(), "InvVariance");
-    EXPECT_EQ(liftedInvVar->get_dim(), toVec(K_BN_BWD_INTEG_PARAM_DIMS));
-    EXPECT_EQ(liftedInvVar->get_stride(), toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(liftedInvVar->get_dim(), toVec(K_BN_BWD_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(liftedInvVar->get_stride(), toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
     EXPECT_EQ(liftedInvVar->get_data_type(), DataType::FLOAT);
 
     // DX tensor (output)
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DX_UID), 0u);
-    auto liftedDx = tensorMap[K_BN_BWD_INTEG_TENSOR_DX_UID];
-    EXPECT_EQ(liftedDx->get_uid(), K_BN_BWD_INTEG_TENSOR_DX_UID);
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DX_UID), 0u);
+    auto liftedDx = tensorMap[K_BN_BWD_TENSOR_DX_UID];
+    EXPECT_EQ(liftedDx->get_uid(), K_BN_BWD_TENSOR_DX_UID);
     EXPECT_EQ(liftedDx->get_name(), "DX");
     EXPECT_FALSE(liftedDx->get_dim().empty());
     EXPECT_FALSE(liftedDx->get_stride().empty());
 
     // DScale tensor (output)
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DSCALE_UID), 0u);
-    auto liftedDscale = tensorMap[K_BN_BWD_INTEG_TENSOR_DSCALE_UID];
-    EXPECT_EQ(liftedDscale->get_uid(), K_BN_BWD_INTEG_TENSOR_DSCALE_UID);
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DSCALE_UID), 0u);
+    auto liftedDscale = tensorMap[K_BN_BWD_TENSOR_DSCALE_UID];
+    EXPECT_EQ(liftedDscale->get_uid(), K_BN_BWD_TENSOR_DSCALE_UID);
     EXPECT_EQ(liftedDscale->get_name(), "DScale");
     EXPECT_FALSE(liftedDscale->get_dim().empty());
     EXPECT_FALSE(liftedDscale->get_stride().empty());
 
     // DBias tensor (output)
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DBIAS_UID), 0u);
-    auto liftedDbias = tensorMap[K_BN_BWD_INTEG_TENSOR_DBIAS_UID];
-    EXPECT_EQ(liftedDbias->get_uid(), K_BN_BWD_INTEG_TENSOR_DBIAS_UID);
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DBIAS_UID), 0u);
+    auto liftedDbias = tensorMap[K_BN_BWD_TENSOR_DBIAS_UID];
+    EXPECT_EQ(liftedDbias->get_uid(), K_BN_BWD_TENSOR_DBIAS_UID);
     EXPECT_EQ(liftedDbias->get_name(), "DBias");
     EXPECT_FALSE(liftedDbias->get_dim().empty());
     EXPECT_FALSE(liftedDbias->get_stride().empty());
@@ -355,19 +347,16 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardTensorSha
     ASSERT_NE(bnBwdNode, nullptr);
 
     // Verify pointer equality between tensor map and node attributes
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DY_UID].get(), bnBwdNode->attributes.get_dy().get());
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_X_UID].get(), bnBwdNode->attributes.get_x().get());
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_SCALE_UID].get(),
-              bnBwdNode->attributes.get_scale().get());
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_MEAN_UID].get(),
-              bnBwdNode->attributes.get_mean().get());
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_INV_VARIANCE_UID].get(),
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_DY_UID].get(), bnBwdNode->attributes.get_dy().get());
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_X_UID].get(), bnBwdNode->attributes.get_x().get());
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_SCALE_UID].get(), bnBwdNode->attributes.get_scale().get());
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_MEAN_UID].get(), bnBwdNode->attributes.get_mean().get());
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_INV_VARIANCE_UID].get(),
               bnBwdNode->attributes.get_inv_variance().get());
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DX_UID].get(), bnBwdNode->attributes.get_dx().get());
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DSCALE_UID].get(),
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_DX_UID].get(), bnBwdNode->attributes.get_dx().get());
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_DSCALE_UID].get(),
               bnBwdNode->attributes.get_dscale().get());
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DBIAS_UID].get(),
-              bnBwdNode->attributes.get_dbias().get());
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_DBIAS_UID].get(), bnBwdNode->attributes.get_dbias().get());
 }
 
 // Serializes to binary (FlatBuffer path), lifts without finalization, and verifies all fields.
@@ -405,39 +394,36 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardLiftWitho
     EXPECT_EQ(bnBwdNode->attributes.compute_data_type, DataType::FLOAT);
 
     // Verify key tensor dims and names
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DY_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DY_UID]->get_dim(), toVec(K_BN_BWD_INTEG_DATA_DIMS));
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DY_UID]->get_stride(),
-              toVec(K_BN_BWD_INTEG_DATA_STRIDES));
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DY_UID]->get_name(), "DY");
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DY_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_DY_UID]->get_dim(), toVec(K_BN_BWD_TENSOR_DY_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_DY_UID]->get_stride(), toVec(K_BN_BWD_TENSOR_DY_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_DY_UID]->get_name(), "DY");
 
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_X_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_X_UID]->get_dim(), toVec(K_BN_BWD_INTEG_DATA_DIMS));
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_X_UID]->get_stride(),
-              toVec(K_BN_BWD_INTEG_DATA_STRIDES));
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_X_UID]->get_name(), "X");
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_X_UID]->get_dim(), toVec(K_BN_BWD_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_X_UID]->get_stride(), toVec(K_BN_BWD_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_X_UID]->get_name(), "X");
 
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_SCALE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_SCALE_UID]->get_dim(),
-              toVec(K_BN_BWD_INTEG_PARAM_DIMS));
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_SCALE_UID]->get_stride(),
-              toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_SCALE_UID]->get_name(), "Scale");
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_SCALE_UID]->get_dim(), toVec(K_BN_BWD_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_SCALE_UID]->get_stride(),
+              toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_SCALE_UID]->get_name(), "Scale");
 
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_MEAN_UID]->get_name(), "Mean");
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_MEAN_UID]->get_name(), "Mean");
 
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_INV_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_INV_VARIANCE_UID]->get_name(), "InvVariance");
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_INV_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_INV_VARIANCE_UID]->get_name(), "InvVariance");
 
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DX_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DX_UID]->get_name(), "DX");
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DX_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_DX_UID]->get_name(), "DX");
 
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DSCALE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DSCALE_UID]->get_name(), "DScale");
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DSCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_DSCALE_UID]->get_name(), "DScale");
 
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_DBIAS_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BN_BWD_INTEG_TENSOR_DBIAS_UID]->get_name(), "DBias");
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DBIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_BWD_TENSOR_DBIAS_UID]->get_name(), "DBias");
 }
 
 // Builds a minimal graph (no optional mean/invVariance), verifies optional tensors
@@ -506,20 +492,20 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardPeerStats
     ASSERT_EQ(tensorMap.size(), 10u) << "Expected 10 tensors (8 base + 2 peer_stats)";
 
     // Verify peer_stats tensors appear in the tensor map with correct UIDs, names, dims, strides
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_PEER_STAT_0_UID), 0u);
-    auto liftedPeerStat0 = tensorMap[K_BN_BWD_INTEG_TENSOR_PEER_STAT_0_UID];
-    EXPECT_EQ(liftedPeerStat0->get_uid(), K_BN_BWD_INTEG_TENSOR_PEER_STAT_0_UID);
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_PEER_STAT_0_UID), 0u);
+    auto liftedPeerStat0 = tensorMap[K_BN_BWD_TENSOR_PEER_STAT_0_UID];
+    EXPECT_EQ(liftedPeerStat0->get_uid(), K_BN_BWD_TENSOR_PEER_STAT_0_UID);
     EXPECT_EQ(liftedPeerStat0->get_name(), "PeerStat0");
-    EXPECT_EQ(liftedPeerStat0->get_dim(), toVec(K_BN_BWD_INTEG_PARAM_DIMS));
-    EXPECT_EQ(liftedPeerStat0->get_stride(), toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(liftedPeerStat0->get_dim(), toVec(K_BN_BWD_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(liftedPeerStat0->get_stride(), toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
     EXPECT_EQ(liftedPeerStat0->get_data_type(), DataType::FLOAT);
 
-    ASSERT_NE(tensorMap.count(K_BN_BWD_INTEG_TENSOR_PEER_STAT_1_UID), 0u);
-    auto liftedPeerStat1 = tensorMap[K_BN_BWD_INTEG_TENSOR_PEER_STAT_1_UID];
-    EXPECT_EQ(liftedPeerStat1->get_uid(), K_BN_BWD_INTEG_TENSOR_PEER_STAT_1_UID);
+    ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_PEER_STAT_1_UID), 0u);
+    auto liftedPeerStat1 = tensorMap[K_BN_BWD_TENSOR_PEER_STAT_1_UID];
+    EXPECT_EQ(liftedPeerStat1->get_uid(), K_BN_BWD_TENSOR_PEER_STAT_1_UID);
     EXPECT_EQ(liftedPeerStat1->get_name(), "PeerStat1");
-    EXPECT_EQ(liftedPeerStat1->get_dim(), toVec(K_BN_BWD_INTEG_PARAM_DIMS));
-    EXPECT_EQ(liftedPeerStat1->get_stride(), toVec(K_BN_BWD_INTEG_PARAM_STRIDES));
+    EXPECT_EQ(liftedPeerStat1->get_dim(), toVec(K_BN_BWD_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(liftedPeerStat1->get_stride(), toVec(K_BN_BWD_TENSOR_SCALE_STRIDES));
     EXPECT_EQ(liftedPeerStat1->get_data_type(), DataType::FLOAT);
 
     // Verify the lifted node's attributes reference peer_stats correctly
@@ -532,9 +518,9 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BatchnormBackwardPeerStats
     const auto& liftedPeerStats = bnBwdNode->attributes.get_peer_stats();
     ASSERT_EQ(liftedPeerStats.size(), 2u) << "Expected 2 peer_stats tensors in lifted node";
 
-    EXPECT_EQ(liftedPeerStats[0]->get_uid(), K_BN_BWD_INTEG_TENSOR_PEER_STAT_0_UID);
+    EXPECT_EQ(liftedPeerStats[0]->get_uid(), K_BN_BWD_TENSOR_PEER_STAT_0_UID);
     EXPECT_EQ(liftedPeerStats[0]->get_name(), "PeerStat0");
-    EXPECT_EQ(liftedPeerStats[1]->get_uid(), K_BN_BWD_INTEG_TENSOR_PEER_STAT_1_UID);
+    EXPECT_EQ(liftedPeerStats[1]->get_uid(), K_BN_BWD_TENSOR_PEER_STAT_1_UID);
     EXPECT_EQ(liftedPeerStats[1]->get_name(), "PeerStat1");
 
     // Verify pointer equality: peer_stats in node attributes share objects with tensor map

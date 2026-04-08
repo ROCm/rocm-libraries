@@ -9,8 +9,6 @@
 {%- macro vector_const_name(df, op) -%}
 {%- if df.test_constant_name -%}
 {{ df.test_constant_name }}
-{%- elif "conv" in op.effective_error_label and op.test_data.constants_include -%}
-K_CONV_{{ df.name | upper }}
 {%- else -%}
 {{ op.tensor_const_prefix }}{{ df.name | upper }}
 {%- endif -%}
