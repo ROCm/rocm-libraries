@@ -67,7 +67,7 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    rocblas_int m, l, lsv, lend, lendsv;
+    rocblas_int m, l, lsv, lend, lendsv, lsv_scaling, lendsv_scaling;
     rocblas_int l1;
     rocblas_int iters;
     S anorm, p;
@@ -131,13 +131,15 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
             if(lend == l)
                 continue;
 
+            lsv_scaling = lsv;
+            lendsv_scaling = lendsv;
             // Scale submatrix
             if(anorm == 0)
                 continue;
             else if(anorm > ssfmax)
-                scale_tridiag(lsv, lendsv, D, E, anorm / ssfmax);
+                scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmax / anorm);
             else if(anorm < ssfmin)
-                scale_tridiag(lsv, lendsv, D, E, anorm / ssfmin);
+                scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmin / anorm);
 
             if(lend >= l)
             {
@@ -315,9 +317,9 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
 
             // Undo scaling
             if(anorm > ssfmax)
-                scale_tridiag(lsv, lendsv, D, E, ssfmax / anorm);
+                scale_tridiag(lsv_scaling, lendsv_scaling, D, E, anorm / ssfmax);
             if(anorm < ssfmin)
-                scale_tridiag(lsv, lendsv, D, E, ssfmin / anorm);
+                scale_tridiag(lsv_scaling, lendsv_scaling, D, E, anorm / ssfmin);
         }
 
         // Check for convergence
