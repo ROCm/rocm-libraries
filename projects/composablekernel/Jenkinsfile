@@ -1836,8 +1836,7 @@ pipeline {
                                             -D GEMM_PRESHUFFLE_CONFIG_FILE="default_ci_config.json" \
                                             -D FLATMM_DATATYPE="fp16;fp8;bf16;bf8" \
                                             -D FLATMM_LAYOUT="rcr" \
-                                            -D FLATMM_CONFIG_FILE="default_ci_config.json" \
-                                            .. && \
+                                            -D FLATMM_CONFIG_FILE="default_ci_config.json" .. && \
                                            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_flatmm_all && \
                                            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
                                            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
@@ -1914,7 +1913,7 @@ pipeline {
                                             python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_tensorquant/grouped_gemm_tensorquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_tensorquant_results.json  """
 =======
                                             -D FLATMM_DATATYPE="fp16;fp8;bf16;bf8" \
-                                            -D FLATMM_LAYOUT="rcr".. && \
+                                            -D FLATMM_LAYOUT="rcr" .. && \
                                            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all && \
                                            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
                                            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
