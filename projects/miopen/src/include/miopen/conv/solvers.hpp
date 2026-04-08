@@ -4678,8 +4678,6 @@ private:
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
 #endif
-    template <typename DataType>
-    void Init(const miopen::conv::ProblemDescription&);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd2D final
@@ -4716,9 +4714,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd2D final
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&,
                              const PerformanceConfigConvDepthwiseFwd2D&) const override;
-
-    uint32_t GetSupportedSolutionCount(const ExecutionContext&,
-                                       const miopen::conv::ProblemDescription&) const;
 };
 /// Common base for ConvWinogradNHWC transposing solvers (tunable and non-tunable).
 /// Provides ConvertFromApiParams, ConvertForInnerSolver, Transpose, and GetTransposes.

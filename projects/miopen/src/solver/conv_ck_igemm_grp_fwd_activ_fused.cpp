@@ -32,7 +32,7 @@
 #include <miopen/generic_search.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/ck_utility_common.hpp>
-#include <miopen/solver/implicitgemm_ck_util.hpp>
+#include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_CK_IGEMM_GRP_FWD_ACTIV)

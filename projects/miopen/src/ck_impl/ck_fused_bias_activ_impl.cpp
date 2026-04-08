@@ -14,7 +14,7 @@
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/fusion/fusion_invoke_params.hpp>
-#include <miopen/solver/implicitgemm_ck_util.hpp>
+#include "implicitgemm_ck_util.hpp"
 #include <ck/tensor_operation/gpu/device/device_conv_fwd_bias_activation.hpp>
 
 // ---------------------------------------------------------------------------

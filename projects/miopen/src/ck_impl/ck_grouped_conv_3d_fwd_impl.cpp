@@ -15,7 +15,7 @@
 #include <miopen/execution_context.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/ck_utility_common.hpp>
-#include <miopen/solver/implicitgemm_ck_util.hpp>
+#include "implicitgemm_ck_util.hpp"
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward_bilinear.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward_scale.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp>

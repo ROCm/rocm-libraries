@@ -7,7 +7,7 @@
 #include <miopen/solver/ck_impl_interface.hpp>
 #include <miopen/solver/ck_impl_error.hpp>
 #include <miopen/solver/ck_utility_common.hpp>
-#include <miopen/solver/implicitgemm_ck_util.hpp>
+#include "implicitgemm_ck_util.hpp"
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/execution_context.hpp>

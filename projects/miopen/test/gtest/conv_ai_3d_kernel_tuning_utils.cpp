@@ -35,7 +35,6 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
-#include <miopen/solver/implicitgemm_ck_util.hpp>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
 #include <miopen/filesystem.hpp>

@@ -7,7 +7,7 @@
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv_solution.hpp>
 #include <miopen/solver/ck_utility_common.hpp>
-#include <miopen/solver/implicitgemm_ck_util.hpp>
+#include "implicitgemm_ck_util.hpp"
 
 #include <algorithm>
 #include <array>

@@ -34,7 +34,7 @@
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #endif
-#include <miopen/solver/implicitgemm_ck_util.hpp>
+#include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR)
