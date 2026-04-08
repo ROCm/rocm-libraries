@@ -4126,7 +4126,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SMovB64(dst=sgpr(tileStart, 2), src=0, comment="set default tileStart"))
 
       #Calculate tensor 2d size
-      # For UseSubtileImpl kernels (MX and non-MX), useFixedSrd2=True so tensor2dSize is not needed.
+      # When useFixedSrd2=True (UseSubtileImpl or pre-shuffled tensors),
+      # tensor2dSize is not allocated, so skip initialization.
       if not useFixedSrd2:
         if use64bShadowLimit or ((not use64bShadowLimit) and tensor2dSize0 % 2 == 0):
           module.add(SMovB64(dst=sgpr(tensor2dSize0, 2), src=0x1, comment="Init tensor size"))
