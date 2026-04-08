@@ -143,6 +143,24 @@ if(HIP_PLATFORM STREQUAL nvidia)
   find_package(CUDA REQUIRED)
 endif()
 
+# Some CPU side functionality is provided by external lapack
+# Linking lapack library requires fortran flags
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+if(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG)
+  find_package(LAPACK 3.7 REQUIRED CONFIG)
+else()
+  find_package(LAPACK 3.7 REQUIRED)
+endif()
+
+if(NOT LAPACK_LIBRARIES)
+  message("Using manually specified LAPACK")
+  set(LAPACK_LIBRARIES
+    ${LAPACK_blas_LIBRARIES}
+    ${LAPACK_lapack_LIBRARIES}
+  )
+endif()
+
 
 # Append our library helper cmake path
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )

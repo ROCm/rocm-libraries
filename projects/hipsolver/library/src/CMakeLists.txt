@@ -141,6 +141,7 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
     list(APPEND static_depends PACKAGE rocsolver)
   endif()
 
+  target_link_libraries(hipsolver PRIVATE ${LAPACK_LIBRARIES})
   target_link_libraries(hipsolver PRIVATE roc::rocblas roc::rocsolver)
   target_link_libraries(hipsolver PUBLIC hip::host)
 
