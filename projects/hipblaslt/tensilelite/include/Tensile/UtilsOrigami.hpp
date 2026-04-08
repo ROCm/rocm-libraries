@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 #pragma once
-
+#include <stdexcept>
 #include <origami/origami.hpp>
 #include <rocisa/include/enum.hpp>
 #include <origami/simulator/tensilelite/formocast_simulator.hpp>
@@ -75,9 +75,15 @@ namespace TensileLite
             return origami::data_type_t::Float8BFloat8;
         case rocisa::DataType::BFloat8Float8:
             return origami::data_type_t::BFloat8Float8;
+        case rocisa::DataType::Float6:
+            return origami::data_type_t::Float6;
+        case rocisa::DataType::BFloat6:
+            return origami::data_type_t::BFloat6;   
+        case rocisa::DataType::Float4:
+            return origami::data_type_t::Float4;
 
         default:
-            return origami::data_type_t::None;
+      throw std::runtime_error("Unsupported data type: " + std::to_string(static_cast<int>(type)));
         }
     }
 } // namespace TensileLite
