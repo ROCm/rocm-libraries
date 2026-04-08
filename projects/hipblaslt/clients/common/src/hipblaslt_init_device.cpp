@@ -45,9 +45,11 @@ void fill_batch(T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batc
 {
     size_t           size_64   = stride >= lda ? lda * N + size_t(batch_count - 1) * stride : lda * N;
     if constexpr(
-        std::is_same_v<
-            T,
-            hipblaslt_f4x2> || std::is_same_v<T, hipblaslt_f6x16> || std::is_same_v<T, hipblaslt_bf6x16>)
+        std::is_same_v<T, hipblaslt_f4x2>
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
+        || std::is_same_v<T, hipblaslt_f6x16> || std::is_same_v<T, hipblaslt_bf6x16>
+#endif
+    )
     {
         using type = T;
         size_64    = size_64 / type::packed_size;
@@ -138,6 +140,7 @@ __device__ hipblaslt_f4x2 random_int<hipblaslt_f4x2>(size_t idx)
     return hipblaslt_f4x2(float(r0), float(r1));
 }
 
+#if defined(HIPBLASLT_USE_FP6)
 /*! \brief  generate a random number in range [-7, -6, ..., 7] */
 template <>
 __device__ hipblaslt_f6x16 random_int<hipblaslt_f6x16>(size_t idx)
@@ -165,7 +168,9 @@ __device__ hipblaslt_f6x16 random_int<hipblaslt_f6x16>(size_t idx)
                            float(r[14]),
                            float(r[15]));
 }
+#endif
 
+#if defined(HIPBLASLT_USE_BF6)
 /*! \brief  generate a random number in range [-28, -27, ..., 28] */
 template <>
 __device__ hipblaslt_bf6x16 random_int<hipblaslt_bf6x16>(size_t idx)
@@ -193,6 +198,7 @@ __device__ hipblaslt_bf6x16 random_int<hipblaslt_bf6x16>(size_t idx)
                             float(r[14]),
                             float(r[15]));
 }
+#endif
 
 /*! \brief  generate a random number in range [2^-3,2^-2,2^-1,2^0,]2^1,2^2,2^3]] */
 template <>
@@ -248,6 +254,7 @@ __device__ hipblaslt_f4x2 random_hpl(size_t idx)
     return hipblaslt_f4x2(r0, r1);
 }
 
+#if defined(HIPBLASLT_USE_FP6)
 /*! \brief  generate a random number in HPL-like [-0.5,0.5] doubles  */
 template <>
 __device__ hipblaslt_f6x16 random_hpl(size_t idx)
@@ -279,7 +286,9 @@ __device__ hipblaslt_f6x16 random_hpl(size_t idx)
                            r[14],
                            r[15]);
 }
+#endif
 
+#if defined(HIPBLASLT_USE_BF6)
 /*! \brief  generate a random number in HPL-like [-0.5,0.5] doubles  */
 template <>
 __device__ hipblaslt_bf6x16 random_hpl(size_t idx)
@@ -311,6 +320,7 @@ __device__ hipblaslt_bf6x16 random_hpl(size_t idx)
                             r[14],
                             r[15]);
 }
+#endif
 
 /*! \brief  generate a random number in range [2^-3,2^-2,2^-1,2^0,]2^1,2^2,2^3]] */
 template <>
@@ -335,6 +345,7 @@ __device__ T
 
     if constexpr(std::is_same_v<T, hipblaslt_f4x2>)
         return hipblaslt_f4x2(func(calc(2 * idx)), func(calc(2 * idx + 1)));
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
     else if constexpr(std::is_same_v<T, hipblaslt_f6x16> || std::is_same_v<T, hipblaslt_bf6x16>)
     {
         using type = T;
@@ -355,6 +366,7 @@ __device__ T
                  func(calc(type::packed_size * idx + 14)),
                  func(calc(type::packed_size * idx + 15)));
     }
+#endif
     else
         return T(func(calc(idx)));
 }
@@ -376,6 +388,7 @@ __device__ hipblaslt_f4x2 norm_dist(uint32_t base_seed, size_t idx)
 }
 
 
+#if defined(HIPBLASLT_USE_FP6)
 template <>
 __device__ hipblaslt_f6x16 norm_dist(uint32_t base_seed, size_t idx)
 {
@@ -402,7 +415,9 @@ __device__ hipblaslt_f6x16 norm_dist(uint32_t base_seed, size_t idx)
                            r[14],
                            r[15]);
 }
+#endif
 
+#if defined(HIPBLASLT_USE_BF6)
 template <>
 __device__ hipblaslt_bf6x16 norm_dist(uint32_t base_seed, size_t idx)
 {
@@ -429,6 +444,7 @@ __device__ hipblaslt_bf6x16 norm_dist(uint32_t base_seed, size_t idx)
                             r[14],
                             r[15]);
 }
+#endif
 
 template <typename T>
 void hipblaslt_init_device(ABC_dims                 abc,
@@ -445,8 +461,10 @@ void hipblaslt_init_device(ABC_dims                 abc,
     {
         if constexpr(
             std::is_same_v<T, hipblaslt_f4x2>
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
             || std::is_same_v<T, hipblaslt_f6x16>
             || std::is_same_v<T, hipblaslt_bf6x16>
+#endif
             || std::is_same_v<T, hipblaslt_e8>
             || std::is_same_v<T, hipblaslt_e5m3>)
         {
@@ -557,9 +575,11 @@ void hipblaslt_init_device(ABC_dims                 abc,
         case hipblaslt_initialization::zero:
             fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                 if constexpr(
-                    std::is_same_v<
-                        T,
-                        hipblaslt_f4x2> || std::is_same_v<T, hipblaslt_f6x16> || std::is_same_v<T, hipblaslt_bf6x16>)
+                    std::is_same_v<T, hipblaslt_f4x2>
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
+                    || std::is_same_v<T, hipblaslt_f6x16> || std::is_same_v<T, hipblaslt_bf6x16>
+#endif
+                )
                     return T(0.f);
                 else
                     return T(0);
@@ -717,14 +737,18 @@ void hipblaslt_init_device(ABC_dims                 abc,
         hipblaslt_init_device<hipblaslt_e5m3>(
             abc, init, is_nan, static_cast<hipblaslt_e5m3*>(A), M, N, lda, stride, batch_count);
         break;
+#if defined(HIPBLASLT_USE_FP6)
     case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
         hipblaslt_init_device<hipblaslt_f6x16>(
             abc, init, is_nan, static_cast<hipblaslt_f6x16*>(A), M, N, lda, stride, batch_count);
         break;
+#endif
+#if defined(HIPBLASLT_USE_BF6)
     case static_cast<hipDataType>(HIP_R_6F_E3M2_EXT):
         hipblaslt_init_device<hipblaslt_bf6x16>(
             abc, init, is_nan, static_cast<hipblaslt_bf6x16*>(A), M, N, lda, stride, batch_count);
         break;
+#endif
     case static_cast<hipDataType>(HIP_R_4F_E2M1_EXT):
         hipblaslt_init_device<hipblaslt_f4x2>(
             abc, init, is_nan, static_cast<hipblaslt_f4x2*>(A), M, N, lda, stride, batch_count);

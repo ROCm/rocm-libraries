@@ -76,6 +76,7 @@ inline __device__ __host__ hipblaslt_f4x2 negate(hipblaslt_f4x2 x)
     return x;
 }
 
+#if defined(HIPBLASLT_USE_FP6)
 template <>
 inline __device__ __host__ hipblaslt_f6x16 negate(hipblaslt_f6x16 x)
 {
@@ -97,7 +98,9 @@ inline __device__ __host__ hipblaslt_f6x16 negate(hipblaslt_f6x16 x)
     x.data = cvt.real;
     return x;
 }
+#endif
 
+#if defined(HIPBLASLT_USE_BF6)
 template <>
 inline __device__ __host__ hipblaslt_bf6x16 negate(hipblaslt_bf6x16 x)
 {
@@ -119,6 +122,7 @@ inline __device__ __host__ hipblaslt_bf6x16 negate(hipblaslt_bf6x16 x)
     x.data = cvt.real;
     return x;
 }
+#endif
 
 template <>
 inline __device__ __host__ hipblaslt_f8_fnuz negate(hipblaslt_f8_fnuz x)
