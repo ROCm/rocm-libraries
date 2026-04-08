@@ -89,7 +89,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [4096, 4096, 1, 4096]
+          - Exact: [4096, 4096, 1, 8192]
 
 LibraryLogic:
     ScheduleName: "gfx950"

@@ -1762,7 +1762,10 @@ namespace TensileLite
         assignGridSize(rv.numWorkGroups.y, customKernel.grid.y);
         assignGridSize(rv.numWorkGroups.z, customKernel.grid.z);
 
-        if(internalArgsSupport.version >= 1)
+        bool hasNumWorkGroupsArg = std::any_of(
+            customKernel.args.begin(), customKernel.args.end(),
+            [](auto const& a) { return a.semantic == CustomArgSemantic::NumWorkGroups; });
+        if(hasNumWorkGroupsArg && internalArgsSupport.version >= 1)
         {
             rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
             rv.numWorkGroups.y = 1;
