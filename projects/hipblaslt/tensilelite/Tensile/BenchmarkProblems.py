@@ -22,6 +22,8 @@
 #
 ################################################################################
 
+import hashlib
+import json
 import os
 import shutil
 import sys
@@ -58,19 +60,24 @@ from Tensile.Common.Architectures import isaToGfx, gfxToVariants
 from Tensile.Common.GlobalParameters import globalParameters, startTime
 from Tensile.Common.TimingInstrumentation import timing_context
 
-import hashlib
-import json
+_CACHE_FIELDS = {
+    "ConstantParams": "constantParams",
+    "ForkParams": "forkParams",
+    "ParamGroups": "paramGroups",
+    "CustomKernels": "customKernels",
+    "InternalSupportParams": "internalSupportParams",
+    "CustomKernelWildcard": "customKernelWildcard",
+}
+
+_LEGACY_CACHE = "__legacy__"
+
+def _cacheDataMatches(cacheData, benchmarkStep):
+    """Check if cached data matches the current benchmark step parameters."""
+    return all(cacheData[f] == getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items())
 
 def _computeCacheKey(benchmarkStep):
-    """Compute a deterministic hash from the 6 cache-relevant parameter fields."""
-    cacheFields = {
-        "ConstantParams": benchmarkStep.constantParams,
-        "ForkParams": benchmarkStep.forkParams,
-        "ParamGroups": benchmarkStep.paramGroups,
-        "CustomKernels": benchmarkStep.customKernels,
-        "InternalSupportParams": benchmarkStep.internalSupportParams,
-        "CustomKernelWildcard": benchmarkStep.customKernelWildcard,
-    }
+    """Compute a deterministic hash from the cache-relevant parameter fields."""
+    cacheFields = {f: getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
     canonical = json.dumps(cacheFields, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()[:12]
 
@@ -89,27 +96,23 @@ def _findMatchingCache(stepBaseDir, benchmarkStep, useCache):
             cachePath = os.path.join(cachesDir, entry, "cache.yaml")
             if not os.path.isfile(cachePath):
                 continue
-            c = LibraryIO.read(cachePath)
-            if c["ConstantParams"] == benchmarkStep.constantParams and \
-                    c["ForkParams"] == benchmarkStep.forkParams and \
-                    c["ParamGroups"] == benchmarkStep.paramGroups and \
-                    c["CustomKernels"] == benchmarkStep.customKernels and \
-                    c["InternalSupportParams"] == benchmarkStep.internalSupportParams and \
-                    c["CustomKernelWildcard"] == benchmarkStep.customKernelWildcard:
-                return os.path.join(cachesDir, entry), c["CodeObjectFiles"]
+            try:
+                c = LibraryIO.read(cachePath)
+                if _cacheDataMatches(c, benchmarkStep):
+                    return os.path.join(cachesDir, entry), c["CodeObjectFiles"]
+            except Exception:
+                printWarning(f"Ignoring corrupt cache entry: {cachePath}")
+                continue
 
     # Fall back to legacy single cache.yaml
     legacyCachePath = os.path.join(stepBaseDir, "cache.yaml")
     if os.path.isfile(legacyCachePath):
-        c = LibraryIO.read(legacyCachePath)
-        if c["ConstantParams"] == benchmarkStep.constantParams and \
-                c["ForkParams"] == benchmarkStep.forkParams and \
-                c["ParamGroups"] == benchmarkStep.paramGroups and \
-                c["CustomKernels"] == benchmarkStep.customKernels and \
-                c["InternalSupportParams"] == benchmarkStep.internalSupportParams and \
-                c["CustomKernelWildcard"] == benchmarkStep.customKernelWildcard:
-            # Legacy cache — sourcePath stays at stepBaseDir/source
-            return "__legacy__", c["CodeObjectFiles"]
+        try:
+            c = LibraryIO.read(legacyCachePath)
+            if _cacheDataMatches(c, benchmarkStep):
+                return _LEGACY_CACHE, c["CodeObjectFiles"]
+        except Exception:
+            printWarning(f"Ignoring corrupt cache entry: {legacyCachePath}")
 
     return None, None
 
@@ -478,18 +481,24 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             if matchDir is not None:
                 cacheValid = True
                 codeObjectFiles = matchCO
-                if matchDir == "__legacy__":
+                if matchDir == _LEGACY_CACHE:
                     cacheDir = stepBaseDir
                 else:
                     cacheDir = matchDir
+            elif useCache:
+                has_legacy = os.path.isfile(os.path.join(stepBaseDir, "cache.yaml"))
+                has_new = os.path.isdir(os.path.join(stepBaseDir, "caches"))
+                if has_legacy or has_new:
+                    printWarning("Cache data does not match config: redoing solution generation")
 
         if cacheDir == stepBaseDir:
             # Legacy cache layout
-            sourcePath = ensurePath(shortNamePath / "source")
+            sourcePath = shortNamePath / "source"
         else:
-            sourcePath = ensurePath(Path(cacheDir) / "source")
+            sourcePath = Path(cacheDir) / "source"
 
         if not cacheValid:
+            ensurePath(sourcePath)
             # enumerate benchmark permutations and create resulting solution objects
             with timing_context("python_solution_generation"):
                 with timing_context("python_solgen_fork_permutations"):
