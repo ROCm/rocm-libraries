@@ -88,19 +88,20 @@ using int32x16_t = int32_t __attribute__((ext_vector_type(16)));
 using int32x32_t = int32_t __attribute__((ext_vector_type(32)));
 using int32x64_t = int32_t __attribute__((ext_vector_type(64)));
 
-// TODO: Check if this definition is actually necessary.
-// struct int8x12_tt // for int8_t x12
-// {
-//     int32_t data[3];
-// };
+struct int8x12_tt // for int8_t x12
+{
+    int32_t data[3];
+};
 
-// template <>
-// struct impl::ext_vector<int8_t, 12>
-// {
-//     static constexpr index_t N = 12;
-//     using value_type           = int8x12_tt;
-//     using type                 = int8x12_tt;
-// };
+// TODO: Unclear what the point of this ext vector implementation override is. Clang can handle this
+// type and size just fine without the override.
+template <>
+struct impl::ext_vector<int8_t, 12>
+{
+    static constexpr index_t N = 12;
+    using value_type           = int8x12_tt;
+    using type                 = int8x12_tt;
+};
 
 template <f6_kind kind>
 struct int32x3_tt // for fp6x16 and bf6x16
