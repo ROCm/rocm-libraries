@@ -104,7 +104,7 @@ using IntegrationGpuRMSnormForwardFp32Fp32Fp32Fp32
 using IntegrationGpuRMSnormForwardFp16Fp32Fp16Fp32
     = RMSNormForwardTraining<half, float, half, float>;
 
-// 3. Input: BFLOAT16, Scale: FP32, Output: BFLOAT16, Compute: FP32
+// 3. Input: BFP16, Scale: FP32, Output: BFP16, Compute: FP32
 using IntegrationGpuRMSnormForwardBfp16Fp32Bfp16Fp32
     = RMSNormForwardTraining<bfloat16, float, bfloat16, float>;
 
@@ -112,16 +112,9 @@ using IntegrationGpuRMSnormForwardBfp16Fp32Bfp16Fp32
 using IntegrationGpuRMSnormForwardFp16Fp32Fp32Fp32
     = RMSNormForwardTraining<half, float, float, float>;
 
-// 5. Input: BFLOAT16, Scale: FP32, Output: FP32, Compute: FP32
+// 5. Input: BFP16, Scale: FP32, Output: FP32, Compute: FP32
 using IntegrationGpuRMSnormForwardBfp16Fp32Fp32Fp32
     = RMSNormForwardTraining<bfloat16, float, float, float>;
-
-// 6. Input: FP16, Scale: FP16, Output: FP16, Compute: FP16
-using IntegrationGpuRMSnormForwardFp16Fp16Fp16Fp16 = RMSNormForwardTraining<half, half, half, half>;
-
-// 7. Input: BFLOAT16, Scale: BFLOAT16, Output: BFLOAT16, Compute: BFLOAT16
-using IntegrationGpuRMSnormForwardBfp16Bfp16Bfp16Bfp16
-    = RMSNormForwardTraining<bfloat16, bfloat16, bfloat16, bfloat16>;
 }
 
 // ============================================================================
@@ -151,7 +144,5 @@ REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardFp16Fp32Fp16Fp32);
 REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardBfp16Fp32Bfp16Fp32);
 REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardFp16Fp32Fp32Fp32);
 REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardBfp16Fp32Fp32Fp32);
-REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardFp16Fp16Fp16Fp16);
-REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardBfp16Bfp16Bfp16Bfp16);
 
 } // namespace hip_kernel_provider::rmsnorm::test

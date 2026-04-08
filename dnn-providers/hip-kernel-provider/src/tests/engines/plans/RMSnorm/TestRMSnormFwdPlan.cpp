@@ -234,7 +234,7 @@ TEST(TestRMSnormFwdPlan, CompileFp32SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_IO_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=float"));
 }
 
 TEST(TestRMSnormFwdPlan, CompileFp16SetsCorrectDefines)
@@ -269,7 +269,7 @@ TEST(TestRMSnormFwdPlan, CompileFp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_IO_TYPE=half"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=half"));
 }
 
 TEST(TestRMSnormFwdPlan, CompileBfp16SetsCorrectDefines)
@@ -305,7 +305,7 @@ TEST(TestRMSnormFwdPlan, CompileBfp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_IO_TYPE=ushort"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=ushort"));
 }
 
 TEST(TestRMSnormFwdPlan, CompileWithUnsupportedDimensionThrows)

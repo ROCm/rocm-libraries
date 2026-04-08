@@ -83,17 +83,24 @@ void RMSnormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>&
                                     "BFLOAT16 data types for x and y tensors.");
     }
 
+    // Only fp32 compute type is supported for now
     std::unordered_set<hipdnn_data_sdk::data_objects::DataType> allowedComputeTypes{
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-        hipdnn_data_sdk::data_objects::DataType::HALF};
+        hipdnn_data_sdk::data_objects::DataType::FLOAT
+
+    };
     validateConsistentDataTypes(affineTensorIds,
                                 allowedComputeTypes,
                                 "RMSnorm affine tensors use unsupported data type.",
                                 "All affine tensors for RMSnorm must have the same data type.");
 
+    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> allowedStatTypes{
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_data_sdk::data_objects::DataType::HALF};
+
     validateConsistentDataTypes(statTensorIds,
-                                allowedComputeTypes,
+                                tensorMap,
+                                allowedStatTypes,
                                 "RMSnorm stat tensors use unsupported data type.",
                                 "All stat tensors for RMSnorm must have the same data type.");
 }
