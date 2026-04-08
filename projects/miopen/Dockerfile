@@ -224,7 +224,7 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
         cmake --build .; \
     else \
         echo "Building with $BUILD_JOBS parallel jobs"; \
-        cmake --build . -j224; \
+        cmake --build . -j$BUILD_JOBS; \
     fi && \
     cmake --install .
 
