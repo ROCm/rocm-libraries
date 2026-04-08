@@ -49,22 +49,6 @@ namespace miopen {
 namespace solver {
 namespace conv {
 
-namespace {
-// Type tags for AI heuristics. These replace CK types (ck::half_t, ck::bhalf_t,
-// ck::tf32_t) that were previously used as template arguments to
-// RunParameterPredictionModel. The DataType template parameter is unused in the
-// function body — these tags only drive the mode_use_tf32 constexpr check.
-struct HalfTag
-{
-};
-struct BFloat16Tag
-{
-};
-struct TF32Tag
-{
-};
-} // namespace
-
 using ProblemDescription = miopen::conv::ProblemDescription;
 
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(

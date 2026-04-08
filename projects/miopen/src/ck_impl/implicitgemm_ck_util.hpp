@@ -42,6 +42,63 @@ namespace solver {
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
+template <typename ConvPtrsType>
+typename ConvPtrsType::iterator FindConvPtrByID(ConvPtrsType& conv_ptrs,
+                                                const std::string& kernel_id)
+{
+    return std::find_if(conv_ptrs.begin(), conv_ptrs.end(), [&kernel_id](const auto& ptr) {
+        return ptr->GetTypeString() == kernel_id;
+    });
+}
+
+template <typename DeviceOpType,
+          typename CKArgsType,
+          typename ProblemDescriptionType = miopen::conv::ProblemDescription>
+std::vector<std::string> FillValidKernelsIDs(const ProblemDescriptionType& problem)
+{
+    const auto args      = CKArgsType{problem};
+    const auto conv_ptrs = DeviceOpType::GetInstances();
+    assert(!conv_ptrs.empty());
+
+    std::vector<std::string> valid_kernels;
+    valid_kernels.reserve(conv_ptrs.size());
+    for(size_t idx = 0; idx < conv_ptrs.size(); ++idx)
+    {
+        if(args.IsSupportedBy(conv_ptrs[idx]))
+            valid_kernels.emplace_back(std::move(conv_ptrs[idx]->GetTypeString()));
+    }
+    assert(!valid_kernels.empty());
+    return valid_kernels;
+}
+
+namespace internal {
+#ifndef NDEBUG
+
+#define DEBUG_PRINT_VEC(x) DebugPrintVec(#x, x);
+
+template <typename CKArgsType, typename ConvPtr>
+void DebugPrintCKArgPtrs(
+    const CKArgsType& ck_args, const ConvPtr& conv_ptr, ConstData_t x, ConstData_t w, ConstData_t y)
+{
+
+    MIOPEN_LOG_I("CK Instance: " << conv_ptr->GetTypeString());
+    MIOPEN_LOG_I("in ptr = " << x);
+    MIOPEN_LOG_I("w ptr = " << w);
+    MIOPEN_LOG_I("out ptr = " << y);
+
+    DEBUG_PRINT_VEC(ck_args.input);
+    DEBUG_PRINT_VEC(ck_args.in_strides);
+    DEBUG_PRINT_VEC(ck_args.weight);
+    DEBUG_PRINT_VEC(ck_args.wei_strides);
+    DEBUG_PRINT_VEC(ck_args.output);
+    DEBUG_PRINT_VEC(ck_args.out_strides);
+}
+
+#undef DEBUG_PRINT_VEC
+
+#endif // NDEBUG
+} // namespace internal
+
 namespace conv {
 template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGWrw = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<

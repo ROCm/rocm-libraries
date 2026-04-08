@@ -302,12 +302,9 @@ struct CKArgs
         input_lengths = {G, N, C, Hi, Wi}; // input
         out_lens      = {G, N, K, Ho, Wo}; // output
         wei_lens      = {G, K, C, Y, X};   // filter = wei
-        bias_lens     = {G, 1, K, 1, 1};
-        bias_strides  = {K, 0, 1, 0, 0};
-
-        in_strides  = {Hi * Wi * C, G * Hi * Wi * C, 1, Wi * C, C};
-        out_strides = {Ho * Wo * K, G * Ho * Wo * K, 1, Wo * K, K};
-        wei_strides = {Y * X * C, G * Y * X * C, 1, X * C, C};
+        in_strides    = {Hi * Wi * C, G * Hi * Wi * C, 1, Wi * C, C};
+        out_strides   = {Ho * Wo * K, G * Ho * Wo * K, 1, Wo * K, K};
+        wei_strides   = {Y * X * C, G * Y * X * C, 1, X * C, C};
 
         filter_stride   = {ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
                            ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
@@ -321,30 +318,6 @@ struct CKArgs
 
     CKArgs(const CKArgs&)            = default;
     CKArgs& operator=(const CKArgs&) = default;
-
-    template <typename ConvPtr>
-    auto MakeArgument(const ConvPtr& conv_ptr, ConstData_t in, ConstData_t w, Data_t out) const
-    {
-        return conv_ptr.MakeArgument(in,
-                                     w,
-                                     std::array<const void*, 0>{},
-                                     out,
-                                     input_lengths,
-                                     in_strides,
-                                     wei_lens,
-                                     wei_strides,
-                                     std::array<std::array<ck::index_t, NDimSpatial + 3>, 0>{},
-                                     std::array<std::array<ck::index_t, NDimSpatial + 3>, 0>{},
-                                     out_lens,
-                                     out_strides,
-                                     filter_stride,
-                                     filter_dilation,
-                                     lPadding,
-                                     rPadding,
-                                     InElementOp{},
-                                     WeiElementOp{},
-                                     OutElementOp{});
-    }
 
     int G;
     int N;
@@ -364,8 +337,6 @@ struct CKArgs
     std::array<ck::index_t, 5> out_strides;
     std::array<ck::index_t, 5> wei_lens;
     std::array<ck::index_t, 5> wei_strides;
-    std::array<ck::index_t, 5> bias_lens;
-    std::array<ck::index_t, 5> bias_strides;
     std::array<ck::index_t, 2> filter_stride;
     std::array<ck::index_t, 2> filter_dilation;
     std::array<ck::index_t, 2> lPadding;
@@ -383,9 +354,28 @@ std::vector<std::string> FillValidKernels(const ProblemDescription& problem)
     std::vector<std::string> valid_kernels;
 
     ck::static_for<0, kernelCount, 1>{}([&](auto i) -> void {
-        const auto conv_ptr = std::get<i>(DeviceConvFwdFactory{});
-        auto argument       = ck_args.MakeArgument(conv_ptr, nullptr, nullptr, nullptr);
-        if(conv_ptr.IsSupportedArgument(argument))
+        auto conv_ptr = std::get<i>(DeviceConvFwdFactory{});
+        auto argument_ptr =
+            conv_ptr.MakeArgumentPointer(nullptr,
+                                         nullptr,
+                                         std::array<const void*, 0>{},
+                                         nullptr,
+                                         ck_args.input_lengths,
+                                         ck_args.in_strides,
+                                         ck_args.wei_lens,
+                                         ck_args.wei_strides,
+                                         std::array<std::array<ck::index_t, NDimSpatial + 3>, 0>{},
+                                         std::array<std::array<ck::index_t, NDimSpatial + 3>, 0>{},
+                                         ck_args.out_lens,
+                                         ck_args.out_strides,
+                                         ck_args.filter_stride,
+                                         ck_args.filter_dilation,
+                                         ck_args.lPadding,
+                                         ck_args.rPadding,
+                                         InElementOp{},
+                                         WeiElementOp{},
+                                         OutElementOp{});
+        if(conv_ptr.IsSupportedArgument(argument_ptr.get()))
         {
             valid_kernels.push_back(conv_ptr.GetTypeString());
         }
@@ -402,9 +392,28 @@ bool CheckCKApplicability(const ProblemDescription& problem)
     ck::static_for<0, kernelCount, 1>{}([&](auto i) -> void {
         if(found)
             return;
-        const auto conv_ptr = std::get<i>(DeviceConvFwdFactory{});
-        auto argument       = ck_args.MakeArgument(conv_ptr, nullptr, nullptr, nullptr);
-        if(conv_ptr.IsSupportedArgument(argument))
+        auto conv_ptr = std::get<i>(DeviceConvFwdFactory{});
+        auto argument_ptr =
+            conv_ptr.MakeArgumentPointer(nullptr,
+                                         nullptr,
+                                         std::array<const void*, 0>{},
+                                         nullptr,
+                                         ck_args.input_lengths,
+                                         ck_args.in_strides,
+                                         ck_args.wei_lens,
+                                         ck_args.wei_strides,
+                                         std::array<std::array<ck::index_t, NDimSpatial + 3>, 0>{},
+                                         std::array<std::array<ck::index_t, NDimSpatial + 3>, 0>{},
+                                         ck_args.out_lens,
+                                         ck_args.out_strides,
+                                         ck_args.filter_stride,
+                                         ck_args.filter_dilation,
+                                         ck_args.lPadding,
+                                         ck_args.rPadding,
+                                         InElementOp{},
+                                         WeiElementOp{},
+                                         OutElementOp{});
+        if(conv_ptr.IsSupportedArgument(argument_ptr.get()))
         {
             found = true;
         }
@@ -419,11 +428,30 @@ bool CheckIsArgSupported(const ProblemDescription& problem, const std::string& k
     bool supported                 = false;
 
     ck::static_for<0, kernelCount, 1>{}([&](auto i) -> void {
-        const auto conv_ptr = std::get<i>(DeviceConvFwdFactory{});
+        auto conv_ptr = std::get<i>(DeviceConvFwdFactory{});
         if(conv_ptr.GetTypeString() == kernel_id)
         {
-            auto argument = ck_args.MakeArgument(conv_ptr, nullptr, nullptr, nullptr);
-            supported     = conv_ptr.IsSupportedArgument(argument);
+            auto argument_ptr = conv_ptr.MakeArgumentPointer(
+                nullptr,
+                nullptr,
+                std::array<const void*, 0>{},
+                nullptr,
+                ck_args.input_lengths,
+                ck_args.in_strides,
+                ck_args.wei_lens,
+                ck_args.wei_strides,
+                std::array<std::array<ck::index_t, NDimSpatial + 3>, 0>{},
+                std::array<std::array<ck::index_t, NDimSpatial + 3>, 0>{},
+                ck_args.out_lens,
+                ck_args.out_strides,
+                ck_args.filter_stride,
+                ck_args.filter_dilation,
+                ck_args.lPadding,
+                ck_args.rPadding,
+                InElementOp{},
+                WeiElementOp{},
+                OutElementOp{});
+            supported = conv_ptr.IsSupportedArgument(argument_ptr.get());
         }
     });
     return supported;
@@ -491,13 +519,19 @@ ck_impl_depthwise_fwd_is_args_supported(const miopen::conv::ProblemDescription* 
 }
 
 extern "C" ck_impl_status_t
-ck_impl_depthwise_fwd_get_workspace_size(const miopen::conv::ProblemDescription* /*problem*/,
-                                         miopenDataType_t /*data_type*/,
+ck_impl_depthwise_fwd_get_workspace_size(const miopen::conv::ProblemDescription* problem,
+                                         miopenDataType_t data_type,
                                          bool /*use_tf32*/,
                                          size_t* out_size)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_size, CK_IMPL_STATUS_BAD_PARAM, "Null out_size");
+        CK_IMPL_THROW_IF_NULL(problem, CK_IMPL_STATUS_BAD_PARAM, "Null problem");
+        if(data_type != miopenHalf)
+        {
+            *out_size = 0;
+            return;
+        }
         *out_size = 0;
     });
 }
@@ -533,29 +567,42 @@ ck_impl_depthwise_fwd_get_solution(const miopen::ExecutionContext* ctx,
             found         = true;
             auto conv_ptr = std::make_shared<DeviceConvFwdInstance>();
 
-            solution.invoker_factory = [conv_ptr = std::move(conv_ptr), ck_args = CKArgs{*problem}](
-                                           const std::vector<miopen::Kernel>&) {
+            solution.invoker_factory = [conv_ptr, ck_args = CKArgs{*problem}](
+                                           const std::vector<miopen::Kernel>&) mutable {
                 return [conv_ptr = std::move(conv_ptr),
                         ck_args](const miopen::Handle& handle,
                                  const miopen::AnyInvokeParams& primitive_params) {
                     const auto& fwd_ctx = primitive_params.CastTo<miopen::conv::DataInvokeParams>();
-                    auto invoker        = conv_ptr->MakeInvoker();
-                    auto argument       = ck_args.MakeArgument(*conv_ptr.get(),
-                                                         fwd_ctx.tensors.in,
-                                                         fwd_ctx.tensors.w,
-                                                         fwd_ctx.tensors.out);
-
+                    auto argument_ptr   = conv_ptr->MakeArgumentPointer(
+                        fwd_ctx.tensors.in,
+                        fwd_ctx.tensors.w,
+                        std::array<const void*, 0>{},
+                        fwd_ctx.tensors.out,
+                        ck_args.input_lengths,
+                        ck_args.in_strides,
+                        ck_args.wei_lens,
+                        ck_args.wei_strides,
+                        std::array<std::array<ck::index_t, NDimSpatial + 3>, 0>{},
+                        std::array<std::array<ck::index_t, NDimSpatial + 3>, 0>{},
+                        ck_args.out_lens,
+                        ck_args.out_strides,
+                        ck_args.filter_stride,
+                        ck_args.filter_dilation,
+                        ck_args.lPadding,
+                        ck_args.rPadding,
+                        InElementOp{},
+                        WeiElementOp{},
+                        OutElementOp{});
+                    auto invoker_ptr = conv_ptr->MakeInvokerPointer();
                     {
-                        {
-                            miopen::HipEventProfiler prf(handle);
-                            invoker.Run(argument, StreamConfig{nullptr, false});
-                        }
-                        if(handle.IsProfilingEnabled())
-                        {
-                            float avg_time = handle.GetKernelTime();
-                            handle.ResetKernelTime();
-                            handle.AccumKernelTime(avg_time);
-                        }
+                        miopen::HipEventProfiler prf(handle);
+                        invoker_ptr->Run(argument_ptr.get(), {handle.GetStream(), false});
+                    }
+                    if(handle.IsProfilingEnabled())
+                    {
+                        float avg_time = handle.GetKernelTime();
+                        handle.ResetKernelTime();
+                        handle.AccumKernelTime(avg_time);
                     }
                 };
             };

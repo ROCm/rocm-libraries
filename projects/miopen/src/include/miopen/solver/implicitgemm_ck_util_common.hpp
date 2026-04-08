@@ -102,34 +102,20 @@ struct CKBWDWeightBufferDescriptor
     }
 };
 
-template <typename ConvPtrsType>
-typename ConvPtrsType::iterator FindConvPtrByID(ConvPtrsType& conv_ptrs,
-                                                const std::string& kernel_id)
+// Lightweight type tags for AI heuristics template dispatch.
+// Replace CK types (ck::half_t, ck::bhalf_t, ck::tf32_t) that were previously
+// used as template arguments to RunParameterPredictionModel. The DataType
+// template parameter is unused in the function body -- these tags only drive
+// the mode_use_tf32 constexpr check.
+struct HalfTag
 {
-    return std::find_if(conv_ptrs.begin(), conv_ptrs.end(), [&kernel_id](const auto& ptr) {
-        return ptr->GetTypeString() == kernel_id;
-    });
-}
-
-template <typename DeviceOpType,
-          typename CKArgsType,
-          typename ProblemDescriptionType = miopen::conv::ProblemDescription>
-std::vector<std::string> FillValidKernelsIDs(const ProblemDescriptionType& problem)
+};
+struct BFloat16Tag
 {
-    const auto args      = CKArgsType{problem};
-    const auto conv_ptrs = DeviceOpType::GetInstances();
-    assert(!conv_ptrs.empty());
-
-    std::vector<std::string> valid_kernels;
-    valid_kernels.reserve(conv_ptrs.size());
-    for(size_t idx = 0; idx < conv_ptrs.size(); ++idx)
-    {
-        if(args.IsSupportedBy(conv_ptrs[idx]))
-            valid_kernels.emplace_back(std::move(conv_ptrs[idx]->GetTypeString()));
-    }
-    assert(!valid_kernels.empty());
-    return valid_kernels;
-}
+};
+struct TF32Tag
+{
+};
 
 namespace internal {
 
@@ -453,24 +439,6 @@ void DebugPrintVec(const char* name, const V& vec)
 }
 
 #define DEBUG_PRINT_VEC(x) DebugPrintVec(#x, x);
-
-template <typename CKArgsType, typename ConvPtr>
-void DebugPrintCKArgPtrs(
-    const CKArgsType& ck_args, const ConvPtr& conv_ptr, ConstData_t x, ConstData_t w, ConstData_t y)
-{
-
-    MIOPEN_LOG_I("CK Instance: " << conv_ptr->GetTypeString());
-    MIOPEN_LOG_I("in ptr = " << x);
-    MIOPEN_LOG_I("w ptr = " << w);
-    MIOPEN_LOG_I("out ptr = " << y);
-
-    DEBUG_PRINT_VEC(ck_args.input);
-    DEBUG_PRINT_VEC(ck_args.in_strides);
-    DEBUG_PRINT_VEC(ck_args.weight);
-    DEBUG_PRINT_VEC(ck_args.wei_strides);
-    DEBUG_PRINT_VEC(ck_args.output);
-    DEBUG_PRINT_VEC(ck_args.out_strides);
-}
 
 inline void DebugPrintConvTensors(const ConvTensors& conv_tensors)
 {
