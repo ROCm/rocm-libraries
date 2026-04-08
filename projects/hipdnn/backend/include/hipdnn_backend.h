@@ -345,12 +345,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
  *
  * Uses the standard two-call pattern: call first with @p serializedGraph set to @c nullptr to query
  * the required buffer size, then call again with a caller-allocated buffer to receive the data.
- * The descriptor must be of type HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR and must have
- * operations set (either via the C-API path or deserialization). Finalization is not required —
- * if operations are set but the graph is not finalized, serialization builds from operations
- * directly.
+ * The descriptor must be of type HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR. Finalization is not
+ * required — if operations are set but the graph is not finalized, serialization builds from
+ * operations directly. An empty operations list produces a valid (but empty) serialized graph.
  *
- * @param [in]  descriptor        An operation graph descriptor with operations set.
+ * @param [in]  descriptor        An operation graph descriptor.
  * @param [in]  requestedByteSize Size of the caller-allocated buffer in bytes.
  *                                Ignored when @p serializedGraph is @c nullptr.
  * @param [out] graphByteSize     Pointer to receive the size of the serialized graph in bytes.
@@ -361,8 +360,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
  * @retval HIPDNN_STATUS_SUCCESS              The serialized graph was successfully retrieved,
  *                                            or the size query completed successfully.
  * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  descriptor or graphByteSize is null.
- * @retval HIPDNN_STATUS_BAD_PARAM            The descriptor is not an operation graph descriptor,
- *                                            or has no operations set.
+ * @retval HIPDNN_STATUS_BAD_PARAM            The descriptor is not an operation graph descriptor.
  * @retval HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT  The requestedByteSize is smaller than the
  *                                                     serialized graph size.
  * @retval HIPDNN_STATUS_INTERNAL_ERROR       An internal error occurred during serialization.
@@ -378,8 +376,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  *
  * Uses the standard two-call pattern: call first with @p serializedJsonGraph set to @c nullptr to
  * query the required buffer size, then call again with a caller-allocated buffer to receive the
- * data. The descriptor must be of type HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR and must have
- * operations set (either via the C-API path or deserialization).
+ * data. The descriptor must be of type HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR. An empty
+ * operations list produces a valid (but empty) serialized JSON graph.
  *
  * @param [in]  descriptor          An operation graph descriptor.
  * @param [in]  requestedByteSize   Size of the caller-allocated buffer in bytes.
@@ -394,7 +392,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  *                                                 or the size query completed successfully.
  * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER    descriptor or graphByteSize is null.
  * @retval HIPDNN_STATUS_BAD_PARAM                 The descriptor is not an operation graph
- *                                                 descriptor, or has no operations.
+ *                                                 descriptor.
  * @retval HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT  The requestedByteSize is smaller than the
  *                                                     JSON graph size.
  * @retval HIPDNN_STATUS_INTERNAL_ERROR            An internal error occurred during serialization.
