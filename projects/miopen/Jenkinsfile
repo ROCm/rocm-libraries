@@ -323,7 +323,6 @@ pipeline {
             when {
                 expression { params.BUILD_PACKAGE_AND_CHECKS && params.TARGET_NOGPU && params.DATATYPE_NA }
             }
-            // Use the gfx90X docker image for packaging and static checks
             parallel
             {
                 stage("HIP Package") {
@@ -446,7 +445,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
-                        runDbSyncJob(gfx90a_flags, "gfx90X")
+                        runDbSyncJob(gfx90a_flags, "ci")
                     }
                     post {
                         always {
@@ -507,7 +506,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
-                        runDbSyncJob(gfx942_flags, "gfx942_gfx950")
+                        runDbSyncJob(gfx942_flags, "ci")
                     }
                     post {
                         always {
@@ -843,7 +842,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx908") }
                     steps{
-                        runDbSyncJob(gfx908_flags, "gfx90X")
+                        runDbSyncJob(gfx908_flags, "ci")
                     }
                     post {
                         always {
