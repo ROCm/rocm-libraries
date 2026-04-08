@@ -730,17 +730,8 @@ void hiprand_kernel_h_hiprand_sobol_init_test()
     DirectionVectors_t<int_type>* d_vector;
     int_type*                     d_constants;
 
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        load_scrambled_sobol_constants_and_vectors_to_gpu<state_type, int_type>(dimensions,
-                                                                                &d_vector,
-                                                                                &d_constants);
-    }
-    else
-    {
-        load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
-        d_constants = NULL;
-    }
+	load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
+	d_constants = NULL;
 
     unsigned long long offset = 4;
 
@@ -755,10 +746,7 @@ void hiprand_kernel_h_hiprand_sobol_init_test()
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(states));
     HIP_CHECK(hipFree(d_vector));
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        HIP_CHECK(hipFree(d_constants));
-    }
+    HIP_CHECK(hipFree(d_constants));
 }
 
 template<class state_type>
@@ -954,19 +942,8 @@ void hiprand_kernel_h_hiprand_sobol_test()
     const unsigned int dimensions = 8;
 
     DirectionVectors_t<int_type>* d_vector;
-    int_type*                     d_constants;
 
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        load_scrambled_sobol_constants_and_vectors_to_gpu<state_type, int_type>(dimensions,
-                                                                                &d_vector,
-                                                                                &d_constants);
-    }
-    else
-    {
-        load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
-        d_constants = NULL;
-    }
+	load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
 
     const size_t output_size = 8192;
     int_type*    output;
@@ -984,10 +961,6 @@ void hiprand_kernel_h_hiprand_sobol_test()
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(d_vector));
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        HIP_CHECK(hipFree(d_constants));
-    }
     
     double mean = 0;
     for(auto v : output_host)
@@ -1120,19 +1093,7 @@ void hiprand_kernel_h_hiprand_uniform_sobol_test()
     const unsigned int dimensions = 8;
 
     DirectionVectors_t<int_type>* d_vector;
-    int_type*                     d_constants;
-
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        load_scrambled_sobol_constants_and_vectors_to_gpu<state_type, int_type>(dimensions,
-                                                                                &d_vector,
-                                                                                &d_constants);
-    }
-    else
-    {
-        load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
-        d_constants = NULL;
-    }
+    load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
 
     const size_t output_size = 8192;
     float*       output;
@@ -1149,10 +1110,6 @@ void hiprand_kernel_h_hiprand_uniform_sobol_test()
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(d_vector));
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        HIP_CHECK(hipFree(d_constants));
-    }
 
     double mean = 0;
     for(auto v : output_host)
@@ -1291,19 +1248,8 @@ void hiprand_kernel_h_hiprand_normal_sobol_test()
     const unsigned int dimensions = 8;
 
     DirectionVectors_t<int_type>* d_vector;
-    int_type*                     d_constants;
-
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        load_scrambled_sobol_constants_and_vectors_to_gpu<state_type, int_type>(dimensions,
-                                                                                &d_vector,
-                                                                                &d_constants);
-    }
-    else
-    {
-        load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
-        d_constants = NULL;
-    }
+	
+    load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
 
     const size_t output_size = 8192;
     float*       output;
@@ -1320,10 +1266,6 @@ void hiprand_kernel_h_hiprand_normal_sobol_test()
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(d_vector));
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        HIP_CHECK(hipFree(d_constants));
-    }
 
     double mean = 0;
     for(auto v : output_host)
@@ -1800,19 +1742,7 @@ void hiprand_kernel_h_hiprand_poisson_sobol_test(double lambda)
     const unsigned int dimensions = 8;
 
     DirectionVectors_t<int_type>* d_vector;
-    int_type*                     d_constants;
-
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        load_scrambled_sobol_constants_and_vectors_to_gpu<state_type, int_type>(dimensions,
-                                                                                &d_vector,
-                                                                                &d_constants);
-    }
-    else
-    {
-        load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
-        d_constants = NULL;
-    }
+    load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
 
     const size_t  output_size = 8192;
     unsigned int* output;
@@ -1831,10 +1761,7 @@ void hiprand_kernel_h_hiprand_poisson_sobol_test(double lambda)
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(d_vector));
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        HIP_CHECK(hipFree(d_constants));
-    }
+
     double mean = 0;
     for(auto v : output_host)
     {
@@ -1960,19 +1887,7 @@ void hiprand_kernel_h_hiprand_discrete_sobol_test(double lambda)
     const unsigned int dimensions = 8;
 
     DirectionVectors_t<int_type>* d_vector;
-    int_type*                     d_constants;
-
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        load_scrambled_sobol_constants_and_vectors_to_gpu<state_type, int_type>(dimensions,
-                                                                                &d_vector,
-                                                                                &d_constants);
-    }
-    else
-    {
-        load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
-        d_constants = NULL;
-    }
+    load_sobol_vectors_to_gpu<state_type, int_type>(dimensions, &d_vector);
 
     const size_t  output_size = 8192;
     unsigned int* output;
@@ -1995,10 +1910,7 @@ void hiprand_kernel_h_hiprand_discrete_sobol_test(double lambda)
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(d_vector));
-    if(is_sobol_scrambled<state_type>::value)
-    {
-        HIP_CHECK(hipFree(d_constants));
-    }
+
     ASSERT_EQ(hiprandDestroyDistribution(discrete_distribution), HIPRAND_STATUS_SUCCESS);
 
     double mean = 0;
