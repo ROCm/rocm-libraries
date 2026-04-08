@@ -58,6 +58,9 @@ BenchmarkProblems:
                     { type: int64, semantic: StrideD0 },
                     { type: int64, semantic: StrideD1 }, 
                     { type: address, semantic: AddressD } ]
+            macrotile: [64, 64, 64]
+            threads: [256, 1, 1]
+            grid: [TilesX, TilesY, Batch]
         - MatrixInstruction:
           - [16,16,16, 1, 1, 2,2, 2,2] # 256 x 128
         - PreloadKernArgs: [False]
