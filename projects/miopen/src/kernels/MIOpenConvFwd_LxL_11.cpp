@@ -8,12 +8,19 @@
 // All algorithm parameters are injected at compile time via -D defines
 // (same macro names as the original OpenCL kernel).
 
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
 #endif
 
 #include "float_types.h"
-#include "math_ops.h"
+
+__device__ uint iDiv_legacy(uint v, uint d)
+{
+    uint r = (uint)((float)v * (1.0f / (float)d) + 0.00001f);
+    return r;
+}
+
+__device__ uint iMod(uint v, uint u, uint d) { return v - __mul24(u, d); }
 
 // float_types.h uses FLOAT / FLOAT_ACCUM for HIP and _FLOAT / _FLOAT_ACCUM for OpenCL.
 // This kernel uses the _FLOAT / _FLOAT_ACCUM names throughout; alias them for HIP.
