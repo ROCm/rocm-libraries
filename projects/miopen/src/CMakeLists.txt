@@ -936,6 +936,12 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
     add_subdirectory(ck_impl)
 endif()
 
+# Proxy target that bundles MIOpen linkage with build-order dependencies on the
+# CK plugin shared libraries (MIOpenCKGroupedConv_*.so).  Internal consumers
+# (tests, driver, speedtests) link this instead of MIOpen directly so that
+# building any single executable also builds the plugins it loads via dlopen.
+# When CK is disabled, CK_PLUGIN_TARGETS is empty and this is a plain
+# pass-through to MIOpen.
 add_library(MIOpen_with_plugins INTERFACE)
 target_link_libraries(MIOpen_with_plugins INTERFACE MIOpen)
 if(CK_PLUGIN_TARGETS)

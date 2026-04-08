@@ -37,6 +37,7 @@ function(ck_impl_base_arch ARCH OUT_VAR)
     set(${OUT_VAR} "${_base}" PARENT_SCOPE)
 endfunction()
 
+# Collect plugin target names for the MIOpen_with_plugins proxy (see src/CMakeLists.txt).
 set(CK_PLUGIN_TARGETS)
 foreach(gpu_target IN LISTS GPU_TARGETS)
     ck_impl_base_arch("${gpu_target}" arch_base)
@@ -116,4 +117,6 @@ foreach(gpu_target IN LISTS GPU_TARGETS)
     )
 endforeach()
 
+# Propagate the list to the parent scope so src/CMakeLists.txt can wire
+# build-order dependencies into the MIOpen_with_plugins proxy target.
 set(CK_PLUGIN_TARGETS "${CK_PLUGIN_TARGETS}" PARENT_SCOPE)

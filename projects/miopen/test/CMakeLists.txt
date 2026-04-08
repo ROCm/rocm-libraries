@@ -412,6 +412,7 @@ function(add_test_executable TEST_NAME)
         AND (${TEST_NAME} MATCHES "test_soft_max") )
         set_tests_properties(${TEST_NAME} PROPERTIES RUN_SERIAL On)
     endif()
+    # MIOpen_with_plugins ensures CK plugin .so's are built alongside the test
     if(NOT MIOPEN_EMBED_DB STREQUAL "")
         target_link_libraries(${TEST_NAME} MIOpen_with_plugins miopen_data)
     else()
