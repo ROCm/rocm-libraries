@@ -196,7 +196,6 @@ TEST(CPU_FusionCreateOpConvForward_FP32, TestInvalidConvLayout)
 }
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1)
-MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_AMD_WINOGRAD_RAGE_RXS_F2X3)
 
 // The test uses a specific fusion configuration that triggers the solver.
 // ConvCKIgemmGrpFwdBiasActivFused
@@ -264,7 +263,6 @@ public:
         miopenConvFwdAlgorithm_t algo{}; // not used in GetWorkSpaceSize
         {
             ScopedEnvironment<bool> find_mode_env1(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1, false);
-            ScopedEnvironment<bool> find_mode_env2(MIOPEN_DEBUG_AMD_WINOGRAD_RAGE_RXS_F2X3, false);
             ASSERT_TRUE(
                 IsOnlyConvCKIgemmGrpFwdBiasActivFusedSolverApplicable(cba_base::fusePlanDesc))
                 << "Test configuration is invalid as other solvers are applicable. Please update "

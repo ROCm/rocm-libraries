@@ -57,7 +57,6 @@ namespace rocRoller
                 iot::mapRequired(io, "numDims", op.m_numDims);
                 iot::mapRequired(io, "sizes", op.m_sizes);
                 iot::mapRequired(io, "pointer", op.m_pointer);
-                iot::mapRequired(io, "extent", op.m_extent);
                 iot::mapRequired(io, "strides", op.m_strides);
                 iot::mapRequired(io, "literalStrides", op.m_literalStrides);
             }

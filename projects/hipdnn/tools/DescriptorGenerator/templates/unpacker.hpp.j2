@@ -5,6 +5,9 @@
 
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/{{ op.frontend.effective_attributes_include }}.hpp>
+{% if op.data_fields_helper is defined and op.data_fields_helper %}
+#include <hipdnn_frontend/detail/{{ op.data_fields_helper.include }}.hpp>
+{% endif %}
 #include <hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp>
 #include <memory>
 #include <optional>
@@ -38,6 +41,11 @@ namespace hipdnn_frontend::detail
 
 {% endif %}
 {% endfor %}
+{% if op.data_fields_helper is defined and op.data_fields_helper %}
+    // Unpack shared {{ op.data_fields_helper.label }} parameters
+    HIPDNN_CHECK_ERROR({{ op.data_fields_helper.unpack_function }}(opDesc, attributes, "{{ op.effective_error_label }}"));
+
+{% else %}
 {% for df in op.data_fields %}
 {% if df.is_vector %}
     // Unpack {{ df.name }}
@@ -114,6 +122,7 @@ namespace hipdnn_frontend::detail
     }
     attributes.set_compute_data_type(dt);
 
+{% endif %}
 {% endif %}
     // Unpack operation name
     std::string opName;

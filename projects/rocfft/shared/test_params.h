@@ -24,10 +24,8 @@
 
 #include <stdexcept>
 
-extern int    verbose;
-extern size_t ramgb;
-extern size_t vramgb;
-extern int    ngpus;
+extern int verbose;
+extern int ngpus;
 
 extern size_t n_random_tests;
 

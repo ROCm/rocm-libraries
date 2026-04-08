@@ -19,7 +19,6 @@
  */
 typedef enum
 {
-    HIPDNN_CONVOLUTION_MODE_CONVOLUTION = 0, ///< Mathematical convolution (filter is flipped)
-    HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION
-    = 1 ///< Cross-correlation mode (standard deep learning)
+    HIPDNN_CONVOLUTION = 0, ///< Mathematical convolution (filter is flipped)
+    HIPDNN_CROSS_CORRELATION = 1 ///< Cross-correlation mode (standard deep learning)
 } hipdnnConvolutionMode_t;

@@ -53,6 +53,22 @@ namespace
             = "/opt/rocm/lib/hipblaslt/library/hipblasltTransform.hsaco";
 #endif
 
+        int             deviceId{};
+        hipDeviceProp_t props{};
+        if(hipGetDevice(&deviceId) == hipSuccess
+           && hipGetDeviceProperties(&props, deviceId) == hipSuccess)
+        {
+            std::string archName = props.gcnArchName;
+            auto        colonPos = archName.find(':');
+            if(colonPos != std::string::npos)
+                archName = archName.substr(0, colonPos);
+
+            auto perArchPath = rocblaslt_find_library_relative_path(
+                std::filesystem::path(archName) / "hipblasltTransform.hsaco");
+            if(perArchPath)
+                return *perArchPath;
+        }
+
         auto path = rocblaslt_find_library_relative_path(
             std::filesystem::path("hipblasltTransform.hsaco"));
         if(path)

@@ -543,7 +543,7 @@ namespace CopyGeneratorTest
         auto outputTag  = command->allocateTag();
         auto output_arg = command->allocateArgument(floatPtr, outputTag, ArgumentType::Value);
         auto sizeTag    = command->allocateTag();
-        auto size_arg   = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
+        auto size_arg   = command->allocateArgument(uintVal, sizeTag, ArgumentType::Size);
 
         auto input_exp  = std::make_shared<Expression::Expression>(input_arg);
         auto output_exp = std::make_shared<Expression::Expression>(output_arg);
@@ -609,10 +609,10 @@ namespace CopyGeneratorTest
         commandKernel.setContext(m_context);
         commandKernel.generateKernel();
 
-        const int size       = 4;
-        auto      input_ptr  = make_shared_device<float>(size);
-        auto      output_ptr = make_shared_device<float>(size);
-        float     val[size]  = {2.0f, 3.0f, 5.0f, 7.0f};
+        const uint32_t size       = 4;
+        auto           input_ptr  = make_shared_device<float>(size);
+        auto           output_ptr = make_shared_device<float>(size);
+        float          val[size]  = {2.0f, 3.0f, 5.0f, 7.0f};
 
         ASSERT_THAT(hipMemset(output_ptr.get(), 0, size * sizeof(float)), HasHipSuccess(0));
         ASSERT_THAT(hipMemcpy(input_ptr.get(), val, size * sizeof(float), hipMemcpyDefault),
@@ -621,7 +621,7 @@ namespace CopyGeneratorTest
         CommandArguments commandArgs = command->createArguments();
         commandArgs.setArgument(outputTag, ArgumentType::Value, output_ptr.get());
         commandArgs.setArgument(inputTag, ArgumentType::Value, input_ptr.get());
-        commandArgs.setArgument(sizeTag, ArgumentType::Limit, size);
+        commandArgs.setArgument(sizeTag, ArgumentType::Size, size);
 
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
