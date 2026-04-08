@@ -22,10 +22,11 @@ auto GetConvTestCases(miopenDataType_t datatype)
 const auto& GetTestParams()
 {
     static const auto params = [] {
-        Gpu supported_gpus =
-            Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx103X;
+        Gpu supported_gpus = Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X |
+                             Gpu::gfx950 | Gpu::gfx103X | Gpu::gfx110X | Gpu::gfx115X |
+                             Gpu::gfx120X;
         auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
-        p.SetTolerance(Gpu::gfx94X, miopenFloat, 3.0f);
+        p.SetTolerance(supported_gpus, miopenFloat, 3.0f);
         return p;
     }();
     return params;

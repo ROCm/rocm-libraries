@@ -26,7 +26,9 @@ bool ConvHipDirectFwd11x11::IsApplicable(const ExecutionContext& ctx,
     if(!ctx.use_hip_kernels)
         return false;
     const auto& name = ctx.GetStream().GetDeviceName();
-    if(!(StartsWith(name, "gfx90") || StartsWith(name, "gfx94") || StartsWith(name, "gfx103")))
+    if(!(StartsWith(name, "gfx90") || StartsWith(name, "gfx94") || StartsWith(name, "gfx95") ||
+         StartsWith(name, "gfx103") || StartsWith(name, "gfx110") || StartsWith(name, "gfx115") ||
+         StartsWith(name, "gfx120")))
         return false;
     if(!problem.Is2d())
         return false;
