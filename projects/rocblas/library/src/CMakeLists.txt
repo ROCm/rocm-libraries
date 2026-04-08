@@ -668,6 +668,11 @@ add_library( rocblas
   ${subdir_src64_list}
 )
 
+# Add Windows version resource to library
+if(WIN32 AND BUILD_SHARED_LIBS)
+  target_sources(rocblas PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+endif()
+
 foreach( file ${subdir_src64_list} )
   SET_SOURCE_FILES_PROPERTIES( ${file} PROPERTIES COMPILE_DEFINITIONS ROCBLAS_INTERNAL_ILP64 )
 endforeach()

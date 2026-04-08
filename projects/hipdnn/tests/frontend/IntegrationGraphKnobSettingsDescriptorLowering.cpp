@@ -11,6 +11,8 @@
 
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -19,6 +21,8 @@ using hipdnn_data_sdk::data_objects::FloatValueT;
 using hipdnn_data_sdk::data_objects::IntValueT;
 using hipdnn_data_sdk::data_objects::KnobSettingT;
 using hipdnn_data_sdk::data_objects::StringValueT;
+using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::TestableGraphKnobLowering;
 
 namespace
 {
@@ -64,26 +68,12 @@ EngineConfigT buildExpectedEngineConfig(int64_t engineId, const std::vector<Knob
     return config;
 }
 
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph_via_descriptors;
-    using Graph::create_execution_plan_ext_via_descriptors;
-};
-
-class IntegrationGraphKnobsDescriptorLowering : public ::testing::Test
+class IntegrationGraphKnobsDescriptorLowering : public IntegrationTestFixture
 {
 protected:
     void SetUp() override
     {
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testKnobsPluginPath().c_str()};
-
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+        IntegrationTestFixture::SetUp();
 
         // Query the exact plugin paths the backend resolved when loading,
         // then find the knobs plugin by name. This ensures we dlopen the same
@@ -95,10 +85,16 @@ protected:
         auto it = std::find_if(loadedPaths.begin(), loadedPaths.end(), [](const auto& path) {
             return path.string().find(TEST_KNOBS_PLUGIN_NAME) != std::string::npos;
         });
-        ASSERT_NE(it, loadedPaths.end()) << "TestKnobsPlugin not found in loaded plugins";
+        ASSERT_NE(it, loadedPaths.end())
+            << "TestKnobsPlugin not found in loaded plugins"; // NOLINT(readability-implicit-bool-conversion)
 
         _knobRecorder = std::make_unique<hipdnn_tests::TestPluginKnobRecorder>(*it);
         _knobRecorder->reset();
+    }
+
+    std::vector<std::string> getPluginPaths() const override
+    {
+        return {hipdnn_tests::plugin_constants::testKnobsPluginPath()};
     }
 
     void TearDown() override
@@ -110,9 +106,9 @@ protected:
         }
     }
 
-    TestableGraph createAndBuildSimpleGraph()
+    TestableGraphKnobLowering createAndBuildSimpleGraph()
     {
-        TestableGraph graph;
+        TestableGraphKnobLowering graph;
         graph.set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
@@ -134,13 +130,12 @@ protected:
         return graph;
     }
 
-    hipdnnHandle_t _handle = nullptr;
     std::unique_ptr<hipdnn_tests::TestPluginKnobRecorder> _knobRecorder;
 };
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithIntKnob)
 {
-    TestableGraph graph = createAndBuildSimpleGraph();
+    TestableGraphKnobLowering graph = createAndBuildSimpleGraph();
 
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings = {KnobSetting("test.int_knob", int64_t{80})};
@@ -152,7 +147,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithIntKnob)
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithFloatKnob)
 {
-    TestableGraph graph = createAndBuildSimpleGraph();
+    TestableGraphKnobLowering graph = createAndBuildSimpleGraph();
 
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings = {KnobSetting("test.float_knob", 0.75)};
@@ -164,7 +159,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithFloatKnob
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithStringKnob)
 {
-    TestableGraph graph = createAndBuildSimpleGraph();
+    TestableGraphKnobLowering graph = createAndBuildSimpleGraph();
 
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings
@@ -177,7 +172,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithStringKno
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithMultipleKnobs)
 {
-    TestableGraph graph = createAndBuildSimpleGraph();
+    TestableGraphKnobLowering graph = createAndBuildSimpleGraph();
 
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings
@@ -192,7 +187,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithMultipleK
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithSharedKnob)
 {
-    TestableGraph graph = createAndBuildSimpleGraph();
+    TestableGraphKnobLowering graph = createAndBuildSimpleGraph();
 
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>();
     const std::vector<KnobSetting> settings
@@ -205,7 +200,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithSharedKno
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithDeprecatedKnob)
 {
-    TestableGraph graph = createAndBuildSimpleGraph();
+    TestableGraphKnobLowering graph = createAndBuildSimpleGraph();
 
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings = {KnobSetting("test.deprecated_knob", int64_t{5})};
@@ -217,7 +212,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithDeprecate
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithEmptyKnobs)
 {
-    TestableGraph graph = createAndBuildSimpleGraph();
+    TestableGraphKnobLowering graph = createAndBuildSimpleGraph();
 
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings;
@@ -229,7 +224,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithEmptyKnob
 
 TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanFiltersUnsupportedKnob)
 {
-    TestableGraph graph = createAndBuildSimpleGraph();
+    TestableGraphKnobLowering graph = createAndBuildSimpleGraph();
 
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings = {KnobSetting("nonexistent.knob", int64_t{42})};
