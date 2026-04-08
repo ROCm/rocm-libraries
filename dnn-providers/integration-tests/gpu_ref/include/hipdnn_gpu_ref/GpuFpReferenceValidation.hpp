@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn_gpu_ref/detail/HipRtcTypeName.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 
@@ -24,52 +25,6 @@ namespace hipdnn_gpu_ref
 
 namespace detail
 {
-
-// HipRTC type name mapping — matches GpuFpReferenceConvolution pattern
-template <typename T>
-struct ValidatorHipRtcTypeName;
-
-template <>
-struct ValidatorHipRtcTypeName<float>
-{
-    static constexpr const char* VALUE = "float";
-};
-
-template <>
-struct ValidatorHipRtcTypeName<hipdnn_data_sdk::types::half>
-{
-    static constexpr const char* VALUE = "_Float16";
-};
-
-template <>
-struct ValidatorHipRtcTypeName<hipdnn_data_sdk::types::bfloat16>
-{
-    static constexpr const char* VALUE = "__bf16";
-};
-
-template <>
-struct ValidatorHipRtcTypeName<double>
-{
-    static constexpr const char* VALUE = "double";
-};
-
-template <>
-struct ValidatorHipRtcTypeName<int8_t>
-{
-    static constexpr const char* VALUE = "signed char";
-};
-
-template <>
-struct ValidatorHipRtcTypeName<uint8_t>
-{
-    static constexpr const char* VALUE = "unsigned char";
-};
-
-template <>
-struct ValidatorHipRtcTypeName<int32_t>
-{
-    static constexpr const char* VALUE = "int";
-};
 
 // RAII wrapper for HIP device memory
 class GpuValidatorBuffer
@@ -241,8 +196,7 @@ private:
         auto* implPtr = implementation.rawDeviceData();
 
         // Build defines and compile kernel
-        auto defines
-            = detail::buildValidatorDefines(detail::ValidatorHipRtcTypeName<T>::VALUE, "double");
+        auto defines = detail::buildValidatorDefines(detail::HipRtcTypeName<T>::VALUE, "double");
 
         auto& compiler = detail::GpuRefKernelCompiler::instance();
         auto& kernel = compiler.getOrCompile("GpuRefValidator.cpp", defines, "validateAllClose");
@@ -343,8 +297,7 @@ private:
         auto* refPtr = reference.rawDeviceData();
         auto* implPtr = implementation.rawDeviceData();
 
-        auto defines
-            = detail::buildValidatorDefines(detail::ValidatorHipRtcTypeName<T>::VALUE, "double");
+        auto defines = detail::buildValidatorDefines(detail::HipRtcTypeName<T>::VALUE, "double");
 
         auto& compiler = detail::GpuRefKernelCompiler::instance();
         auto& kernel = compiler.getOrCompile("GpuRefValidator.cpp", defines, "validateExact");

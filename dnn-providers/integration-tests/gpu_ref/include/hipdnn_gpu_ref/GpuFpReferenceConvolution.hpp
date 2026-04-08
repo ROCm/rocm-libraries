@@ -3,11 +3,10 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/types/Bfloat16.hpp>
-#include <hipdnn_data_sdk/types/Half.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn_gpu_ref/detail/HipRtcTypeName.hpp>
 #include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
 
 #include <array>
@@ -24,47 +23,6 @@ namespace hipdnn_gpu_ref
 
 namespace detail
 {
-
-// --- HipRTC type name mapping ---
-
-template <typename T>
-struct HipRtcTypeName;
-
-template <>
-struct HipRtcTypeName<float>
-{
-    static constexpr const char* VALUE = "float";
-};
-
-template <>
-struct HipRtcTypeName<hipdnn_data_sdk::types::half>
-{
-    static constexpr const char* VALUE = "_Float16";
-};
-
-template <>
-struct HipRtcTypeName<hipdnn_data_sdk::types::bfloat16>
-{
-    static constexpr const char* VALUE = "__bf16";
-};
-
-template <>
-struct HipRtcTypeName<int8_t>
-{
-    static constexpr const char* VALUE = "signed char";
-};
-
-template <>
-struct HipRtcTypeName<int32_t>
-{
-    static constexpr const char* VALUE = "int";
-};
-
-template <>
-struct HipRtcTypeName<double>
-{
-    static constexpr const char* VALUE = "double";
-};
 
 // Shared argument and stride structs — single definition used by both host and device (HipRTC).
 #include <GpuRefConvArgs.h> // NOLINT(misc-include-cleaner)
