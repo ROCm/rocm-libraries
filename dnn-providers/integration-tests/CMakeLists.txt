@@ -181,10 +181,6 @@ export(TARGETS hipdnn_integration_tests
     FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_integration_tests/hipdnn_integration_testsTargets.cmake"
 )
 
-# file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipdnnIntegrationTestHelpers.cmake"
-#     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_integration_tests"
-# )
-
 # Install-tree exports
 install(EXPORT hipdnn_integration_tests_targets
     FILE hipdnn_integration_testsTargets.cmake
