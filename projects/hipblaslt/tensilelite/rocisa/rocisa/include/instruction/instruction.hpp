@@ -231,7 +231,9 @@ namespace rocisa
             int oriVal = getVgprMsb();
             if(newVal != oriVal && !outputInlineAsm){
                 // Base layer WA: need to store previous msb value in [15:8] bits.
-                int setVal = oriVal < 0? newVal : newVal + (oriVal << 8);
+                //int setVal = oriVal < 0? newVal : newVal + (oriVal << 8);
+		// only set newVal until complier support it
+                int setVal = newVal;
                 std::string msbStr = "s_set_vgpr_msb " + std::to_string(setVal);
                 std::string msbComment = std::string("src0: " + std::to_string(msbSrc[0]) + ", src1: " + std::to_string(msbSrc[1]) + \
                     ", src2: " + std::to_string(msbSrc[2]) + ", dst: " + std::to_string(msbDst));
