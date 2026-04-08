@@ -39,7 +39,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                              HipdnnBackendDescriptor* biasDesc,
                              HipdnnBackendDescriptor* invRmsDesc,
                              hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
-                             hipdnnNormFwdPhase_t forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING,
+                             hipdnnNormFwdPhase_t forwardPhase = HIPDNN_NORM_FWD_TRAINING,
                              const std::string& name = "")
 {
     auto wrapper = createDescriptor<RMSNormOperationDescriptor>();
@@ -78,7 +78,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
 
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT, HIPDNN_TYPE_NORM_FWD_PHASE, 1, &forwardPhase);
-    desc->setAttribute(HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     if(!name.empty())
     {
         desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
@@ -319,7 +319,7 @@ TEST_F(TestGraphDescriptorRMSNorm, BuildFromOperationWithoutOptionalTensors)
                                               nullptr,
                                               nullptr,
                                               HIPDNN_DATA_FLOAT,
-                                              HIPDNN_NORM_FWD_PHASE_INFERENCE);
+                                              HIPDNN_NORM_FWD_INFERENCE);
 
     auto desc = getDescriptor();
     setHandle();
@@ -378,7 +378,7 @@ TEST_F(TestGraphDescriptorRMSNorm, NamePreservedInFlatBuffer)
                                               nullptr,
                                               invRmsDesc.get(),
                                               HIPDNN_DATA_FLOAT,
-                                              HIPDNN_NORM_FWD_PHASE_TRAINING,
+                                              HIPDNN_NORM_FWD_TRAINING,
                                               opName);
 
     auto desc = getDescriptor();

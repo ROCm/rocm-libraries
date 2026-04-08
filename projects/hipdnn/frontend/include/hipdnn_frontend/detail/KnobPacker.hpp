@@ -28,7 +28,7 @@ inline Error createKnobSettingDescriptor(const hipdnn_frontend::KnobSetting& set
 
     // Set knob ID
     HIPDNN_CHECK_ERROR(setDescriptorAttrString(
-        desc.get(), HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, setting.knobId(), "knob ID"));
+        desc.get(), HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, setting.knobId(), "knob ID"));
 
     // Set knob value, dispatching on the variant type
     HIPDNN_CHECK_ERROR(std::visit(
@@ -37,7 +37,7 @@ inline Error createKnobSettingDescriptor(const hipdnn_frontend::KnobSetting& set
             if constexpr(std::is_same_v<T, int64_t>)
             {
                 return setDescriptorAttrScalar(desc.get(),
-                                               HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT,
+                                               HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
                                                HIPDNN_TYPE_INT64,
                                                val,
                                                "knob value (int64)");
@@ -45,7 +45,7 @@ inline Error createKnobSettingDescriptor(const hipdnn_frontend::KnobSetting& set
             else if constexpr(std::is_same_v<T, double>)
             {
                 return setDescriptorAttrScalar(desc.get(),
-                                               HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT,
+                                               HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
                                                HIPDNN_TYPE_DOUBLE,
                                                val,
                                                "knob value (double)");
@@ -53,7 +53,7 @@ inline Error createKnobSettingDescriptor(const hipdnn_frontend::KnobSetting& set
             else if constexpr(std::is_same_v<T, std::string>)
             {
                 return setDescriptorAttrString(
-                    desc.get(), HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, val, "knob value (string)");
+                    desc.get(), HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, val, "knob value (string)");
             }
             else
             {
