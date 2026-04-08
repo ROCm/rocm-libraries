@@ -86,6 +86,7 @@ struct HIPBLASLT_EXPORT hipblaslt_bf6x16
                                               = hip_bf6_rounding_mode::standard,
                                               uint32_t rng = 0)
     {
+#ifdef HIPBLASLT_USE_HIP_FP6X16
         union
         {
             hipblaslt_bf6x16_storage real;
@@ -132,6 +133,41 @@ struct HIPBLASLT_EXPORT hipblaslt_bf6x16
             out.fp6x32 = __amd_cvt_fp16x32_to_fp6x32_sr_scale(in.fp16x32, __AMD_OCP_E3M2, rng, 0);
             data       = out.real[0];
         }
+#else
+        __amd_fp16x32_storage_t fp16x32 = {};
+        fp16x32[0]  = v0;
+        fp16x32[1]  = v1;
+        fp16x32[2]  = v2;
+        fp16x32[3]  = v3;
+        fp16x32[4]  = v4;
+        fp16x32[5]  = v5;
+        fp16x32[6]  = v6;
+        fp16x32[7]  = v7;
+        fp16x32[8]  = v8;
+        fp16x32[9]  = v9;
+        fp16x32[10] = v10;
+        fp16x32[11] = v11;
+        fp16x32[12] = v12;
+        fp16x32[13] = v13;
+        fp16x32[14] = v14;
+        fp16x32[15] = v15;
+
+        union
+        {
+            hipblaslt_bf6x16_storage real[2];
+            __amd_fp6x32_storage_t   fp6x32;
+        } out = {};
+
+        if(rm == hip_bf6_rounding_mode::standard)
+        {
+            out.fp6x32 = __amd_cvt_fp16x32_to_fp6x32_scale(fp16x32, __AMD_OCP_E3M2, 0);
+        }
+        else
+        {
+            out.fp6x32 = __amd_cvt_fp16x32_to_fp6x32_sr_scale(fp16x32, __AMD_OCP_E3M2, rng, 0);
+        }
+        data = out.real[0];
+#endif
     }
     explicit HIP_HOST_DEVICE hipblaslt_bf6x16(float                 v0,
                                               float                 v1,
@@ -153,11 +189,6 @@ struct HIPBLASLT_EXPORT hipblaslt_bf6x16
                                               = hip_bf6_rounding_mode::standard,
                                               uint32_t rng = 0)
     {
-        union
-        {
-            hipblaslt_bf6x16_storage real;
-            __amd_fp6x16_storage_t   tmp;
-        } cvt;
         __amd_floatx16_storage_t fp32x16;
 
         fp32x16[0]  = v0;
@@ -179,8 +210,29 @@ struct HIPBLASLT_EXPORT hipblaslt_bf6x16
 
         if(rm == hip_bf6_rounding_mode::standard)
         {
+#ifdef HIPBLASLT_USE_HIP_FP6X16
+            union
+            {
+                hipblaslt_bf6x16_storage real;
+                __amd_fp6x16_storage_t   tmp;
+            } cvt;
             cvt.tmp = __amd_cvt_floatx16_to_fp6x16_scale(fp32x16, __AMD_OCP_E3M2, 0);
             data    = cvt.real;
+#else
+            union
+            {
+                __amd_floatx32_storage_t fp32x32;
+                __amd_floatx16_storage_t fp32x16[2];
+            } in = {};
+            union
+            {
+                hipblaslt_bf6x16_storage real[2];
+                __amd_fp6x32_storage_t   fp6x32;
+            } out = {};
+            in.fp32x16[0] = fp32x16;
+            out.fp6x32 = __amd_cvt_floatx32_to_fp6x32_scale(in.fp32x32, __AMD_OCP_E3M2, 0);
+            data       = out.real[0];
+#endif
         }
         else
         {
@@ -221,11 +273,6 @@ struct HIPBLASLT_EXPORT hipblaslt_bf6x16
                                               = hip_bf6_rounding_mode::standard,
                                               uint32_t rng = 0)
     {
-        union
-        {
-            hipblaslt_bf6x16_storage real;
-            __amd_fp6x16_storage_t   tmp;
-        } cvt;
         __amd_floatx16_storage_t fp32x16;
 
         fp32x16[0]  = static_cast<float>(v0);
@@ -247,8 +294,29 @@ struct HIPBLASLT_EXPORT hipblaslt_bf6x16
 
         if(rm == hip_bf6_rounding_mode::standard)
         {
+#ifdef HIPBLASLT_USE_HIP_FP6X16
+            union
+            {
+                hipblaslt_bf6x16_storage real;
+                __amd_fp6x16_storage_t   tmp;
+            } cvt;
             cvt.tmp = __amd_cvt_floatx16_to_fp6x16_scale(fp32x16, __AMD_OCP_E3M2, 0);
             data    = cvt.real;
+#else
+            union
+            {
+                __amd_floatx32_storage_t fp32x32;
+                __amd_floatx16_storage_t fp32x16[2];
+            } in = {};
+            union
+            {
+                hipblaslt_bf6x16_storage real[2];
+                __amd_fp6x32_storage_t   fp6x32;
+            } out = {};
+            in.fp32x16[0] = fp32x16;
+            out.fp6x32 = __amd_cvt_floatx32_to_fp6x32_scale(in.fp32x32, __AMD_OCP_E3M2, 0);
+            data       = out.real[0];
+#endif
         }
         else
         {
