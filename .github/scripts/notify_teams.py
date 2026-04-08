@@ -365,7 +365,9 @@ def main():
     parser.add_argument(
         "--pr-number", default="", help="Pull request number (optional)"
     )
-    parser.add_argument("--pr-title", default="", help="Pull request title (optional)")
+    parser.add_argument(
+        "--pr-title", nargs="*", default=[], help="Pull request title (optional)"
+    )
     parser.add_argument(
         "--job-name", default="", help="Job/test name (optional, for test failures)"
     )
@@ -393,6 +395,9 @@ def main():
     extractor = ErrorExtractor(args.log_path, args.failure_stage)
     error_context, issue_type = extractor.extract()
 
+    # Handle pr_title which may be a list due to nargs='*'
+    pr_title = " ".join(args.pr_title) if args.pr_title else None
+
     # Send notification
     notifier = TeamsNotifier(args.webhook_url, args.dry_run)
     success = notifier.send_notification(
@@ -403,7 +408,7 @@ def main():
         error_context=error_context,
         issue_type=issue_type,
         pr_number=args.pr_number if args.pr_number else None,
-        pr_title=args.pr_title if args.pr_title else None,
+        pr_title=pr_title,
         job_name=args.job_name if args.job_name else None,
     )
 
