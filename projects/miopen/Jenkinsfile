@@ -313,10 +313,10 @@ pipeline {
                 expression { params.BUILD_DOCKER && params.TARGET_NOGPU && params.DATATYPE_NA }
             }
             parallel {
-                // stage('Build Docker for CI') { steps { script { runDockerBuild('ci') } } } // Unified docker build for CI
-                stage('Build Docker gfx90X') { steps { script { runDockerBuild('gfx90X') } } }
-                stage('Build Docker gfx942, gfx950') { steps { script { runDockerBuild('gfx942_gfx950') } } }
-                stage('Build Docker Navi(gfx1101, gfx1151)') { steps { script { runDockerBuild('navi') } } }
+                stage('Build Docker for CI') { steps { script { runDockerBuild('ci') } } } // Unified docker build for CI
+                // stage('Build Docker gfx90X') { steps { script { runDockerBuild('gfx90X') } } }
+                // stage('Build Docker gfx942, gfx950') { steps { script { runDockerBuild('gfx942_gfx950') } } }
+                // stage('Build Docker Navi(gfx1101, gfx1151)') { steps { script { runDockerBuild('navi') } } }
             }
         }
         stage("Package and Static checks") {
@@ -331,7 +331,7 @@ pipeline {
                     steps {
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob( package_build:true, needs_gpu:false, gpu_family: "gfx90X")
+                                utils.buildHipClangJob( package_build:true, needs_gpu:false, gpu_family: "ci")
                             }
                         }
                     }
@@ -346,7 +346,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob(make_targets: "check_format", needs_gpu:false, gpu_family: "gfx90X")
+                                utils.buildHipClangJob(make_targets: "check_format", needs_gpu:false, gpu_family: "ci")
                             }
                         }
                     }
@@ -384,7 +384,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob( build_type: 'debug', setup_flags: HipNoGPU_flags, build_cmd: build_cmd, needs_gpu:false, gpu_family: "gfx90X")
+                                utils.buildHipClangJob( build_type: 'debug', setup_flags: HipNoGPU_flags, build_cmd: build_cmd, needs_gpu:false, gpu_family: "ci")
                             }
                         }
                     }
@@ -402,7 +402,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob(setup_flags: fin_flags, make_targets: "all", build_fin: "ON", needs_gpu:false, build_install: true, gpu_family: "gfx90X")
+                                utils.buildHipClangJob(setup_flags: fin_flags, make_targets: "all", build_fin: "ON", needs_gpu:false, build_install: true, gpu_family: "ci")
                             }
                         }
                     }
@@ -428,7 +428,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob(setup_cmd: setup_cmd, build_cmd: build_cmd, needs_gpu:false, gpu_family: "gfx90X")
+                                utils.buildHipClangJob(setup_cmd: setup_cmd, build_cmd: build_cmd, needs_gpu:false, gpu_family: "ci")
                             }
                         }
                     }
@@ -461,7 +461,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
-                        runBuildAndSingleGtestJob(flags: Full_test + Bf16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx90X")
+                        runBuildAndSingleGtestJob(flags: Full_test + Bf16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                     post {
                         always {
@@ -476,7 +476,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
-                        runBuildAndSingleGtestJob(flags: Full_test + Fp16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx90X")
+                        runBuildAndSingleGtestJob(flags: Full_test + Fp16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                     post {
                         always {
@@ -491,7 +491,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
-                        runBuildAndSingleGtestJob(flags: Full_test + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx90X")
+                        runBuildAndSingleGtestJob(flags: Full_test + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                     post {
                         always {
@@ -522,7 +522,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
-                        runBuildAndSingleGtestJob(flags: Full_test + Bf16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx942_gfx950")
+                        runBuildAndSingleGtestJob(flags: Full_test + Bf16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                 }               
                 stage('Fp16 Hip Install All gfx942') {
@@ -532,7 +532,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
-                        runBuildAndSingleGtestJob(flags: Full_test + Fp16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx942_gfx950")
+                        runBuildAndSingleGtestJob(flags: Full_test + Fp16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                     post {
                         always {
@@ -547,7 +547,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
-                        runBuildAndSingleGtestJob(flags: Full_test + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx942_gfx950")
+                        runBuildAndSingleGtestJob(flags: Full_test + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                     post {
                         always {
@@ -562,7 +562,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
-                        runBuildAndSingleGtestJob(flags: Full_test + Tf32_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx942_gfx950")
+                        runBuildAndSingleGtestJob(flags: Full_test + Tf32_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                     post {
                         always {
@@ -578,7 +578,7 @@ pipeline {
                     }
                     agent{ label rocmnode("navi32") }
                     steps{
-                        runBuildAndSingleGtestJob(flags: Full_test + Fp16_flags + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "navi")
+                        runBuildAndSingleGtestJob(flags: Full_test + Fp16_flags + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                 }                
                 stage('Fp32 Hip Install All gfx1101') {
@@ -588,7 +588,7 @@ pipeline {
                     }
                     agent{ label rocmnode("navi32") }
                     steps{
-                        runBuildAndSingleGtestJob(flags: Full_test + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "navi")
+                        runBuildAndSingleGtestJob(flags: Full_test + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                 }
             }
@@ -638,7 +638,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob( build_type: 'debug', setup_flags: NOMLIR_flags + gfx90a_flags, build_cmd: NOMLIR_build_cmd, test_flags: ' --verbose ', build_install: true, gpu_family: "gfx90X")
+                                utils.buildHipClangJob( build_type: 'debug', setup_flags: NOMLIR_flags + gfx90a_flags, build_cmd: NOMLIR_build_cmd, test_flags: ' --verbose ', build_install: true, gpu_family: "ci")
                             }
                         }
                     }
@@ -657,7 +657,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob( build_type: 'debug', setup_flags: "-DMIOPEN_USE_COMPOSABLEKERNEL=Off" + gfx90a_flags, make_targets: "", build_install: true, gpu_family: "gfx90X")
+                                utils.buildHipClangJob( build_type: 'debug', setup_flags: "-DMIOPEN_USE_COMPOSABLEKERNEL=Off" + gfx90a_flags, make_targets: "", build_install: true, gpu_family: "ci")
                             }
                         }
                     }
@@ -676,7 +676,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob( setup_flags: "-DBUILD_SHARED_LIBS=Off" + gfx90a_flags, mlir_build: 'OFF', build_install: true, gpu_family: "gfx90X")
+                                utils.buildHipClangJob( setup_flags: "-DBUILD_SHARED_LIBS=Off" + gfx90a_flags, mlir_build: 'OFF', build_install: true, gpu_family: "ci")
                             }
                         }
                     }
@@ -699,7 +699,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob(setup_flags: gfx90a_flags, make_targets: make_targets, execute_cmd: execute_cmd, find_mode: "Normal", build_install: true, gpu_family: "gfx90X")
+                                utils.buildHipClangJob(setup_flags: gfx90a_flags, make_targets: make_targets, execute_cmd: execute_cmd, find_mode: "Normal", build_install: true, gpu_family: "ci")
                             }
                         }
                     }
@@ -722,7 +722,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob(setup_flags: gfx90a_flags, make_targets: make_targets, execute_cmd: execute_cmd, build_install: true, gpu_family: "gfx90X")
+                                utils.buildHipClangJob(setup_flags: gfx90a_flags, make_targets: make_targets, execute_cmd: execute_cmd, build_install: true, gpu_family: "ci")
                             }
                         }
                     }
@@ -741,7 +741,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob(make_targets: Smoke_targets, setup_flags: "-DMIOPEN_USE_SQLITE_PERF_DB=On" + gfx90a_flags, build_install: true, gpu_family: "gfx90X")
+                                utils.buildHipClangJob(make_targets: Smoke_targets, setup_flags: "-DMIOPEN_USE_SQLITE_PERF_DB=On" + gfx90a_flags, build_install: true, gpu_family: "ci")
                             }
                         }
                     }
@@ -763,7 +763,7 @@ pipeline {
                                 utils.buildHipClangJob(setup_flags: "-DMIOPEN_ENABLE_FIN_INTERFACE=On" + gfx90a_flags,
                                                             make_targets: "test_unit_FinInterface",
                                                             execute_cmd: "bin/test_unit_FinInterface",
-                                                            gpu_family: "gfx90X")
+                                                            gpu_family: "ci")
                             }
                         }
                     }
@@ -782,7 +782,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob(setup_flags: gfx90a_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "gfx90X")
+                                utils.buildHipClangJob(setup_flags: gfx90a_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
                             }
                         }
                     }
@@ -802,7 +802,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob(setup_flags: gfx942_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "gfx942_gfx950")
+                                utils.buildHipClangJob(setup_flags: gfx942_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
                             }
                         }
                     }
@@ -858,7 +858,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx908") }
                     steps{
-                        runBuildAndSingleGtestJob(flags: Full_test + Bf16_flags + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx90X")
+                        runBuildAndSingleGtestJob(flags: Full_test + Bf16_flags + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                     post {
                         always {
@@ -873,7 +873,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx908") }
                     steps{
-                        runBuildAndSingleGtestJob(flags: Full_test + Fp16_flags + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx90X")
+                        runBuildAndSingleGtestJob(flags: Full_test + Fp16_flags + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                     post {
                         always {
@@ -888,7 +888,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx908") }
                     steps{
-                        runBuildAndSingleGtestJob(flags: Full_test + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "gfx90X")
+                        runBuildAndSingleGtestJob(flags: Full_test + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                     post {
                         always {
@@ -905,7 +905,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob(setup_flags: gfx908_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "gfx90X")
+                                utils.buildHipClangJob(setup_flags: gfx908_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
                             }
                         }
                     }
@@ -926,7 +926,7 @@ pipeline {
                         gfx115x_filter_flags = " -DMIOPEN_TEST_GFX115X=On "
                     }
                     steps{
-                        runBuildAndSingleGtestJob(flags: gfx115x_filter_flags + Full_test + Bf16_flags + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "navi")
+                        runBuildAndSingleGtestJob(flags: gfx115x_filter_flags + Full_test + Bf16_flags + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                     post {
                         always {
@@ -945,7 +945,7 @@ pipeline {
                         build_timeout_minutes = 420
                     }
                     steps{
-                        runBuildAndSingleGtestJob(flags: gfx115x_filter_flags + Full_test + Fp16_flags + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "navi")
+                        runBuildAndSingleGtestJob(flags: gfx115x_filter_flags + Full_test + Fp16_flags + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                     post {
                         always {
@@ -964,7 +964,7 @@ pipeline {
                         build_timeout_minutes = 420
                     }
                     steps{
-                        runBuildAndSingleGtestJob(flags: gfx115x_filter_flags + Full_test + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "navi")
+                        runBuildAndSingleGtestJob(flags: gfx115x_filter_flags + Full_test + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
                     post {
                         always {
