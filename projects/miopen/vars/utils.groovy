@@ -283,7 +283,7 @@ def buildTheRockDockerImage(Map conf=[:])
     
     echo "Building image..."
     def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-    def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max " +
+    def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=min " +
                             "--cache-from type=registry,ref=${cacheRef} "
 
     try {
@@ -326,39 +326,6 @@ def getDockerImage(Map conf=[:])
 
     def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_${gpu_family}"
 
-    def theRockHash = sh(
-            script: """
-                grep -A 5 'repository: "ROCm/TheRock"' ${env.WORKSPACE}/.github/workflows/therock-ci-linux.yml \
-                | grep '^ *ref:' \
-                | awk '{print \$2}'
-            """.stripIndent(),
-            returnStdout: true
-        ).trim()
-
-    def cacheRefFrom = "${cacheRef}_${theRockHash}"
-    def cacheRefTo = "${cacheRef}_${theRockHash}"
-
-    // With the docker credentials check if the cacheRefFrom exists in the registry
-    def cacheExists = ""
-
-    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-        cacheExists = sh(
-            script: """
-                if docker manifest inspect ${cacheRefFrom} > /dev/null 2>&1; then
-                    echo "true"
-                else
-                    echo "false"
-                fi
-            """.stripIndent(),
-            returnStdout: true
-        ).trim()
-    }
-
-    if (cacheExists != "true") {
-    // If cache tag does not exist then default to the dev build cache
-        cacheRefFrom = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_dev_build"
-    }
-
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
     def gpu_arch
     if (gpu_family == "ci")
@@ -391,7 +358,7 @@ def getDockerImage(Map conf=[:])
     }
 
     def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
-                     "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" "
+                     "--target miopen "
 
     if(env.CCACHE_HOST)
     {
@@ -443,8 +410,8 @@ def getDockerImage(Map conf=[:])
     {
         echo "Building image..."
         def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRefTo},compression=zstd,mode=max,registry.insecure=true " +
-                              "--cache-from type=registry,ref=${cacheRefFrom},registry.insecure=true "
+        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
+                              "--cache-from type=registry,ref=${cacheRef},registry.insecure=true "
 
         try {
 
