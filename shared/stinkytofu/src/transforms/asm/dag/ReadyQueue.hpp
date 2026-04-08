@@ -44,7 +44,10 @@ namespace
         StinkyInstruction* inst;
         unsigned           inDegree;
         unsigned           id;
-        unsigned           wmmaAffinity = UINT_MAX; // earliest WMMA/SWMMA successor id
+        // Pre-computed pick order for ds_reads. Lower = pick first.
+        // Assigned by the pre-scan in scheduleRegionWithMovableSideEffects
+        // based on DsReadOrder config and WMMA consumer analysis.
+        unsigned dsReadPriority = UINT_MAX;
 
         DAGNode(StinkyInstruction* inst, unsigned id)
             : inst(inst)

@@ -261,10 +261,6 @@ namespace
         // so we do not string WMMAs when scalar/tensor work is still ready.
         bool lastPickedWasWMMA = false;
 
-        // ABBA zigzag: track affinity group transitions to flip DAG id sort direction.
-        unsigned lastPickedDsReadAffinity_ = UINT_MAX;
-        bool     dsReadSortAscending_      = true;
-
         // This region contains WMMA.
         bool hasWMMAInRegion_ = false;
 
@@ -555,9 +551,9 @@ namespace
                     break;
                 if(!isDSRead(inst))
                     continue;
-                for(const StinkyRegister& dst : inst.getDestRegs())
+                for(const StinkyRegister& src : inst.getSrcRegs())
                 {
-                    if(isPseudoReg(dst) && be.tokens.count(dst.reg.idx))
+                    if(isPseudoReg(src) && be.tokens.count(src.reg.idx))
                     {
                         targetDSLoad        = &inst;
                         targetDSLoadIt      = it; // keep updating → ends up as latest
@@ -752,48 +748,13 @@ namespace
             }
             else if(pickKind == 1)
             {
-                // Pick ds_read based on configured reorder strategy.
-                using DsReadOrder = PassFeatureConfig::DsReadOrder;
-                const auto order
-                    = getPassContext().getPassFeatureConfig().dagFeatures.dsReadOrder;
-
+                // Pick ds_read with smallest pre-computed dsReadPriority.
                 DAGNode* best = nullptr;
-                if(order == DsReadOrder::ProgramOrder)
+                for(DAGNode* n : localReadQueue)
                 {
-                    // AABB: just take the smallest DAG id (top of set).
-                    best = localReadQueue.top();
+                    if(!best || n->dsReadPriority < best->dsReadPriority)
+                        best = n;
                 }
-                else
-                {
-                    // ABAB/ABBA: pick from the smallest wmmaAffinity group.
-                    // Find the smallest wmmaAffinity in the queue.
-                    unsigned smallestAffinity = UINT_MAX;
-                    for(DAGNode* n : localReadQueue)
-                        smallestAffinity = std::min(smallestAffinity, n->wmmaAffinity);
-
-                    // ABBA: flip sort direction when transitioning to a new group.
-                    if(order == DsReadOrder::AscendingCache
-                       && lastPickedDsReadAffinity_ != UINT_MAX
-                       && smallestAffinity != lastPickedDsReadAffinity_)
-                    {
-                        dsReadSortAscending_ = !dsReadSortAscending_;
-                    }
-
-                    bool ascending = (order == DsReadOrder::Ascending) || dsReadSortAscending_;
-
-                    for(DAGNode* n : localReadQueue)
-                    {
-                        if(n->wmmaAffinity != smallestAffinity)
-                            continue;
-                        if(!best
-                           || (ascending ? (n->id < best->id) : (n->id > best->id)))
-                        {
-                            best = n;
-                        }
-                    }
-                }
-
-                lastPickedDsReadAffinity_ = best->wmmaAffinity;
                 node = best;
                 localReadQueue.erase(best);
                 for(const StinkyRegister& dstReg : node->inst->getDestRegs())
@@ -978,8 +939,6 @@ namespace
         // Per scheduling region (between non-movable side effects). blockBegin is the BB start
         // so prefix seeding and loop-head detection see preloop / prior regions in file order.
         lastPickedWasWMMA          = false;
-        lastPickedDsReadAffinity_  = UINT_MAX;
-        dsReadSortAscending_       = true;
         wmmaIssuedCountThisRegion_ = 0;
         if(getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false)
             return;

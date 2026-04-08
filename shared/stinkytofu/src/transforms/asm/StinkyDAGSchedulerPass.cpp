@@ -165,36 +165,114 @@ namespace
             }
         }
 
-        // Annotate ds_read nodes with WMMA affinity using cross-BB def-use chains.
-        // Walks through PHI nodes transitively to find the first real WMMA consumer.
-        for(unsigned i = 0; i < regionSize; ++i)
+        // Pre-scan: assign dsReadPriority to each ds_read based on WMMA affinity
+        // and DsReadOrder config. Lower priority = pick first.
         {
-            if(isDSRead(*dagNodes[i].inst))
+            using DsReadOrder = PassFeatureConfig::DsReadOrder;
+            const auto dsOrder
+                = readyQueue.getPassContext().getPassFeatureConfig().dagFeatures.dsReadOrder;
+
+            // Collect ds_reads with their affinity and operand type (src register).
+            struct DsInfo { unsigned idx, affinity, srcReg; };
+            std::vector<DsInfo> dsReads;
+
+            for(unsigned i = 0; i < regionSize; ++i)
             {
-                // BFS through users, skipping PHI nodes, to find WMMA consumers.
-                std::vector<StinkyInstruction*> worklist(
+                if(!isDSRead(*dagNodes[i].inst))
+                    continue;
+
+                unsigned affinity = UINT_MAX;
+                // BFS through users, skip PHIs, find earliest WMMA consumer.
+                std::vector<StinkyInstruction*> q(
                     dagNodes[i].inst->getUsers().begin(),
                     dagNodes[i].inst->getUsers().end());
-                std::unordered_set<StinkyInstruction*> visited;
-                while(!worklist.empty())
+                std::unordered_set<StinkyInstruction*> seen;
+                while(!q.empty())
                 {
-                    StinkyInstruction* user = worklist.back();
-                    worklist.pop_back();
-                    if(!visited.insert(user).second)
-                        continue;
-                    if(user->getUnifiedOpcode() == GFX::PHI)
-                    {
-                        // Walk through PHI to its real users.
-                        for(StinkyInstruction* phiUser : user->getUsers())
-                            worklist.push_back(phiUser);
-                        continue;
-                    }
-                    auto it = wmmaIndex.find(user);
+                    StinkyInstruction* u = q.back(); q.pop_back();
+                    if(!seen.insert(u).second) continue;
+                    if(u->getUnifiedOpcode() == GFX::PHI)
+                    { for(auto* pu : u->getUsers()) q.push_back(pu); continue; }
+                    auto it = wmmaIndex.find(u);
                     if(it != wmmaIndex.end())
-                        dagNodes[i].wmmaAffinity
-                            = std::min(dagNodes[i].wmmaAffinity, it->second);
+                        affinity = std::min(affinity, it->second);
                 }
+
+                unsigned srcReg = 0;
+                for(const StinkyRegister& s : dagNodes[i].inst->getSrcRegs())
+                    if(s.isRegister()) { srcReg = s.reg.idx; break; }
+
+                dsReads.push_back({i, affinity, srcReg});
             }
+
+            // Sort by affinity, then by DAG id.
+            std::sort(dsReads.begin(), dsReads.end(), [](const DsInfo& a, const DsInfo& b) {
+                return a.affinity != b.affinity ? a.affinity < b.affinity : a.idx < b.idx;
+            });
+
+            if(dsOrder == DsReadOrder::ProgramOrder)
+            {
+                for(auto& d : dsReads)
+                    dagNodes[d.idx].dsReadPriority = d.idx;
+            }
+            else
+            {
+                // For AscendingCache: find first single-operand affinity group,
+                // then zigzag backward through mixed groups.
+                // For Ascending: all groups use ascending order.
+                std::map<unsigned, std::set<unsigned>> groupSrcRegs;
+                for(auto& d : dsReads)
+                    groupSrcRegs[d.affinity].insert(d.srcReg);
+
+                // Determine sort direction for mixed groups via look-ahead.
+                // Both Ascending and AscendingCache use look-ahead to find the
+                // first single-operand group and load the absent operand first.
+                // Ascending: all mixed groups use the same direction.
+                // AscendingCache: mixed groups zigzag.
+                std::map<unsigned, bool> groupAsc; // affinity → ascending?
+                {
+                    std::vector<unsigned> mixedAffinities;
+                    for(auto& [aff, regs] : groupSrcRegs)
+                        if(regs.size() > 1) mixedAffinities.push_back(aff);
+
+                    // Work backward from the last mixed group.
+                    bool asc = false;
+                    for(int i = (int)mixedAffinities.size() - 1; i >= 0; --i)
+                    {
+                        groupAsc[mixedAffinities[i]] = asc;
+                        if(dsOrder == DsReadOrder::AscendingCache)
+                            asc = !asc; // zigzag only for AscendingCache
+                    }
+                }
+
+                // Assign priority. Within each group, sort by DAG id
+                // (ascending or descending per groupAsc).
+                unsigned pri = 0;
+                unsigned prevAff = UINT_MAX;
+                std::vector<DsInfo*> group;
+                auto flushGroup = [&]() {
+                    if(group.empty()) return;
+                    bool asc = groupAsc.count(prevAff) ? groupAsc[prevAff] : true;
+                    if(!asc)
+                    {
+                        // Reverse operand type order but keep DAG id order within
+                        // each type. Sort by (srcReg descending, idx ascending).
+                        std::stable_sort(group.begin(), group.end(),
+                                         [](const DsInfo* a, const DsInfo* b) {
+                                             return a->srcReg > b->srcReg;
+                                         });
+                    }
+                    for(auto* d : group) dagNodes[d->idx].dsReadPriority = pri++;
+                    group.clear();
+                };
+                for(auto& d : dsReads)
+                {
+                    if(d.affinity != prevAff) { flushGroup(); prevAff = d.affinity; }
+                    group.push_back(&d);
+                }
+                flushGroup();
+            }
+
         }
 
         PASS_DEBUG(dumpDAGGraph(dagGraph, dagNodes));
