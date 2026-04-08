@@ -142,9 +142,12 @@ namespace
                 if(biasVec)
                     result += biasVec[i];
 
-                if(activation == ActivationType::Relu) {
+                if(activation == ActivationType::Relu)
+                {
                     result = std::max(0.0f, result);
-                } else {
+                }
+                else
+                {
                     assert(activation == ActivationType::None);
                 }
 
