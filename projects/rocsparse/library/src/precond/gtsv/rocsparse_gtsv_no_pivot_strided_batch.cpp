@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 
 #include "gtsv_nopivot_strided_batch_device.h"
 #include "gtsv_nopivot_strided_batch_medium_device.h"
+#include "gtsv_nopivot_thomas_device.h"
 
 #include <map>
 
@@ -130,6 +131,12 @@ rocsparse_status
         current_m = num_spikes;
     }
 
+    if(current_m > 1024)
+    {
+        *buffer_size = 0;
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    }
+
     return rocsparse_status_success;
 }
 
@@ -140,21 +147,21 @@ namespace rocsparse
     {
         static constexpr int MAX_RECURSION_LEVELS = determine_max_recursion_levels();
 
-        T* dl_modified[MAX_RECURSION_LEVELS];
-        T* d_modified[MAX_RECURSION_LEVELS];
-        T* du_modified[MAX_RECURSION_LEVELS];
-        T* B_modified[MAX_RECURSION_LEVELS];
+        T* dl_modified[MAX_RECURSION_LEVELS]{};
+        T* d_modified[MAX_RECURSION_LEVELS]{};
+        T* du_modified[MAX_RECURSION_LEVELS]{};
+        T* B_modified[MAX_RECURSION_LEVELS]{};
 
-        T* dl_spike[MAX_RECURSION_LEVELS];
-        T* d_spike[MAX_RECURSION_LEVELS];
-        T* du_spike[MAX_RECURSION_LEVELS];
-        T* B_spike[MAX_RECURSION_LEVELS];
+        T* dl_spike[MAX_RECURSION_LEVELS]{};
+        T* d_spike[MAX_RECURSION_LEVELS]{};
+        T* du_spike[MAX_RECURSION_LEVELS]{};
+        T* B_spike[MAX_RECURSION_LEVELS]{};
     };
 
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_cramer_rule_kernel(rocsparse_handle handle,
-                                               rocsparse_int    n,
-                                               rocsparse_int    stride,
+                                               rocsparse_int    batch_count,
+                                               int64_t          batch_stride,
                                                int64_t          ldb,
                                                const T*         dl,
                                                const T*         d,
@@ -162,12 +169,12 @@ namespace rocsparse
                                                T*               B)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_2x2_kernel<BLOCKSIZE>),
-                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3((batch_count - 1) / BLOCKSIZE + 1),
                                            dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
-                                           n,
-                                           stride,
+                                           batch_count,
+                                           batch_stride,
                                            ldb,
                                            dl,
                                            d,
@@ -178,8 +185,8 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_3(rocsparse_handle handle,
-                                            rocsparse_int    n,
-                                            rocsparse_int    stride,
+                                            rocsparse_int    batch_count,
+                                            int64_t          batch_stride,
                                             int64_t          ldb,
                                             const T*         dl,
                                             const T*         d,
@@ -187,12 +194,12 @@ namespace rocsparse
                                             T*               B)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_3x3_kernel<BLOCKSIZE>),
-                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3((batch_count - 1) / BLOCKSIZE + 1),
                                            dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
-                                           n,
-                                           stride,
+                                           batch_count,
+                                           batch_stride,
                                            ldb,
                                            dl,
                                            d,
@@ -203,8 +210,8 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_4(rocsparse_handle handle,
-                                            rocsparse_int    n,
-                                            rocsparse_int    stride,
+                                            rocsparse_int    batch_count,
+                                            int64_t          batch_stride,
                                             int64_t          ldb,
                                             const T*         dl,
                                             const T*         d,
@@ -212,12 +219,12 @@ namespace rocsparse
                                             T*               B)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_4x4_kernel<BLOCKSIZE>),
-                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3((batch_count - 1) / BLOCKSIZE + 1),
                                            dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
-                                           n,
-                                           stride,
+                                           batch_count,
+                                           batch_stride,
                                            ldb,
                                            dl,
                                            d,
@@ -228,8 +235,8 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_5(rocsparse_handle handle,
-                                            rocsparse_int    n,
-                                            rocsparse_int    stride,
+                                            rocsparse_int    batch_count,
+                                            int64_t          batch_stride,
                                             int64_t          ldb,
                                             const T*         dl,
                                             const T*         d,
@@ -237,12 +244,12 @@ namespace rocsparse
                                             T*               B)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_5x5_kernel<BLOCKSIZE>),
-                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3((batch_count - 1) / BLOCKSIZE + 1),
                                            dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
-                                           n,
-                                           stride,
+                                           batch_count,
+                                           batch_stride,
                                            ldb,
                                            dl,
                                            d,
@@ -253,8 +260,8 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_6(rocsparse_handle handle,
-                                            rocsparse_int    n,
-                                            rocsparse_int    stride,
+                                            rocsparse_int    batch_count,
+                                            int64_t          batch_stride,
                                             int64_t          ldb,
                                             const T*         dl,
                                             const T*         d,
@@ -262,12 +269,12 @@ namespace rocsparse
                                             T*               B)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_6x6_kernel<BLOCKSIZE>),
-                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3((batch_count - 1) / BLOCKSIZE + 1),
                                            dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
-                                           n,
-                                           stride,
+                                           batch_count,
+                                           batch_stride,
                                            ldb,
                                            dl,
                                            d,
@@ -278,8 +285,8 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_thomas_kernel_7(rocsparse_handle handle,
-                                            rocsparse_int    n,
-                                            rocsparse_int    stride,
+                                            rocsparse_int    batch_count,
+                                            int64_t          batch_stride,
                                             int64_t          ldb,
                                             const T*         dl,
                                             const T*         d,
@@ -287,12 +294,12 @@ namespace rocsparse
                                             T*               B)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_7x7_kernel<BLOCKSIZE>),
-                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3((batch_count - 1) / BLOCKSIZE + 1),
                                            dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
-                                           n,
-                                           stride,
+                                           batch_count,
+                                           batch_stride,
                                            ldb,
                                            dl,
                                            d,
@@ -303,8 +310,8 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, uint32_t M, typename T>
     rocsparse_status launch_thomas_kernel_m(rocsparse_handle handle,
-                                            rocsparse_int    n,
-                                            rocsparse_int    stride,
+                                            rocsparse_int    batch_count,
+                                            int64_t          batch_stride,
                                             int64_t          ldb,
                                             const T*         dl,
                                             const T*         d,
@@ -312,12 +319,12 @@ namespace rocsparse
                                             T*               B)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_thomas_kernel<BLOCKSIZE, M>),
-                                           dim3((n - 1) / BLOCKSIZE + 1),
+                                           dim3((batch_count - 1) / BLOCKSIZE + 1),
                                            dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
-                                           n,
-                                           stride,
+                                           batch_count,
+                                           batch_stride,
                                            ldb,
                                            dl,
                                            d,
@@ -330,7 +337,7 @@ namespace rocsparse
     template <uint32_t WF_SIZE, typename T>
     rocsparse_status launch_pcr_wavefront_kernel(rocsparse_handle handle,
                                                  rocsparse_int    m,
-                                                 rocsparse_int    n,
+                                                 rocsparse_int    batch_count,
                                                  int64_t          batch_stride,
                                                  int64_t          ldb,
                                                  const T*         dl,
@@ -340,13 +347,13 @@ namespace rocsparse
     {
         constexpr uint32_t BLOCKSIZE = 256;
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::gtsv_nopivot_batch_pcr_wavefront_kernel<BLOCKSIZE, WF_SIZE>),
-            dim3((n - 1) / (BLOCKSIZE / WF_SIZE) + 1),
+            (rocsparse::gtsv_nopivot_strided_batch_pcr_wavefront_kernel<BLOCKSIZE, WF_SIZE>),
+            dim3((batch_count - 1) / (BLOCKSIZE / WF_SIZE) + 1),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
             m,
-            n,
+            batch_count,
             batch_stride,
             ldb,
             dl,
@@ -360,7 +367,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_pcr_shared_kernel(rocsparse_handle handle,
                                               rocsparse_int    m,
-                                              rocsparse_int    n,
+                                              rocsparse_int    batch_count,
                                               int64_t          batch_stride,
                                               int64_t          ldb,
                                               const T*         dl,
@@ -370,13 +377,13 @@ namespace rocsparse
     {
         constexpr uint32_t WF_SIZE = 32;
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::gtsv_nopivot_batch_pcr_shared_kernel<BLOCKSIZE, WF_SIZE>),
-            dim3(n),
+            (rocsparse::gtsv_nopivot_strided_batch_pcr_shared_kernel<BLOCKSIZE, WF_SIZE>),
+            dim3(batch_count),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
             m,
-            n,
+            batch_count,
             batch_stride,
             ldb,
             dl,
@@ -389,7 +396,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, uint32_t HALF_BLOCKSIZE, typename T>
     rocsparse_status launch_crpcr_pow2_shared_kernel(rocsparse_handle handle,
                                                      rocsparse_int    m,
-                                                     rocsparse_int    n,
+                                                     rocsparse_int    batch_count,
                                                      int64_t          batch_stride,
                                                      int64_t          ldb,
                                                      const T*         dl,
@@ -398,13 +405,13 @@ namespace rocsparse
                                                      T*               B)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::gtsv_nopivot_batch_crpcr_shared_kernel<BLOCKSIZE, HALF_BLOCKSIZE>),
-            dim3(n),
+            (rocsparse::gtsv_nopivot_strided_batch_crpcr_shared_kernel<BLOCKSIZE, HALF_BLOCKSIZE>),
+            dim3(batch_count),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
             m,
-            n,
+            batch_count,
             batch_stride,
             ldb,
             dl,
@@ -429,13 +436,13 @@ namespace rocsparse
         rocsparse_host_assert(m <= 1024, "This function is designed for m <= 1024.");
 
         using thomas_kernel_func_ptr = rocsparse_status (*)(rocsparse_handle handle,
-                                                            rocsparse_int    n,
-                                                            rocsparse_int    stride,
+                                                            rocsparse_int    batch_count,
+                                                            int64_t          batch_stride,
                                                             int64_t          ldb,
                                                             const T*         dl,
                                                             const T*         d,
                                                             const T*         du,
-                                                            T*               B);
+                                                            T*               x);
 
         // Kernel dispatch table for thomas solver
         static const std::map<int, thomas_kernel_func_ptr> s_thomas_kernel_dispatch
@@ -471,7 +478,7 @@ namespace rocsparse
 
         using pcr_kernel_func_ptr = rocsparse_status (*)(rocsparse_handle handle,
                                                          rocsparse_int    m,
-                                                         rocsparse_int    n,
+                                                         rocsparse_int    batch_count,
                                                          int64_t          batch_stride,
                                                          int64_t          ldb,
                                                          const T*         dl,
@@ -508,7 +515,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_backward_substitution_kernel(rocsparse_handle handle,
                                                          rocsparse_int    m,
-                                                         rocsparse_int    n,
+                                                         rocsparse_int    batch_count,
                                                          int64_t          ldb,
                                                          int              num_spikes,
                                                          const T*         dl_modified,
@@ -520,12 +527,12 @@ namespace rocsparse
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_backward_kernel<BLOCKSIZE>),
-            dim3((m - 1) / BLOCKSIZE + 1, n, 1),
+            dim3((m - 1) / BLOCKSIZE + 1, batch_count, 1),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
             m,
-            n,
+            batch_count,
             ldb,
             num_spikes,
             dl_modified,
@@ -540,8 +547,8 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_forward_elimination_kernel(rocsparse_handle handle,
                                                        rocsparse_int    m,
-                                                       rocsparse_int    n,
-                                                       int64_t          stride,
+                                                       rocsparse_int    batch_count,
+                                                       int64_t          batch_stride,
                                                        int64_t          ldb,
                                                        rocsparse_int    num_spikes,
                                                        const T*         dl,
@@ -559,13 +566,13 @@ namespace rocsparse
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_forward_kernel<BLOCKSIZE>),
-            dim3((m - 1) / BLOCKSIZE + 1, n, 1),
+            dim3((m - 1) / BLOCKSIZE + 1, batch_count, 1),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
             m,
-            n,
-            stride,
+            batch_count,
+            batch_stride,
             ldb,
             num_spikes,
             dl,
@@ -586,7 +593,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     rocsparse_status launch_spike_solver_kernel(rocsparse_handle handle,
                                                 rocsparse_int    num_spikes,
-                                                rocsparse_int    n,
+                                                rocsparse_int    batch_count,
                                                 const T*         dl_spike,
                                                 const T*         d_spike,
                                                 const T*         du_spike,
@@ -594,12 +601,12 @@ namespace rocsparse
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_nopivot_strided_batch_spike_solver_pcr_kernel<BLOCKSIZE>),
-            dim3(n),
+            dim3(batch_count),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
             num_spikes,
-            n,
+            batch_count,
             dl_spike,
             d_spike,
             du_spike,
@@ -651,7 +658,7 @@ namespace rocsparse
         // Define function pointer type for kernel dispatch
         using KernelFuncPtr = rocsparse_status (*)(rocsparse_handle handle,
                                                    rocsparse_int    num_spikes,
-                                                   rocsparse_int    n,
+                                                   rocsparse_int    batch_count,
                                                    const T*         dl_spike,
                                                    const T*         d_spike,
                                                    const T*         du_spike,
@@ -835,6 +842,11 @@ rocsparse_status rocsparse::gtsv_no_pivot_strided_batch_template(rocsparse_handl
         offset += ((sizeof(T) * int64_t(num_spikes) * batch_count - 1) / 256 + 1) * 256;
 
         current_m = num_spikes;
+    }
+
+    if(current_m > 1024)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
 
     RETURN_IF_ROCSPARSE_ERROR(gtsv_no_pivot_strided_batch_template_dispatch(

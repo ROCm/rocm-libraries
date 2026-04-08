@@ -28,6 +28,7 @@
 #include "gtsv_nopivot_device.h"
 #include "gtsv_nopivot_large_device.h"
 #include "gtsv_nopivot_medium_device.h"
+#include "gtsv_nopivot_thomas_device.h"
 
 #include <map>
 
@@ -141,6 +142,7 @@ namespace rocsparse
                                            0,
                                            handle->stream,
                                            n,
+                                           0,
                                            ldb,
                                            dl,
                                            d,
@@ -164,6 +166,7 @@ namespace rocsparse
                                            0,
                                            handle->stream,
                                            n,
+                                           0,
                                            ldb,
                                            dl,
                                            d,
@@ -187,6 +190,7 @@ namespace rocsparse
                                            0,
                                            handle->stream,
                                            n,
+                                           0,
                                            ldb,
                                            dl,
                                            d,
@@ -210,6 +214,7 @@ namespace rocsparse
                                            0,
                                            handle->stream,
                                            n,
+                                           0,
                                            ldb,
                                            dl,
                                            d,
@@ -233,6 +238,7 @@ namespace rocsparse
                                            0,
                                            handle->stream,
                                            n,
+                                           0,
                                            ldb,
                                            dl,
                                            d,
@@ -256,6 +262,7 @@ namespace rocsparse
                                            0,
                                            handle->stream,
                                            n,
+                                           0,
                                            ldb,
                                            dl,
                                            d,
@@ -279,6 +286,7 @@ namespace rocsparse
                                            0,
                                            handle->stream,
                                            n,
+                                           0,
                                            ldb,
                                            dl,
                                            d,
