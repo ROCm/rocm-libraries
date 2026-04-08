@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 #ifndef HIPSOLVER_DENSE64_H
@@ -32,6 +32,50 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnDestroyParams(hipsolverDnParams_t 
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnSetAdvOptions(hipsolverDnParams_t   params,
                                                             hipsolverDnFunction_t func,
                                                             hipsolverAlgMode_t    alg);
+
+// geev
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXgeev_bufferSize(hipsolverDnHandle_t handle,
+                                                               hipsolverDnParams_t params,
+                                                               hipsolverEigMode_t  jobvl,
+                                                               hipsolverEigMode_t  jobvr,
+                                                               int64_t             n,
+                                                               hipDataType         dataTypeA,
+                                                               const void*         A,
+                                                               int64_t             lda,
+                                                               hipDataType         dataTypeW,
+                                                               const void*         W,
+                                                               hipDataType         dataTypeVL,
+                                                               const void*         VL,
+                                                               int64_t             ldvl,
+                                                               hipDataType         dataTypeVR,
+                                                               const void*         VR,
+                                                               int64_t             ldvr,
+                                                               hipDataType         computeType,
+                                                               size_t*             lworkOnDevice,
+                                                               size_t*             lworkOnHost);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXgeev(hipsolverDnHandle_t handle,
+                                                    hipsolverDnParams_t params,
+                                                    hipsolverEigMode_t  jobvl,
+                                                    hipsolverEigMode_t  jobvr,
+                                                    int64_t             n,
+                                                    hipDataType         dataTypeA,
+                                                    void*               A,
+                                                    int64_t             lda,
+                                                    hipDataType         dataTypeW,
+                                                    void*               W,
+                                                    hipDataType         dataTypeVL,
+                                                    void*               VL,
+                                                    int64_t             ldvl,
+                                                    hipDataType         dataTypeVR,
+                                                    void*               VR,
+                                                    int64_t             ldvr,
+                                                    hipDataType         computeType,
+                                                    void*               workOnDevice,
+                                                    size_t              lworkOnDevice,
+                                                    void*               workOnHost,
+                                                    size_t              lworkOnHost,
+                                                    int*                devInfo);
 
 // geqrf
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXgeqrf_bufferSize(hipsolverDnHandle_t handle,

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -71,6 +71,115 @@ try
     return hipsolver::cuda2hip_status(cusolverDnSetAdvOptions((cusolverDnParams_t)params,
                                                               hipsolver::hip2cuda_function(func),
                                                               hipsolver::hip2cuda_algmode(alg)));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+/******************** GEEV ********************/
+hipsolverStatus_t hipsolverDnXgeev_bufferSize(hipsolverDnHandle_t handle,
+                                              hipsolverDnParams_t params,
+                                              hipsolverEigMode_t  jobvl,
+                                              hipsolverEigMode_t  jobvr,
+                                              int64_t             n,
+                                              hipDataType         dataTypeA,
+                                              const void*         A,
+                                              int64_t             lda,
+                                              hipDataType         dataTypeW,
+                                              const void*         W,
+                                              hipDataType         dataTypeVL,
+                                              const void*         VL,
+                                              int64_t             ldvl,
+                                              hipDataType         dataTypeVR,
+                                              const void*         VR,
+                                              int64_t             ldvr,
+                                              hipDataType         computeType,
+                                              size_t*             lworkOnDevice,
+                                              size_t*             lworkOnHost)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!params)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return hipsolver::cuda2hip_status(cusolverDnXgeev_bufferSize((cusolverDnHandle_t)handle,
+                                                                 (cusolverDnParams_t)params,
+                                                                 hipsolver::hip2cuda_evect(jobvl),
+                                                                 hipsolver::hip2cuda_evect(jobvr),
+                                                                 n,
+                                                                 dataTypeA,
+                                                                 A,
+                                                                 lda,
+                                                                 dataTypeW,
+                                                                 W,
+                                                                 dataTypeVL,
+                                                                 VL,
+                                                                 ldvl,
+                                                                 dataTypeVR,
+                                                                 VR,
+                                                                 ldvr,
+                                                                 computeType,
+                                                                 lworkOnDevice,
+                                                                 lworkOnHost));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDnXgeev(hipsolverDnHandle_t handle,
+                                   hipsolverDnParams_t params,
+                                   hipsolverEigMode_t  jobvl,
+                                   hipsolverEigMode_t  jobvr,
+                                   int64_t             n,
+                                   hipDataType         dataTypeA,
+                                   void*               A,
+                                   int64_t             lda,
+                                   hipDataType         dataTypeW,
+                                   void*               W,
+                                   hipDataType         dataTypeVL,
+                                   void*               VL,
+                                   int64_t             ldvl,
+                                   hipDataType         dataTypeVR,
+                                   void*               VR,
+                                   int64_t             ldvr,
+                                   hipDataType         computeType,
+                                   void*               workOnDevice,
+                                   size_t              lworkOnDevice,
+                                   void*               workOnHost,
+                                   size_t              lworkOnHost,
+                                   int*                devInfo)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!params)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    return hipsolver::cuda2hip_status(cusolverDnXgeev((cusolverDnHandle_t)handle,
+                                                      (cusolverDnParams_t)params,
+                                                      hipsolver::hip2cuda_evect(jobvl),
+                                                      hipsolver::hip2cuda_evect(jobvr),
+                                                      n,
+                                                      dataTypeA,
+                                                      A,
+                                                      lda,
+                                                      dataTypeW,
+                                                      W,
+                                                      dataTypeVL,
+                                                      VL,
+                                                      ldvl,
+                                                      dataTypeVR,
+                                                      VR,
+                                                      ldvr,
+                                                      computeType,
+                                                      workOnDevice,
+                                                      lworkOnDevice,
+                                                      workOnHost,
+                                                      lworkOnHost,
+                                                      devInfo));
 }
 catch(...)
 {
