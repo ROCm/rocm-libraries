@@ -69,6 +69,32 @@ using HipcubDeviceReduceTestsParams = ::testing::Types<
     DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
     DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>>;
 
+// Device numeric_limits for custom_test_type<T>
+_HIPCUB_STD_NAMESPACE_BEGIN
+
+template<class T>
+struct numeric_limits<test_utils::custom_test_type<T>>
+{
+    static constexpr bool is_specialized = true;
+
+    static constexpr test_utils::custom_test_type<T> min() noexcept
+    {
+        return {_HIPCUB_STD::numeric_limits<T>::min(), _HIPCUB_STD::numeric_limits<T>::min()};
+    }
+
+    static constexpr test_utils::custom_test_type<T> lowest() noexcept
+    {
+        return {_HIPCUB_STD::numeric_limits<T>::lowest(), _HIPCUB_STD::numeric_limits<T>::lowest()};
+    }
+
+    static constexpr test_utils::custom_test_type<T> max() noexcept
+    {
+        return {_HIPCUB_STD::numeric_limits<T>::max(), _HIPCUB_STD::numeric_limits<T>::max()};
+    }
+};
+
+_HIPCUB_STD_NAMESPACE_END
+
 TYPED_TEST_SUITE(HipcubDeviceReduceTests, HipcubDeviceReduceTestsParams);
 
 TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
