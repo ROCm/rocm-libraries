@@ -108,6 +108,8 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     static_assert(sizeof(ADataType) == sizeof(BDataType), "Wrong!");
     static constexpr index_t ElementSize = sizeof(ADataType);
     static constexpr index_t K2          = Problem::VectorLoadSize / ElementSize * PackedSize;
+    // We define kDramLoadPackElems as 128 for fp6 because K2 == 16, so in this way we have correct
+    // values for K1 (number of contiguous lanes in a row)
     static constexpr index_t kDramLoadPackElems =
         std::is_same_v<ADataType, pk_fp6x16_t>
             ? kDramLoadPackBytes
@@ -248,6 +250,11 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
 
         constexpr index_t PadSize = SwizzleFactor * K2;
 
+        // Padding is needed between waves writing to LDS for a single mfma tile
+        // Example: instruction 16x128 8 bit
+        // 2 waves read elements from gmem to lds but they are consumed by a single
+        // wave when reading from LDS, so we need padding there but not between
+        // consecutive mfma tiles in LDS
         constexpr auto desc_0 = make_naive_tensor_descriptor( //
             make_tuple(number<M0>{},
                        number<K0>{},
