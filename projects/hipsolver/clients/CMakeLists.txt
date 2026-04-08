@@ -47,22 +47,6 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 include(build-options)
 
-# Linking lapack library requires fortran flags
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
-if(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG)
-  find_package(LAPACK 3.7 REQUIRED CONFIG)
-else()
-  find_package(LAPACK 3.7 REQUIRED)
-endif()
-
-if(NOT LAPACK_LIBRARIES)
-  set(LAPACK_LIBRARIES
-    ${LAPACK_blas_LIBRARIES}
-    ${LAPACK_lapack_LIBRARIES}
-  )
-endif()
-
 if(NOT TARGET hipsolver)
   find_package(hipsolver REQUIRED CONFIG PATHS ${ROCM_PATH} /opt/rocm)
 endif()

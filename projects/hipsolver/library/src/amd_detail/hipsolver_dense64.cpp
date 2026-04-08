@@ -27,6 +27,7 @@
  */
 
 #include "exceptions.hpp"
+#include "extern.hpp"
 #include "hipsolver.h"
 #include "hipsolver_conversions.hpp"
 #include "lib_macros.hpp"
@@ -257,6 +258,8 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!params)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    sgeev_('x', 'x', 0, nullptr, 0, nullptr, nullptr, nullptr, 0, nullptr, 0, nullptr, 0, 0);
 
     return HIPSOLVER_STATUS_NOT_SUPPORTED;
 }
