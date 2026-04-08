@@ -15,7 +15,7 @@ class TestableGraphLifting : public hipdnn_frontend::graph::Graph
 {
 public:
     using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
+    using Graph::deserialize;
     using Graph::fromBackendDescriptor;
     using Graph::get_raw_graph_descriptor;
 
@@ -51,7 +51,7 @@ class TestableGraphKnobLowering : public hipdnn_frontend::graph::Graph
 {
 public:
     using Graph::build_operation_graph_via_descriptors;
-    using Graph::create_execution_plan_ext_via_descriptors;
+    using Graph::create_execution_plan_ext;
 };
 
 } // namespace hipdnn_tests

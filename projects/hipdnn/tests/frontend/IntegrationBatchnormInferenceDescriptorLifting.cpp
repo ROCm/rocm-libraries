@@ -198,7 +198,7 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, BatchnormInferenceTensorS
 
 // Builds a BatchnormInference graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all fields survive the FlatBuffer-direct path.
+// all fields survive the backend C API serialization path.
 TEST_F(IntegrationBatchnormInferenceDescriptorLifting, BatchnormInferenceLiftWithoutFinalization)
 {
     auto originalGraph = buildGraph();

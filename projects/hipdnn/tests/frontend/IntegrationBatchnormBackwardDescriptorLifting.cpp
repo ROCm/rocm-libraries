@@ -244,24 +244,27 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLifting, BasicBatchnormBackwardRoun
     auto liftedDx = tensorMap[K_BN_BWD_TENSOR_DX_UID];
     EXPECT_EQ(liftedDx->get_uid(), K_BN_BWD_TENSOR_DX_UID);
     EXPECT_EQ(liftedDx->get_name(), "DX");
-    EXPECT_FALSE(liftedDx->get_dim().empty());
-    EXPECT_FALSE(liftedDx->get_stride().empty());
+    EXPECT_EQ(liftedDx->get_dim(), toVec(K_BN_BWD_TENSOR_DX_DIMS));
+    EXPECT_EQ(liftedDx->get_stride(), toVec(K_BN_BWD_TENSOR_DX_STRIDES));
+    EXPECT_EQ(liftedDx->get_data_type(), DataType::FLOAT);
 
     // DScale tensor (output)
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DSCALE_UID), 0u);
     auto liftedDscale = tensorMap[K_BN_BWD_TENSOR_DSCALE_UID];
     EXPECT_EQ(liftedDscale->get_uid(), K_BN_BWD_TENSOR_DSCALE_UID);
     EXPECT_EQ(liftedDscale->get_name(), "DScale");
-    EXPECT_FALSE(liftedDscale->get_dim().empty());
-    EXPECT_FALSE(liftedDscale->get_stride().empty());
+    EXPECT_EQ(liftedDscale->get_dim(), toVec(K_BN_BWD_TENSOR_DSCALE_DIMS));
+    EXPECT_EQ(liftedDscale->get_stride(), toVec(K_BN_BWD_TENSOR_DSCALE_STRIDES));
+    EXPECT_EQ(liftedDscale->get_data_type(), DataType::FLOAT);
 
     // DBias tensor (output)
     ASSERT_NE(tensorMap.count(K_BN_BWD_TENSOR_DBIAS_UID), 0u);
     auto liftedDbias = tensorMap[K_BN_BWD_TENSOR_DBIAS_UID];
     EXPECT_EQ(liftedDbias->get_uid(), K_BN_BWD_TENSOR_DBIAS_UID);
     EXPECT_EQ(liftedDbias->get_name(), "DBias");
-    EXPECT_FALSE(liftedDbias->get_dim().empty());
-    EXPECT_FALSE(liftedDbias->get_stride().empty());
+    EXPECT_EQ(liftedDbias->get_dim(), toVec(K_BN_BWD_TENSOR_DBIAS_DIMS));
+    EXPECT_EQ(liftedDbias->get_stride(), toVec(K_BN_BWD_TENSOR_DBIAS_STRIDES));
+    EXPECT_EQ(liftedDbias->get_data_type(), DataType::FLOAT);
 
     // Verify 1 sub-node of the correct type
     auto& subNodes = liftedGraph->getSubNodes();

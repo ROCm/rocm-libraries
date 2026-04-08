@@ -72,7 +72,12 @@ inline std::shared_ptr<TestableGraphLifting>
         return nullptr;
     }
 
-    auto data = graph.toBinary();
+    auto [data, serErr] = graph.to_binary();
+    EXPECT_TRUE(serErr.is_good()) << serErr.get_message();
+    if(!serErr.is_good())
+    {
+        return nullptr;
+    }
     EXPECT_FALSE(data.empty());
     if(data.empty())
     {
