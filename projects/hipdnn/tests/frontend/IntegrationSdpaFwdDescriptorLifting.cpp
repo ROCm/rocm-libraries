@@ -577,7 +577,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdDeserializeViaBackendWithHand
 
 // Exercises the JSON serialize/deserialize path with a handle (full finalization)
 // for an SDPA forward graph.
-TEST_F(IntegrationSdpaFpropDescriptorLifting, JsonRoundTripWithHandle)
+TEST_F(IntegrationSdpaFwdDescriptorLifting, JsonRoundTripWithHandle)
 {
     auto originalGraph = buildGraph();
 
@@ -631,8 +631,8 @@ TEST_F(IntegrationSdpaFpropDescriptorLifting, JsonRoundTripWithHandle)
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
 
-    auto* opNode = dynamic_cast<SdpaFpropNode*>(subNodes[0].get());
-    ASSERT_NE(opNode, nullptr) << "Expected a SdpaFpropNode";
+    auto* opNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr) << "Expected a SdpaFwdNode";
 
     // Verify diagonal alignment
     EXPECT_EQ(opNode->attributes.diagonal_alignment, DiagonalAlignment::TOP_LEFT);

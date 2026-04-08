@@ -454,23 +454,23 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, JsonRoundTripWithHandle)
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 3u);
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_name(), "x");
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_dim(), toVec(K_TENSOR_X_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_stride(), toVec(K_TENSOR_X_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_data_type(), DataType::FLOAT);
+    ASSERT_NE(tensorMap.count(K_WGRAD_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_WGRAD_TENSOR_X_UID]->get_name(), "x");
+    EXPECT_EQ(tensorMap[K_WGRAD_TENSOR_X_UID]->get_dim(), toVec(K_WGRAD_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_WGRAD_TENSOR_X_UID]->get_stride(), toVec(K_WGRAD_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[K_WGRAD_TENSOR_X_UID]->get_data_type(), DataType::FLOAT);
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_DY_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_name(), "dy");
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_dim(), toVec(K_TENSOR_DY_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_stride(), toVec(K_TENSOR_DY_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_data_type(), DataType::FLOAT);
+    ASSERT_NE(tensorMap.count(K_WGRAD_TENSOR_DY_UID), 0u);
+    EXPECT_EQ(tensorMap[K_WGRAD_TENSOR_DY_UID]->get_name(), "dy");
+    EXPECT_EQ(tensorMap[K_WGRAD_TENSOR_DY_UID]->get_dim(), toVec(K_WGRAD_TENSOR_DY_DIMS));
+    EXPECT_EQ(tensorMap[K_WGRAD_TENSOR_DY_UID]->get_stride(), toVec(K_WGRAD_TENSOR_DY_STRIDES));
+    EXPECT_EQ(tensorMap[K_WGRAD_TENSOR_DY_UID]->get_data_type(), DataType::FLOAT);
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_DW_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_DW_UID]->get_name(), "dw");
-    EXPECT_EQ(tensorMap[K_TENSOR_DW_UID]->get_dim(), toVec(K_TENSOR_DW_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_DW_UID]->get_stride(), toVec(K_TENSOR_DW_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_DW_UID]->get_data_type(), DataType::FLOAT);
+    ASSERT_NE(tensorMap.count(K_WGRAD_TENSOR_DW_UID), 0u);
+    EXPECT_EQ(tensorMap[K_WGRAD_TENSOR_DW_UID]->get_name(), "dw");
+    EXPECT_EQ(tensorMap[K_WGRAD_TENSOR_DW_UID]->get_dim(), toVec(K_WGRAD_TENSOR_DW_DIMS));
+    EXPECT_EQ(tensorMap[K_WGRAD_TENSOR_DW_UID]->get_stride(), toVec(K_WGRAD_TENSOR_DW_STRIDES));
+    EXPECT_EQ(tensorMap[K_WGRAD_TENSOR_DW_UID]->get_data_type(), DataType::FLOAT);
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
@@ -481,10 +481,10 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, JsonRoundTripWithHandle)
 
     // Verify convolution parameters
     EXPECT_EQ(opNode->attributes.get_convolution_mode(), ConvolutionMode::CONVOLUTION);
-    EXPECT_EQ(opNode->attributes.get_pre_padding(), toVec(K_CONV_PADDING));
-    EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_CONV_PADDING));
-    EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
-    EXPECT_EQ(opNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+    EXPECT_EQ(opNode->attributes.get_pre_padding(), toVec(K_WGRAD_CONV_PADDING));
+    EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_WGRAD_CONV_PADDING));
+    EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_WGRAD_CONV_STRIDE));
+    EXPECT_EQ(opNode->attributes.get_dilation(), toVec(K_WGRAD_CONV_DILATION));
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
 }
 

@@ -442,31 +442,31 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLifting, JsonRoundTripWithHandle)
     ASSERT_EQ(tensorMap.size(), 6u);
 
     // Verify tensor dims and names
-    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_dim(), toVec(K_SPATIAL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_stride(), toVec(K_SPATIAL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_X_UID]->get_name(), "x");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_X_UID]->get_dim(), toVec(K_BN_INF_SPATIAL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_X_UID]->get_stride(), toVec(K_BN_INF_SPATIAL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_X_UID]->get_name(), "x");
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_MEAN_UID]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_MEAN_UID]->get_stride(), toVec(K_CHANNEL_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_MEAN_UID]->get_name(), "mean");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_MEAN_UID]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_MEAN_UID]->get_stride(), toVec(K_BN_INF_CHANNEL_STRIDES));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_MEAN_UID]->get_name(), "mean");
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_INV_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_INV_VARIANCE_UID]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_INV_VARIANCE_UID]->get_name(), "inv_variance");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_INV_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_INV_VARIANCE_UID]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_INV_VARIANCE_UID]->get_name(), "inv_variance");
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_SCALE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_SCALE_UID]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_SCALE_UID]->get_name(), "scale");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_SCALE_UID]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_SCALE_UID]->get_name(), "scale");
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_BIAS_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_BIAS_UID]->get_dim(), toVec(K_CHANNEL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_BIAS_UID]->get_name(), "bias");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_BIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_BIAS_UID]->get_dim(), toVec(K_BN_INF_CHANNEL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_BIAS_UID]->get_name(), "bias");
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_dim(), toVec(K_SPATIAL_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_Y_UID]->get_name(), "y");
+    ASSERT_NE(tensorMap.count(K_BN_INF_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_Y_UID]->get_dim(), toVec(K_BN_INF_SPATIAL_DIMS));
+    EXPECT_EQ(tensorMap[K_BN_INF_TENSOR_Y_UID]->get_name(), "y");
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();

@@ -847,25 +847,25 @@ TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenNodeFails)
     graph.set_name("FailTest").set_compute_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(K_TENSOR_X_UID)
+    x->set_uid(K_FPROP_TENSOR_X_UID)
         .set_name("X")
         .set_data_type(DataType::FLOAT)
-        .set_dim(toVec(K_TENSOR_X_DIMS))
-        .set_stride(toVec(K_TENSOR_X_STRIDES));
+        .set_dim(toVec(K_FPROP_TENSOR_X_DIMS))
+        .set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
     auto w = std::make_shared<TensorAttributes>();
-    w->set_uid(K_TENSOR_W_UID)
+    w->set_uid(K_FPROP_TENSOR_W_UID)
         .set_name("W")
         .set_data_type(DataType::FLOAT)
-        .set_dim(toVec(K_TENSOR_W_DIMS))
-        .set_stride(toVec(K_TENSOR_W_STRIDES));
+        .set_dim(toVec(K_FPROP_TENSOR_W_DIMS))
+        .set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
     ConvFpropAttributes convAttrs;
     convAttrs.set_x(x);
     convAttrs.set_w(w);
-    convAttrs.set_pre_padding(toVec(K_CONV_PADDING));
-    convAttrs.set_post_padding(toVec(K_CONV_PADDING));
-    convAttrs.set_stride(toVec(K_CONV_STRIDE));
-    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+    convAttrs.set_pre_padding(toVec(K_FPROP_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_FPROP_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_FPROP_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
 
     graph.conv_fprop(x, w, convAttrs);
 
@@ -891,26 +891,26 @@ TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenGraphCreateFails)
         .set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(K_TENSOR_X_UID)
+    x->set_uid(K_FPROP_TENSOR_X_UID)
         .set_name("X")
         .set_data_type(DataType::FLOAT)
-        .set_dim(toVec(K_TENSOR_X_DIMS))
-        .set_stride(toVec(K_TENSOR_X_STRIDES));
+        .set_dim(toVec(K_FPROP_TENSOR_X_DIMS))
+        .set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
     auto w = std::make_shared<TensorAttributes>();
-    w->set_uid(K_TENSOR_W_UID)
+    w->set_uid(K_FPROP_TENSOR_W_UID)
         .set_name("W")
         .set_data_type(DataType::FLOAT)
-        .set_dim(toVec(K_TENSOR_W_DIMS))
-        .set_stride(toVec(K_TENSOR_W_STRIDES));
+        .set_dim(toVec(K_FPROP_TENSOR_W_DIMS))
+        .set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
     ConvFpropAttributes convAttrs;
     convAttrs.set_x(x);
     convAttrs.set_w(w);
     convAttrs.set_compute_data_type(DataType::FLOAT);
-    convAttrs.set_pre_padding(toVec(K_CONV_PADDING));
-    convAttrs.set_post_padding(toVec(K_CONV_PADDING));
-    convAttrs.set_stride(toVec(K_CONV_STRIDE));
-    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+    convAttrs.set_pre_padding(toVec(K_FPROP_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_FPROP_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_FPROP_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
 
     graph.conv_fprop(x, w, convAttrs);
 
@@ -1112,7 +1112,7 @@ TEST_F(TestGraph, PreferredEngineIdSelectsSpecificConfig)
     ASSERT_TRUE(graph.validate().is_good());
 
     // Set preferred engine ID
-    int64_t preferredEngineId = 42;
+    const int64_t preferredEngineId = 42;
     graph.set_preferred_engine_id_ext(preferredEngineId);
 
     graph.build_operation_graph(_handle);
@@ -1261,12 +1261,12 @@ TEST_F(TestGraph, PreferredEngineIdSelectsSpecificConfig)
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(
                     engineDesc2, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, _))
-        .WillOnce([preferredEngineId](hipdnnBackendDescriptor_t,
-                                      hipdnnBackendAttributeName_t,
-                                      hipdnnBackendAttributeType_t,
-                                      int64_t,
-                                      int64_t*,
-                                      void* arrayOfElements) {
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* arrayOfElements) {
             *static_cast<int64_t*>(arrayOfElements) = preferredEngineId;
             return HIPDNN_STATUS_SUCCESS;
         });
@@ -1298,7 +1298,7 @@ TEST_F(TestGraph, PreferredEngineIdFallsBackToTopConfig)
     ASSERT_TRUE(graph.validate().is_good());
 
     // Set preferred engine ID that doesn't exist
-    int64_t preferredEngineId = 999;
+    const int64_t preferredEngineId = 999;
     graph.set_preferred_engine_id_ext(preferredEngineId);
 
     graph.build_operation_graph(_handle);
@@ -3368,7 +3368,7 @@ static void
                             const std::string& description,
                             bool deprecated,
                             hipdnnBackendAttributeType_t valueType,
-                            KnobValueVariant defaultValue)
+                            const KnobValueVariant& defaultValue)
 {
     // Helper lambdas for mock attribute patterns
 
@@ -3449,50 +3449,50 @@ static void
     };
 
     // 1. Knob ID (string)
-    mockString(HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, knobId);
+    mockString(HIPDNN_ATTR_KNOB_INFO_TYPE, knobId);
 
     // 2. Description (string)
-    mockString(HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, description);
+    mockString(HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, description);
 
     // 3. Deprecated flag (bool)
-    mockScalarBool(HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, deprecated);
+    mockScalarBool(HIPDNN_ATTR_KNOB_INFO_DEPRECATED, deprecated);
 
     // 4. Default value type (int64 holding the type enum)
-    mockScalarInt64(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT, static_cast<int64_t>(valueType));
+    mockScalarInt64(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE, static_cast<int64_t>(valueType));
 
     // 5. Default value and constraint fields, dispatched on type
     if(valueType == HIPDNN_TYPE_INT64)
     {
         auto intVal = std::get<int64_t>(defaultValue);
-        mockScalarInt64(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, intVal);
+        mockScalarInt64(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, intVal);
 
         // No constraints (all absent)
-        mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT, HIPDNN_TYPE_INT64);
-        mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT, HIPDNN_TYPE_INT64);
-        mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT, HIPDNN_TYPE_INT64);
-        mockEmptyVec(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT);
+        mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_INT64);
+        mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_INT64);
+        mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64);
+        mockEmptyVec(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT);
     }
     else if(valueType == HIPDNN_TYPE_DOUBLE)
     {
         auto doubleVal = std::get<double>(defaultValue);
-        mockScalarDouble(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, doubleVal);
+        mockScalarDouble(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, doubleVal);
 
         // No constraints (all absent)
-        mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT, HIPDNN_TYPE_DOUBLE);
-        mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT, HIPDNN_TYPE_DOUBLE);
+        mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_DOUBLE);
+        mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_DOUBLE);
     }
     else if(valueType == HIPDNN_TYPE_CHAR)
     {
         auto strVal = std::get<std::string>(defaultValue);
-        mockString(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, strVal);
+        mockString(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, strVal);
 
         // No string max length
-        mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT, HIPDNN_TYPE_INT32);
+        mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH, HIPDNN_TYPE_INT32);
 
         // No valid values string (not supported)
         EXPECT_CALL(*mockBackend,
                     backendGetAttribute(knobDesc,
-                                        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
+                                        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
                                         HIPDNN_TYPE_CHAR,
                                         0,
                                         _,
@@ -3707,13 +3707,13 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
     // We set up the basic attributes manually and add the constraint mock.
 
     // Knob ID
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(
-                    knobDesc1, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, HIPDNN_TYPE_CHAR, 0, _, nullptr))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(knobDesc1, HIPDNN_ATTR_KNOB_INFO_TYPE, HIPDNN_TYPE_CHAR, 0, _, nullptr))
         .WillOnce(DoAll(SetArgPointee<4>(int64_t{10}), Return(HIPDNN_STATUS_SUCCESS)));
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(
-                    knobDesc1, HIPDNN_ATTR_KNOB_INFO_TYPE_EXT, HIPDNN_TYPE_CHAR, 10, _, NotNull()))
+                    knobDesc1, HIPDNN_ATTR_KNOB_INFO_TYPE, HIPDNN_TYPE_CHAR, 10, _, NotNull()))
         .WillOnce(DoAll(SetArgPointee<4>(int64_t{10}),
                         Invoke([](hipdnnBackendDescriptor_t,
                                   hipdnnBackendAttributeName_t,
@@ -3725,15 +3725,14 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
 
     // Description
     const std::string desc = "Algorithm choice";
-    EXPECT_CALL(
-        *_mockBackend,
-        backendGetAttribute(
-            knobDesc1, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT, HIPDNN_TYPE_CHAR, 0, _, nullptr))
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    knobDesc1, HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, HIPDNN_TYPE_CHAR, 0, _, nullptr))
         .WillOnce(DoAll(SetArgPointee<4>(static_cast<int64_t>(desc.size() + 1)),
                         Return(HIPDNN_STATUS_SUCCESS)));
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(knobDesc1,
-                                    HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_DESCRIPTION,
                                     HIPDNN_TYPE_CHAR,
                                     static_cast<int64_t>(desc.size() + 1),
                                     _,
@@ -3752,7 +3751,7 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
     EXPECT_CALL(
         *_mockBackend,
         backendGetAttribute(
-            knobDesc1, HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT, HIPDNN_TYPE_BOOLEAN, 1, _, NotNull()))
+            knobDesc1, HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, 1, _, NotNull()))
         .WillOnce(DoAll(Invoke([](hipdnnBackendDescriptor_t,
                                   hipdnnBackendAttributeName_t,
                                   hipdnnBackendAttributeType_t,
@@ -3764,7 +3763,7 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
     // Default value type = CHAR
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(knobDesc1,
-                                    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
                                     HIPDNN_TYPE_INT64,
                                     1,
                                     _,
@@ -3784,12 +3783,12 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
     EXPECT_CALL(
         *_mockBackend,
         backendGetAttribute(
-            knobDesc1, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT, HIPDNN_TYPE_CHAR, 0, _, nullptr))
+            knobDesc1, HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, HIPDNN_TYPE_CHAR, 0, _, nullptr))
         .WillOnce(DoAll(SetArgPointee<4>(static_cast<int64_t>(defaultStr.size() + 1)),
                         Return(HIPDNN_STATUS_SUCCESS)));
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(knobDesc1,
-                                    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE,
                                     HIPDNN_TYPE_CHAR,
                                     static_cast<int64_t>(defaultStr.size() + 1),
                                     _,
@@ -3806,21 +3805,15 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
                         Return(HIPDNN_STATUS_SUCCESS)));
 
     // String max length: 20
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(knobDesc1,
-                                    HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT,
-                                    HIPDNN_TYPE_INT32,
-                                    0,
-                                    _,
-                                    nullptr))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(
+            knobDesc1, HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH, HIPDNN_TYPE_INT32, 0, _, nullptr))
         .WillOnce(DoAll(SetArgPointee<4>(1), Return(HIPDNN_STATUS_SUCCESS)));
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(knobDesc1,
-                                    HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT,
-                                    HIPDNN_TYPE_INT32,
-                                    1,
-                                    _,
-                                    NotNull()))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(
+            knobDesc1, HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH, HIPDNN_TYPE_INT32, 1, _, NotNull()))
         .WillOnce(DoAll(Invoke([](hipdnnBackendDescriptor_t,
                                   hipdnnBackendAttributeName_t,
                                   hipdnnBackendAttributeType_t,
@@ -3834,17 +3827,14 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
         = std::string("fast") + '\0' + "accurate" + '\0' + "balanced" + '\0';
     const auto validValBufLen = static_cast<int64_t>(validValBuf.size());
 
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(knobDesc1,
-                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
-                                    HIPDNN_TYPE_CHAR,
-                                    0,
-                                    _,
-                                    nullptr))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(
+            knobDesc1, HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, _, nullptr))
         .WillOnce(DoAll(SetArgPointee<4>(validValBufLen), Return(HIPDNN_STATUS_SUCCESS)));
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(knobDesc1,
-                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
+                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
                                     HIPDNN_TYPE_CHAR,
                                     validValBufLen,
                                     _,
@@ -4027,14 +4017,13 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
     // Knob choice: set knob ID (string)
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(
-                    knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, _, _))
+                    knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, _, _))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     // Knob choice: set knob value (int64)
-    EXPECT_CALL(
-        *_mockBackend,
-        backendSetAttribute(
-            knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 1, _))
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(
+                    knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, _))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     // Knob choice finalize
@@ -4115,13 +4104,12 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
 
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(
-                    knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, _, _))
+                    knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, _, _))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    EXPECT_CALL(
-        *_mockBackend,
-        backendSetAttribute(
-            knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 1, _))
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(
+                    knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, _))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     EXPECT_CALL(*_mockBackend, backendFinalize(knobChoiceDesc))
@@ -4200,13 +4188,12 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithDeprecatedKnob)
 
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(
-                    knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, _, _))
+                    knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, _, _))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    EXPECT_CALL(
-        *_mockBackend,
-        backendSetAttribute(
-            knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 1, _))
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(
+                    knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, _))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     EXPECT_CALL(*_mockBackend, backendFinalize(knobChoiceDesc))
@@ -4287,14 +4274,13 @@ TEST_F(TestGraph, CreateExecutionPlanWithInt64Knobs)
     // Knob choice: set knob ID (string)
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(
-                    knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, _, _))
+                    knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, _, _))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     // Knob choice: set knob value (int64)
-    EXPECT_CALL(
-        *_mockBackend,
-        backendSetAttribute(
-            knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 1, _))
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(
+                    knobChoiceDesc, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, _))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     // Knob choice finalize
@@ -4391,16 +4377,14 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
         });
 
     // Knob choice: set knob IDs (string) for both
-    EXPECT_CALL(
-        *_mockBackend,
-        backendSetAttribute(_, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, _, _))
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, _, _))
         .Times(2)
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
 
     // Knob choice: set knob values (int64) for both
-    EXPECT_CALL(
-        *_mockBackend,
-        backendSetAttribute(_, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 1, _))
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, _))
         .Times(2)
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
 
@@ -4533,6 +4517,7 @@ TEST_F(TestGraph, EngineOverrideDoesNotReplaceExplicitlySetEngineId)
 
 TEST_F(TestGraph, SetPreferredEngineIdByName)
 {
+    // NOLINTNEXTLINE(misc-const-correctness)
     Graph graph;
 
     const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
@@ -4548,6 +4533,7 @@ TEST_F(TestGraph, SetPreferredEngineIdByName)
 
 TEST_F(TestGraph, SetPreferredEngineIdByEmptyStringClearsPreference)
 {
+    // NOLINTNEXTLINE(misc-const-correctness)
     Graph graph;
 
     const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
@@ -4573,7 +4559,7 @@ TEST_F(TestGraph, SetPreferredEngineIdByNameThenById)
     graph.set_preferred_engine_id_ext(testEngineName);
 
     // Then override with a different ID
-    int64_t overrideId = 999;
+    const int64_t overrideId = 999;
     graph.set_preferred_engine_id_ext(std::optional<int64_t>(overrideId));
 
     // Verify the ID overload took precedence
@@ -4712,6 +4698,7 @@ TEST_F(TestGraph, MoveConstruction)
 
 TEST_F(TestGraph, MoveAssignment)
 {
+    // NOLINTNEXTLINE(misc-const-correctness)
     Graph originalGraph;
     originalGraph.set_name("OriginalGraph")
         .set_compute_data_type(DataType::FLOAT)
@@ -4810,6 +4797,7 @@ TEST_F(TestGraph, MoveConstructionWithPreferredEngineId)
 
 TEST_F(TestGraph, MoveAssignmentToEmptyGraph)
 {
+    // NOLINTNEXTLINE(misc-const-correctness)
     Graph sourceGraph;
     sourceGraph.set_name("SourceGraph").set_compute_data_type(DataType::FLOAT);
 
@@ -4904,7 +4892,7 @@ TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
     EXPECT_FALSE(config->matchOperation("conv_fprop", {x8, w}).has_value());
 }
 
-TEST_F(TestGraph, SdpaFpropNodeCreation)
+TEST_F(TestGraph, SdpaFwdNodeCreation)
 {
     Graph graph;
     graph.set_io_data_type(DataType::FLOAT)
@@ -4933,7 +4921,7 @@ TEST_F(TestGraph, SdpaFpropNodeCreation)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
-TEST_F(TestGraph, SdpaFpropNodeCreationWithStats)
+TEST_F(TestGraph, SdpaFwdNodeCreationWithStats)
 {
     Graph graph;
     graph.set_io_data_type(DataType::FLOAT)

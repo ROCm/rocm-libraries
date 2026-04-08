@@ -449,23 +449,23 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, JsonRoundTripWithHandle)
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 3u);
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_DY_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_name(), "dy");
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_dim(), toVec(K_TENSOR_DY_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_stride(), toVec(K_TENSOR_DY_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_data_type(), DataType::FLOAT);
+    ASSERT_NE(tensorMap.count(K_DGRAD_TENSOR_DY_UID), 0u);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DY_UID]->get_name(), "dy");
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DY_UID]->get_dim(), toVec(K_DGRAD_TENSOR_DY_DIMS));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DY_UID]->get_stride(), toVec(K_DGRAD_TENSOR_DY_STRIDES));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DY_UID]->get_data_type(), DataType::FLOAT);
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_W_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_name(), "w");
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_dim(), toVec(K_TENSOR_W_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_stride(), toVec(K_TENSOR_W_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_W_UID]->get_data_type(), DataType::FLOAT);
+    ASSERT_NE(tensorMap.count(K_DGRAD_TENSOR_W_UID), 0u);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_W_UID]->get_name(), "w");
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_W_UID]->get_dim(), toVec(K_DGRAD_TENSOR_W_DIMS));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_W_UID]->get_stride(), toVec(K_DGRAD_TENSOR_W_STRIDES));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_W_UID]->get_data_type(), DataType::FLOAT);
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_DX_UID), 0u);
-    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_name(), "dx");
-    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_dim(), toVec(K_TENSOR_DX_DIMS));
-    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_stride(), toVec(K_TENSOR_DX_STRIDES));
-    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_data_type(), DataType::FLOAT);
+    ASSERT_NE(tensorMap.count(K_DGRAD_TENSOR_DX_UID), 0u);
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DX_UID]->get_name(), "dx");
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DX_UID]->get_dim(), toVec(K_DGRAD_TENSOR_DX_DIMS));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DX_UID]->get_stride(), toVec(K_DGRAD_TENSOR_DX_STRIDES));
+    EXPECT_EQ(tensorMap[K_DGRAD_TENSOR_DX_UID]->get_data_type(), DataType::FLOAT);
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();

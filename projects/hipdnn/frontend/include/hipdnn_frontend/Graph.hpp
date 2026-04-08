@@ -115,8 +115,8 @@
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
-#include <hipdnn_frontend/node/SdpaBpropNode.hpp>
-#include <hipdnn_frontend/node/SdpaFpropNode.hpp>
+#include <hipdnn_frontend/node/SdpaBwdNode.hpp>
+#include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
@@ -2564,7 +2564,7 @@ public:
     {
         if(attributes.get_name().empty())
         {
-            attributes.set_name("SdpaFprop_" + std::to_string(_sub_nodes.size()));
+            attributes.set_name("SdpaFwd_" + std::to_string(_sub_nodes.size()));
         }
         if(q->get_name().empty())
         {
@@ -2597,7 +2597,7 @@ public:
         }
 
         _sub_nodes.emplace_back(
-            std::make_shared<SdpaFpropNode>(std::move(attributes), graph_attributes));
+            std::make_shared<SdpaFwdNode>(std::move(attributes), graph_attributes));
 
         return ret;
     }
@@ -2638,7 +2638,7 @@ public:
     {
         if(attributes.get_name().empty())
         {
-            attributes.set_name("SdpaBprop_" + std::to_string(_sub_nodes.size()));
+            attributes.set_name("SdpaBwd_" + std::to_string(_sub_nodes.size()));
         }
         if(q->get_name().empty())
         {
@@ -2672,7 +2672,7 @@ public:
         attributes.set_dv(dv);
 
         _sub_nodes.emplace_back(
-            std::make_shared<SdpaBpropNode>(std::move(attributes), graph_attributes));
+            std::make_shared<SdpaBwdNode>(std::move(attributes), graph_attributes));
 
         return {dq, dk, dv};
     }

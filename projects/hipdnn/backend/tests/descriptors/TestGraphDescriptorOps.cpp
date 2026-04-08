@@ -1995,11 +1995,11 @@ TEST_F(TestGraphDescriptorOps, AppendOpsAfterSerialization)
 
     // Append a second operation (should succeed and invalidate the cache)
     auto xDesc2 = createFinalizedTensor(
-        K_ALT_TENSOR_X_UID, toVec(K_TENSOR_X_DIMS), toVec(K_TENSOR_X_STRIDES));
+        K_ALT_TENSOR_X_UID, toVec(K_FPROP_TENSOR_X_DIMS), toVec(K_FPROP_TENSOR_X_STRIDES));
     auto wDesc2 = createFinalizedTensor(
-        K_ALT_TENSOR_W_UID, toVec(K_TENSOR_W_DIMS), toVec(K_TENSOR_W_STRIDES));
+        K_ALT_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
     auto yDesc2 = createFinalizedTensor(
-        K_ALT_TENSOR_Y_UID, toVec(K_TENSOR_Y_DIMS), toVec(K_TENSOR_Y_STRIDES));
+        K_ALT_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
     auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
 
     std::array<HipdnnBackendDescriptor*, 1> ops2 = {convOp2.get()};

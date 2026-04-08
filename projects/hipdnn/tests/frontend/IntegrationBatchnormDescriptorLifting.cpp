@@ -327,9 +327,11 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BasicBatchnormRoundTrip)
 
     // Verify 1 sub-node of the correct type
     auto& subNodes = liftedGraph->getSubNodes();
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
 
     auto* bnNode = dynamic_cast<BatchnormNode*>(subNodes[0].get());
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     ASSERT_NE(bnNode, nullptr) << "Expected a BatchnormNode";
 
     // Verify operation name and compute data type
@@ -893,57 +895,55 @@ TEST_F(IntegrationBatchnormDescriptorLifting, JsonRoundTripWithHandle)
            "nextRunMean, nextRunVar)";
 
     // Verify key tensor dims and names
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_X_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_X_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_DATA_DIMS));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_X_UID]->get_stride(),
-              toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_X_UID]->get_name(), "X");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_X_UID]->get_dim(), toVec(K_BATCHNORM_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_X_UID]->get_stride(),
+              toVec(K_BATCHNORM_TENSOR_X_STRIDES));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_X_UID]->get_name(), "X");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_Y_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_Y_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_DATA_DIMS));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_Y_UID]->get_name(), "Y");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_Y_UID]->get_dim(), toVec(K_BATCHNORM_TENSOR_X_DIMS));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_Y_UID]->get_name(), "Y");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_SCALE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_SCALE_UID]->get_dim(),
-              toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_SCALE_UID]->get_name(), "Scale");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_SCALE_UID]->get_dim(),
+              toVec(K_BATCHNORM_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_SCALE_UID]->get_name(), "Scale");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_BIAS_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_BIAS_UID]->get_name(), "Bias");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_BIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_BIAS_UID]->get_name(), "Bias");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_EPSILON_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_EPSILON_UID]->get_name(), "Epsilon");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_EPSILON_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_EPSILON_UID]->get_name(), "Epsilon");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID]->get_name(), "Momentum");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_MOMENTUM_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_MOMENTUM_UID]->get_name(), "Momentum");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID]->get_name(), "PrevRunMean");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID]->get_name(), "PrevRunMean");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID]->get_name(),
-              "PrevRunVar");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID]->get_name(), "PrevRunVar");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_MEAN_UID]->get_name(), "Mean");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_MEAN_UID]->get_name(), "Mean");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID]->get_name(), "InvVariance");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_INV_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_INV_VARIANCE_UID]->get_name(), "InvVariance");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID]->get_name(), "NextRunMean");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID]->get_name(), "NextRunMean");
 
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID]->get_name(),
-              "NextRunVar");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID]->get_name(), "NextRunVar");
 
     // Verify 1 sub-node of the correct type
     auto& subNodes = liftedGraph->getSubNodes();
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
 
     auto* bnNode = dynamic_cast<BatchnormNode*>(subNodes[0].get());
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     ASSERT_NE(bnNode, nullptr) << "Expected a BatchnormNode";
 
     // Verify operation name and compute data type
