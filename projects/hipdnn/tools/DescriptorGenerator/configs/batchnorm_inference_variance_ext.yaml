@@ -124,6 +124,7 @@ operation:
 
   test_data:
     constants_include: "BnInfVarExtConstants"
+    tensor_const_prefix: "K_BN_INF_VAR_EXT_"
     tensor_uids: { x: 80, mean: 81, variance: 82, scale: 83, bias: 84, y: 85, epsilon: 86 }
     tensor_configs:
       x: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }

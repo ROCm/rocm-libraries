@@ -35,7 +35,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaGraph)
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsTrueForSdpaGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
 
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
                                                                      builder.GetSize());
@@ -46,7 +46,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsTrueForSdpaGraph)
 TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 {
     // Create an SDPA graph with known dimensions (withStats = false by default)
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
 
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
                                                                      builder.GetSize());
