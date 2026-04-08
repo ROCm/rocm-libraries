@@ -49,8 +49,8 @@ struct TileFmhaShape
 
     static constexpr index_t NumWarps = max(NumGemm0Warps, NumGemm1Warps);
 
-    static constexpr index_t kM0    = BlockTile::at(number<0>{}); // tile size along q seqlen
-    static constexpr index_t kN0    = BlockTile::at(number<1>{}); // tile size along k seqlen
+    static constexpr index_t kM0 = BlockTile::at(number<0>{}); // tile size along q seqlen
+    static constexpr index_t kN0 = BlockTile::at(number<1>{}); // tile size along k seqlen
     static constexpr index_t kK0 = BlockTile::at(number<2>{}); // tile size along qk gemm unroll
     static constexpr index_t kN1 = BlockTile::at(number<3>{}); // tile size along v head_dim
     static constexpr index_t kK1 = BlockTile::at(number<4>{}); // tile size along kv gemm unroll
