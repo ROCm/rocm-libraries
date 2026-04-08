@@ -155,8 +155,10 @@ void calculateKforSwizzling(
 }
 
 template<typename T, std::enable_if_t<true
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
                                       && (!std::is_same<hipblaslt_f6x16, T>::value)
                                       && (!std::is_same<hipblaslt_bf6x16, T>::value)
+#endif
                                       && (!std::is_same<hipblaslt_f4x2, T>::value)
                                       ,bool> = true>
 float typeToFloat(T* buf, size_t idx)
@@ -165,8 +167,10 @@ float typeToFloat(T* buf, size_t idx)
 }
 
 template<typename T, std::enable_if_t<false
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
                                       || std::is_same<hipblaslt_f6x16, T>::value
                                       || std::is_same<hipblaslt_bf6x16, T>::value
+#endif
                                       || std::is_same<hipblaslt_f4x2, T>::value
                                       ,bool> = true>
 float typeToFloat(T* buf, size_t idx)
@@ -217,6 +221,7 @@ std::vector<float> mx_type_to_f32(hipDataType type, hipDataType stype, HipHostBu
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
         }
+#if defined(HIPBLASLT_USE_FP6)
     case HIP_R_6F_E2M3_EXT:
         switch(stype)
         {
@@ -226,6 +231,8 @@ std::vector<float> mx_type_to_f32(hipDataType type, hipDataType stype, HipHostBu
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
         }
+#endif
+#if defined(HIPBLASLT_USE_BF6)
     case HIP_R_6F_E3M2_EXT:
         switch(stype)
         {
@@ -235,6 +242,7 @@ std::vector<float> mx_type_to_f32(hipDataType type, hipDataType stype, HipHostBu
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
         }
+#endif
     case HIP_R_4F_E2M1_EXT:
         switch(stype)
         {

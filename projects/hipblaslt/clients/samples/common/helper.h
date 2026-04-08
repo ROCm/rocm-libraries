@@ -79,9 +79,14 @@ struct Runner
         CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
 
         if constexpr(
-            std::is_same_v<
-                InTypeA,
-                hipblaslt_f4x2> || std::is_same_v<InTypeA, hipblaslt_f6x16> || std::is_same_v<InTypeA, hipblaslt_bf6x16>)
+            std::is_same_v<InTypeA, hipblaslt_f4x2>
+#if defined(HIPBLASLT_USE_FP6)
+            || std::is_same_v<InTypeA, hipblaslt_f6x16>
+#endif
+#if defined(HIPBLASLT_USE_BF6)
+            || std::is_same_v<InTypeA, hipblaslt_bf6x16>
+#endif
+        )
         {
             using type = InTypeA;
             a_factor   = type::packed_size;
@@ -92,9 +97,14 @@ struct Runner
         }
 
         if constexpr(
-            std::is_same_v<
-                InTypeB,
-                hipblaslt_f4x2> || std::is_same_v<InTypeB, hipblaslt_f6x16> || std::is_same_v<InTypeB, hipblaslt_bf6x16>)
+            std::is_same_v<InTypeB, hipblaslt_f4x2>
+#if defined(HIPBLASLT_USE_FP6)
+            || std::is_same_v<InTypeB, hipblaslt_f6x16>
+#endif
+#if defined(HIPBLASLT_USE_BF6)
+            || std::is_same_v<InTypeB, hipblaslt_bf6x16>
+#endif
+        )
         {
             using type = InTypeB;
             b_factor   = type::packed_size;
