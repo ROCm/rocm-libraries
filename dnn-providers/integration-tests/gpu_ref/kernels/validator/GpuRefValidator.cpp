@@ -25,6 +25,11 @@ extern "C" __global__ void validateAllClose(ValidatorArgs args)
         return;
     }
 
+    if(*args.failureFlag != 0)
+    {
+        return;
+    }
+
     const auto* ref = static_cast<const DATA_TYPE*>(args.reference);
     const auto* impl = static_cast<const DATA_TYPE*>(args.implementation);
 
@@ -53,6 +58,11 @@ extern "C" __global__ void validateExact(ValidatorArgs args)
 {
     auto idx = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
     if(idx >= args.totalElements)
+    {
+        return;
+    }
+
+    if(*args.failureFlag != 0)
     {
         return;
     }
