@@ -365,6 +365,22 @@ struct HIPBLASLT_EXPORT hipblaslt_f6x16
     {
     }
 
+    explicit HIP_HOST_DEVICE hipblaslt_f6x16(int                  val,
+                                             hip_f6_rounding_mode rm
+                                             = hip_f6_rounding_mode::standard,
+                                             uint32_t rng = 0)
+        : hipblaslt_f6x16(static_cast<float>(val), rm, rng)
+    {
+    }
+
+    explicit HIP_HOST_DEVICE hipblaslt_f6x16(uint32_t             val,
+                                             hip_f6_rounding_mode rm
+                                             = hip_f6_rounding_mode::standard,
+                                             uint32_t rng = 0)
+        : hipblaslt_f6x16(static_cast<float>(val), rm, rng)
+    {
+    }
+
     float castElement(size_t idx) const
     {
         // TODO: update below code if hip_ext_ocp.h supports __amd_cvt_fp6x16_to_floatx16_scale
