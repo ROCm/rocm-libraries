@@ -80,7 +80,8 @@ namespace rocrand_impl::host
 struct mtgp32_device_engine : ::rocrand_device::mtgp32_engine
 {
     // suppress warning about no initialization for __shared__ variables
-    __host__ __device__ mtgp32_device_engine(){};
+    __host__ __device__
+    mtgp32_device_engine() {};
 
     __forceinline__ __host__ __device__
     unsigned int next()
@@ -366,14 +367,14 @@ public:
         return *this;
     }
 
-	void free_engines()
-	{
+    void free_engines()
+    {
         if(m_engines != nullptr)
         {
             system_type::free(m_engines);
             m_engines = nullptr;
         }
-	}
+    }
 
     ~mtgp32_generator_template()
     {
