@@ -24,9 +24,9 @@
 
 #ifdef __HIP__
 constexpr rocrand_status RAND_STATUS_TYPE_ERROR = ROCRAND_STATUS_TYPE_ERROR;
-#else // __HIP__
+#elif defined(__CUDACC__)
 constexpr curandStatus_t RAND_STATUS_TYPE_ERROR = CURAND_STATUS_TYPE_ERROR;
-#endif // __HIP__
+#endif
 
 #ifdef __HIP__
 using rand_ordering_t = rocrand_ordering;
@@ -36,7 +36,7 @@ constexpr rand_ordering_t RAND_ORDERING_PSEUDO_BEST = ROCRAND_ORDERING_PSEUDO_BE
 constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DYNAMIC = ROCRAND_ORDERING_PSEUDO_DYNAMIC;
 constexpr rand_ordering_t RAND_ORDERING_PSEUDO_SEEDED = ROCRAND_ORDERING_PSEUDO_SEEDED;
 constexpr rand_ordering_t RAND_ORDERING_QUASI_DEFAULT = ROCRAND_ORDERING_QUASI_DEFAULT;
-#else // __HIP__
+#elif defined(__CUDACC__)
 using rand_ordering_t = curandOrdering_t;
 constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DEFAULT = CURAND_ORDERING_PSEUDO_DEFAULT;
 constexpr rand_ordering_t RAND_ORDERING_PSEUDO_LEGACY = CURAND_ORDERING_PSEUDO_LEGACY;
@@ -44,7 +44,7 @@ constexpr rand_ordering_t RAND_ORDERING_PSEUDO_BEST = CURAND_ORDERING_PSEUDO_BES
 constexpr rand_ordering_t RAND_ORDERING_PSEUDO_DYNAMIC = CURAND_ORDERING_PSEUDO_DYNAMIC;
 constexpr rand_ordering_t RAND_ORDERING_PSEUDO_SEEDED = CURAND_ORDERING_PSEUDO_SEEDED;
 constexpr rand_ordering_t RAND_ORDERING_QUASI_DEFAULT = CURAND_ORDERING_QUASI_DEFAULT;
-#endif // __HIP__
+#endif
 
 constexpr const char* ordering_name(ordering_t order)
 {
@@ -178,7 +178,7 @@ struct host_api_benchmark : public primbench::benchmark_interface
             else
                 static_assert(sizeof(T) == 0, "Missing a constexpr elif.");
         };
-#else // __HIP__
+#elif defined(__CUDACC__)
         const auto launch = [&]
         {
             if constexpr(Distribution == DISTRIBUTION_UNIFORM && std::is_same_v<T, unsigned int>)
@@ -202,7 +202,7 @@ struct host_api_benchmark : public primbench::benchmark_interface
             else
                 static_assert(sizeof(T) == 0, "Missing a constexpr elif.");
         };
-#endif // __HIP__
+#endif
 
         state.set_items(items);
         state.add_writes<T>(items);
@@ -271,7 +271,7 @@ private:
         }                                                              \
     }                                                                  \
     while(0)
-#else // __HIP__
+#elif defined(__CUDACC__)
 #define QUEUE_DISTRIBUTIONS(engine, ordering)                              \
     do                                                                     \
     {                                                                      \
@@ -297,7 +297,7 @@ private:
         }                                                                      \
     }                                                                          \
     while(0)
-#endif // __HIP__
+#endif
 
 // Quoting programmers-guide.rst:
 // ``ROCRAND_ORDERING_PSEUDO_DYNAMIC`` is not supported for generators
@@ -353,7 +353,7 @@ int main(int argc, char* argv[])
     QUEUE_QUASI(ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32);
     QUEUE_QUASI(ROCRAND_RNG_QUASI_SOBOL64);
     QUEUE_QUASI(ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64);
-#else // __HIP__
+#elif defined(__CUDACC__)
     QUEUE_PSEUDO(CURAND_RNG_PSEUDO_MRG32K3A);
     QUEUE_PSEUDO(CURAND_RNG_PSEUDO_MTGP32);
     QUEUE_DISTRIBUTIONS(CURAND_RNG_PSEUDO_MT19937, CURAND_ORDERING_PSEUDO_DEFAULT);
@@ -363,7 +363,7 @@ int main(int argc, char* argv[])
     QUEUE_QUASI(CURAND_RNG_QUASI_SCRAMBLED_SOBOL32);
     QUEUE_QUASI(CURAND_RNG_QUASI_SOBOL64);
     QUEUE_QUASI(CURAND_RNG_QUASI_SCRAMBLED_SOBOL64);
-#endif // __HIP__
+#endif
 
     executor.run();
 }

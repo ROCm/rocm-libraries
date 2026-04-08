@@ -22,9 +22,9 @@
 
 #ifdef __HIP__
 #include <rocrand/rocrand_mtgp32_11213.h>
-#else // __HIP__
+#elif defined(__CUDACC__)
 #include <curand_mtgp32_host.h>
-#endif // __HIP__
+#endif
 
 #include <optional>
 
@@ -33,9 +33,9 @@
 
 #ifdef __HIP__
 constexpr memcpy_kind_t MEMCPY_HOST_TO_DEVICE = hipMemcpyHostToDevice;
-#else // __HIP__
+#elif defined(__CUDACC__)
 constexpr memcpy_kind_t MEMCPY_HOST_TO_DEVICE = cudaMemcpyHostToDevice;
-#endif // __HIP__
+#endif
 
 #ifdef __HIP__
 constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A = ROCRAND_RNG_PSEUDO_MRG32K3A;
@@ -46,7 +46,7 @@ constexpr rng_type_t RAND_RNG_QUASI_SOBOL32 = ROCRAND_RNG_QUASI_SOBOL32;
 constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL32 = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32;
 constexpr rng_type_t RAND_RNG_QUASI_SOBOL64 = ROCRAND_RNG_QUASI_SOBOL64;
 constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL64 = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64;
-#else // __HIP__
+#elif defined(__CUDACC__)
 constexpr rng_type_t RAND_RNG_PSEUDO_MRG32K3A = CURAND_RNG_PSEUDO_MRG32K3A;
 constexpr rng_type_t RAND_RNG_PSEUDO_XORWOW = CURAND_RNG_PSEUDO_XORWOW;
 constexpr rng_type_t RAND_RNG_PSEUDO_PHILOX4_32_10 = CURAND_RNG_PSEUDO_PHILOX4_32_10;
@@ -55,7 +55,7 @@ constexpr rng_type_t RAND_RNG_QUASI_SOBOL32 = CURAND_RNG_QUASI_SOBOL32;
 constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL32 = CURAND_RNG_QUASI_SCRAMBLED_SOBOL32;
 constexpr rng_type_t RAND_RNG_QUASI_SOBOL64 = CURAND_RNG_QUASI_SOBOL64;
 constexpr rng_type_t RAND_RNG_QUASI_SCRAMBLED_SOBOL64 = CURAND_RNG_QUASI_SCRAMBLED_SOBOL64;
-#endif // __HIP__
+#endif
 
 #ifdef __HIP__
 using rand_state_mrg32k3a_t = rocrand_state_mrg32k3a;
@@ -66,7 +66,7 @@ using rand_state_sobol32_t = rocrand_state_sobol32;
 using rand_state_scrambled_sobol32_t = rocrand_state_scrambled_sobol32;
 using rand_state_sobol64_t = rocrand_state_sobol64;
 using rand_state_scrambled_sobol64_t = rocrand_state_scrambled_sobol64;
-#else // __HIP__
+#elif defined(__CUDACC__)
 using rand_state_mrg32k3a_t = curandStateMRG32k3a_t;
 using rand_state_philox4x32_10_t = curandStatePhilox4_32_10_t;
 using rand_state_xorwow_t = curandStateXORWOW_t;
@@ -75,19 +75,19 @@ using rand_state_sobol32_t = curandStateSobol32_t;
 using rand_state_scrambled_sobol32_t = curandStateScrambledSobol32_t;
 using rand_state_sobol64_t = curandStateSobol64_t;
 using rand_state_scrambled_sobol64_t = curandStateScrambledSobol64_t;
-#endif // __HIP__
+#endif
 
 #ifdef __HIP__
 constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_32_JOEKUO6 = ROCRAND_DIRECTION_VECTORS_32_JOEKUO6;
 constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6 = ROCRAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6;
 constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_64_JOEKUO6 = ROCRAND_DIRECTION_VECTORS_64_JOEKUO6;
 constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6 = ROCRAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6;
-#else // __HIP__
+#elif defined(__CUDACC__)
 constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_32_JOEKUO6 = CURAND_DIRECTION_VECTORS_32_JOEKUO6;
 constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6 = CURAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6;
 constexpr rand_direction_vector_set_t RAND_DIRECTION_VECTORS_64_JOEKUO6 = CURAND_DIRECTION_VECTORS_64_JOEKUO6;
 constexpr rand_direction_vector_set_t RAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6 = CURAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6;
-#endif // __HIP__
+#endif
 
 constexpr size_t next_power2(size_t x)
 {
@@ -318,7 +318,7 @@ struct runner<rocrand_state_lfsr113>
                            generator);
     }
 };
-#endif // __HIP__
+#endif
 
 template<typename EngineState, typename SobolType>
 __global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
@@ -812,7 +812,7 @@ struct generator_discrete_custom : public generator_type
 
     rand_discrete_distribution_t discrete_distribution;
 };
-#endif // __HIP__
+#endif
 
 template<typename Generator, typename State, typename T, distribution Distribution>
 struct device_api_benchmark : public primbench::benchmark_interface
@@ -949,7 +949,7 @@ private:
               DISTRIBUTION_DISCRETE_CUSTOM);                                                       \
     }                                                                                              \
     while(0)
-#else // __HIP__
+#elif defined(__CUDACC__)
 #define QUEUE_DISTRIBUTIONS(State, engine)                                                         \
     do                                                                                             \
     {                                                                                              \
@@ -991,7 +991,7 @@ private:
         }                                                                                          \
     }                                                                                              \
     while(0)
-#endif // __HIP__
+#endif
 
 int main(int argc, char* argv[])
 {
@@ -1026,7 +1026,7 @@ int main(int argc, char* argv[])
     QUEUE_DISTRIBUTIONS(rocrand_state_threefry4x32_20, ROCRAND_RNG_PSEUDO_THREEFRY4_32_20);
     QUEUE_DISTRIBUTIONS(rocrand_state_threefry2x64_20, ROCRAND_RNG_PSEUDO_THREEFRY2_64_20);
     QUEUE_DISTRIBUTIONS(rocrand_state_threefry4x64_20, ROCRAND_RNG_PSEUDO_THREEFRY4_64_20);
-#endif // __HIP__
+#endif
 
     executor.run();
 }

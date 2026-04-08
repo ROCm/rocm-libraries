@@ -24,9 +24,9 @@
 
 #ifdef __HIP__
 #include <rocrand/rocrand_kernel.h>
-#else // __HIP__
+#elif defined(__CUDACC__)
 #include <curand_kernel.h>
-#endif // __HIP__
+#endif
 
 #ifdef __HIP__
     #define RAND_CHECK(condition)                                                               \
@@ -41,7 +41,7 @@
             }                                                                                      \
         }                                                                                          \
         while(0)
-#else // __HIP__
+#elif defined(__CUDACC__)
     #define RAND_CHECK(condition)                                                                \
         do                                                                                        \
         {                                                                                         \
@@ -54,7 +54,7 @@
             }                                                                                     \
         }                                                                                         \
         while(0)
-#endif // __HIP__
+#endif
 
 #ifdef __HIP__
 using stream_t = hipStream_t;
@@ -66,7 +66,7 @@ using rand_discrete_distribution_t = rocrand_discrete_distribution;
 using rand_direction_vector_set_t = rocrand_direction_vector_set;
 using direction_vectors32_t = const unsigned int;
 using direction_vectors64_t = const unsigned long long;
-#else // __HIP__
+#elif defined(__CUDACC__)
 using stream_t = cudaStream_t;
 using rng_type_t = curandRngType;
 using ordering_t = curandOrdering;
@@ -76,7 +76,7 @@ using rand_discrete_distribution_t = curandDiscreteDistribution_t;
 using rand_direction_vector_set_t = curandDirectionVectorSet_t;
 using direction_vectors32_t = curandDirectionVectors32_t;
 using direction_vectors64_t = curandDirectionVectors64_t;
-#endif // __HIP__
+#endif
 
 inline std::string engine_name(const rng_type_t rng_type)
 {
@@ -104,7 +104,7 @@ inline std::string engine_name(const rng_type_t rng_type)
         case ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64: return "scrambled_sobol64";
         case ROCRAND_RNG_PSEUDO_DEFAULT:          return "pseudo_default";
         case ROCRAND_RNG_QUASI_DEFAULT:           return "quasi_default";
-#else // __HIP__
+#elif defined(__CUDACC__)
         case CURAND_RNG_PSEUDO_XORWOW:           return "xorwow";
         case CURAND_RNG_PSEUDO_MRG32K3A:         return "mrg32k3a";
         case CURAND_RNG_PSEUDO_MTGP32:           return "mtgp32";
@@ -117,7 +117,7 @@ inline std::string engine_name(const rng_type_t rng_type)
         case CURAND_RNG_TEST:                    return "test";
         case CURAND_RNG_PSEUDO_DEFAULT:          return "pseudo_default";
         case CURAND_RNG_QUASI_DEFAULT:           return "quasi_default";
-#endif // __HIP__
+#endif
     }
     // clang-format on
     return "unknown";
