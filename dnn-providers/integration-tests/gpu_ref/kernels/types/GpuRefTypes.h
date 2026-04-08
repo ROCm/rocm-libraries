@@ -3,8 +3,8 @@
 
 // Self-contained device header for GPU reference kernels.
 // No host includes allowed - this is compiled by HipRTC.
-// X_TYPE, W_TYPE, Y_TYPE, COMPUTE_TYPE must be defined at compile time via
-// -DX_TYPE=<type> -DW_TYPE=<type> -DY_TYPE=<type> -DCOMPUTE_TYPE=<type>
+// COMPUTE_TYPE must be defined at compile time via -DCOMPUTE_TYPE=<type>.
+// Convolution kernels also require -DX_TYPE=<type> -DW_TYPE=<type> -DY_TYPE=<type>.
 
 #pragma once
 

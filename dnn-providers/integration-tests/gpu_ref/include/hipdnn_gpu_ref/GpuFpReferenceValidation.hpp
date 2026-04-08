@@ -5,6 +5,7 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
 #include <hipdnn_gpu_ref/detail/HipRtcTypeName.hpp>
@@ -26,48 +27,6 @@ namespace hipdnn_gpu_ref
 namespace detail
 {
 
-// RAII wrapper for HIP device memory
-class GpuValidatorBuffer
-{
-public:
-    explicit GpuValidatorBuffer(size_t bytes)
-        : _bytes(bytes)
-    {
-        if(bytes > 0)
-        {
-            throwOnHipError(hipMalloc(&_ptr, bytes), "GpuValidatorBuffer: hipMalloc failed");
-        }
-    }
-
-    ~GpuValidatorBuffer()
-    {
-        if(_ptr != nullptr)
-        {
-            // Best-effort cleanup; ignore errors during destruction
-            static_cast<void>(hipFree(_ptr));
-        }
-    }
-
-    GpuValidatorBuffer(const GpuValidatorBuffer&) = delete;
-    GpuValidatorBuffer& operator=(const GpuValidatorBuffer&) = delete;
-    GpuValidatorBuffer(GpuValidatorBuffer&&) = delete;
-    GpuValidatorBuffer& operator=(GpuValidatorBuffer&&) = delete;
-
-    void* get() const
-    {
-        return _ptr;
-    }
-
-    size_t bytes() const
-    {
-        return _bytes;
-    }
-
-private:
-    void* _ptr = nullptr;
-    size_t _bytes;
-};
-
 #include <GpuRefValidatorArgs.h> // NOLINT(misc-include-cleaner)
 
 inline std::vector<std::string> buildValidatorDefines(const char* dataType, const char* computeType)
@@ -75,10 +34,6 @@ inline std::vector<std::string> buildValidatorDefines(const char* dataType, cons
     std::vector<std::string> defines;
     defines.emplace_back(std::string("-DDATA_TYPE=") + dataType);
     defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + computeType);
-    // GpuRefTypes.h toAccum/fromAccum overloads require X_TYPE defined
-    defines.emplace_back(std::string("-DX_TYPE=") + dataType);
-    defines.emplace_back(std::string("-DW_TYPE=") + dataType);
-    defines.emplace_back(std::string("-DY_TYPE=") + dataType);
     return defines;
 }
 
@@ -186,10 +141,9 @@ private:
     {
         auto totalElements = static_cast<int64_t>(reference.elementCount());
 
-        // Allocate single failure flag on device
-        const detail::GpuValidatorBuffer flagBuf(sizeof(int));
-        detail::throwOnHipError(hipMemset(flagBuf.get(), 0, sizeof(int)),
-                                "validateAllClose: hipMemset failureFlag failed");
+        // Allocate single failure flag using MigratableMemory
+        hipdnn_data_sdk::utilities::MigratableMemory<int> flagBuf(1);
+        flagBuf.hostData()[0] = 0;
 
         // Get device pointers — triggers host→device migration if needed
         auto* refPtr = reference.rawDeviceData();
@@ -205,7 +159,7 @@ private:
         detail::ValidatorArgs args{};
         args.reference = refPtr;
         args.implementation = implPtr;
-        args.failureFlag = static_cast<int*>(flagBuf.get());
+        args.failureFlag = static_cast<int*>(flagBuf.deviceData());
         args.totalElements = totalElements;
         args.absoluteTolerance = static_cast<double>(_absoluteTolerance);
         args.relativeTolerance = static_cast<double>(_relativeTolerance);
@@ -213,10 +167,8 @@ private:
         detail::launchValidatorKernel(kernel.function(), totalElements, args);
 
         // Read back single failure flag
-        int hostFlag = 0;
-        detail::throwOnHipError(
-            hipMemcpy(&hostFlag, flagBuf.get(), sizeof(int), hipMemcpyDeviceToHost),
-            "validateAllClose: hipMemcpy failureFlag failed");
+        flagBuf.markDeviceModified();
+        auto hostFlag = flagBuf.hostData()[0];
 
         if(hostFlag != 0)
         {
@@ -289,10 +241,9 @@ private:
     {
         auto totalElements = static_cast<int64_t>(reference.elementCount());
 
-        // Allocate single failure flag on device
-        const detail::GpuValidatorBuffer flagBuf(sizeof(int));
-        detail::throwOnHipError(hipMemset(flagBuf.get(), 0, sizeof(int)),
-                                "validateExact: hipMemset failureFlag failed");
+        // Allocate single failure flag using MigratableMemory
+        hipdnn_data_sdk::utilities::MigratableMemory<int> flagBuf(1);
+        flagBuf.hostData()[0] = 0;
 
         auto* refPtr = reference.rawDeviceData();
         auto* implPtr = implementation.rawDeviceData();
@@ -305,7 +256,7 @@ private:
         detail::ValidatorArgs args{};
         args.reference = refPtr;
         args.implementation = implPtr;
-        args.failureFlag = static_cast<int*>(flagBuf.get());
+        args.failureFlag = static_cast<int*>(flagBuf.deviceData());
         args.totalElements = totalElements;
         args.absoluteTolerance = 0.0;
         args.relativeTolerance = 0.0;
@@ -313,10 +264,8 @@ private:
         detail::launchValidatorKernel(kernel.function(), totalElements, args);
 
         // Read back single failure flag
-        int hostFlag = 0;
-        detail::throwOnHipError(
-            hipMemcpy(&hostFlag, flagBuf.get(), sizeof(int), hipMemcpyDeviceToHost),
-            "validateExact: hipMemcpy failureFlag failed");
+        flagBuf.markDeviceModified();
+        auto hostFlag = flagBuf.hostData()[0];
 
         if(hostFlag != 0)
         {
