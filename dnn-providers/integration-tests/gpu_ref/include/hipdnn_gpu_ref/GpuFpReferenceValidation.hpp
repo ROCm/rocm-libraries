@@ -6,10 +6,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 
-#include <cstdint>
 #include <limits>
-#include <memory>
-#include <type_traits>
 
 namespace hipdnn_gpu_ref
 {
@@ -41,57 +38,10 @@ private:
     float _relativeTolerance;
 };
 
-// GPU-based integer tensor validator implementing IReferenceValidation.
-// Requires exact equality between reference and implementation tensors.
-// Only supports packed (contiguous) tensors.
-template <class T>
-class GpuIntReferenceValidation : public hipdnn_test_sdk::utilities::IReferenceValidation
-{
-public:
-    GpuIntReferenceValidation() = default;
-    ~GpuIntReferenceValidation() override = default;
-
-    bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
-                  hipdnn_data_sdk::utilities::ITensor& implementation) const override;
-
-private:
-    bool gpuExact(hipdnn_data_sdk::utilities::ITensor& reference,
-                  hipdnn_data_sdk::utilities::ITensor& implementation) const;
-};
-
 // Suppress implicit instantiation — definitions are in GpuFpReferenceValidation.cpp
 extern template class GpuFpReferenceValidation<float>;
 extern template class GpuFpReferenceValidation<hipdnn_data_sdk::types::half>;
 extern template class GpuFpReferenceValidation<hipdnn_data_sdk::types::bfloat16>;
 extern template class GpuFpReferenceValidation<double>;
-
-extern template class GpuIntReferenceValidation<int8_t>;
-extern template class GpuIntReferenceValidation<uint8_t>;
-extern template class GpuIntReferenceValidation<int32_t>;
-
-// Factory function to create a GPU allClose validator for the given data type.
-// Mirrors the createAllCloseValidator() API from CpuFpReferenceValidation.hpp.
-std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
-    createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType dataType,
-                               float absoluteTolerance = std::numeric_limits<float>::epsilon(),
-                               float relativeTolerance = std::numeric_limits<float>::epsilon());
-
-// Templated factory function to create a GPU allClose validator.
-template <typename T>
-inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
-    // NOLINTNEXTLINE(readability-redundant-casting) - cast needed for non-float T types
-    createGpuAllCloseValidator(float absoluteTolerance = float(std::numeric_limits<T>::epsilon()),
-                               // NOLINTNEXTLINE(readability-redundant-casting)
-                               float relativeTolerance = float(std::numeric_limits<T>::epsilon()))
-{
-    if constexpr(std::is_integral_v<T>)
-    {
-        return std::make_unique<GpuIntReferenceValidation<T>>();
-    }
-    else
-    {
-        return std::make_unique<GpuFpReferenceValidation<T>>(absoluteTolerance, relativeTolerance);
-    }
-}
 
 } // namespace hipdnn_gpu_ref

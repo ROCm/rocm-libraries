@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_gpu_ref/GpuFpReferenceValidation.hpp>
+#include <hipdnn_gpu_ref/GpuIntReferenceValidation.hpp>
 
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
@@ -14,21 +14,7 @@ namespace hipdnn_gpu_ref
 {
 
 template <class T>
-GpuFpReferenceValidation<T>::GpuFpReferenceValidation(float absoluteTolerance,
-                                                      float relativeTolerance)
-    : _absoluteTolerance(absoluteTolerance)
-    , _relativeTolerance(relativeTolerance)
-{
-    if(absoluteTolerance < 0.0f || relativeTolerance < 0.0f || std::isnan(absoluteTolerance)
-       || std::isnan(relativeTolerance) || std::isinf(absoluteTolerance)
-       || std::isinf(relativeTolerance))
-    {
-        throw std::invalid_argument("Tolerances must be finite and non-negative");
-    }
-}
-
-template <class T>
-bool GpuFpReferenceValidation<T>::allClose(
+bool GpuIntReferenceValidation<T>::allClose(
     hipdnn_data_sdk::utilities::ITensor& reference,
     hipdnn_data_sdk::utilities::ITensor& implementation) const
 {
@@ -43,17 +29,16 @@ bool GpuFpReferenceValidation<T>::allClose(
         return true;
     }
 
-    // GPU kernel uses linear indexing — only valid for packed (contiguous) tensors.
     if(!reference.isPacked() || !implementation.isPacked())
     {
         throw std::runtime_error("GPU validator requires packed (contiguous) tensors");
     }
 
-    return gpuAllClose(reference, implementation);
+    return gpuExact(reference, implementation);
 }
 
 template <class T>
-bool GpuFpReferenceValidation<T>::gpuAllClose(
+bool GpuIntReferenceValidation<T>::gpuExact(
     hipdnn_data_sdk::utilities::ITensor& reference,
     hipdnn_data_sdk::utilities::ITensor& implementation) const
 {
@@ -63,24 +48,21 @@ bool GpuFpReferenceValidation<T>::gpuAllClose(
     hipdnn_data_sdk::utilities::MigratableMemory<int> flagBuf(1);
     flagBuf.hostData()[0] = 0;
 
-    // Get device pointers — triggers host→device migration if needed
     auto* refPtr = reference.rawDeviceData();
     auto* implPtr = implementation.rawDeviceData();
 
-    // Build defines and compile kernel
     auto defines = detail::buildValidatorDefines(detail::HipRtcTypeName<T>::VALUE, "double");
 
     auto& compiler = detail::GpuRefKernelCompiler::instance();
-    auto& kernel = compiler.getOrCompile("GpuRefValidator.cpp", defines, "validateAllClose");
+    auto& kernel = compiler.getOrCompile("GpuRefValidator.cpp", defines, "validateExact");
 
-    // Build args
     detail::ValidatorArgs args{};
     args.reference = refPtr;
     args.implementation = implPtr;
     args.failureFlag = static_cast<int*>(flagBuf.deviceData());
     args.totalElements = totalElements;
-    args.absoluteTolerance = static_cast<double>(_absoluteTolerance);
-    args.relativeTolerance = static_cast<double>(_relativeTolerance);
+    args.absoluteTolerance = 0.0;
+    args.relativeTolerance = 0.0;
 
     detail::launchValidatorKernel(kernel.function(), totalElements, args);
 
@@ -93,9 +75,8 @@ bool GpuFpReferenceValidation<T>::gpuAllClose(
 
 // --- Explicit template instantiations ---
 
-template class GpuFpReferenceValidation<float>;
-template class GpuFpReferenceValidation<hipdnn_data_sdk::types::half>;
-template class GpuFpReferenceValidation<hipdnn_data_sdk::types::bfloat16>;
-template class GpuFpReferenceValidation<double>;
+template class GpuIntReferenceValidation<int8_t>;
+template class GpuIntReferenceValidation<uint8_t>;
+template class GpuIntReferenceValidation<int32_t>;
 
 } // namespace hipdnn_gpu_ref
