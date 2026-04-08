@@ -125,7 +125,7 @@ private:
     void BindRequiredCommonSymbols(std::vector<std::string>& missing);
     void
     BindSolverSymbols(CKSolverType solver, const char* prefix, std::vector<std::string>& missing);
-    void BindOptionalKernelTypeSymbols(std::vector<std::string>& missing);
+    void BindOptionalKernelTypeSymbols();
     static constexpr int ToSolverIndex(CKSolverType solver) { return static_cast<int>(solver); }
 
     // Singleton cache
@@ -204,25 +204,6 @@ private:
     ConvSolution
     ExtractSolution(ck_impl_status_t status, ConvSolution* ptr, const char* operation) const;
 };
-
-#if MIOPEN_ENABLE_AI_KERNEL_TUNING
-/// Tokenize a CK kernel name string by extracting the template parameters
-/// between '<' and '>', splitting on commas, and stripping whitespace.
-inline std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
-{
-    std::vector<std::string> tokens;
-    std::string token;
-    std::istringstream tokenStream(
-        kernel.substr(kernel.find('<') + 1, kernel.find('>') - kernel.find('<') - 1));
-    while(std::getline(tokenStream, token, ','))
-    {
-        token.erase(remove_if(token.begin(), token.end(), isspace),
-                    token.end()); // strip whitespace
-        tokens.push_back(token);
-    }
-    return tokens;
-}
-#endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
 
 /// Check whether a kernel_id with embedded split_k is valid for deterministic
 /// execution.  Returns false (invalid) if deterministic is requested and

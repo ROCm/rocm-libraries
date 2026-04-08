@@ -906,30 +906,10 @@ target_include_directories(MIOpen PUBLIC
 )
 
 if(MIOPEN_USE_COMPOSABLEKERNEL)
-    if(MIOPEN_BUILD_CK )
-        # the aliased target doesnt exist when we build CK inline as part of MIOPEN.  The aliased target only is not
-        # global when you build it so we dont have access to it.
-        set(MIOPEN_CK_LINK_FLAGS device_conv_operations hip::host)
-
-        # The include directories also dont propagate correctly when using the non aliased targets.
-        # Manually including them fixes this problem for inline builds.
-        target_include_directories(MIOpen SYSTEM PRIVATE
-            ${MIOPEN_CK_INCLUDE_DIR}
-            ${MIOPEN_CK_BUILD_INCLUDE_DIR}
-            ${MIOPEN_CK_LIBRARY_INCLUDE_DIR})
-    else()
-        # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
-        set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
-        
+    if(MIOPEN_BUILD_CK)
         if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
             add_definitions(-DCK_EXPERIMENTAL_BUILDER)
         endif()
-    endif()
-    if(GPU_TARGETS MATCHES "gfx942" OR GPU_TARGETS MATCHES "gfx950")
-        target_compile_definitions(MIOpen PRIVATE CK_ENABLE_TF32)
-    endif()
-    if(GPU_TARGETS MATCHES "gfx950")
-        target_compile_definitions(MIOpen PRIVATE CK_USE_GFX95)
     endif()
 
     # Build per-GPU-target CK grouped conv shared libraries
@@ -956,7 +936,7 @@ endif()
 target_include_directories(MIOpen SYSTEM PUBLIC $<BUILD_INTERFACE:${HALF_INCLUDE_DIR}>)
 # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
 #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
-target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2 ${MIOPEN_CK_LINK_FLAGS})
+target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2)
 miopen_generate_export_header(MIOpen)
 
 if(WIN32)

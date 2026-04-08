@@ -152,7 +152,6 @@ foreach(obj IN LISTS obj_files)
             "  exit code: ${unbundle_result}\n"
             "  stderr: ${unbundle_error}\n"
             "  stdout: ${unbundle_output}")
-        continue()
     endif()
 
     # Re-bundle with only host + target arch, compressed
@@ -174,7 +173,6 @@ foreach(obj IN LISTS obj_files)
             "  exit code: ${rebundle_result}\n"
             "  stderr: ${rebundle_error}\n"
             "  stdout: ${rebundle_output}")
-        continue()
     endif()
 
     # Replace the .hip_fatbin section with the single-arch fatbin.

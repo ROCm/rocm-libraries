@@ -63,6 +63,15 @@ foreach(gpu_target IN LISTS GPU_TARGETS)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
     )
 
+    set_target_properties(${lib_name} PROPERTIES
+        SOVERSION ${MIOpen_SOVERSION}
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN 1
+    )
+    if(NOT WIN32 AND NOT APPLE)
+        target_link_libraries(${lib_name} PRIVATE "-Wl,--exclude-libs,ALL")
+    endif()
+
     # Full target string needed for correct device codegen
     target_compile_options(${lib_name} PRIVATE
         --offload-arch=${gpu_target}
@@ -113,8 +122,8 @@ foreach(gpu_target IN LISTS GPU_TARGETS)
 
     # Install alongside MIOpen
     install(TARGETS ${lib_name}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT ck_plugins
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT ck_plugins
     )
 endforeach()
 

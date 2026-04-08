@@ -39,12 +39,10 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_DEFAULT_KERNELS)
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
-#endif
 #endif
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
@@ -54,8 +52,6 @@ namespace solver {
 namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
-
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 namespace {
 
@@ -90,7 +86,6 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
         kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
     }
 }
-#endif
 
 // clang-format off
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
@@ -174,14 +169,12 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::DefaultKernelFromList(
 }
 
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
-    [[maybe_unused]] const miopen::ExecutionContext& ctx,
-    const ::miopen::conv::ProblemDescription& problem)
+    const miopen::ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
 {
     index     = 0;
     kernel_id = "None";
     split_k   = 1;
 
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -309,13 +302,11 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
 
     // Invariant: split_k must always be 1 in deterministic mode
     assert(!is_deterministic || split_k == 1);
-#endif
 }
 
 bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
     const ::miopen::conv::ProblemDescription& problem)
 {
-#if MIOPEN_USE_COMPOSABLEKERNEL
     if(valid_kernels.empty())
     {
         InitValidKernels(problem);
@@ -358,7 +349,6 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
         // All split_k and index values were iterated
         return false;
     } while(false);
-#endif
     return true;
 }
 
@@ -368,9 +358,8 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::IsValidValue() const
 }
 
 bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::IsValid(
-    [[maybe_unused]] const ::miopen::conv::ProblemDescription& problem) const
+    const ::miopen::conv::ProblemDescription& problem) const
 {
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(!IsDeterministicSplitKValid(kernel_id, problem.GetConv().attribute.deterministic))
         return false;
 
@@ -405,9 +394,6 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::IsValid(
             CKSolverType::GrpConv3dWrw, problem, kernel_id, miopenBFloat16, false);
     default: return false;
     }
-#else
-    return false;
-#endif
 }
 
 bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::operator==(
@@ -436,7 +422,6 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsValidPerformanceConfig(
 size_t ConvHipImplicitGemm3DGroupWrwXdlops::GetCKMaxWorkspaceSize(
     const ::miopen::conv::ProblemDescription& problem) const
 {
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
     if(!loader.IsLoaded())
         return 0;
@@ -448,10 +433,6 @@ size_t ConvHipImplicitGemm3DGroupWrwXdlops::GetCKMaxWorkspaceSize(
         ws = std::max(
             ws, loader.GetWorkspaceSize(CKSolverType::GrpConv3dWrw, problem, data_type, true));
     return ws;
-#else
-    (void)problem;
-    return 0;
-#endif
 }
 
 size_t ConvHipImplicitGemm3DGroupWrwXdlops::GetWorkspaceSize(
@@ -470,10 +451,8 @@ ConvHipImplicitGemm3DGroupWrwXdlops::Search(const ExecutionContext& ctx,
 }
 
 bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ::miopen::conv::ProblemDescription& problem) const
+    const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem) const
 {
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS))
         return false;
     if(!problem.AllTensorsDimsFitIntoInt())
@@ -500,38 +479,20 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
         return true;
 
     return loader.IsApplicable(CKSolverType::GrpConv3dWrw, problem, data_type, false);
-#else
-    (void)ctx;
-    (void)problem;
-    return false;
-#endif
 }
 
 ConvSolution ConvHipImplicitGemm3DGroupWrwXdlops::GetSolution(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ::miopen::conv::ProblemDescription& problem,
-    [[maybe_unused]] const PerformanceConfigHipImplicitGemm3DGroupWrwXdlops& config) const
+    const ExecutionContext& ctx,
+    const ::miopen::conv::ProblemDescription& problem,
+    const PerformanceConfigHipImplicitGemm3DGroupWrwXdlops& config) const
 {
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
     return loader.GetSolution(
         CKSolverType::GrpConv3dWrw, ctx, problem, config.kernel_id, config.UseTF32());
-
-#else
-    return {};
-#endif
 }
-
-#if !(MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL)
-void miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
-    const ::miopen::conv::ProblemDescription&)
-{
-    // No-op stub for non-CK builds
-}
-#endif
 
 } // namespace conv
 } // namespace solver

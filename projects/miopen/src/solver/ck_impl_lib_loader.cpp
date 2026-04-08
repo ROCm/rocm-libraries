@@ -320,21 +320,21 @@ void CkImplLibLoader::BindSolverSymbols(CKSolverType solver,
     bind_symbol(fns.get_solution, (sym + "get_solution").c_str());
 }
 
-void CkImplLibLoader::BindOptionalKernelTypeSymbols(std::vector<std::string>& missing)
+void CkImplLibLoader::BindOptionalKernelTypeSymbols()
 {
-    auto bind_symbol = [this, &missing](auto& member, const char* symbol_name) {
+    auto bind_optional = [this](auto& member, const char* symbol_name) {
         using FnPtr = std::remove_reference_t<decltype(member)>;
         member      = reinterpret_cast<FnPtr>(ResolveRawSymbol(symbol_name));
         if(member == nullptr)
-            missing.emplace_back(symbol_name);
+            MIOPEN_LOG_I2("Optional CK symbol not found: " << symbol_name);
     };
 
-    bind_symbol(solver_fns_[ToSolverIndex(CKSolverType::GrpConv3dFwd)].get_all_kernel_types,
-                "ck_impl_3d_fwd_get_all_kernel_type_strings");
-    bind_symbol(solver_fns_[ToSolverIndex(CKSolverType::GrpConv3dBwd)].get_all_kernel_types,
-                "ck_impl_3d_bwd_get_all_kernel_type_strings");
-    bind_symbol(solver_fns_[ToSolverIndex(CKSolverType::GrpConv3dWrw)].get_all_kernel_types,
-                "ck_impl_3d_wrw_get_all_kernel_type_strings");
+    bind_optional(solver_fns_[ToSolverIndex(CKSolverType::GrpConv3dFwd)].get_all_kernel_types,
+                  "ck_impl_3d_fwd_get_all_kernel_type_strings");
+    bind_optional(solver_fns_[ToSolverIndex(CKSolverType::GrpConv3dBwd)].get_all_kernel_types,
+                  "ck_impl_3d_bwd_get_all_kernel_type_strings");
+    bind_optional(solver_fns_[ToSolverIndex(CKSolverType::GrpConv3dWrw)].get_all_kernel_types,
+                  "ck_impl_3d_wrw_get_all_kernel_type_strings");
 }
 
 bool CkImplLibLoader::LoadSymbols()
@@ -366,7 +366,7 @@ bool CkImplLibLoader::LoadSymbols()
     for(const auto& binding : solver_bindings)
         BindSolverSymbols(binding.solver, binding.prefix, missing);
 
-    BindOptionalKernelTypeSymbols(missing);
+    BindOptionalKernelTypeSymbols();
 
     if(missing.empty())
         return true;

@@ -33,6 +33,7 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
