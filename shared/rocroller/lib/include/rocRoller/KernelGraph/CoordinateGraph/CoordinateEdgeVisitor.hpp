@@ -226,6 +226,18 @@ namespace rocRoller
                 return rv;
             }
 
+            std::vector<Expression::ExpressionPtr> operator()(LDSSwizzleGR const& e)
+            {
+                AssertFatal(srcs.size() == 1 && indexes.size() >= 2);
+                return {e.swizzle(indexes[0], indexes[1])};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(LDSSwizzleLR const& e)
+            {
+                AssertFatal(srcs.size() == 1 && indexes.size() >= 2);
+                return {e.unswizzle(indexes[0], indexes[1])};
+            }
+
             std::vector<Expression::ExpressionPtr> operator()(PiecewiseAffineJoin const& e)
             {
                 AssertFatal(dsts.size() == e.strides.first.size(),
@@ -560,6 +572,24 @@ namespace rocRoller
                 for(size_t i = 0; i < e.reverse.size(); ++i)
                     rv.push_back(positionalArgumentPropagation(e.reverse[i], indexes));
                 return rv;
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(LDSSwizzleGR const& e)
+            {
+                AssertFatal(srcs.size() == 1);
+                auto delta = getDelta(dstTags[0]);
+                for(size_t i = 0; i < srcs.size(); ++i)
+                    deltas.emplace(srcTags[i], delta);
+                return {e.swizzle(indexes[0], indexes[1])};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(LDSSwizzleLR const& e)
+            {
+                AssertFatal(srcs.size() == 1);
+                auto delta = getDelta(dstTags[0]);
+                for(size_t i = 0; i < srcs.size(); ++i)
+                    deltas.emplace(srcTags[i], delta);
+                return {e.unswizzle(indexes[0], indexes[1])};
             }
 
             std::vector<Expression::ExpressionPtr> operator()(PiecewiseAffineJoin const& e)

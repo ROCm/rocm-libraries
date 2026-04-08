@@ -1251,7 +1251,7 @@ namespace rocRoller::KernelGraph
 
         /**
          * @brief Detect if a candidate's index path contains a non-affine
-         * transform (e.g. LDS bank swizzle ExpressionTransform) and extract
+         * transform (e.g. LDS bank swizzle edge) and extract
          * the unroll coordinate and its value from the upstream SetCoordinate.
          *
          * When found, the unroll coordinate's value must be incorporated
@@ -1302,26 +1302,27 @@ namespace rocRoller::KernelGraph
                 return {-1, -1};
 
             // Check if any node in the transform path has an
-            // ExpressionTransform edge (e.g. LDS swizzle).
+            // LDS swizzle edge (LDSSwizzleGR or LDSSwizzleLR).
             // `path` contains coordinate node tags; getNeighbours
             // returns incident edge tags in the hypergraph.
-            bool hasExpressionTransform = false;
+            bool hasLDSSwizzle = false;
             for(auto nodeTag : path)
             {
                 for(auto edgeTag :
                     kgraph.coordinates.getNeighbours(nodeTag, Graph::opposite(direction)))
                 {
-                    if(kgraph.coordinates.get<ExpressionTransform>(edgeTag).has_value())
+                    if(kgraph.coordinates.get<LDSSwizzleGR>(edgeTag).has_value()
+                       || kgraph.coordinates.get<LDSSwizzleLR>(edgeTag).has_value())
                     {
-                        hasExpressionTransform = true;
+                        hasLDSSwizzle = true;
                         break;
                     }
                 }
-                if(hasExpressionTransform)
+                if(hasLDSSwizzle)
                     break;
             }
 
-            if(!hasExpressionTransform)
+            if(!hasLDSSwizzle)
                 return {-1, -1};
 
             // Walk upstream via Body edges to find the SetCoordinate that sets

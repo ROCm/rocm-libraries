@@ -302,6 +302,127 @@ namespace rocRoller
         };
 
         /**
+         * LDS bank swizzle for Global Read (write) side.
+         *
+         * Permutes K-column chunk index based on tile row to eliminate
+         * ds_read_b128 bank conflicts. Only the reverse visitor is used
+         * (the forward direction is never traversed for this edge).
+         *
+         * Graph: addElement(edge, {swizzledCol}, {col, row})
+         * Reverse: given col and row indexes, compute swizzled col.
+         */
+        struct LDSSwizzleGR
+        {
+            unsigned int numColumns;
+            unsigned int rowsPerBankRow;
+
+            LDSSwizzleGR() = default;
+
+            LDSSwizzleGR(unsigned int numColumns, unsigned int rowsPerBankRow)
+                : numColumns(numColumns)
+                , rowsPerBankRow(rowsPerBankRow)
+            {
+            }
+
+            /// Compute swizzled column from col and row index expressions.
+            Expression::ExpressionPtr swizzle(Expression::ExpressionPtr col,
+                                              Expression::ExpressionPtr row) const
+            {
+                using namespace Expression;
+                auto numCol  = literal(numColumns);
+                auto logRows = literal(static_cast<unsigned int>(__builtin_ctz(rowsPerBankRow)));
+
+                // Convert tile row to LDS bank row index
+                auto bankRowIdx = row >> logRows;
+
+                // On even bank rows, swap adjacent column pairs (0<->1, 2<->3, etc)
+                auto swapOnEvenRow = (bankRowIdx ^ literal(1u)) & literal(1u);
+                col                = col ^ swapOnEvenRow;
+
+                // Rotate columns: rotation = numCol - (bankRowIdx / 2) * 2
+                auto rotation = numCol - ((bankRowIdx >> literal(1u)) << literal(1u));
+                col           = (col + rotation) & (numCol - literal(1u));
+                return col;
+            }
+
+            std::string toString() const
+            {
+                return name();
+            }
+
+            std::string name() const
+            {
+                return "LDSSwizzleGR";
+            }
+        };
+
+        /**
+         * LDS bank swizzle for Local Read side.
+         *
+         * Un-permutes element-granularity K-column index based on tile
+         * row so the wave reads the correct logical element from the
+         * swizzled LDS layout.
+         *
+         * Graph: addElement(edge, {rawCol}, {col, row})
+         * Reverse: given col and row indexes, compute un-swizzled col.
+         */
+        struct LDSSwizzleLR
+        {
+            unsigned int numColumns;
+            unsigned int rowsPerBankRow;
+            unsigned int elementsPerChunk;
+
+            LDSSwizzleLR() = default;
+
+            LDSSwizzleLR(unsigned int numColumns,
+                         unsigned int rowsPerBankRow,
+                         unsigned int elementsPerChunk)
+                : numColumns(numColumns)
+                , rowsPerBankRow(rowsPerBankRow)
+                , elementsPerChunk(elementsPerChunk)
+            {
+            }
+
+            /// Compute un-swizzled column (in elements) from col and row index expressions.
+            Expression::ExpressionPtr unswizzle(Expression::ExpressionPtr col,
+                                                Expression::ExpressionPtr row) const
+            {
+                using namespace Expression;
+                auto numCol   = literal(numColumns);
+                auto logElems = literal(static_cast<unsigned int>(__builtin_ctz(elementsPerChunk)));
+                auto elems    = literal(elementsPerChunk);
+                auto logRows  = literal(static_cast<unsigned int>(__builtin_ctz(rowsPerBankRow)));
+
+                // Decompose element index into dwordx4 chunk and sub-element offset
+                auto colChunk       = col >> logElems;
+                auto elementInChunk = col & (elems - literal(1u));
+
+                // Convert tile row to LDS bank row index
+                auto bankRowIdx = row >> logRows;
+
+                // Inverse rotation: invRotation = (bankRowIdx / 2) * 2
+                auto invRotation = (bankRowIdx >> literal(1u)) << literal(1u);
+                colChunk         = (colChunk + invRotation) & (numCol - literal(1u));
+
+                // On even bank rows, swap adjacent column pairs
+                auto swapOnEvenRow = (bankRowIdx ^ literal(1u)) & literal(1u);
+                colChunk           = colChunk ^ swapOnEvenRow;
+
+                return colChunk * elems + elementInChunk;
+            }
+
+            std::string toString() const
+            {
+                return name();
+            }
+
+            std::string name() const
+            {
+                return "LDSSwizzleLR";
+            }
+        };
+
+        /**
          * Join dimensions using conditional strides and initial values.
          *
          * The strides and initial values are passed in.  They are not

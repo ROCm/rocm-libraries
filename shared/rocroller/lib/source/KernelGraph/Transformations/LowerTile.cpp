@@ -121,85 +121,6 @@ namespace rocRoller
                    && (layoutType == LayoutType::MATRIX_A || layoutType == LayoutType::MATRIX_B);
         }
 
-        /**
-         * Build the GR (Global Read) swizzle ExpressionTransform.
-         *
-         *   $0 = tile col (in dwordx4 chunks)
-         *   $1 = tile row
-         *   returns swizzled col (in dwordx4 chunks)
-         */
-        ExpressionTransform buildGRSwizzleTransform(LDSSwizzleParams const& params)
-        {
-            AssertFatal(params.rowsPerBankRow > 0,
-                        "buildGRSwizzleTransform: rowsPerBankRow must be > 0");
-            auto colChunk = positionalArgument(0, Register::Type::Vector, DataType::UInt32);
-            auto row      = positionalArgument(1, Register::Type::Vector, DataType::UInt32);
-
-            auto numCol  = literal(params.numColumns);
-            auto logRows = literal(static_cast<unsigned int>(__builtin_ctz(params.rowsPerBankRow)));
-
-            // Convert tile row to LDS bank row index
-            auto bankRowIdx = row >> logRows;
-
-            // On even lds bank rows, swap adjacent column pairs (0<->1, 2<->3, etc):
-            auto swapOnEvenRow = (bankRowIdx ^ literal(1u)) & literal(1u);
-            colChunk           = colChunk ^ swapOnEvenRow;
-
-            // Every two rows, rotate columns backwards by increasing larger amounts
-            // rotation = numCol - (bankRowIdx / 2) * 2.
-            auto rotation = numCol - ((bankRowIdx >> literal(1u)) << literal(1u));
-
-            // Mod num cols
-            colChunk = (colChunk + rotation) & (numCol - literal(1u));
-
-            auto forwardArg = positionalArgument(0, Register::Type::Vector, DataType::UInt32);
-            return ExpressionTransform{{forwardArg}, {colChunk}};
-        }
-
-        /**
-         * Build the LR (LDS Read) swizzle ExpressionTransform.
-         *
-         *   $0 = tile col (in elements)
-         *   $1 = tile row
-         *   returns swizzled col (in elements)
-         */
-        ExpressionTransform buildLRSwizzleTransform(LDSSwizzleParams const& params)
-        {
-            AssertFatal(params.rowsPerBankRow > 0 && params.elementsPerChunk > 0,
-                        "buildLRSwizzleTransform: rowsPerBankRow and elementsPerChunk must be > 0");
-            auto col = positionalArgument(0, Register::Type::Vector, DataType::UInt32);
-            auto row = positionalArgument(1, Register::Type::Vector, DataType::UInt32);
-
-            auto numCol = literal(params.numColumns);
-            auto logElems
-                = literal(static_cast<unsigned int>(__builtin_ctz(params.elementsPerChunk)));
-            auto elementsPerChunk = literal(params.elementsPerChunk);
-            auto logRows = literal(static_cast<unsigned int>(__builtin_ctz(params.rowsPerBankRow)));
-
-            // Decompose element index into chunk (dwordx4) index and element-within-chunk offset
-            auto colChunk       = col >> logElems;
-            auto elementInChunk = col & (elementsPerChunk - literal(1u));
-
-            // Convert tile row to LDS bank row index
-            auto bankRowIdx = row >> logRows;
-
-            // Every two rows, rotate columns forwards by increasing larger amounts
-            // invRotation = (bankRowIdx / 2) * 2
-            auto invRotation = (bankRowIdx >> literal(1u)) << literal(1u);
-
-            // Mod num cols
-            colChunk = (colChunk + invRotation) & (numCol - literal(1u));
-
-            // On even lds bank rows, swap adjacent column pairs (0<->1, 2<->3, etc):
-            auto swapOnEvenRow = (bankRowIdx ^ literal(1u)) & literal(1u);
-            colChunk           = colChunk ^ swapOnEvenRow;
-
-            auto unswizzledCol = colChunk * elementsPerChunk + elementInChunk;
-
-            auto forwardArg = positionalArgument(0, Register::Type::Vector, DataType::UInt32);
-            return ExpressionTransform{{forwardArg}, {unswizzledCol}};
-        }
-
         ConstraintStatus NoConstructDestructMT(const KernelGraph& k)
         {
             TIMER(t, "Constraint::NoConstructDestructMT");
@@ -1086,11 +1007,13 @@ namespace rocRoller
 
                 if(!params.noConflicts())
                 {
-                    auto grSwizzle = buildGRSwizzleTransform(params);
 
                     grSwizzleNThrX
                         = graph.coordinates.addElement(ThreadTileNumber(0, literal(numColumns)));
-                    graph.coordinates.addElement(grSwizzle, {grSwizzleNThrX}, {nThrX, nThrY});
+                    graph.coordinates.addElement(
+                        LDSSwizzleGR{params.numColumns, params.rowsPerBankRow},
+                        {grSwizzleNThrX},
+                        {nThrX, nThrY});
 
                     Log::getLogger()->debug(
                         "GR swizzle B: K={} R={}", params.numColumns, params.rowsPerBankRow);
@@ -1138,11 +1061,13 @@ namespace rocRoller
 
                 if(!params.noConflicts())
                 {
-                    auto grSwizzle = buildGRSwizzleTransform(params);
 
                     grSwizzleNThrY
                         = graph.coordinates.addElement(ThreadTileNumber(1, literal(numColumns)));
-                    graph.coordinates.addElement(grSwizzle, {grSwizzleNThrY}, {nThrY, nThrX});
+                    graph.coordinates.addElement(
+                        LDSSwizzleGR{params.numColumns, params.rowsPerBankRow},
+                        {grSwizzleNThrY},
+                        {nThrY, nThrX});
 
                     Log::getLogger()->debug(
                         "GR swizzle (load): nThrY={} nThrX={} grSwizzleNThrY={} K={} R={}",
@@ -2339,7 +2264,7 @@ namespace rocRoller
                                         false);
                 }
 
-                // LR swizzle: insert ExpressionTransform that un-permutes
+                // LR swizzle: insert LDSSwizzleLR edge that un-permutes
                 // the K-column so the wave reads the correct logical element.
                 //   ldsTag --Tile--> {iMacX, rawIMacY}
                 //   {rawIMacY} --ET--> {colCoord, rowCoord}
@@ -2364,10 +2289,12 @@ namespace rocRoller
                             int rowCoord = isA ? iMacX : iMacY;
                             int colCoord = isA ? iMacY : iMacX;
 
-                            auto lrSwizzle = buildLRSwizzleTransform(params);
-
                             auto rawCol = graph.coordinates.addElement(tile.tileIndex(kDim));
-                            graph.coordinates.addElement(lrSwizzle, {rawCol}, {colCoord, rowCoord});
+                            graph.coordinates.addElement(LDSSwizzleLR{params.numColumns,
+                                                                      params.rowsPerBankRow,
+                                                                      params.elementsPerChunk},
+                                                         {rawCol},
+                                                         {colCoord, rowCoord});
                             if(isA)
                                 tileIMacY = rawCol;
                             else

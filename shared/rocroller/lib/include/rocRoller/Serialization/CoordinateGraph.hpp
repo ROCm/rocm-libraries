@@ -242,6 +242,47 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::CoordinateGraph::LDSSwizzleGR, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void
+                mapping(IO& io, KernelGraph::CoordinateGraph::LDSSwizzleGR& edge, Context& ctx)
+            {
+                iot::mapRequired(io, "numColumns", edge.numColumns);
+                iot::mapRequired(io, "rowsPerBankRow", edge.rowsPerBankRow);
+            }
+
+            static void mapping(IO& io, KernelGraph::CoordinateGraph::LDSSwizzleGR& edge)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+                Context ctx;
+                mapping(io, edge, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::CoordinateGraph::LDSSwizzleLR, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void
+                mapping(IO& io, KernelGraph::CoordinateGraph::LDSSwizzleLR& edge, Context& ctx)
+            {
+                iot::mapRequired(io, "numColumns", edge.numColumns);
+                iot::mapRequired(io, "rowsPerBankRow", edge.rowsPerBankRow);
+                iot::mapRequired(io, "elementsPerChunk", edge.elementsPerChunk);
+            }
+
+            static void mapping(IO& io, KernelGraph::CoordinateGraph::LDSSwizzleLR& edge)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+                Context ctx;
+                mapping(io, edge, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::CoordinateGraph::PiecewiseAffineJoin, IO, Context>
         {
             using iot = IOTraits<IO>;

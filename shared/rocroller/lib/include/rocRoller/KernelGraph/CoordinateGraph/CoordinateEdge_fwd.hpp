@@ -16,6 +16,8 @@ namespace rocRoller
         struct Forget;
         struct Inherit;
         struct Join;
+        struct LDSSwizzleGR;
+        struct LDSSwizzleLR;
         struct MakeOutput;
         struct PassThrough;
         struct PiecewiseAffineJoin;
@@ -30,6 +32,8 @@ namespace rocRoller
                                                      Forget,
                                                      Inherit,
                                                      Join,
+                                                     LDSSwizzleGR,
+                                                     LDSSwizzleLR,
                                                      MakeOutput,
                                                      PassThrough,
                                                      PiecewiseAffineJoin,

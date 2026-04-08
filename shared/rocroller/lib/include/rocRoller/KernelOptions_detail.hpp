@@ -127,7 +127,7 @@ namespace rocRoller
 
         /**
          * LDS bank conflict elimination via intra-wave column rotation + pair-swap swizzle.
-         * When set to Swizzle, applies ExpressionTransform to remap K-column indices on
+         * When set to Swizzle, remaps K-column indices on
          * both the GR (write) and LR (read) sides to eliminate ds_read_b128 bank conflicts.
          */
         LDSBankSwizzleMode ldsSwizzleMode = LDSBankSwizzleMode::None;
