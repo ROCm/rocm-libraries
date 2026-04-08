@@ -936,6 +936,12 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
     add_subdirectory(ck_impl)
 endif()
 
+add_library(MIOpen_with_plugins INTERFACE)
+target_link_libraries(MIOpen_with_plugins INTERFACE MIOpen)
+if(CK_PLUGIN_TARGETS)
+    add_dependencies(MIOpen_with_plugins ${CK_PLUGIN_TARGETS})
+endif()
+
 if(WIN32)
     # Refer to https://en.cppreference.com/w/cpp/language/types for details.
     target_compile_options(MIOpen PRIVATE $<BUILD_INTERFACE:$<$<CXX_COMPILER_ID:Clang>:-U__LP64__>>)

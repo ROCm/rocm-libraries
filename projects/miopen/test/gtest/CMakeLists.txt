@@ -108,7 +108,7 @@ function(add_gtest TEST_NAME TEST_CPP)
 
   # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
   #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
-  target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main GTest::gmock MIOpen hip::host )
+  target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main GTest::gmock MIOpen_with_plugins hip::host )
   if(NOT MIOPEN_EMBED_DB STREQUAL "")
       target_link_libraries(${TEST_NAME} $<BUILD_INTERFACE:miopen_data>)
   endif()
@@ -294,23 +294,6 @@ else()
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT clients)
   endif()
-endif()
-
-# Ensure CK plugin libraries are built before tests (loaded via dlopen at runtime)
-if(MIOPEN_USE_COMPOSABLEKERNEL)
-  foreach(gpu_target IN LISTS GPU_TARGETS)
-    string(FIND "${gpu_target}" ":" _colon_pos)
-    if(_colon_pos GREATER -1)
-      string(SUBSTRING "${gpu_target}" 0 ${_colon_pos} _arch_base)
-    else()
-      set(_arch_base "${gpu_target}")
-    endif()
-    set(_ck_lib "MIOpenCKGroupedConv_${_arch_base}")
-    if(TARGET ${_ck_lib})
-      add_dependencies(tests ${_ck_lib})
-      add_dependencies(check ${_ck_lib})
-    endif()
-  endforeach()
 endif()
 
 message(STATUS "gtest env: MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR}")
