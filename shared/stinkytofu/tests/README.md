@@ -9,7 +9,7 @@ tests/
 +-- CMakeLists.txt           # Test build configuration
 +-- StinkyTofuTestMain.cpp   # Main test entry point (GTest runner)
 +-- unit/                    # Unit tests
-    +-- ConfigurableWaitCntPassTest.cpp
+    +-- WaitCntInsertionTest.cpp
     +-- IntrusiveListTest.cpp
     +-- PassManagerTest.cpp
     +-- StinkyAsmEmitterTest.cpp
@@ -96,7 +96,7 @@ ctest --output-on-failure
 Unit tests verify individual components in isolation:
 - **PassManagerTest**: Tests for the pass manager infrastructure
 - **IntrusiveListTest**: Tests for the intrusive list data structure
-- **ConfigurableWaitCntPassTest**: Tests for the configurable wait count pass
+- **WaitCntInsertionTest**: Tests for the configurable wait count pass
 - **StinkyAsmEmitterTest**: Tests for the assembly emitter
 
 ## Adding New Tests
@@ -119,7 +119,7 @@ Unit tests verify individual components in isolation:
    set(UNIT_TEST_FILES
        unit/PassManagerTest.cpp
        unit/IntrusiveListTest.cpp
-       unit/ConfigurableWaitCntPassTest.cpp
+       unit/WaitCntInsertionTest.cpp
        unit/asm/StinkyAsmEmitterTest.cpp
        unit/MyNewTest.cpp  # Add your new test here
    )

@@ -34,7 +34,7 @@ set(TEST_LINK_LIBS
 
 # Assembly IR Tests
 set(UNIT_ASM_TEST_FILES
-    unit/asm/ConfigurableWaitCntPassTest.cpp
+    unit/asm/WaitCntInsertionTest.cpp
     unit/asm/DAGSchedulerPassTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/DefUseChainTest.cpp
@@ -52,6 +52,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/FuzzTest.cpp
     unit/asm/HwInstDescTest.cpp
     unit/asm/ReadWriteOperandTest.cpp
+    unit/asm/BarrierTest.cpp
 )
 
 # High-Level IR Tests
@@ -193,3 +194,19 @@ if(STINKYTOFU_BUILD_PYTHON)
 else()
     message(STATUS "Python module build disabled (STINKYTOFU_BUILD_PYTHON=OFF) - skipping Python tests")
 endif()
+
+##===----------------------------------------------------------------------===##
+# FileCheck tests (LLVM-style .stir pattern tests)
+##===----------------------------------------------------------------------===##
+file(GLOB FILECHECK_TESTS "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.stir")
+foreach(test_file ${FILECHECK_TESTS})
+    get_filename_component(test_name ${test_file} NAME_WE)
+    add_test(
+        NAME FileCheck.${test_name}
+        COMMAND $<TARGET_FILE:stinkytofu-check>
+                ${test_file}
+                --stinkytofu-opt $<TARGET_FILE:stinkytofu-opt>
+    )
+endforeach()
+list(LENGTH FILECHECK_TESTS FILECHECK_COUNT)
+message(STATUS "  - Registered ${FILECHECK_COUNT} FileCheck tests")

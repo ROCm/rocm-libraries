@@ -131,6 +131,54 @@ namespace stinkytofu
         return StinkyErrorCode::SUCCESS;
     }
 
+    StinkyErrorCode StinkyIRConverter::populateFunctionFromParsed(ParsedFunction& parsedFunc,
+                                                                  Function&       func,
+                                                                  GfxArchID       arch)
+    {
+        if(parsedFunc.blocks.empty())
+            return StinkyErrorCode::PARSE_ERROR;
+
+        func.clear();
+        func.setName(parsedFunc.funcName);
+
+        std::unordered_map<std::string, BasicBlock*> blockMap;
+
+        for(auto& parsedBlock : parsedFunc.blocks)
+        {
+            BasicBlock* bb                 = func.createBasicBlock(parsedBlock->blockId);
+            blockMap[parsedBlock->blockId] = bb;
+
+            AsmIRBuilder irBuilder(*bb, arch);
+            for(auto& inst : parsedBlock->instructions)
+            {
+                convertInstruction(irBuilder, inst, arch);
+            }
+        }
+
+        for(size_t i = 0; i < parsedFunc.blocks.size(); ++i)
+        {
+            ParsedBlock& parsedBlock = *parsedFunc.blocks[i];
+            BasicBlock*  bb          = blockMap[parsedBlock.blockId];
+            if(!bb)
+                continue;
+
+            for(const std::string& succId : parsedBlock.successorIds)
+            {
+                std::string key = succId;
+                if(!key.empty() && key[0] == '^')
+                    key = key.substr(1);
+                BasicBlock* succ = blockMap[key];
+                if(succ)
+                {
+                    bb->addSuccessor(succ);
+                    succ->addPredecessor(bb);
+                }
+            }
+        }
+
+        return StinkyErrorCode::SUCCESS;
+    }
+
     Function* StinkyIRConverter::convertToFunction(const std::string& rawInstructions)
     {
         function = std::make_unique<Function>("kernel");
