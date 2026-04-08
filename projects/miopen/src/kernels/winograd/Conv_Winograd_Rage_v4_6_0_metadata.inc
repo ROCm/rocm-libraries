@@ -1,5 +1,28 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
 
 .macro PROLOG_KERNEL_DESCRIPTOR kernel_name:req
 .text
@@ -98,21 +121,23 @@ amdhsa.kernels:
 .endm
 
 .macro kernel_end kernel_name:req
-.if (.amdgcn.gfx_generation_number == 12)
-.balignl 256, 0xBF9F0000
-.else
 .align 256
-.endif
 .Lfunc_end0:
    .size \kernel_name, .Lfunc_end0 - \kernel_name
 .endm
 
-.macro EPILOG_KERNEL_DESCRIPTOR arg_sc:req, arg_wc:req, arg_accum_offset:req, arg_wg_x:req, arg_kernel_name:req
+.macro EPILOG_KERNEL_DESCRIPTOR kernel_name:req
 
-kernel_end \arg_kernel_name
+kernel_end \kernel_name
 
-.amdgcn.next_free_sgpr = \arg_sc
-.amdgcn.next_free_vgpr = \arg_wc
+.if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4 && .amdgcn.gfx_generation_stepping == 2)
+    sgpr_cnt = 80
+    vgpr_cnt = 164
+    workgroup_size_x = 768
+.endif
+
+.amdgcn.next_free_sgpr = sgpr_cnt
+.amdgcn.next_free_vgpr = vgpr_cnt
 
 __group_segment_fixed_size = 65536
 __sgpr_dispatch_ptr = 1
@@ -123,7 +148,6 @@ __sgpr_workgroup_id_z = 0
 __sgpr_workgroup_info = 0
 __vgpr_workitem_id = 1
 __reserve_vcc = 1
-__accum_offset = \arg_accum_offset
 __float_round_mode_32 = 0
 __float_round_mode_16_64 = 0
 __float_denorm_mode_32 = 0
@@ -135,7 +159,7 @@ __fp16_overflow = 0
 .rodata
 .p2align 6
 .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4 && .amdgcn.gfx_generation_stepping == 2)
-.amdhsa_kernel \arg_kernel_name
+.amdhsa_kernel \kernel_name
     .amdhsa_group_segment_fixed_size         __group_segment_fixed_size
     .amdhsa_user_sgpr_dispatch_ptr           __sgpr_dispatch_ptr // s[0:1]
     .amdhsa_user_sgpr_kernarg_segment_ptr    __sgpr_kernarg_segment_ptr // s[2:3]
@@ -147,7 +171,7 @@ __fp16_overflow = 0
 	.amdhsa_reserve_vcc                      __reserve_vcc
     .amdhsa_next_free_sgpr                   .amdgcn.next_free_sgpr
     .amdhsa_next_free_vgpr                   .amdgcn.next_free_vgpr
-	.amdhsa_accum_offset                     __accum_offset
+	.amdhsa_accum_offset                     .amdgcn.next_free_vgpr
 	.amdhsa_float_round_mode_32              __float_round_mode_32
 	.amdhsa_float_round_mode_16_64           __float_round_mode_16_64
 	.amdhsa_float_denorm_mode_32             __float_denorm_mode_32
@@ -155,49 +179,34 @@ __fp16_overflow = 0
     .amdhsa_dx10_clamp                       __dx10_clamp
     .amdhsa_ieee_mode                        __ieee_mode
 	.amdhsa_fp16_overflow                    __fp16_overflow
-.end_amdhsa_kernel
-.elseif (.amdgcn.gfx_generation_number == 12)
-.amdhsa_kernel \arg_kernel_name
-    .amdhsa_group_segment_fixed_size         __group_segment_fixed_size
-    .amdhsa_user_sgpr_dispatch_ptr           __sgpr_dispatch_ptr // s[0:1]
-    .amdhsa_user_sgpr_kernarg_segment_ptr    __sgpr_kernarg_segment_ptr // s[2:3]
-    .amdhsa_system_sgpr_workgroup_id_x       __sgpr_workgroup_id_x
-    .amdhsa_system_sgpr_workgroup_id_y       __sgpr_workgroup_id_y
-    .amdhsa_system_sgpr_workgroup_id_z       __sgpr_workgroup_id_z
-    .amdhsa_system_sgpr_workgroup_info       __sgpr_workgroup_info
-    .amdhsa_system_vgpr_workitem_id          __vgpr_workitem_id
-    .amdhsa_reserve_vcc                      __reserve_vcc
-    .amdhsa_next_free_sgpr                   .amdgcn.next_free_sgpr
-    .amdhsa_next_free_vgpr                   .amdgcn.next_free_vgpr
+/* \todo add gfx12 support with these directives
     .amdhsa_wavefront_size32                 0
     .amdhsa_workgroup_processor_mode         0
-    .amdhsa_round_robin_scheduling           0
-    .amdhsa_forward_progress                 0
-    .amdhsa_memory_ordered                   0
-    .amdhsa_float_round_mode_32              __float_round_mode_32
-    .amdhsa_float_round_mode_16_64           __float_round_mode_16_64
-    .amdhsa_float_denorm_mode_32             __float_denorm_mode_32
-    .amdhsa_float_denorm_mode_16_64          __float_denorm_mode_16_64
-    .amdhsa_fp16_overflow                    __fp16_overflow
+*/
 .end_amdhsa_kernel
 .endif
 
-METADATA_WRAPPER \arg_sc, \arg_wc, \arg_wg_x, <\arg_kernel_name>
+METADATA_WRAPPER sgpr_cnt, vgpr_cnt, workgroup_size_x, <\kernel_name>
 
 .endm
 
-.macro PROLOG_KERNEL_DESCRIPTOR_WRAPPER machine_version:req, kernel_version:req, kernel_name_postfix:req
-    PROLOG_KERNEL_DESCRIPTOR miopenSp3AsmConvRage_v\kernel_version\()_gfx\machine_version\()\kernel_name_postfix
+.macro PROLOG_KERNEL_DESCRIPTOR_WRAPPER machine_version:req, kernel_name_postfix:req
+    PROLOG_KERNEL_DESCRIPTOR miopenSp3AsmConvRage_v4_6_0_gfx\machine_version\()\kernel_name_postfix
 .endm
 
-.macro EPILOG_KERNEL_DESCRIPTOR_WRAPPER sc:req, wc:req, accum_offset:req, wg_x:req, machine_version:req, kernel_version:req, kernel_name_postfix:req
-    EPILOG_KERNEL_DESCRIPTOR \sc, \wc, \accum_offset, \wg_x, miopenSp3AsmConvRage_v\kernel_version\()_gfx\machine_version\()\kernel_name_postfix
+.macro EPILOG_KERNEL_DESCRIPTOR_WRAPPER machine_version:req, kernel_name_postfix:req
+    EPILOG_KERNEL_DESCRIPTOR miopenSp3AsmConvRage_v4_6_0_gfx\machine_version\()\kernel_name_postfix
 .endm
 
-.macro KERNEL_PROLOG kernel_version:req, kernel_name_postfix:req
-	PROLOG_KERNEL_DESCRIPTOR_WRAPPER %.amdgcn.gfx_generation_number, \kernel_version, \kernel_name_postfix
+.macro KERNEL_PROLOG kernel_name_postfix:req
+	PROLOG_KERNEL_DESCRIPTOR_WRAPPER %.amdgcn.gfx_generation_number, \kernel_name_postfix
 .endm
 
-.macro KERNEL_EPILOG sc:req, wc:req, accum_offset:req, wg_x:req, kernel_version:req, kernel_name_postfix:req
-	EPILOG_KERNEL_DESCRIPTOR_WRAPPER \sc, \wc, \accum_offset, \wg_x, %.amdgcn.gfx_generation_number, \kernel_version, \kernel_name_postfix
+.macro KERNEL_EPILOG kernel_name_postfix:req
+	EPILOG_KERNEL_DESCRIPTOR_WRAPPER %.amdgcn.gfx_generation_number, \kernel_name_postfix
 .endm
+
+.if (.amdgcn.gfx_generation_number != 9 || .amdgcn.gfx_generation_minor != 4 && .amdgcn.gfx_generation_stepping != 2)
+    .error "Unsupported gfx version"
+    .end
+.endif

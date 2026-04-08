@@ -113,6 +113,8 @@ private:
     std::vector<Tgpu> din;
     std::vector<Tgpu> dout;
     std::vector<Tref> dinhost;
+
+    bool use_hip_graph = false;
 };
 
 template <typename Tgpu, typename Tref>
@@ -161,6 +163,8 @@ int ActivationDriver<Tgpu, Tref>::AddCmdLineArgs()
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
+
+    AddHipGraphFlag(inflags);
 
     return miopenStatusSuccess;
 }
@@ -296,6 +300,7 @@ int ActivationDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 template <typename Tgpu, typename Tref>
 int ActivationDriver<Tgpu, Tref>::RunForwardGPU()
 {
+    use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
 
     float alpha = 1, beta = 0;
     double fulltime = 0.;
@@ -304,10 +309,7 @@ int ActivationDriver<Tgpu, Tref>::RunForwardGPU()
     int iters       = inflags.GetValueInt("iter");
     Timer t;
 
-    for(int i = 0; i < iters; i++)
-    {
-        START_TIME
-
+    int return_code = CaptureKernel([&]() -> int {
         miopenActivationForward(GetHandle(),
                                 activDesc,
                                 &alpha,
@@ -316,6 +318,16 @@ int ActivationDriver<Tgpu, Tref>::RunForwardGPU()
                                 &beta,
                                 outputTensor,
                                 out_dev->GetMem());
+        return miopenStatusSuccess;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < iters; i++)
+    {
+        START_TIME
+
+        ExecuteKernel();
 
         miopen::deref(GetHandle()).Finish();
         STOP_TIME
@@ -331,12 +343,20 @@ int ActivationDriver<Tgpu, Tref>::RunForwardGPU()
         if(inflags.GetValueInt("time") == 1)
         {
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             lowtime = (time < lowtime) ? time : lowtime;
             if(iters > 1 && i > 0)
                 avgtime += time;
         }
     }
+    FinalizeKernel();
 
     if(WALL_CLOCK)
     {
@@ -379,6 +399,8 @@ int ActivationDriver<Tgpu, Tref>::RunForwardCPU()
 template <typename Tgpu, typename Tref>
 int ActivationDriver<Tgpu, Tref>::RunBackwardGPU()
 {
+    use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
+
     float alpha = 1, beta = 0;
     double fulltime = 0.;
     float avgtime   = 0.0f;
@@ -386,10 +408,7 @@ int ActivationDriver<Tgpu, Tref>::RunBackwardGPU()
     int iters       = inflags.GetValueInt("iter");
     Timer t;
 
-    for(int i = 0; i < iters; i++)
-    {
-        START_TIME
-
+    int return_code = CaptureKernel([&]() -> int {
         miopenActivationBackward(GetHandle(),
                                  activDesc,
                                  &alpha,
@@ -402,6 +421,16 @@ int ActivationDriver<Tgpu, Tref>::RunBackwardGPU()
                                  &beta,
                                  dInputTensor,
                                  din_dev->GetMem());
+        return miopenStatusSuccess;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < iters; i++)
+    {
+        START_TIME
+
+        ExecuteKernel();
 
         miopen::deref(GetHandle()).Finish();
         STOP_TIME
@@ -417,12 +446,20 @@ int ActivationDriver<Tgpu, Tref>::RunBackwardGPU()
         if(inflags.GetValueInt("time") == 1)
         {
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             lowtime = (time < lowtime) ? time : lowtime;
             if(iters > 1 && i > 0)
                 avgtime += time;
         }
     }
+    FinalizeKernel();
 
     if(WALL_CLOCK)
     {
