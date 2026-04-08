@@ -261,7 +261,9 @@ namespace stinkytofu
             uint16_t fieldSizeBits : 12 = 0;
             uint16_t isDest : 1         = 0;
             uint16_t isReadWrite : 1    = 0;
-            uint16_t reserved : 2       = 0;
+            // M64: 64-bit lane mask that may be truncated to 32 bits in wave32.
+            uint16_t isM64 : 1          = 0;
+            uint16_t reserved : 1       = 0;
         };
 
         /// Operand field descriptions for this instruction (primary encoding).

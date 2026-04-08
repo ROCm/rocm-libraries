@@ -53,8 +53,12 @@ DEF_ARCH(Gfx1250,
 //   Pos          D0, D1, ... (dest) or S0, S1, ... (src)
 //   EncodeField  hardware encoding field   (vdata, vaddr, rsrc, soffset, simm16, ...)
 //   Type         operand type              (vgpr, sreg, label, wait_alu, ...)
-//   Size         field size in bits         (16, 32, 64, 128, ...)
-//   Options      RW (read-write), RSRC (resource descriptor)
+//   Size         field size in bits (16, 32, 64, 128, ...) or M64
+//   Options      RW (read-write), M64 (64-bit lane mask, truncatable in wave32)
+//
+//   M64 can appear as the Size field (implies 64 bits) or as an Option.
+//   It marks a 64-bit lane mask operand that may be truncated to 32 bits
+//   in wave32 mode.  Example: {D0, vdst, vcc, M64}
 //
 // Instructions inherit .fields from their format.  Per-instruction
 // .operand_fields can provide a partial override using named fields:
@@ -185,13 +189,13 @@ DEF_FORMAT(VOPC,
     .maxOperands = 3,  // dst(vcc/sdst) + src0 + src1
     .flags = {VALU},
     .fields = {
-        {D0, vdst, vcc, 64},
+        {D0, vdst, vcc, M64},
         {S0, src0, src, 32},
         {S1, vsrc1, vgpr, 32},
     },
     .promotedFormat = MC_VOP3,
     .alt_fields = {
-        {D0, vdst, sreg, 64},
+        {D0, vdst, sreg, M64},
         {S0, src0, src, 32},
         {S1, src1, src, 32},
     },
@@ -202,13 +206,13 @@ DEF_FORMAT(VCMPX,
     .parent = VOPC,
     .flags = {VCmpX, ImplicitWriteEXEC},
     .fields = {
-        {D0, vdst, exec, 64},
+        {D0, vdst, exec, M64},
         {S0, src0, src, 32},
         {S1, vsrc1, vgpr, 32},
     },
     .promotedFormat = MC_VOP3,
     .alt_fields = {
-        {D0, vdst, exec, 64},
+        {D0, vdst, exec, M64},
         {S0, src0, src, 32},
         {S1, src1, src, 32},
     },

@@ -97,12 +97,13 @@ namespace stinkytofu
     // Full entry (in .fields or .operand_fields):
     //   {Pos, EncodeField, Type, Size [, Options...]}
     //   e.g. {D0, vdata, vgpr, 32, RW}
+    //   e.g. {D0, vdst, vcc, M64}        — M64 in size position implies 64
     //
     //   Pos          D0, D1, ... (dest) or S0, S1, ... (src)
     //   EncodeField  hardware encoding field (vdata, simm16, ssrc0, ...)
     //   Type         operand type           (vgpr, sreg, label, wait_alu, ...)
-    //   Size         field size in bits     (16, 32, 64, 128, ...)
-    //   Options      RW (read-write), RSRC (resource descriptor)
+    //   Size         field size in bits (16, 32, 64, 128, ...) or M64
+    //   Options      RW (read-write), M64 (64-bit lane mask, truncatable in wave32)
     //
     // Partial override (in .operand_fields only) — inherits from format .fields
     // and selectively overrides individual properties by name:
@@ -113,6 +114,7 @@ namespace stinkytofu
     {
         bool        isDest      = false;
         bool        isReadWrite = false;
+        bool        isM64       = false;
         std::string encodeField; // "vdata", "vaddr", "rsrc", "soffset", "simm16", ...
         std::string fieldType; // "vgpr", "sreg", "label", "wait_alu", ...
         int         sizeBits = 0;
@@ -1293,16 +1295,27 @@ namespace stinkytofu
                 if(tokens.size() >= 4
                    && tokens[1].find('.') == std::string::npos)
                 {
-                    // Full entry: {D0, vdata, vgpr, 32 [, RW]}
+                    // Full entry: {D0, vdata, vgpr, 32 [, RW|M64]}
+                    // M64 can appear as the size field (implies 64) or as an option.
                     OperandFieldEntry e;
                     e.isDest      = (!tokens[0].empty() && tokens[0][0] == 'D');
                     e.encodeField = tokens[1];
                     e.fieldType   = tokens[2];
-                    e.sizeBits    = std::stoi(tokens[3]);
+                    if(tokens[3] == "M64")
+                    {
+                        e.sizeBits = 64;
+                        e.isM64    = true;
+                    }
+                    else
+                    {
+                        e.sizeBits = std::stoi(tokens[3]);
+                    }
                     for(size_t ti = 4; ti < tokens.size(); ++ti)
                     {
                         if(tokens[ti] == "RW")
                             e.isReadWrite = true;
+                        else if(tokens[ti] == "M64")
+                            e.isM64 = true;
                     }
                     out.push_back(e);
                 }
@@ -1593,7 +1606,8 @@ namespace stinkytofu
                             << fieldTypeToCpp(e.fieldType)
                             << ", " << e.sizeBits
                             << ", " << (e.isDest ? 1 : 0)
-                            << ", " << (e.isReadWrite ? 1 : 0) << "},\n";
+                            << ", " << (e.isReadWrite ? 1 : 0)
+                            << ", " << (e.isM64 ? 1 : 0) << "},\n";
                     }
                     out << "};\n\n";
                 }
@@ -1654,7 +1668,8 @@ namespace stinkytofu
                             << fieldTypeToCpp(e.fieldType)
                             << ", " << e.sizeBits
                             << ", " << (e.isDest ? 1 : 0)
-                            << ", " << (e.isReadWrite ? 1 : 0) << "},\n";
+                            << ", " << (e.isReadWrite ? 1 : 0)
+                            << ", " << (e.isM64 ? 1 : 0) << "},\n";
                     }
                     out << "};\n\n";
                 }

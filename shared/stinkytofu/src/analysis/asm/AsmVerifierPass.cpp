@@ -121,10 +121,15 @@ namespace stinkytofu
             if(reg.dataType != StinkyRegister::Type::Register)
                 continue;
 
-            if(reg.reg.num != expectedWidth)
+            // M64 operands are 64-bit lane masks that may be truncated to
+            // 32 bits in wave32 mode, so width 1 is valid when expected is 2.
+            bool m64Truncated = field.isM64 && expectedWidth == 2 && reg.reg.num == 1;
+
+            if(reg.reg.num != expectedWidth && !m64Truncated)
             {
-                errors << "Instruction '" << hwDesc->mnemonic << "' operand "
-                       << (isDest ? "dest[" : "src[") << operandIndex << "] "
+                errors << "Instruction '";
+                inst->dump(errors);
+                errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
                        << "has register width " << reg.reg.num << ", expected " << expectedWidth
                        << "\n";
             }
@@ -132,8 +137,9 @@ namespace stinkytofu
             RegType expectedType = fieldTypeToRegType(field.fieldType);
             if(expectedType != RegType::UNKNOWN && reg.reg.type != expectedType)
             {
-                errors << "Instruction '" << hwDesc->mnemonic << "' operand "
-                       << (isDest ? "dest[" : "src[") << operandIndex << "] "
+                errors << "Instruction '";
+                inst->dump(errors);
+                errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
                        << "has register type '" << regTypeToString(reg.reg.type) << "', expected '"
                        << regTypeToString(expectedType) << "'\n";
             }
