@@ -71,14 +71,14 @@ endfunction()
 # Default test sizes. Non-tile-aligned to stress remainder handling.
 # f32 and f16/bf16 use different sizes to increase coverage diversity.
 set(F32_SIZES -M 133 -N 147 -K 165)
-set(ALT_SIZES -M 131 -N 141 -K 151)
-set(ODD_SIZES -M 102 -N 103 -K 105)
+set(F16_SIZES -M 131 -N 141 -K 151)
+set(ADDITIONAL_SIZES -M 102 -N 103 -K 105)
 
 macro(get_test_sizes TYPE OUT_SIZES)
     if("${TYPE}" STREQUAL "f32")
         set(${OUT_SIZES} ${F32_SIZES})
     else()
-        set(${OUT_SIZES} ${ALT_SIZES})
+        set(${OUT_SIZES} ${F16_SIZES})
     endif()
 endmacro()
 
@@ -105,8 +105,8 @@ foreach(PATH fast slow)
     add_cpu_gemm_test(${PATH}_F32_Sanity
         ARGS ${F32_SIZES} --type f32 --validate ${PATH_FLAGS}
     )
-    add_cpu_gemm_test(${PATH}_F32_Odd_Sizes
-        ARGS ${ODD_SIZES} --type f32 --validate ${PATH_FLAGS}
+    add_cpu_gemm_test(${PATH}_F32_ADDITIONAL_SIZES
+        ARGS ${ADDITIONAL_SIZES} --type f32 --validate ${PATH_FLAGS}
     )
     foreach(TYPE f32 f16 bf16)
         get_test_sizes(${TYPE} SIZES)

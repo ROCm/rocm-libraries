@@ -142,8 +142,11 @@ namespace
                 if(biasVec)
                     result += biasVec[i];
 
-                if(activation == ActivationType::Relu)
+                if(activation == ActivationType::Relu) {
                     result = std::max(0.0f, result);
+                } else {
+                    assert(activation == ActivationType::None);
+                }
 
                 d[i + j * m] = result;
             }
@@ -220,9 +223,9 @@ int runGemm(size_t         m,
     // Initialize inputs with random values in {-1.0, 1.0}
     size_t                          seed = 42;
     std::mt19937                    gen(seed);
-    std::uniform_int_distribution<> dis(0, 1);
+    std::uniform_int_distribution<> binary_distribution(0, 1);
 
-    auto randomGen = [&]() { return dis(gen) ? 1.0f : -1.0f; };
+    auto randomGen = [&]() { return binary_distribution(gen) ? 1.0f : -1.0f; };
 
     std::generate(a.begin(), a.end(), [&]() { return static_cast<InputT>(randomGen()); });
     std::generate(b.begin(), b.end(), [&]() { return static_cast<InputT>(randomGen()); });
@@ -249,13 +252,13 @@ int runGemm(size_t         m,
         contraction.setScaleAlphaVec(rocisa::DataType::Float, scaleAlphaVecLen, factorDim);
     }
 
-    // Random scale generator: magnitude in [1.1, 100], sign random.
+    // Random scale generator: magnitude in (1, 100], integer values to avoid rounding issues, sign random.
     // Excludes 0 and ±1 so missing/incorrect scaling is never masked.
-    std::uniform_real_distribution<float> scaleDis(1.1f, 100.0f);
+    std::uniform_int_distribution<int> scaleDis(2, 100);
     auto scaleGen = [&]() {
-        float sign = dis(gen) ? 1.0f : -1.0f;
-        float mag  = scaleDis(gen);
-        return sign * mag;
+        float sign = binary_distribution(gen) ? 1.0f : -1.0f;
+        int mag    = scaleDis(gen);
+        return sign * static_cast<float>(mag);
     };
 
     std::vector<float> scaleABuf;
