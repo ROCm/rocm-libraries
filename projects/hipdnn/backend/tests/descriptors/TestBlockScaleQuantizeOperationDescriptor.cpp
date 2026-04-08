@@ -54,24 +54,24 @@ public:
                 desc->setAttribute(attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &tensor);
             }
         };
-        setIf(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT, _xDesc);
-        setIf(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT, _yDesc);
-        setIf(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT, _scaleDesc);
+        setIf(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC, _xDesc);
+        setIf(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_YDESC, _yDesc);
+        setIf(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_DESC, _scaleDesc);
         if(std::find(
-               skip.begin(), skip.end(), HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT)
+               skip.begin(), skip.end(), HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE)
            == skip.end())
         {
             int32_t blockSize = K_BSQ_BLOCK_SIZE;
-            desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
+            desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE,
                                HIPDNN_TYPE_INT32,
                                1,
                                &blockSize);
         }
-        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT)
+        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC)
            == skip.end())
         {
             auto computeType = HIPDNN_DATA_FLOAT;
-            desc->setAttribute(HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT,
+            desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
                                HIPDNN_TYPE_DATA_TYPE,
                                1,
                                &computeType);
@@ -125,7 +125,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, CreateDescriptor)
     auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR);
 }
 
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, FinalizeWithRequiredAttributes)
@@ -147,14 +147,13 @@ TEST_P(TestBlockScaleQuantizeOperationDescriptorFinalizeFailsWithout, FinalizeFa
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    RequiredAttributes,
-    TestBlockScaleQuantizeOperationDescriptorFinalizeFailsWithout,
-    ::testing::Values(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
-                      HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT,
-                      HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT,
-                      HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
-                      HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT));
+INSTANTIATE_TEST_SUITE_P(RequiredAttributes,
+                         TestBlockScaleQuantizeOperationDescriptorFinalizeFailsWithout,
+                         ::testing::Values(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
+                                           HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_YDESC,
+                                           HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_DESC,
+                                           HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE,
+                                           HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC));
 
 // =============================================================================
 // SetAttribute Tests - Tensor Descriptors
@@ -163,7 +162,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorDescriptorX)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_xDesc));
@@ -176,7 +175,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorDescriptorX)
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorDescriptorY)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_YDESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_yDesc));
@@ -188,7 +187,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorDescriptorY)
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorDescriptorScale)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_DESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_scaleDesc));
@@ -200,7 +199,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorDescriptorScale)
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorFailsNotFinalized)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   &_unfinalizedTensor),
@@ -212,14 +211,14 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorFailsWrongType)
     auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT, HIPDNN_TYPE_INT64, 1, &_xDesc),
+            HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC, HIPDNN_TYPE_INT64, 1, &_xDesc),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorFailsWrongElementCount)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   2,
                                                   &_xDesc),
@@ -229,7 +228,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorFailsWrongElementCoun
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorFailsNullPointer)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr),
@@ -245,8 +244,10 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetComputeDataType)
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
 
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                                       HIPDNN_TYPE_DATA_TYPE,
+                                       1,
+                                       &computeType));
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
 }
@@ -257,8 +258,10 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetComputeDataTypeWrongElement
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(
-            HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                           HIPDNN_TYPE_DATA_TYPE,
+                           2,
+                           &computeType),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -270,10 +273,8 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetAndGetBlockSize)
 {
     auto desc = getDescriptor();
     int32_t blockSize = K_BSQ_BLOCK_SIZE;
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
-                                       HIPDNN_TYPE_INT32,
-                                       1,
-                                       &blockSize));
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE, HIPDNN_TYPE_INT32, 1, &blockSize));
 
     ASSERT_EQ(desc->getData().block_size, K_BSQ_BLOCK_SIZE);
 }
@@ -310,7 +311,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetAttributeFailsAfterFinalize
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   &_xDesc),
@@ -338,11 +339,12 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeTensorDescriptor)
 
     HipdnnBackendDescriptor* retrievedX = nullptr;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedX));
+                                       static_cast<void*>(&retrievedX)));
+    const std::unique_ptr<HipdnnBackendDescriptor> ownedX(retrievedX);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedX, nullptr);
@@ -357,13 +359,15 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeComputeType)
     auto desc = getDescriptor();
     setAllAttributesExcept();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                       HIPDNN_TYPE_DATA_TYPE,
+                       1,
+                       &computeType);
     desc->finalize();
 
     hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
                                        HIPDNN_TYPE_DATA_TYPE,
                                        1,
                                        &elementCount,
@@ -381,7 +385,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeBlockSizeAfterFina
 
     int32_t retrieved = 0;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE,
                                        HIPDNN_TYPE_INT32,
                                        1,
                                        &elementCount,
@@ -475,7 +479,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeFailsBeforeFinaliz
     setAllAttributesExcept();
 
     HipdnnBackendDescriptor* dummy = nullptr;
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr,
@@ -488,7 +492,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeFailsNullPointer)
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr,
@@ -517,7 +521,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeTensorXQueryReturn
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -531,7 +535,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeTensorYQueryReturn
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_YDESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -545,7 +549,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeTensorScaleQueryRe
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_DESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -559,7 +563,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeComputeTypeQueryRe
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
                                        HIPDNN_TYPE_DATA_TYPE,
                                        0,
                                        &elementCount,
@@ -573,7 +577,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeBlockSizeQueryRetu
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE,
                                        HIPDNN_TYPE_INT32,
                                        0,
                                        &elementCount,
@@ -586,7 +590,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeTensorQueryFailsNu
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   0,
                                                   nullptr,
@@ -641,7 +645,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, ToStringContainsExpectedInfo)
     setAllAttributesExcept();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("BlockScaleQuantizeOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=" + std::to_string(K_BSQ_TENSOR_X_UID)), std::string::npos);
     ASSERT_NE(str.find("y_uid=" + std::to_string(K_BSQ_TENSOR_Y_UID)), std::string::npos);
@@ -671,8 +675,10 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
-    desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                       HIPDNN_TYPE_DATA_TYPE,
+                       1,
+                       &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -693,8 +699,10 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeWithHalfComputeType)
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC,
+                       HIPDNN_TYPE_DATA_TYPE,
+                       1,
+                       &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -727,7 +735,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, TryAsInterfaceReturnsValidGrap
     makeFinalized();
     auto desc = getDescriptor();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface exposes the same tensor shared_ptrs
@@ -741,6 +749,6 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, TryAsInterfaceReturnsValidGrap
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _xDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }

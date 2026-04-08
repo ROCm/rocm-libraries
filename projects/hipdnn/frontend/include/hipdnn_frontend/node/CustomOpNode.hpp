@@ -7,6 +7,8 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/CustomOpPacker.hpp>
+#include <hipdnn_frontend/detail/CustomOpUnpacker.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -19,6 +21,21 @@ public:
         : INode(graphAttrs)
         , attributes(std::move(customOpAttributes))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        CustomOpAttributes customOpAttr;
+        HIPDNN_CHECK_ERROR(detail::unpackCustomOpOperation(opDesc, tensorMap, customOpAttr));
+        attributes = std::move(customOpAttr);
+        return {};
+    }
+
+    NodeType getNodeType() const override
+    {
+        return NodeType::CUSTOM_OP;
     }
 
     std::string getNodeName() const override
@@ -123,6 +140,13 @@ public:
         }
 
         return {ErrorCode::OK, ""};
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createCustomOpOperation(attributes, tensorDescs, operations);
     }
 
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>

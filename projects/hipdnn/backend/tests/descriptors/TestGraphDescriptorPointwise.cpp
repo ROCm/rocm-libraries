@@ -16,6 +16,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/PointwiseConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <array>
@@ -26,8 +27,8 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
-
 namespace
 {
 
@@ -42,14 +43,22 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<PointwiseOperationDescriptor>();
     auto desc = wrapper->asDescriptor<PointwiseOperationDescriptor>();
 
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &in0Desc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &out0Desc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &in1Desc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &in2Desc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&in0Desc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&out0Desc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&in1Desc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&in2Desc));
 
     auto operation = HIPDNN_POINTWISE_ADD;
     desc->setAttribute(HIPDNN_ATTR_POINTWISE_MODE, HIPDNN_TYPE_POINTWISE_MODE, 1, &operation);
@@ -71,7 +80,10 @@ public:
     {
         auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
-        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                           HIPDNN_TYPE_HANDLE,
+                           1,
+                           static_cast<const void*>(&handle));
     }
 
 protected:
@@ -91,10 +103,12 @@ protected:
 
 TEST_F(TestGraphDescriptorPointwise, BuildFromSingleOperation)
 {
-    auto in0Desc = createFinalizedTensor(40, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto out0Desc = createFinalizedTensor(41, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto in1Desc = createFinalizedTensor(3);
-    auto in2Desc = createFinalizedTensor(4);
+    auto in0Desc = createFinalizedTensor(
+        K_PW_TENSOR_IN0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+    auto out0Desc = createFinalizedTensor(
+        K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+    auto in1Desc = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
+    auto in2Desc = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
     auto opDesc
         = createFinalizedPointwiseOp(in0Desc.get(), out0Desc.get(), in1Desc.get(), in2Desc.get());
 
@@ -102,8 +116,10 @@ TEST_F(TestGraphDescriptorPointwise, BuildFromSingleOperation)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
@@ -126,19 +142,21 @@ TEST_F(TestGraphDescriptorPointwise, BuildFromSingleOperation)
     ASSERT_NE(attrs, nullptr);
 
     // Verify tensor UID references
-    EXPECT_EQ(attrs->in_0_tensor_uid, 40);
-    EXPECT_EQ(attrs->out_0_tensor_uid, 41);
-    EXPECT_EQ(attrs->in_1_tensor_uid, 3);
-    EXPECT_EQ(attrs->in_2_tensor_uid, 4);
+    EXPECT_EQ(attrs->in_0_tensor_uid, K_PW_TENSOR_IN0_UID);
+    EXPECT_EQ(attrs->out_0_tensor_uid, K_PW_TENSOR_OUT0_UID);
+    EXPECT_EQ(attrs->in_1_tensor_uid, K_PW_TENSOR_IN1_UID);
+    EXPECT_EQ(attrs->in_2_tensor_uid, K_PW_TENSOR_IN2_UID);
     EXPECT_FALSE(attrs->axis_tensor_uid.has_value());
 }
 
 TEST_F(TestGraphDescriptorPointwise, ComputeDataTypePreserved)
 {
-    auto in0Desc = createFinalizedTensor(40, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto out0Desc = createFinalizedTensor(41, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto in1Desc = createFinalizedTensor(3);
-    auto in2Desc = createFinalizedTensor(4);
+    auto in0Desc = createFinalizedTensor(
+        K_PW_TENSOR_IN0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+    auto out0Desc = createFinalizedTensor(
+        K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+    auto in1Desc = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
+    auto in2Desc = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
     auto opDesc = createFinalizedPointwiseOp(
         in0Desc.get(), out0Desc.get(), in1Desc.get(), in2Desc.get(), HIPDNN_DATA_HALF);
 
@@ -146,8 +164,10 @@ TEST_F(TestGraphDescriptorPointwise, ComputeDataTypePreserved)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();

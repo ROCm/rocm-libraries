@@ -197,12 +197,20 @@ list(
     -Wformat=2 # Enable stricter format string checks
     -Winit-self # Warn about variables initialized with itself
     -Wunreachable-code # Warn about unreachable code
-    -Wno-error=unused-command-line-argument # Disable error for unused command line arguments
+    $<$<CXX_COMPILER_ID:Clang>:-Wno-error=unused-command-line-argument> # Disable error for unused command line arguments (Clang-specific)
+    -Wno-error=null-dereference # Downgrade null-dereference to warning (too many false positives with flatbuffers)
     -Wswitch-default # Warn if a switch statement does not have a default case
 )
 
 add_compile_options(${EXTRA_COMPILE_OPTIONS})
 add_link_options(${EXTRA_LINK_OPTIONS})
+
+# Disable RTTI in production code and RTTI-free test targets.
+# Public headers must not use typeid, dynamic_cast, or dynamic_pointer_cast.
+set(HIPDNN_NO_RTTI_OPTIONS
+    $<$<CXX_COMPILER_ID:MSVC>:/GR->
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-rtti>
+)
 
 add_subdirectory(data_sdk)
 add_subdirectory(flatbuffers_sdk)
@@ -270,7 +278,7 @@ if(HIPDNN_ENABLE_COVERAGE)
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
         -object
-        ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_public_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_data_sdk_tests
         -object

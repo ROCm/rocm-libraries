@@ -74,7 +74,10 @@ public:
         auto desc = getDescriptor();
         for(const auto& [attributeName, tensorDesc] : tensorMap)
         {
-            desc->setAttribute(attributeName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &tensorDesc);
+            desc->setAttribute(attributeName,
+                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                               1,
+                               static_cast<const void*>(&tensorDesc));
         }
     }
 
@@ -473,8 +476,8 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationDescriptor, GetAttributeTensorD
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &rawX));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
+                                       static_cast<void*>(&rawX)));
+    const std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedX, nullptr);
@@ -721,7 +724,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationDescriptor, ToStringContainsExp
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("BatchnormInferenceVarianceExtOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=80"), std::string::npos);
     ASSERT_NE(str.find("mean_uid=81"), std::string::npos);
@@ -816,7 +819,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationDescriptor, TryAsInterfaceRetur
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -828,6 +831,6 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationDescriptor, TryAsInterfaceRetur
 TEST_F(TestBatchnormInferenceVarianceExtOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _xDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }

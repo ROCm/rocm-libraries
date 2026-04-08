@@ -5,6 +5,7 @@
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
@@ -110,6 +111,13 @@ void BatchnormInferenceOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                     arrayOfElements,
                     "BatchnormInferenceOperationDescriptor::setAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        setString(_name,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "BatchnormInferenceOperationDescriptor::setAttribute()");
+        break;
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
@@ -190,6 +198,22 @@ void BatchnormInferenceOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                     arrayOfElements,
                     "BatchnormInferenceOperationDescriptor::getAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        getString(_name,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "BatchnormInferenceOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_TYPE_EXT:
+        getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "BatchnormInferenceOperationDescriptor::getAttribute()");
+        break;
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
@@ -212,6 +236,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
     BatchnormInferenceOperationDescriptor::buildNode() const
 {
     auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    node->name = _name;
     node->compute_data_type = _computeDataType;
     node->attributes.Set(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesT(_data));
     return node;
@@ -225,6 +250,7 @@ hipdnnBackendDescriptorType_t BatchnormInferenceOperationDescriptor::getStaticTy
 std::string BatchnormInferenceOperationDescriptor::toString() const
 {
     std::string str = "BatchnormInferenceOperationDescriptor: {";
+    str += "name=" + _name + ", ";
     str += "x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", mean_uid=" + std::to_string(_data.mean_tensor_uid);
     str += ", inv_variance_uid=" + std::to_string(_data.inv_variance_tensor_uid);
@@ -235,6 +261,40 @@ std::string BatchnormInferenceOperationDescriptor::toString() const
     str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
+}
+
+std::shared_ptr<BatchnormInferenceOperationDescriptor>
+    BatchnormInferenceOperationDescriptor::fromNode(
+        const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
+{
+    const auto* attrs = nodeT.attributes.AsBatchnormInferenceAttributes();
+    THROW_IF_NULL(attrs,
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "BatchnormInferenceOperationDescriptor::fromNode: BatchnormInferenceAttributes "
+                  "is null");
+
+    auto desc = std::make_shared<BatchnormInferenceOperationDescriptor>();
+    desc->_data = *attrs;
+    desc->_computeDataType = nodeT.compute_data_type;
+    desc->_name = nodeT.name;
+    desc->_xDesc = findTensorInMap(
+        tensorMap, attrs->x_tensor_uid, "BatchnormInferenceOperationDescriptor::fromNode: X");
+    desc->_meanDesc = findTensorInMap(
+        tensorMap, attrs->mean_tensor_uid, "BatchnormInferenceOperationDescriptor::fromNode: Mean");
+    desc->_invVarianceDesc
+        = findTensorInMap(tensorMap,
+                          attrs->inv_variance_tensor_uid,
+                          "BatchnormInferenceOperationDescriptor::fromNode: InvVariance");
+    desc->_scaleDesc = findTensorInMap(tensorMap,
+                                       attrs->scale_tensor_uid,
+                                       "BatchnormInferenceOperationDescriptor::fromNode: Scale");
+    desc->_biasDesc = findTensorInMap(
+        tensorMap, attrs->bias_tensor_uid, "BatchnormInferenceOperationDescriptor::fromNode: Bias");
+    desc->_yDesc = findTensorInMap(
+        tensorMap, attrs->y_tensor_uid, "BatchnormInferenceOperationDescriptor::fromNode: Y");
+    desc->finalize();
+    return desc;
 }
 
 } // namespace hipdnn_backend

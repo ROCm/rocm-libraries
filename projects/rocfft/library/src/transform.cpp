@@ -70,8 +70,16 @@ try
     log_trace(__func__, "info", info, "work_buffer", work_buffer, "size_in_bytes", size_in_bytes);
     if(!work_buffer)
         return rocfft_status_invalid_work_buffer;
-    info->workBufferSize = size_in_bytes;
-    info->workBuffer     = work_buffer;
+
+    if(!info)
+        return rocfft_status_invalid_arg_value;
+
+    // The specified pointer is for the current HIP device
+    int deviceid = hipInvalidDeviceId;
+    if(hipGetDevice(&deviceid) != hipSuccess)
+        return rocfft_status_failure;
+
+    info->workBuffers[deviceid] = gpubuf::make_nonowned(work_buffer, size_in_bytes);
 
     return rocfft_status_success;
 }
@@ -84,7 +92,16 @@ rocfft_status rocfft_execution_info_set_stream(rocfft_execution_info info, void*
 try
 {
     log_trace(__func__, "info", info, "stream", stream);
-    info->rocfft_stream = (hipStream_t)stream;
+
+    if(!info)
+        return rocfft_status_invalid_arg_value;
+
+    // The specified stream is for the current HIP device
+    int deviceid = hipInvalidDeviceId;
+    if(hipGetDevice(&deviceid) != hipSuccess)
+        return rocfft_status_failure;
+
+    info->rocfft_streams[deviceid] = (hipStream_t)stream;
     return rocfft_status_success;
 }
 catch(...)
@@ -98,6 +115,9 @@ rocfft_status rocfft_execution_info_set_load_callback(rocfft_execution_info info
                                                       size_t                shared_mem_bytes)
 try
 {
+    if(!info)
+        return rocfft_status_invalid_arg_value;
+
     // currently, we're not allocating LDS for callbacks, so fail
     // if any was requested
     if(shared_mem_bytes)
@@ -119,6 +139,9 @@ rocfft_status rocfft_execution_info_set_store_callback(rocfft_execution_info inf
                                                        size_t                shared_mem_bytes)
 try
 {
+    if(!info)
+        return rocfft_status_invalid_arg_value;
+
     // currently, we're not allocating LDS for callbacks, so fail
     // if any was requested
     if(shared_mem_bytes)
@@ -305,7 +328,9 @@ void rocfft_plan_t::LogSortedPlan(const std::vector<size_t>& sortedIdx) const
     }
 }
 
-void rocfft_plan_t::Execute(void* in_buffer[], void* out_buffer[], rocfft_execution_info info)
+void rocfft_plan_t::Execute(void*                                 in_buffer[],
+                            void*                                 out_buffer[],
+                            const rocfft_execution_info_internal& info)
 {
     // Vector of topologically sorted indexes to the items in multiPlan
     auto sortedIdx = MultiPlanTopologicalSort();
@@ -404,7 +429,9 @@ try
 
     try
     {
-        plan->Execute(in_buffer, out_buffer, info);
+        rocfft_execution_info_internal info_internal(info);
+        info_internal.ensure_work_buffer_size(plan->WorkBufBytesPerDevice());
+        plan->Execute(in_buffer, out_buffer, info_internal);
     }
     catch(std::exception& e)
     {
@@ -424,21 +451,19 @@ catch(...)
 void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
                             void*                                   in_buffer[],
                             void*                                   out_buffer[],
-                            rocfft_execution_info                   info,
+                            const rocfft_execution_info_internal&   exec_info,
                             size_t                                  multiPlanIdx,
                             const std::map<int, device_callback_t>& callbacks)
 {
     rocfft_scoped_device dev(location.device);
 
-    // tolerate user not providing an execution_info
-    rocfft_execution_info_t exec_info;
-    if(info)
-        exec_info = *info;
-
-    // use the local stream if user didn't provide one
-    if(mgpuPlan && !exec_info.rocfft_stream)
+    // get stream for async launch during multi-GPU transforms - use
+    // the user-specified stream if present, otherwise use the plan's
+    // stream
+    hipStream_t execStream = exec_info.get_user_stream(location.device);
+    if(mgpuPlan && !execStream)
     {
-        exec_info.rocfft_stream = this->stream;
+        execStream = this->stream;
     }
 
     // TransformPowX below needs in_buffer, out_buffer to work with.
@@ -476,32 +501,9 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
     auto in_transform_ptrs  = mgpuPlan ? in_buffer_copy.data() : in_buffer;
     auto out_transform_ptrs = mgpuPlan ? out_buffer_copy.data() : out_buffer;
 
-    gpubuf autoAllocWorkBuf;
-
-    if(workBufSize > 0)
-    {
-        auto requiredWorkBufBytes = WorkBufBytes(real_type_size(rootPlan->precision));
-        if(!exec_info.workBuffer)
-        {
-            // user didn't provide a buffer, alloc one now
-            if(autoAllocWorkBuf.alloc(requiredWorkBufBytes) != hipSuccess)
-                throw std::runtime_error("work buffer allocation failure");
-            exec_info.workBufferSize = requiredWorkBufBytes;
-            exec_info.workBuffer     = autoAllocWorkBuf.data();
-        }
-        // otherwise user provided a buffer, but complain if it's too small
-        else if(exec_info.workBufferSize < requiredWorkBufBytes)
-        {
-            if(LOG_TRACE_ENABLED())
-                (*LogSingleton::GetInstance().GetTraceOS())
-                    << "user work buffer too small" << std::endl;
-            throw rocfft_status_invalid_work_buffer;
-        }
-    }
-
     // Callbacks do not currently support planar format
     if((array_type_is_planar(rootPlan->inArrayType) || array_type_is_planar(rootPlan->outArrayType))
-       && (exec_info.load_cb_fns || exec_info.store_cb_fns))
+       && (exec_info.get_load_cb_fns() || exec_info.get_store_cb_fns()))
         throw std::runtime_error("callbacks not supported with planar format");
 
     try
@@ -510,14 +512,14 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
                       in_transform_ptrs,
                       (rootPlan->placement == rocfft_placement_inplace) ? in_transform_ptrs
                                                                         : out_transform_ptrs,
-                      &exec_info,
+                      exec_info,
                       multiPlanIdx,
                       callbacks);
         // all work is enqueued to the stream, record the event on
         // the stream. Not needed for single-device plans.
         if(mgpuPlan)
         {
-            if(hipEventRecord(event, exec_info.rocfft_stream) != hipSuccess)
+            if(hipEventRecord(event, execStream) != hipSuccess)
                 throw std::runtime_error("hipEventRecord failed");
         }
     }

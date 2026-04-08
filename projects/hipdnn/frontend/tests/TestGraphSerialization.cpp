@@ -15,6 +15,9 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
+namespace
+{
+
 // Helper function to create a tensor with computed contiguous strides
 std::shared_ptr<TensorAttributes> createTensor(const std::string& name,
                                                const std::vector<int64_t>& dims,
@@ -177,6 +180,8 @@ std::string serializationFormatToString(const ::testing::TestParamInfo<Serializa
         return "Unknown";
     }
 }
+
+} // namespace
 
 //==============================================================================
 // Parametrized Round-Trip Tests
@@ -487,7 +492,7 @@ TEST_P(TestGraphSerializationRoundTrip, BnInfDReluBnBwdFusion)
     auto dy = createTensor("dy", {1, 64, 32, 32}, DataType::FLOAT, 6);
 
     // Batchnorm inference
-    BatchnormInferenceAttributes bnInfAttrs;
+    const BatchnormInferenceAttributes bnInfAttrs;
     auto bnY = graph.batchnorm_inference(x, savedMean, savedInvVariance, scale, bias, bnInfAttrs);
 
     // DReLU (ReLU backward)
@@ -1158,7 +1163,7 @@ TEST(TestGraphSerialization, DeserializeInvalidJsonGracefully)
     Graph graph;
 
     // Empty JSON object
-    nlohmann::json emptyJson = nlohmann::json::object();
+    const nlohmann::json emptyJson = nlohmann::json::object();
     auto err = graph.deserialize(emptyJson);
     // Should not crash, behavior depends on implementation
     // At minimum, should return without exception
@@ -1288,6 +1293,26 @@ TEST_P(TestGraphSerializationRoundTrip, PassByValueTensor)
     roundTripAndCompare(graph);
 }
 
+TEST_P(TestGraphSerializationRoundTrip, PassByValueTensorInt64)
+{
+    Graph graph;
+    graph.set_name("pass_by_value_int64_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+
+    // Create a scalar pass-by-value INT64 tensor (e.g., for SDPA seed/offset)
+    auto seed = std::make_shared<TensorAttributes>(int64_t{42});
+    seed->set_uid(2);
+
+    // Scale x by seed using MUL
+    PointwiseAttributes mulAttrs;
+    mulAttrs.set_mode(PointwiseMode::MUL);
+    graph.pointwise(x, seed, mulAttrs);
+
+    roundTripAndCompare(graph);
+}
+
 TEST_P(TestGraphSerializationRoundTrip, TensorLike)
 {
     Graph graph;
@@ -1318,7 +1343,7 @@ TEST_P(TestGraphSerializationRoundTrip, MatmulNode)
     auto a = createTensor("a", {32, 64}, DataType::FLOAT, 1);
     auto b = createTensor("b", {64, 128}, DataType::FLOAT, 2);
 
-    MatmulAttributes matmulAttrs;
+    const MatmulAttributes matmulAttrs;
     auto c = graph.matmul(a, b, matmulAttrs);
     c->set_output(true); // Mark as output to test non-virtual tensor
 
@@ -1347,7 +1372,7 @@ TEST_P(TestGraphSerializationRoundTrip, BatchnormInferenceNodeVarianceExt)
     auto bias = createTensor1D("bias", 64, DataType::FLOAT, 5);
     auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
 
-    BatchnormInferenceAttributesVarianceExt bnInfVarAttrs;
+    const BatchnormInferenceAttributesVarianceExt bnInfVarAttrs;
 
     auto y = graph.batchnorm_inference_variance_ext(
         x, mean, variance, scale, bias, epsilon, bnInfVarAttrs);
@@ -1512,7 +1537,7 @@ TEST_P(TestGraphSerializationRoundTrip, BatchnormInference)
     auto scale = createTensor1D("scale", 64, DataType::FLOAT, 4);
     auto bias = createTensor1D("bias", 64, DataType::FLOAT, 5);
 
-    BatchnormInferenceAttributes bnInfAttrs;
+    const BatchnormInferenceAttributes bnInfAttrs;
 
     auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, bnInfAttrs);
     y->set_output(true); // Mark as output to test non-virtual tensor
@@ -1643,10 +1668,10 @@ TEST_P(TestGraphSerializationRoundTrip, RMSNormNodeWithBias)
     roundTripAndCompare(graph);
 }
 
-TEST_P(TestGraphSerializationRoundTrip, SdpaFpropNode)
+TEST_P(TestGraphSerializationRoundTrip, SdpaFwdNode)
 {
     Graph graph;
-    graph.set_name("sdpa_fprop_test");
+    graph.set_name("sdpa_fwd_test");
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_io_data_type(DataType::HALF);
 
@@ -1728,7 +1753,7 @@ TEST_P(TestGraphSerializationRoundTrip, CustomOpNode)
     auto inputA = createTensor("input_a", {2, 3}, DataType::FLOAT, 1);
     auto inputB = createTensor("input_b", {2, 3}, DataType::FLOAT, 2);
 
-    std::vector<uint8_t> opaquePayload = {0xDE, 0xAD, 0xBE, 0xEF};
+    const std::vector<uint8_t> opaquePayload = {0xDE, 0xAD, 0xBE, 0xEF};
 
     CustomOpAttributes customAttrs;
     customAttrs.set_name("my_custom_op").set_custom_op_id("example.my_add").set_data(opaquePayload);
@@ -1736,6 +1761,43 @@ TEST_P(TestGraphSerializationRoundTrip, CustomOpNode)
     auto outputs = graph.custom_op({inputA, inputB}, 1, customAttrs);
     ASSERT_EQ(outputs.size(), 1u);
     outputs[0]->set_output(true).set_dim({2, 3}).set_stride({3, 1}).set_data_type(DataType::FLOAT);
+
+    roundTripAndCompare(graph);
+}
+
+TEST_P(TestGraphSerializationRoundTrip, ReductionNode)
+{
+    Graph graph;
+    graph.set_name("reduction_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {2, 8, 16, 64}, DataType::FLOAT, 1);
+
+    Reduction_attributes reductionAttrs;
+    reductionAttrs.set_mode(ReductionMode::ADD);
+
+    auto y = graph.reduction(x, reductionAttrs);
+    y->set_output(true).set_dim({2, 8, 1, 1}).set_stride({8, 1, 1, 1}).set_uid(2);
+
+    roundTripAndCompare(graph);
+}
+
+TEST_P(TestGraphSerializationRoundTrip, ReductionNodeExplicitOutput)
+{
+    Graph graph;
+    graph.set_name("reduction_explicit_output_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {4, 8}, DataType::FLOAT, 1);
+    auto y = createTensor("y", {1, 8}, DataType::FLOAT, 2);
+    y->set_output(true);
+
+    Reduction_attributes reductionAttrs;
+    reductionAttrs.set_mode(ReductionMode::AVG);
+
+    graph.reduction(x, y, reductionAttrs);
 
     roundTripAndCompare(graph);
 }

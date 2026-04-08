@@ -180,7 +180,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic2DElementCoverag
 
     auto recordFunction
         = [&processedElements, &elementsMutex](const std::vector<int64_t>& indices) {
-              std::lock_guard<std::mutex> lock(elementsMutex);
+              const std::lock_guard<std::mutex> lock(elementsMutex);
               processedElements.insert({indices[0], indices[1]});
           };
 
@@ -380,7 +380,7 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicIrregularShapes)
 
     auto recordFunction
         = [&processedElements, &elementsMutex](const std::vector<int64_t>& indices) {
-              std::lock_guard<std::mutex> lock(elementsMutex);
+              const std::lock_guard<std::mutex> lock(elementsMutex);
               processedElements.insert({indices[0], indices[1], indices[2]});
           };
 

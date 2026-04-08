@@ -73,12 +73,6 @@ std::string hipfftw_token_for_functional_test;
 // Transform parameters for manual test:
 hipfft_params manual_params;
 
-// Host memory limitation for tests (GiB):
-size_t ramgb;
-
-// Device memory limitation for tests (GiB):
-size_t vramgb;
-
 // Allow skipping tests if there is a runtime error
 bool skip_runtime_fails;
 // But count the number of failures
@@ -130,7 +124,7 @@ void init_gtest_flags()
     std::swap(temp_list_tests, testing::GTEST_FLAG(list_tests));
 
     // move stdout to devnull
-#ifdef WIN32
+#ifdef _WIN32
     int stdout_fd   = _fileno(stdout);
     int devnull     = _open("NUL", _O_WRONLY);
     int stdout_copy = _dup(stdout_fd);
@@ -145,7 +139,7 @@ void init_gtest_flags()
     (void)RUN_ALL_TESTS();
 
     // put stdout back
-#ifdef WIN32
+#ifdef _WIN32
     _dup2(stdout_copy, stdout_fd);
     _close(stdout_copy);
     _close(devnull);
@@ -303,6 +297,10 @@ void precompile_test_kernels(const std::string& precompile_file)
 
 int main(int argc, char* argv[])
 {
+    // Unless specified otherwise by the user, no limit on host/device memory usage
+    // (see corresponding default values)
+    size_t ramgb_limit, vramgb_limit;
+
     CLI::App app{
         "\n"
         "hipFFT/hipFFTW Runtime Test command line options\n"
@@ -489,9 +487,11 @@ int main(int argc, char* argv[])
     const auto* opt_version = app.add_flag(
         "--version",
         "Print queryable version information from the hipfft library's backend (and return)");
-    app.add_option("--R", ramgb, "RAM limit in GiB for tests")
-        ->default_val(host_memory::singleton().get_total_gbytes());
-    app.add_option("--V", vramgb, "VRAM limit in GiB for tests")->default_val(0);
+    app.add_option("--R", ramgb_limit, "RAM limit in GiB for tests")
+        ->default_val(system_memory::singleton().get_total_gbytes());
+    app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
+        ->default_val(DivRoundingUp(
+            device_memory_accountant::singleton().get_max_total_mem_on_devices(), ONE_GiB));
     app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);
     app.add_option("--single_epsilon", single_epsilon)->default_val(3.75e-5);
     app.add_option("--double_epsilon", double_epsilon)->default_val(1e-15);
@@ -634,12 +634,25 @@ int main(int argc, char* argv[])
     fftwf_plan_with_nthreads(rocfft_concurrency());
 #endif
 
-    // Set host memory limit from command-line options (if more restrictive)
-    const auto usable_bytes = host_memory::singleton().get_usable_bytes();
-    if(ramgb * ONE_GiB < usable_bytes)
-        host_memory::singleton().set_limit_gbytes(ramgb);
-    std::cout << "Usable host memory: " << bytes_to_GiB(host_memory::singleton().get_usable_bytes())
-              << " GiB" << std::endl;
+    system_memory::singleton().set_limit_bytes(ramgb_limit * ONE_GiB);
+    std::cout << "Refraining from using more than "
+              << byte_size_to_str(system_memory::singleton().get_limit_bytes())
+              << " of system memory." << std::endl;
+    device_memory_accountant::singleton().set_limit_bytes_for_all_devices(vramgb_limit * ONE_GiB);
+    std::cout << "Refraining from using more than ";
+    for(size_t dev_id = 0; dev_id < device_memory_accountant::singleton().num_devices(); dev_id++)
+    {
+        if(device_memory_accountant::singleton().num_devices() > 1)
+            std::cout << "\n\t";
+        std::cout << byte_size_to_str(
+            device_memory_accountant::singleton().get_limit_bytes_on_device(dev_id))
+                  << " of device memory";
+        if(device_memory_accountant::singleton().num_devices() > 1)
+            std::cout << " for device ID " << dev_id;
+        std::cout << (dev_id == device_memory_accountant::singleton().num_devices() - 1 ? "."
+                                                                                        : ";");
+    }
+    std::cout << std::endl;
 
     if(use_fftw_wisdom)
     {

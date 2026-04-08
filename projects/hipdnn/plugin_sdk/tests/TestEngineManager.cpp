@@ -95,7 +95,7 @@ std::unique_ptr<TestEngine>
 
 TEST(TestEngineManager, InitiallyHasNoEngines)
 {
-    TestEngineManager manager;
+    const TestEngineManager manager;
     auto engineIds = manager.getAllEngineIds();
     EXPECT_TRUE(engineIds.empty());
 }
@@ -129,7 +129,7 @@ TEST(TestEngineManager, GetApplicableEngineIdsFiltersCorrectly)
     manager.addEngine(createTestEngine(3, true));
 
     TestHandle handle;
-    NiceMock<MockGraph> mockGraph;
+    const NiceMock<MockGraph> mockGraph;
     auto applicableIds = manager.getApplicableEngineIds(handle, mockGraph);
 
     EXPECT_EQ(applicableIds.size(), 2u);
@@ -143,9 +143,9 @@ TEST(TestEngineManager, GetWorkspaceSizeReturnsEngineWorkspace)
     TestEngineManager manager;
     manager.addEngine(createTestEngine(1, true, 2048));
 
-    TestHandle handle;
-    NiceMock<MockGraph> mockGraph;
-    NiceMock<MockEngineConfig> mockConfig;
+    const TestHandle handle;
+    const NiceMock<MockGraph> mockGraph;
+    const NiceMock<MockEngineConfig> mockConfig;
     ON_CALL(mockConfig, engineId()).WillByDefault(Return(1));
 
     auto workspaceSize = manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig);
@@ -157,9 +157,9 @@ TEST(TestEngineManager, GetWorkspaceSizeThrowsForUnknownEngine)
     TestEngineManager manager;
     manager.addEngine(createTestEngine(1, true));
 
-    TestHandle handle;
-    NiceMock<MockGraph> mockGraph;
-    NiceMock<MockEngineConfig> mockConfig;
+    const TestHandle handle;
+    const NiceMock<MockGraph> mockGraph;
+    const NiceMock<MockEngineConfig> mockConfig;
     ON_CALL(mockConfig, engineId()).WillByDefault(Return(999));
 
     EXPECT_THROW(manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig), HipdnnPluginException);
