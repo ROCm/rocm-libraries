@@ -258,7 +258,7 @@ protected:
     {
         auto error = miopen::rms_range(tensC_ocl, tensC_hip);
         EXPECT_TRUE(miopen::float_equal_sentinel(error, 0.f))
-            << "GPU outputs do not match each other. Error: " << error;
+            << "OCL and HIP GPU outputs are expected to be identical. Error: " << error;
     }
 
     void TearDown() override
