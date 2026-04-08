@@ -83,7 +83,7 @@ namespace TensileLite
             return origami::data_type_t::Float4;
 
         default:
-      throw std::runtime_error("Unsupported data type: " + std::to_string(static_cast<int>(type)));
+            throw std::runtime_error("Unsupported data type: " + std::to_string(static_cast<int>(type)));
         }
     }
 } // namespace TensileLite
