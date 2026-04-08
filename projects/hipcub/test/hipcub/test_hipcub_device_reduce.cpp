@@ -62,14 +62,12 @@ using HipcubDeviceReduceTestsParams = ::testing::Types<
     DeviceReduceParams<test_utils::half, test_utils::half>,
     DeviceReduceParams<test_utils::bfloat16, test_utils::bfloat16>,
     DeviceReduceParams<test_utils::half, float>,
-    DeviceReduceParams<test_utils::bfloat16, float>
+    DeviceReduceParams<test_utils::bfloat16, float>,
 #ifdef __HIP_PLATFORM_AMD__
-    ,
     DeviceReduceParams<int, long, true>,
-    DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
-    DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>
 #endif
-    >;
+    DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
+    DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>>;
 
 TYPED_TEST_SUITE(HipcubDeviceReduceTests, HipcubDeviceReduceTestsParams);
 
