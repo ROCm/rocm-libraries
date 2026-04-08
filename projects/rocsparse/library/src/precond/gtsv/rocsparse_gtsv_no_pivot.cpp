@@ -140,15 +140,15 @@ namespace rocsparse
     {
         static constexpr int MAX_RECURSION_LEVELS = determine_max_recursion_levels();
 
-        T* dl_modified[MAX_RECURSION_LEVELS];
-        T* d_modified[MAX_RECURSION_LEVELS];
-        T* du_modified[MAX_RECURSION_LEVELS];
-        T* B_modified[MAX_RECURSION_LEVELS];
+        T* dl_modified[MAX_RECURSION_LEVELS]{};
+        T* d_modified[MAX_RECURSION_LEVELS]{};
+        T* du_modified[MAX_RECURSION_LEVELS]{};
+        T* B_modified[MAX_RECURSION_LEVELS]{};
 
-        T* dl_spike[MAX_RECURSION_LEVELS];
-        T* d_spike[MAX_RECURSION_LEVELS];
-        T* du_spike[MAX_RECURSION_LEVELS];
-        T* B_spike[MAX_RECURSION_LEVELS];
+        T* dl_spike[MAX_RECURSION_LEVELS]{};
+        T* d_spike[MAX_RECURSION_LEVELS]{};
+        T* du_spike[MAX_RECURSION_LEVELS]{};
+        T* B_spike[MAX_RECURSION_LEVELS]{};
     };
 
     template <uint32_t BLOCKSIZE, typename T>
