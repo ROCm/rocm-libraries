@@ -328,7 +328,7 @@ void testing_geev(Arguments& argus)
 
     // determine sizes
     size_t size_A    = size_t(lda) * n;
-    size_t size_W    = size_t(n);
+    size_t size_W    = is_complex<T> ? size_t(n) : size_t(2 * n);
     size_t size_VL   = jobvlC == 'N' ? 0 : size_t(ldvl) * n;
     size_t size_VR   = jobvrC == 'N' ? 0 : size_t(ldvr) * n;
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
@@ -339,8 +339,10 @@ void testing_geev(Arguments& argus)
     size_t size_VRRes = (argus.unit_check || argus.norm_check) ? size_VR : 0;
 
     // check invalid sizes
-    bool invalid_size = (n < 0 || lda < n || bc < 0);
-    if(invalid_size)
+    bool invalid_size    = (n < 0 || lda < n || bc < 0);
+    bool invalid_size_vl = ldvl < (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 1 : n);
+    bool invalid_size_vr = ldvr < (jobvr == HIPSOLVER_EIG_MODE_NOVECTOR ? 1 : n);
+    if(invalid_size || invalid_size_vl || invalid_size_vr)
     {
 #if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
         if(BATCHED)

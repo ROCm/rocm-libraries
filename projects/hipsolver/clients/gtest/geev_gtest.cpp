@@ -52,16 +52,16 @@ const vector<vector<int>> matrix_size_range = {
     {20, 20, -1, 20},
     {20, 20, 20, -1},
     // normal (valid) samples
-    {32, 32},
-    {50, 50},
-    {70, 100},
+    {32, 32, 36, 32},
+    {50, 50, 50, 56},
+    {70, 100, 70, 70},
 };
 
 // // for daily_lapack tests
 // const vector<vector<int>> large_matrix_size_range = {
-//     {192, 192},
-//     {640, 640},
-//     {1000, 1024},
+//     {192, 192, 198, 192},
+//     {640, 640, 640, 646},
+//     {1000, 1024, 1000, 1000},
 // };
 
 Arguments geev_setup_arguments(geev_tuple tup)
