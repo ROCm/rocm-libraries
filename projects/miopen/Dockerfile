@@ -228,10 +228,6 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
     fi && \
     cmake --install .
 
-# NIGHTLY target: push this image as rocm/miopen:therock
-FROM scratch AS update_therock
-COPY --from=build_therock /opt/rocm /opt/rocm
-
 #============================================================================
 # REGULAR: Use the pre-built ROCm image from TheRock to build the rest of
 # the MIOpen environment
@@ -267,10 +263,18 @@ RUN cd / && \
     else \
         rbuild prepare -s develop -d ${PREFIX} -DGPU_ARCHS="${THEROCK_ASIC}"; \
     fi
+# ================================================================================
+# NIGHTLY target: push this image as rocm/miopen:therock
+# ================================================================================
+FROM scratch AS update_therock
+COPY --from=miopen_deps /opt/rocm /opt/rocm
+COPY --from=miopen_deps /usr/local /usr/local
 
 # ============================================================================
 # Build and install CK
 # ============================================================================
+FROM miopen_deps AS build_ck
+ARG THEROCK_ASIC=gfx90a
 ADD miopen/script/redis-cli.conf /redis-cli.conf
 ADD miopen/script/sccache_wrapper.sh /sccache_wrapper.sh
 
@@ -352,8 +356,8 @@ RUN set -x && \
 # ============================================================================
 FROM base AS miopen
 
-COPY --from=miopen_deps /opt/rocm /opt/rocm
-COPY --from=miopen_deps /usr/local /usr/local
+COPY --from=build_ck /opt/rocm /opt/rocm
+COPY --from=build_ck /usr/local /usr/local
 
 # Install explicit version of tools that are supported for miopen development
 # (clang-format, clang-tidy)
