@@ -480,7 +480,8 @@ class LraTileAssignmentTransposedMFMAMixMode(LraTileAssignmentTransposedMFMAB8):
     }
     def __call__(self, writer, kernel, tP):
         # TODO: check correctness of this condition
-        MacDataType = f"MacDataType{tP["tensorChar"]}" if(tP["tensorChar"]=="A" or tP["tensorChar"]=="B") else "DataType"
+        tc = tP["tensorChar"]
+        MacDataType = f"MacDataType{tc}" if(tc=="A" or tc=="B") else "DataType"
         if not tP["enableLDSTr"]:
             comp = LraTileAssignmentMFMA()
             return comp(writer, kernel, tP)

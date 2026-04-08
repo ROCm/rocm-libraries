@@ -10402,7 +10402,8 @@ class KernelWriterAssembly(KernelWriter):
       return Module("TDM LDS swap (Empty)")
 
     module: Module = Module("TDM LDS swap")
-    module.addComment(f"TDM LDS swap(aligned pow2: {not kernel["StoreSwapAddr"]})")
+    storeSwapAddr = kernel["StoreSwapAddr"]
+    module.addComment(f"TDM LDS swap(aligned pow2: {not storeSwapAddr})")
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     ldsAddrSgprName: str = comp.getLdsAddrSgprName(f"tdm{tc}Group0")
 
