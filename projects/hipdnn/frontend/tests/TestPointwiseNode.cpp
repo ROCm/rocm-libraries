@@ -17,11 +17,11 @@ namespace
 {
 namespace
 {
-// Must match the last value in the PointwiseMode enum (Types.hpp).
-// If you add a new PointwiseMode, update this constant.
-constexpr auto K_LAST_POINTWISE_MODE = PointwiseMode::TANH_FWD;
-static_assert(static_cast<int>(K_LAST_POINTWISE_MODE) == 47,
-              "PointwiseMode enum changed — update K_LAST_POINTWISE_MODE");
+// Sentinel: PointwiseMode::COUNT is always one past the last valid mode.
+// New modes inserted before COUNT automatically update the iteration range.
+constexpr auto K_POINTWISE_MODE_COUNT = PointwiseMode::COUNT;
+static_assert(static_cast<int>(K_POINTWISE_MODE_COUNT) == 48,
+              "PointwiseMode enum changed — update this assertion");
 
 // Generic helper function to generate vectors of pointwise modes based on a checker function
 template <typename CheckerFunc>
@@ -30,7 +30,7 @@ std::vector<PointwiseMode> getPointwiseModesByChecker(CheckerFunc checker)
     std::vector<PointwiseMode> modes;
     // Iterate through all possible PointwiseMode values and check if they match the criteria
     for(int i = static_cast<int>(PointwiseMode::NOT_SET);
-        i <= static_cast<int>(K_LAST_POINTWISE_MODE);
+        i < static_cast<int>(K_POINTWISE_MODE_COUNT);
         ++i)
     {
         auto mode = static_cast<PointwiseMode>(i);

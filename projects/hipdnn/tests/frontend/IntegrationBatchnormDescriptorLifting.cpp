@@ -245,37 +245,42 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BasicBatchnormRoundTrip)
     ASSERT_TRUE(liftedMomentum->get_pass_by_value<float>().has_value());
     EXPECT_FLOAT_EQ(liftedMomentum->get_pass_by_value<float>().value(), 0.1f);
 
-    // Verify Mean tensor (inferred dims)
+    // Verify Mean tensor
     ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_MEAN_UID), 0u);
     auto liftedMean = tensorMap[K_BATCHNORM_TENSOR_MEAN_UID];
     EXPECT_EQ(liftedMean->get_uid(), K_BATCHNORM_TENSOR_MEAN_UID);
     EXPECT_EQ(liftedMean->get_name(), "Mean");
-    EXPECT_FALSE(liftedMean->get_dim().empty());
-    EXPECT_FALSE(liftedMean->get_stride().empty());
+    EXPECT_EQ(liftedMean->get_dim(), toVec(K_BATCHNORM_TENSOR_MEAN_DIMS));
+    EXPECT_EQ(liftedMean->get_stride(), toVec(K_BATCHNORM_TENSOR_MEAN_STRIDES));
+    EXPECT_EQ(liftedMean->get_data_type(), DataType::FLOAT);
 
-    // Verify InvVariance tensor (inferred dims)
+    // Verify InvVariance tensor
     ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_INV_VARIANCE_UID), 0u);
     auto liftedInvVar = tensorMap[K_BATCHNORM_TENSOR_INV_VARIANCE_UID];
     EXPECT_EQ(liftedInvVar->get_uid(), K_BATCHNORM_TENSOR_INV_VARIANCE_UID);
     EXPECT_EQ(liftedInvVar->get_name(), "InvVariance");
-    EXPECT_FALSE(liftedInvVar->get_dim().empty());
-    EXPECT_FALSE(liftedInvVar->get_stride().empty());
+    EXPECT_EQ(liftedInvVar->get_dim(), toVec(K_BATCHNORM_TENSOR_INV_VARIANCE_DIMS));
+    EXPECT_EQ(liftedInvVar->get_stride(), toVec(K_BATCHNORM_TENSOR_INV_VARIANCE_STRIDES));
+    EXPECT_EQ(liftedInvVar->get_data_type(), DataType::FLOAT);
 
-    // Verify NextRunMean tensor (inferred dims)
+    // Verify NextRunMean tensor
     ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID), 0u);
     auto liftedNextRunMean = tensorMap[K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID];
     EXPECT_EQ(liftedNextRunMean->get_uid(), K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID);
     EXPECT_EQ(liftedNextRunMean->get_name(), "NextRunMean");
-    EXPECT_FALSE(liftedNextRunMean->get_dim().empty());
-    EXPECT_FALSE(liftedNextRunMean->get_stride().empty());
+    EXPECT_EQ(liftedNextRunMean->get_dim(), toVec(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_DIMS));
+    EXPECT_EQ(liftedNextRunMean->get_stride(), toVec(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_STRIDES));
+    EXPECT_EQ(liftedNextRunMean->get_data_type(), DataType::FLOAT);
 
-    // Verify NextRunVar tensor (inferred dims)
+    // Verify NextRunVar tensor
     ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID), 0u);
     auto liftedNextRunVar = tensorMap[K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID];
     EXPECT_EQ(liftedNextRunVar->get_uid(), K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID);
     EXPECT_EQ(liftedNextRunVar->get_name(), "NextRunVar");
-    EXPECT_FALSE(liftedNextRunVar->get_dim().empty());
-    EXPECT_FALSE(liftedNextRunVar->get_stride().empty());
+    EXPECT_EQ(liftedNextRunVar->get_dim(), toVec(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_DIMS));
+    EXPECT_EQ(liftedNextRunVar->get_stride(),
+              toVec(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_STRIDES));
+    EXPECT_EQ(liftedNextRunVar->get_data_type(), DataType::FLOAT);
 
     // Verify 1 sub-node of the correct type
     auto& subNodes = liftedGraph->getSubNodes();

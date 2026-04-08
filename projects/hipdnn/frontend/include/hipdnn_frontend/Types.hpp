@@ -123,6 +123,7 @@ enum class PointwiseMode
     TAN = 45, ///< Tangent function
     TANH_BWD = 46, ///< Tanh backward pass
     TANH_FWD = 47, ///< Tanh forward pass
+    COUNT = 48 ///< Number of pointwise modes (sentinel — not a valid mode)
 };
 typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
 

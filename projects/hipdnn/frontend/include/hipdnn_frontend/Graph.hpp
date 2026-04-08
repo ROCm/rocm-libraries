@@ -258,10 +258,16 @@ private:
         return {};
     }
 
+    /// Check if we have a valid graph descriptor (may or may not be finalized)
+    bool hasValidGraphDesc() const
+    {
+        return _graphDesc && _graphDesc->valid();
+    }
+
     /// Check if we have a usable (valid + finalized) graph descriptor
     bool hasReadyGraphDesc() const
     {
-        return _graphDesc && _graphDesc->valid() && _graphDescFinalized;
+        return hasValidGraphDesc() && _graphDescFinalized;
     }
 
     Error finalizeExecutionPlanDescriptor()
@@ -1014,7 +1020,7 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Creating execution plans for graph " << graph_attributes.get_name());
 
-        if(!_graphDesc || !_graphDesc->valid())
+        if(!hasReadyGraphDesc())
         {
             return {ErrorCode::HIPDNN_BACKEND_ERROR,
                     "Graph has not been built, build the operation graph first. Cannot create "
@@ -1059,7 +1065,7 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Creating execution plans for graph " << graph_attributes.get_name());
 
-        if(!_graphDesc || !_graphDesc->valid())
+        if(!hasReadyGraphDesc())
         {
             return {ErrorCode::HIPDNN_BACKEND_ERROR,
                     "Graph has not been built, build the operation graph first. Cannot create "
@@ -1162,7 +1168,7 @@ public:
      */
     Error serialize(std::vector<uint8_t>& data) const
     {
-        if(!_graphDesc || !_graphDesc->valid())
+        if(!hasValidGraphDesc())
         {
             return {ErrorCode::INVALID_VALUE,
                     "Graph has no backend descriptor. "
@@ -1293,7 +1299,7 @@ public:
      */
     Error serialize(std::string& jsonData) const
     {
-        if(!_graphDesc || !_graphDesc->valid())
+        if(!hasValidGraphDesc())
         {
             return {ErrorCode::INVALID_VALUE,
                     "Graph has no backend descriptor. "

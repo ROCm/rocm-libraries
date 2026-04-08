@@ -43,6 +43,9 @@ TEST_F(IntegrationGraphLifting, ConvFpropRoundTripViaCApi)
     auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
+    // Verify graph name survives the C-API round-trip
+    EXPECT_EQ(liftedGraph->get_name(), "ConvFpropTestGraph");
+
     // Verify graph-level data types
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
     EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
@@ -363,6 +366,27 @@ TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughDeserializeViaBackend)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     EXPECT_EQ(liftedGraph->get_name(), "LiftingTestGraph");
+}
+
+// Exercises the deserialize() path and verifies the preferred engine ID
+// is preserved through the deserialization path.
+TEST_F(IntegrationGraphLifting, PreferredEngineIdPreservedThroughDeserialize)
+{
+    auto originalGraph = buildConvFpropGraph();
+    originalGraph->set_preferred_engine_id_ext(42);
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    // Create a new graph and use deserialize without handle
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    result = liftedGraph->deserialize(nullptr, data);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    EXPECT_EQ(liftedGraph->get_preferred_engine_id_ext(), 42);
 }
 
 } // namespace
