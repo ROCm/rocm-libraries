@@ -19,7 +19,7 @@ class EnumValue:
 
     Attributes:
         name: Backend C-API suffix appended to ``EnumDef.backend_prefix``
-            (e.g., ``"CROSS_CORRELATION"`` → ``HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION``).
+            (e.g., ``"CROSS_CORRELATION"`` → ``HIPDNN_CROSS_CORRELATION``).
         value: Numeric value in the backend C-API enum typedef.
         sentinel: If True, this value (typically UNSET/NOT_SET) is excluded from the
             backend C-API enum but appears as ``NOT_SET = 0`` in the frontend enum class.
@@ -365,6 +365,7 @@ class TestData:
     tensor_configs: dict[str, TensorConfig] = field(default_factory=dict)
     field_values: dict[str, list] = field(default_factory=dict)
     constants_include: str = ""
+    tensor_const_prefix: Optional[str] = None
 
 
 @dataclass
@@ -896,9 +897,12 @@ class OperationConfig:
     def tensor_const_prefix(self) -> str:
         """Prefix for tensor constant names.
 
-        Returns 'K_' for pre-existing constants headers (backward compatible),
+        Returns the explicit override from test_data if set, otherwise
+        'K_' for pre-existing constants headers (backward compatible),
         'K_{NAME}_' for new operations (avoids collisions).
         """
+        if self.test_data and self.test_data.tensor_const_prefix:
+            return self.test_data.tensor_const_prefix
         if self.test_data and self.test_data.constants_include:
             return "K_"
         return f"K_{self.name.upper()}_"

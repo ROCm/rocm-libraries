@@ -134,6 +134,7 @@ def load_config(path: Path) -> OperationConfig:
             )
         test_data.field_values = td_raw.get("field_values", {})
         test_data.constants_include = td_raw.get("constants_include", "")
+        test_data.tensor_const_prefix = td_raw.get("tensor_const_prefix", None)
 
     # Infer properties config
     infer_properties = _parse_infer_properties(op.get("infer_properties"))
@@ -396,7 +397,7 @@ def _validate_config(config: OperationConfig) -> None:
                 raise ConfigError(
                     f"Operation '{config.name}', data field '{df.name}': "
                     f"mode fields must have 'test_backend_value' set "
-                    f"(e.g., 'HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION')."
+                    f"(e.g., 'HIPDNN_CROSS_CORRELATION')."
                 )
             if not df.backend_setter or not df.backend_getter:
                 raise ConfigError(

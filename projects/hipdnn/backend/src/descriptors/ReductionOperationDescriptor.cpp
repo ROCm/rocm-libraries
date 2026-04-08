@@ -162,7 +162,7 @@ void ReductionOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   "ReductionOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_REDUCTION,
+        getOperationType(HIPDNN_OPERATION_TYPE_REDUCTION_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,

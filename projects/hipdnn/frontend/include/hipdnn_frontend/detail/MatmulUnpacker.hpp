@@ -23,24 +23,24 @@ namespace hipdnn_frontend::detail
     // Unpack A tensor
     std::shared_ptr<graph::TensorAttributes> aTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, tensorMap, aTensor, "matmul A tensor"));
+        opDesc, HIPDNN_ATTR_OPERATION_MATMUL_ADESC, tensorMap, aTensor, "matmul A tensor"));
     attributes.set_a(aTensor);
 
     // Unpack B tensor
     std::shared_ptr<graph::TensorAttributes> bTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_MATMUL_B_EXT, tensorMap, bTensor, "matmul B tensor"));
+        opDesc, HIPDNN_ATTR_OPERATION_MATMUL_BDESC, tensorMap, bTensor, "matmul B tensor"));
     attributes.set_b(bTensor);
 
     // Unpack C tensor
     std::shared_ptr<graph::TensorAttributes> cTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
-        opDesc, HIPDNN_ATTR_OPERATION_MATMUL_C_EXT, tensorMap, cTensor, "matmul C tensor"));
+        opDesc, HIPDNN_ATTR_OPERATION_MATMUL_CDESC, tensorMap, cTensor, "matmul C tensor"));
     attributes.set_c(cTensor);
 
     // Unpack compute data type
     auto [dt, dtErr]
-        = unpackGraphDataType(opDesc, HIPDNN_ATTR_MATMUL_MATH_PREC_EXT, "matmul compute data type");
+        = unpackGraphDataType(opDesc, HIPDNN_ATTR_MATMUL_COMP_TYPE, "matmul compute data type");
     if(dtErr.is_bad())
     {
         return dtErr;
