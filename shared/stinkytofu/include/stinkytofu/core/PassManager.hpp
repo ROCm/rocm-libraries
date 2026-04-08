@@ -220,6 +220,11 @@ namespace stinkytofu
             return dumpInitialIR;
         }
 
+        bool shouldPrintPassName() const
+        {
+            return printPassNames;
+        }
+
         bool shouldPrintBefore(const std::string& passName) const;
         bool shouldPrintAfter(const std::string& passName) const;
 

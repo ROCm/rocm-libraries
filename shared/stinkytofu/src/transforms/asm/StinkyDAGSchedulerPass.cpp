@@ -235,14 +235,29 @@ namespace
                     for(auto& [aff, regs] : groupSrcRegs)
                         if(regs.size() > 1) mixedAffinities.push_back(aff);
 
-                    // Work backward from the last mixed group.
-                    bool asc = false;
-                    for(int i = (int)mixedAffinities.size() - 1; i >= 0; --i)
+                    bool hasSingleOpGroup = (groupSrcRegs.size() > mixedAffinities.size());
+
+                    if(dsOrder == DsReadOrder::AscendingCache && !mixedAffinities.empty())
                     {
-                        groupAsc[mixedAffinities[i]] = asc;
-                        if(dsOrder == DsReadOrder::AscendingCache)
-                            asc = !asc; // zigzag only for AscendingCache
+                        // AscendingCache: always zigzag for cache reuse.
+                        // If single-op anchor exists, work backward from it.
+                        // Otherwise, first group ascending, then alternate.
+                        bool asc = false; // last mixed group descending for cache reuse
+                        for(int i = (int)mixedAffinities.size() - 1; i >= 0; --i)
+                        {
+                            groupAsc[mixedAffinities[i]] = asc;
+                            asc = !asc;
+                        }
                     }
+                    else if(hasSingleOpGroup && !mixedAffinities.empty())
+                    {
+                        // Ascending with single-op anchor: load absent operand first.
+                        // All mixed groups use the same direction.
+                        bool asc = false;
+                        for(int i = (int)mixedAffinities.size() - 1; i >= 0; --i)
+                            groupAsc[mixedAffinities[i]] = asc;
+                    }
+                    // Ascending without anchor: groupAsc empty → default ascending.
                 }
 
                 // Assign priority. Within each group, sort by DAG id
@@ -262,7 +277,8 @@ namespace
                                              return a->srcReg > b->srcReg;
                                          });
                     }
-                    for(auto* d : group) dagNodes[d->idx].dsReadPriority = pri++;
+                    for(auto* d : group)
+                        dagNodes[d->idx].dsReadPriority = pri++;
                     group.clear();
                 };
                 for(auto& d : dsReads)

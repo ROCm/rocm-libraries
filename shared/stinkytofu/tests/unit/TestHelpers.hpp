@@ -24,11 +24,13 @@
 #pragma once
 
 #include <algorithm>
+#include <vector>
 #include <gtest/gtest.h>
 
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu
@@ -78,6 +80,56 @@ namespace stinkytofu
             StinkyInstruction* inst = builder.create(getMCIDByUOp(op, arch));
             inst->addDestReg(StinkyRegister("v", destReg, 4));
             inst->addSrcReg(StinkyRegister("v", addrReg, 1));
+            return inst;
+        }
+
+        /// Create ds_load_b128 / ds_read_b128 with optional memory tokens.
+        /// Internally delegates to createDsReadB128InBlock for the instruction,
+        /// then attaches a MemTokenData modifier when \p memTokens is non-empty.
+        inline StinkyInstruction* createDSLoadInBlock(BasicBlock*      bb,
+                                                      GfxArchID        arch,
+                                                      int              destReg,
+                                                      int              addrReg,
+                                                      std::vector<int> memTokens = {})
+        {
+            StinkyInstruction* inst = createDsReadB128InBlock(bb, arch, destReg, addrReg);
+            if(!memTokens.empty())
+                inst->addModifier<MemTokenData>(MemTokenData{memTokens});
+            return inst;
+        }
+
+        /// Create a tensor_load_to_lds instruction.
+        /// \p src0Reg is a 4-SGPR base address; \p src1Reg is an 8-SGPR descriptor.
+        /// Optionally attach a MemTokenData modifier with \p memTokens.
+        inline StinkyInstruction* createTensorLoadInBlock(BasicBlock*      bb,
+                                                          GfxArchID        arch,
+                                                          int              src0Reg,
+                                                          int              src1Reg,
+                                                          std::vector<int> memTokens = {})
+        {
+            AsmIRBuilder       builder(*bb, arch);
+            StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::tensor_load_to_lds, arch));
+            inst->addSrcReg(StinkyRegister("s", src0Reg, 4));
+            inst->addSrcReg(StinkyRegister("s", src1Reg, 8));
+            if(!memTokens.empty())
+                inst->addModifier<MemTokenData>(MemTokenData{memTokens});
+            return inst;
+        }
+
+        /// Create a ds_write_b64 instruction: mem[v[addrReg]] = v[dataReg:dataReg+1].
+        /// Optionally attach a MemTokenData modifier with \p memTokens.
+        inline StinkyInstruction* createDSWriteInBlock(BasicBlock*      bb,
+                                                       GfxArchID        arch,
+                                                       int              addrReg,
+                                                       int              dataReg,
+                                                       std::vector<int> memTokens = {})
+        {
+            AsmIRBuilder       builder(*bb, arch);
+            StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::ds_write_b64, arch));
+            inst->addSrcReg(StinkyRegister("v", addrReg, 1));
+            inst->addSrcReg(StinkyRegister("v", dataReg, 2));
+            if(!memTokens.empty())
+                inst->addModifier<MemTokenData>(MemTokenData{memTokens});
             return inst;
         }
 

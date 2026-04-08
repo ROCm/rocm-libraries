@@ -34,6 +34,9 @@
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
+#include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 
 #include <functional>
 #include <vector>
@@ -59,7 +62,10 @@ const std::vector<PassInfo> availablePasses
        {"ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); }},
        {"BuildUseDefChainPass", []() { return createBuildUseDefChainPass(); }},
        {"DumpStinkyFunctionPass",
-        []() { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }}};
+        []() { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }},
+       {"PeepholeOptimizationPass", []() { return createPeepholeOptimizationPass(); }},
+       {"DeadCodeEliminationPass", []() { return createDeadCodeEliminationPass(); }},
+       {"RedundantMovEliminationPass", []() { return createRedundantMovEliminationPass(); }}};
 
 /**
  * Create default DebugPrintInstrumentation for stinkytofu-opt.

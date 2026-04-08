@@ -33,6 +33,7 @@
 namespace stinkytofu
 {
     enum class GfxArchID : uint32_t;
+    struct ParsedFunction;
 
     /**
      * StinkyIRConverter - A utility class for converting raw instruction strings to a Function.
@@ -98,6 +99,11 @@ namespace stinkytofu
                                                           Function&          func,
                                                           PassContext&       passCtx,
                                                           GfxArchID          arch);
+
+        /// Populate a Function from a pre-parsed ParsedFunction.
+        static StinkyErrorCode populateFunctionFromParsed(ParsedFunction& parsedFunc,
+                                                          Function&       func,
+                                                          GfxArchID       arch);
 
         /**
          * Get the PassContext associated with the last conversion.

@@ -526,12 +526,13 @@ namespace stinkytofu
             {
                 consumeChar();
             }
-            // Handle C-style single-line comments: //
-            else if(c == '/' && peekAheadChar() == '/')
+            // Handle single-line comments: // or #
+            else if((c == '/' && peekAheadChar() == '/') || c == '#')
             {
                 // Skip until end of line
-                consumeChar(); // consume first '/'
-                consumeChar(); // consume second '/'
+                consumeChar();
+                if(c == '/')
+                    consumeChar(); // consume second '/'
                 while(!isAtBufferEnd() && peekChar() != '\n' && peekChar() != '\r')
                 {
                     consumeChar();

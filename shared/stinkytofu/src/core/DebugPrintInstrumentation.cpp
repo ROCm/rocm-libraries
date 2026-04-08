@@ -25,6 +25,8 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 
+#include <iostream>
+
 namespace stinkytofu
 {
     DebugPrintInstrumentation::DebugPrintInstrumentation(std::unique_ptr<PassManagerDebugConfig> cfg)
@@ -48,6 +50,9 @@ namespace stinkytofu
                                                Function&          F,
                                                PassContext&        /*ctx*/)
     {
+        if(dbgCfg->shouldPrintPassName())
+            std::cerr << "[StinkyTofu] Running pass: " << passName << "\n";
+
         if(dbgCfg->shouldPrintBefore(passName))
         {
             dbgCfg->getOutputStreamInBefore() << "\n*** Before Pass: " << passName << " ***\n";

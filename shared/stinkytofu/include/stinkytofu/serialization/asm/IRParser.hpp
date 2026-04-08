@@ -126,4 +126,22 @@ namespace stinkytofu
     /// @return A ParseResult containing parsed instructions and any diagnostics (errors/warnings).
     ParseResult parseSourceStringWithDiagnostics(const std::string& sourceStr);
 
+    /// Result of parsing multiple functions from an IR source string.
+    struct MultiParseResult
+    {
+        std::vector<std::unique_ptr<ParsedFunction>> functions;
+        std::vector<Diagnostic>                      diagnostics;
+
+        bool hasErrors() const
+        {
+            for(const auto& diag : diagnostics)
+                if(diag.getLevel() == Diagnostic::Level::Error)
+                    return true;
+            return false;
+        }
+    };
+
+    /// Parse all st.func definitions from a source string.
+    MultiParseResult parseAllSourceStringsWithDiagnostics(const std::string& sourceStr);
+
 } // namespace stinkytofu

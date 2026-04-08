@@ -158,6 +158,9 @@ namespace
         /// Print all diagnostics to stderr.
         void printDiagnostics() const;
 
+        /// Parse all functions in the input.
+        std::vector<std::unique_ptr<ParsedFunction>> parseAllFunctions();
+
     private:
         //------------------------------------------------------------------
         // Parsing methods
@@ -498,6 +501,30 @@ namespace
 
         emitError("Expected '}' to close function body");
         return nullptr;
+    }
+
+    std::vector<std::unique_ptr<ParsedFunction>> IRParser::parseAllFunctions()
+    {
+        std::vector<std::unique_ptr<ParsedFunction>> functions;
+        while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
+        {
+            skipNewlines();
+            if(lexer.isAtEnd() || peek().kind == TokenKind::Eof)
+                break;
+            if(peek().kind == TokenKind::Identifier && std::string(peek().text) == "st.func")
+            {
+                auto func = parseFunction();
+                if(func)
+                    functions.push_back(std::move(func));
+                else
+                    break;
+            }
+            else
+            {
+                break; // not a function, stop
+            }
+        }
+        return functions;
     }
 
     std::unique_ptr<ParsedBlock> IRParser::parseBlock()
@@ -1258,6 +1285,20 @@ namespace stinkytofu
         IRParser parser(lexer);
         result.parsedFunction = parser.parse();
         result.diagnostics    = parser.getDiagnostics();
+
+        return result;
+    }
+
+    MultiParseResult parseAllSourceStringsWithDiagnostics(const std::string& sourceStr)
+    {
+        MultiParseResult result;
+
+        IRLexer lexer(sourceStr);
+        lexer.lex();
+
+        IRParser parser(lexer);
+        result.functions   = parser.parseAllFunctions();
+        result.diagnostics = parser.getDiagnostics();
 
         return result;
     }

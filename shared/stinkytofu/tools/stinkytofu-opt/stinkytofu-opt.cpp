@@ -24,6 +24,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
+#include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
 #include "stinkytofu/support/PassOrderSnapshotJson.hpp"
 
@@ -138,7 +139,8 @@ namespace
             {
                 static constexpr char kSnapJson[]  = "--pass-order-snapshot-json=";
                 static constexpr char kSnapAfter[] = "--pass-order-snapshot-after-passes=";
-                if(arg.rfind(kSnapJson, 0) == 0 || arg.rfind(kSnapAfter, 0) == 0)
+                if(arg.rfind(kSnapJson, 0) == 0 || arg.rfind(kSnapAfter, 0) == 0
+                   || arg == "--print-output" || arg.rfind("--ds-read-order=", 0) == 0)
                     continue;
                 passNames.push_back(arg.substr(2)); // Remove "--" prefix
             }
@@ -293,23 +295,26 @@ int main(int argc, char** argv)
     passFeatureConfig.passOrderSnapshot.dumpAfterPasses
         = extractPassOrderSnapshotAfterPasses(argc, argv);
 
-    stinkytofu::PassManager passManager;
-
-    passManager.addInstrumentation(createDebugPrintInstrumentation());
-    if(!passFeatureConfig.passOrderSnapshot.jsonPath.empty())
+    // Parse --ds-read-order=ProgramOrder|Ascending|AscendingCache
+    for(int i = 1; i < argc; ++i)
     {
-        auto collector = std::make_shared<stinkytofu::DAGScheduleJsonCollector>(
-            passFeatureConfig.passOrderSnapshot.jsonPath, "kernel");
-        passManager.addInstrumentation(
-            std::make_shared<stinkytofu::PassOrderSnapshotInstrumentation>(std::move(collector)));
+        std::string a = argv[i];
+        if(a.rfind("--ds-read-order=", 0) == 0)
+        {
+            std::string val = a.substr(16);
+            if(val == "ProgramOrder")
+                passFeatureConfig.dagFeatures.dsReadOrder
+                    = stinkytofu::PassFeatureConfig::DsReadOrder::ProgramOrder;
+            else if(val == "Ascending")
+                passFeatureConfig.dagFeatures.dsReadOrder
+                    = stinkytofu::PassFeatureConfig::DsReadOrder::Ascending;
+            else if(val == "AscendingCache")
+                passFeatureConfig.dagFeatures.dsReadOrder
+                    = stinkytofu::PassFeatureConfig::DsReadOrder::AscendingCache;
+        }
     }
-    passManager.setPassFeatureConfig(passFeatureConfig);
-    setKernelConfig(passManager, arch);
 
-    // Add deserialization pass first to load the IR with the specified architecture
-    passManager.addPass(std::make_unique<DeserializeStinkytofuIRPass>(filename));
-
-    // Parse and add user-specified passes from command line
+    // Parse and validate user-specified passes from command line
     std::vector<std::string> requestedPasses = parsePassNames(argc, argv, passStartIdx);
 
     if(!requestedPasses.empty())
@@ -317,12 +322,8 @@ int main(int argc, char** argv)
         std::cout << "\n=== Adding Passes ===\n";
         for(const auto& passName : requestedPasses)
         {
-            auto pass = createPassByName(passName);
-            if(pass)
-            {
+            if(createPassByName(passName))
                 std::cout << "Adding pass: " << passName << "\n";
-                passManager.addPass(std::move(pass));
-            }
             else
             {
                 std::cerr << "Warning: Unknown pass '" << passName << "' - skipping\n";
@@ -338,9 +339,80 @@ int main(int argc, char** argv)
         std::cout << "Use --list-passes to see available passes.\n\n";
     }
 
-    stinkytofu::Function func("kernel");
-    func.setGemmTileConfig(passManager.getPassContext().getGemmTileConfig());
-    passManager.run(func);
+    // Check for --print-output flag
+    bool printOutput = false;
+    for(int i = 1; i < argc; ++i)
+    {
+        if(std::string(argv[i]) == "--print-output")
+            printOutput = true;
+    }
+
+    // Read and parse all functions from the input file
+    std::ifstream     inputFile(filename);
+    std::stringstream fileBuffer;
+    fileBuffer << inputFile.rdbuf();
+    std::string fileContent = fileBuffer.str();
+
+    GfxArchID archID = getGfxArchID(arch[0], arch[1], arch[2]);
+
+    auto parsed = stinkytofu::parseAllSourceStringsWithDiagnostics(fileContent);
+    if(parsed.hasErrors())
+    {
+        std::cerr << "Error: Failed to parse input file\n";
+        for(const auto& diag : parsed.diagnostics)
+            std::cerr << "  " << diag.getMessage() << "\n";
+        return 1;
+    }
+
+    // Fall back to single-function parsing for flat format (no st.func)
+    if(parsed.functions.empty())
+    {
+        auto singleResult = stinkytofu::parseSourceStringWithDiagnostics(fileContent);
+        if(singleResult.parsedFunction)
+            parsed.functions.push_back(std::move(singleResult.parsedFunction));
+    }
+
+    // Process each function independently
+    for(auto& parsedFunc : parsed.functions)
+    {
+        stinkytofu::PassManager passManager;
+
+        passManager.addInstrumentation(createDebugPrintInstrumentation());
+        if(!passFeatureConfig.passOrderSnapshot.jsonPath.empty())
+        {
+            auto collector = std::make_shared<stinkytofu::DAGScheduleJsonCollector>(
+                passFeatureConfig.passOrderSnapshot.jsonPath, parsedFunc->funcName);
+            passManager.addInstrumentation(
+                std::make_shared<stinkytofu::PassOrderSnapshotInstrumentation>(
+                    std::move(collector)));
+        }
+        passManager.setPassFeatureConfig(passFeatureConfig);
+        setKernelConfig(passManager, arch);
+
+        // Add user-specified passes
+        for(const auto& passName : requestedPasses)
+        {
+            auto pass = createPassByName(passName);
+            if(pass)
+                passManager.addPass(std::move(pass));
+        }
+
+        stinkytofu::Function func(parsedFunc->funcName);
+        func.setGemmTileConfig(passManager.getPassContext().getGemmTileConfig());
+
+        auto result
+            = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*parsedFunc, func, archID);
+        if(result != stinkytofu::StinkyErrorCode::SUCCESS)
+        {
+            std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName << "'\n";
+            continue;
+        }
+
+        passManager.run(func);
+
+        if(printOutput)
+            func.dump(std::cout);
+    }
 
     return 0;
 }

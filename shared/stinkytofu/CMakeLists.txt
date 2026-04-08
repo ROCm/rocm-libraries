@@ -74,7 +74,6 @@ add_subdirectory(tools/tablegen)
 # gfxisa needs generated instruction .inc files (hardware/generated/*.inc)
 target_include_directories(gfxisa PUBLIC ${TABLEGEN_OUTPUT_DIR})
 add_dependencies(gfxisa instruction_generated)
-add_subdirectory(tools/stinkytofu-opt)
 
 ##===----------------------------------------------------------------------===##
 # StinkyTofu library
@@ -136,11 +135,11 @@ if(STINKYTOFU_BUILD_PYTHON)
 endif()
 
 ##===----------------------------------------------------------------------===##
-# Intrinsic Compiler Tool
+# Tools (stinkytofu-opt, stinkytofu-check, intrinsic-compiler)
 ##===----------------------------------------------------------------------===##
-# Add intrinsic-compiler subdirectory AFTER stinkytofu library is built
-# This tool compiles Intrinsics.intrinsic to intrinsics.st.bc
-add_subdirectory(tools/intrinsic-compiler)
+# Added after the stinkytofu library. tablegen is added separately above
+# because it sets TABLEGEN_OUTPUT_DIR needed before gfxisa.
+add_subdirectory(tools)
 
 ##===----------------------------------------------------------------------===##
 # Install targets
