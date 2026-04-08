@@ -45,7 +45,7 @@ from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientEx
 from Tensile.Common.Architectures import isaToGfx
 from Tensile.Common.GlobalParameters import globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
-from .TensileCreateLibrary import copyStaticFiles
+from .TensileCreateLibrary import copyStaticFiles, libraryDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
@@ -115,10 +115,13 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   else:
     env["PYTHONPATH"] = module_path
 
-  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), isaToGfx(list(isaInfoMap.keys())[0]))
+  targetGfx = isaToGfx(list(isaInfoMap.keys())[0])
+  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), targetGfx)
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
-  coList = glob(os.path.join(clientLibraryPath, "library/*.co"))
-  yamlList = glob(os.path.join(clientLibraryPath, "library/*.yaml"))
+  archs = [isaToGfx(isa) for isa in isaInfoMap.keys()]
+  libraryGlobBase = libraryDir(clientLibraryPath, archs)
+  coList = glob(os.path.join(libraryGlobBase, "*.co"))
+  yamlList = glob(os.path.join(libraryGlobBase, "*.yaml"))
 
   clientParametersPaths = []
   splitGSU = False
@@ -736,10 +739,10 @@ def writeClientConfig(
 
     return filename
 
-def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataFilePath, configFile, deviceId, gfxName, problemTypeDict=None):
+def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataFilePath, configFile, deviceId, gfxName, problemTypeDict=None, archs=None):
 
-    libraryPath = os.path.join(libraryRootPath, "library")
-    libraryFiles = [os.path.join(libraryPath, f) for f in os.listdir(libraryPath)]
+    libraryPath = libraryDir(libraryRootPath, archs or [])
+    libraryFiles = [os.path.join(str(libraryPath), f) for f in os.listdir(libraryPath)]
     codeObjectFiles = [f for f in libraryFiles if f.endswith("co")]
 
     if problemTypeDict:
