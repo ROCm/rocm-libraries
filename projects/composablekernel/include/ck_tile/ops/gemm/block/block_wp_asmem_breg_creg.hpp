@@ -65,10 +65,6 @@ struct BlockWeightPreshuffleASmemBRegCReg
     using AWarpTensor = typename WarpGemm::AWarpTensor;
     statically_indexed_array<AWarpTensor, m_preload> preloaded_a_warp_tensor;
 
-    using NEG1                  = number<-1>;
-    using oob_conditional_check = true_type;
-    using static_move_ys        = std::conditional_t<Problem::Async, true_type, false_type>;
-
     CK_TILE_DEVICE static constexpr auto MakeABlockDistributionEncode()
     {
         constexpr auto a_block_outer_dstr_encoding =
@@ -140,10 +136,8 @@ struct BlockWeightPreshuffleASmemBRegCReg
             constexpr auto mIter = loadIter % MIterPerWarp;
             constexpr auto kIter = loadIter / MIterPerWarp;
 
-            a_load_windows[number<kIter>{}][number<mIter>{}].load(preloaded_a_warp_tensor(loadIter),
-                                                                  NEG1{},
-                                                                  oob_conditional_check{},
-                                                                  static_move_ys{});
+            load_tile(preloaded_a_warp_tensor(loadIter),
+                      a_load_windows[number<kIter>{}][number<mIter>{}]);
         });
     }
 
@@ -230,11 +224,8 @@ struct BlockWeightPreshuffleASmemBRegCReg
                 constexpr auto AmIter = (mIter + m_preload) % MIterPerWarp;
                 constexpr auto AkIter = (kIter + (mIter + m_preload) / MIterPerWarp);
 
-                a_load_windows[number<AkIter>{}][number<AmIter>{}].load(
-                        preloaded_a_warp_tensor(number<AwarpIter>{}),
-                        NEG1{},
-                        oob_conditional_check{},
-                        static_move_ys{});
+                load_tile(preloaded_a_warp_tensor(number<AwarpIter>{}),
+                          a_load_windows[number<AkIter>{}][number<AmIter>{}]);
             }
 
             // barrier
