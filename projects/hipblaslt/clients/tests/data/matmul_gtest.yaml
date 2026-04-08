@@ -1818,9 +1818,8 @@ Tests:
   use_e: 1
   gradient: 1
   activation_type: gelu
-  unit_check: 0
-  norm_check: 1
-  gpu_arch: '9..|1250'
+  unit_check: 1
+  gpu_arch_exclude: '1[1-2]\d{2}'
 
 - name: matmul_drelu_fp16
   category: pre_checkin
@@ -1838,7 +1837,7 @@ Tests:
   unit_check: 1
   gpu_arch_exclude: '1[1-2]\d{2}'
 
-- name: matmul_dgelu_bias_fp16
+- name: matmul_dgelu_bias
   category: pre_checkin
   function:
     matmul: *hpa_half_precision
@@ -1855,26 +1854,7 @@ Tests:
   bias_type: f32_r
   unit_check: 0
   norm_check: 1
-  gpu_arch: '9..|1250'
-
-- name: matmul_dgelu_bias_bf16
-  category: pre_checkin
-  function:
-    matmul: *hpa_bf16_precision
-  M: [128, 129]
-  N: [128, 129]
-  K: [128, 129]
-  transA_transB: *transA_transB_range
-  alpha: 1
-  beta: [ 0.0, 2.0 ]
-  use_e: 1
-  gradient: 1
-  activation_type: gelu
-  bias_vector: 1
-  bias_type: f32_r
-  unit_check: 0
-  norm_check: 1
-  gpu_arch: '9..|1250'
+  gpu_arch_exclude: '1[1-2]\d{2}'
 
 - name: matmul_drelu_bias
   category: pre_checkin
@@ -1914,7 +1894,7 @@ Tests:
   unit_check: 1
   gpu_arch: '942'
 
-- name: matmul_bgrada_fp16
+- name: matmul_bgrada_f16
   category: pre_checkin
   function:
     matmul: *hpa_half_precision
@@ -1928,27 +1908,9 @@ Tests:
   bias_vector: 1
   bias_type: f32_r
   bias_source: a
-  unit_check: 0
-  norm_check: 1
-  gpu_arch: '9..|1250'
-
-- name: matmul_bgrada_bf16
-  category: pre_checkin
-  function:
-    matmul: *hpa_bf16_precision
-  M: [128, 129]
-  N: [128, 129]
-  K: [128, 129]
-  transA_transB: *transA_transB_range
-  alpha: 1
-  beta: [ 0.0, 2.0 ]
-  gradient: 1
-  bias_vector: 1
-  bias_type: f32_r
-  bias_source: a
-  unit_check: 0
-  norm_check: 1
-  gpu_arch: '9..|1250'
+  unit_check: 1
+  gpu_arch_exclude: '1[1-2]\d{2}'
+  # norm_check: 1
 
 - name: matmul_bias_gelu_aux_fp32
   category: pre_checkin
@@ -2037,7 +1999,7 @@ Tests:
   norm_check: 1
   gpu_arch: '9(42|50)'
 
-- name: matmul_dgelu_bf16
+- name: matmul_dgelu_bf16_NN
   category: pre_checkin
   function:
     matmul: *hpa_bf16_precision
@@ -2053,27 +2015,27 @@ Tests:
   activation_type: gelu
   unit_check: 0
   norm_check: 1
-  gpu_arch: '(942|1250)'
+  gpu_arch: '942'
 
-- name: matmul_bgradb_bf16
+- name: matmul_bgradb_bf16_NT
   category: pre_checkin
   function:
     matmul: *hpa_bf16_precision
   M: [128, 129]
   N: [128, 129]
   K: [128, 129]
-  transA_transB: *transA_transB_range
+  transA: N
+  transB: T
   alpha: 1
   beta: [ 0.0, 2.0 ]
   gradient: 1
   bias_vector: 1
-  bias_type: f32_r
+  bias_type: bf16_r
   bias_source: b
-  unit_check: 0
-  norm_check: 1
-  gpu_arch: '(942|1250)'
+  unit_check: 1
+  gpu_arch: '942'
 
-- name: matmul_bgradb_fp16
+- name: matmul_bgradb_f16
   category: pre_checkin
   function:
     matmul: *hpa_half_precision
@@ -2085,11 +2047,10 @@ Tests:
   beta: [ 0.0, 2.0 ]
   gradient: 1
   bias_vector: 1
-  bias_type: f32_r
+  bias_type: [f16_r, f32_r]
   bias_source: b
-  unit_check: 0
-  norm_check: 1
-  gpu_arch: '9..|1250'
+  unit_check: 1
+  gpu_arch_exclude: '1[1-2]\d{2}'
 
 - name: matmul_bgradb_16_f32d_NT
   category: pre_checkin
