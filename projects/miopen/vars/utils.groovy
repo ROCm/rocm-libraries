@@ -246,12 +246,12 @@ def getDockerImageName(dockerArgs)
     return image
 }
 
-def buildDevDockerImage(Map conf=[:])
+def buildTheRockDockerImage(Map conf=[:])
 {
     env.DOCKER_BUILDKIT=1
     def prefixpath = conf.get("prefixpath", "/opt/rocm") 
 
-    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_dev_build"
+    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:therock_cache"
 
     def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151;gfx1201" // multiarch builds
 
@@ -267,6 +267,7 @@ def buildDevDockerImage(Map conf=[:])
     def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
                      "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
                      "--build-arg THEROCK_ASIC=\"${gpu_arch}\" " +
+                     "--target update_therock " +
                      " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
 
     if (params.USE_SCCACHE_DOCKER && check_host() && "${env.MIOPEN_SCCACHE}" != "null")
@@ -276,53 +277,39 @@ def buildDevDockerImage(Map conf=[:])
 
     echo "Docker Args: ${dockerArgs}"
 
-    def buildDate = sh(script: "date +%Y%m%d", returnStdout: true).trim()
-    def image = "${env.MIOPEN_DOCKER_IMAGE_URL}-dev:multiarch_dev_${buildDate}"
+    def image = "${env.MIOPEN_DOCKER_IMAGE_URL}:therock"
 
     def dockerImage
-    try{
-        echo "Pulling down image: ${image}"
-        dockerImage = docker.image("${image}")
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            dockerImage.pull()
-        }
-    }
-    catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
-        echo "The job was cancelled or aborted"
-        throw e
-    }
-    catch(Exception ex)
-    {
-        echo "Building image..."
-        def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max " +
-                              "--cache-from type=registry,ref=${cacheRef} "
+    
+    echo "Building image..."
+    def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+    def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max " +
+                            "--cache-from type=registry,ref=${cacheRef} "
 
-        try {
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                sh """
-                    docker buildx inspect ci-builder >/dev/null 2>&1 || \
-                    docker buildx create --name ci-builder --driver docker-container --use
-                    docker buildx use ci-builder
-                    docker buildx inspect --bootstrap
-                """.stripIndent()
-            
-                sh """
-                    DOCKER_BUILDKIT=1 docker buildx build \
-                    --push \
-                    --tag ${image} \
-                    ${dockerCacheArgs} \
-                    ${dockerArgs} \
-                    ${buildContext}
-                """.stripIndent()
-            }
-            dockerImage = docker.image("${image}")
-        } catch (Exception bex) {
-            echo "Buildx not available or failed, falling back to docker.build"
-            dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                dockerImage.push()
-            }
+    try {
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh """
+                docker buildx inspect ci-builder >/dev/null 2>&1 || \
+                docker buildx create --name ci-builder --driver docker-container --use
+                docker buildx use ci-builder
+                docker buildx inspect --bootstrap
+            """.stripIndent()
+        
+            sh """
+                DOCKER_BUILDKIT=1 docker buildx build \
+                --push \
+                --tag ${image} \
+                ${dockerCacheArgs} \
+                ${dockerArgs} \
+                ${buildContext}
+            """.stripIndent()
+        }
+        dockerImage = docker.image("${image}")
+    } catch (Exception bex) {
+        echo "Buildx not available or failed, falling back to docker.build"
+        dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            dockerImage.push()
         }
     }
 
