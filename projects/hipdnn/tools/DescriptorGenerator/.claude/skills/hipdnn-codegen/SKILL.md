@@ -339,7 +339,7 @@ The generator now produces complete integration tests for both lowering and lift
 **Lifting** (`Integration<Op>DescriptorLifting.cpp`):
 - `Basic<Op>RoundTrip` — Full lifting round-trip with field-by-field validation
 - `<Op>TensorSharingPreserved` — Pointer equality verification
-- `<Op>LiftWithoutFinalization` — FlatBuffer-direct path
+- `<Op>LiftWithoutFinalization` — Backend binary serialization path
 - `AutoAssignedUidsPreservedInLiftingRoundTrip` — Auto-assigned UID distinctness and round-trip
 - Per-optional-scalar preservation tests
 
