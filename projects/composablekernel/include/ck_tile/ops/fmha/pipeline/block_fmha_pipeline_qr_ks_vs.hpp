@@ -558,15 +558,20 @@ struct BlockFmhaPipelineQRKSVS
             }
 
             auto v_prefetch = decltype(load_tile(v_dram_window)){};
+            enum class VPrefetchPoint
+            {
+                BeforeGemm0Tail,
+                AfterGemm0Tail,
+                AfterSoftmax
+            };
+
 #if defined(__gfx11__) || defined(__gfx12__)
-            constexpr bool kUseSplitVPrefetch = true;
+            constexpr auto kVPrefetch =
+                kPadHeadDimV ? VPrefetchPoint::AfterSoftmax : VPrefetchPoint::AfterGemm0Tail;
 #else
-            constexpr bool kUseSplitVPrefetch = false;
+            constexpr auto kVPrefetch = VPrefetchPoint::BeforeGemm0Tail;
 #endif
-            constexpr bool kPrefetchVBeforeGemm0Tail = !kUseSplitVPrefetch;
-            constexpr bool kPrefetchVAfterGemm0Tail  = kUseSplitVPrefetch && !kPadHeadDimV;
-            constexpr bool kPrefetchVAfterSoftmax    = kUseSplitVPrefetch && kPadHeadDimV;
-            if constexpr(kPrefetchVBeforeGemm0Tail)
+            if constexpr(kVPrefetch == VPrefetchPoint::BeforeGemm0Tail)
             {
                 load_tile(v_prefetch, v_dram_window); // prefetch load v tile
             }
@@ -583,7 +588,7 @@ struct BlockFmhaPipelineQRKSVS
 
                 run_gemm_0(number<k0_loops - 1>{});
             }
-            if constexpr(kPrefetchVAfterGemm0Tail)
+            if constexpr(kVPrefetch == VPrefetchPoint::AfterGemm0Tail)
             {
                 load_tile(v_prefetch, v_dram_window);
             }
@@ -844,7 +849,7 @@ struct BlockFmhaPipelineQRKSVS
                     randval_ptr, seq_offset, p_compute, randval_dram_window);
             }
 
-            if constexpr(kPrefetchVAfterSoftmax)
+            if constexpr(kVPrefetch == VPrefetchPoint::AfterSoftmax)
             {
                 load_tile(v_prefetch, v_dram_window);
             }

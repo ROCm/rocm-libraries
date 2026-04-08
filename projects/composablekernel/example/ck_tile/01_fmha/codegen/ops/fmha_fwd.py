@@ -68,7 +68,9 @@ FMHA_FWD_KERNEL_HEADER_QR_HPAD = """// SPDX-License-Identifier: MIT
      defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || \
      defined(__gfx1152__) || defined(__gfx1153__) || defined(__gfx11_generic__) || \
      defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__))
+#if !defined(CK_TILE_EXPERIMENTAL_USE_BUFFER_LOAD_OOB_CHECK_OFFSET_TRICK)
 #define CK_TILE_EXPERIMENTAL_USE_BUFFER_LOAD_OOB_CHECK_OFFSET_TRICK 1
+#endif
 #endif
 #include "ck_tile/ops/fmha/block/variants.hpp"
 #include "fmha_fwd.hpp"
@@ -1177,6 +1179,8 @@ class KernelComponentFactoryGfx11(CompatibilityRuleFactory):
     def get_rules(cls) -> List[CompatibilityRule]:
         rules = super().get_rules()
 
+        # For gfx11 fp16/bf16 d128, use dpad=dvpad=t for the 64x32 tile:
+        # the exact-hdim variant (dpad=dvpad=f) is much slower here.
         def check_d128_tile_pipeline(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
