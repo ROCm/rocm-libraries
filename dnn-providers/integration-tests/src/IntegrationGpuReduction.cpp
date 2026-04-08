@@ -76,8 +76,6 @@ public:
 protected:
     void runGraphTest() override
     {
-        SKIP_IF_WINDOWS();
-
         const auto& testCase = this->GetParam();
         const auto& [layout, reductionTestCase] = testCase;
 
