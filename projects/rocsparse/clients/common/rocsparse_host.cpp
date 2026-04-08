@@ -10080,7 +10080,6 @@ INSTANTIATE_DENSE2COO(int64_t, rocsparse_float_complex);
 INSTANTIATE_DENSE2COO(int64_t, rocsparse_double_complex);
 
 INSTANTIATE_IJ(int32_t, int32_t);
-INSTANTIATE_IJ(int32_t, int64_t);
 INSTANTIATE_IJ(int64_t, int32_t);
 INSTANTIATE_IJ(int64_t, int64_t);
 

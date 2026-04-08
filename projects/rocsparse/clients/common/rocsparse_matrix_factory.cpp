@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1046,36 +1046,29 @@ void rocsparse_matrix_factory<T, I, J>::init_hyb(
 // INSTANTIATE.
 //
 template struct rocsparse_matrix_factory<int8_t, int32_t, int32_t>;
-template struct rocsparse_matrix_factory<int8_t, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<int8_t, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<int8_t, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory<_Float16, int32_t, int32_t>;
-template struct rocsparse_matrix_factory<_Float16, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<_Float16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<_Float16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory<rocsparse_bfloat16, int32_t, int32_t>;
-template struct rocsparse_matrix_factory<rocsparse_bfloat16, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<rocsparse_bfloat16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<rocsparse_bfloat16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory<float, int32_t, int32_t>;
-template struct rocsparse_matrix_factory<float, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<float, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<float, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory<double, int32_t, int32_t>;
-template struct rocsparse_matrix_factory<double, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<double, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<double, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory<rocsparse_float_complex, int32_t, int32_t>;
-template struct rocsparse_matrix_factory<rocsparse_float_complex, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<rocsparse_float_complex, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<rocsparse_float_complex, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory<rocsparse_double_complex, int32_t, int32_t>;
-template struct rocsparse_matrix_factory<rocsparse_double_complex, int32_t, int64_t>;
 template struct rocsparse_matrix_factory<rocsparse_double_complex, int64_t, int32_t>;
 template struct rocsparse_matrix_factory<rocsparse_double_complex, int64_t, int64_t>;
