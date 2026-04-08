@@ -311,13 +311,44 @@ inline hipdnn_frontend::PointwiseMode
     }
 }
 
+/// Create a Data SDK ITensor from a frontend DataType enum
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+    createTensor(hipdnn_frontend::DataType dataType,
+                 const std::vector<int64_t>& dims,
+                 const std::vector<int64_t>& strides)
+{
+    using namespace hipdnn_data_sdk::utilities;
+    using namespace hipdnn_data_sdk::types;
+    switch(dataType)
+    {
+    case hipdnn_frontend::DataType::FLOAT:
+        return std::make_unique<Tensor<float>>(dims, strides);
+    case hipdnn_frontend::DataType::HALF:
+        return std::make_unique<Tensor<half>>(dims, strides);
+    case hipdnn_frontend::DataType::BFLOAT16:
+        return std::make_unique<Tensor<bfloat16>>(dims, strides);
+    case hipdnn_frontend::DataType::DOUBLE:
+        return std::make_unique<Tensor<double>>(dims, strides);
+    case hipdnn_frontend::DataType::UINT8:
+        return std::make_unique<Tensor<uint8_t>>(dims, strides);
+    case hipdnn_frontend::DataType::INT32:
+        return std::make_unique<Tensor<int32_t>>(dims, strides);
+    case hipdnn_frontend::DataType::INT8:
+        return std::make_unique<Tensor<int8_t>>(dims, strides);
+    case hipdnn_frontend::DataType::FP8_E4M3:
+        return std::make_unique<Tensor<fp8_e4m3>>(dims, strides);
+    case hipdnn_frontend::DataType::FP8_E5M2:
+        return std::make_unique<Tensor<fp8_e5m2>>(dims, strides);
+    default:
+        throw std::runtime_error("Unsupported data type for tensor");
+    }
+}
+
 /// Create a Data SDK ITensor from frontend TensorAttributes
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     createTensorFromAttribute(const hipdnn_frontend::graph::TensorAttributes& attribute)
 {
-    auto sdkType = frontendToSdkDataType(attribute.get_data_type());
-    return hipdnn_data_sdk::utilities::createTensor(
-        sdkType, attribute.get_dim(), attribute.get_stride());
+    return createTensor(attribute.get_data_type(), attribute.get_dim(), attribute.get_stride());
 }
 
 } // namespace hipdnn_test_sdk::utilities

@@ -29,13 +29,45 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>>
 }
 
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+    createTensor(hipdnn_data_sdk::data_objects::DataType dataType,
+                 const std::vector<int64_t>& dims,
+                 const std::vector<int64_t>& strides)
+{
+    using namespace hipdnn_data_sdk::utilities;
+    using namespace hipdnn_data_sdk::types;
+    switch(dataType)
+    {
+    case hipdnn_data_sdk::data_objects::DataType::FLOAT:
+        return std::make_unique<Tensor<float>>(dims, strides);
+    case hipdnn_data_sdk::data_objects::DataType::HALF:
+        return std::make_unique<Tensor<half>>(dims, strides);
+    case hipdnn_data_sdk::data_objects::DataType::BFLOAT16:
+        return std::make_unique<Tensor<bfloat16>>(dims, strides);
+    case hipdnn_data_sdk::data_objects::DataType::DOUBLE:
+        return std::make_unique<Tensor<double>>(dims, strides);
+    case hipdnn_data_sdk::data_objects::DataType::UINT8:
+        return std::make_unique<Tensor<uint8_t>>(dims, strides);
+    case hipdnn_data_sdk::data_objects::DataType::INT32:
+        return std::make_unique<Tensor<int32_t>>(dims, strides);
+    case hipdnn_data_sdk::data_objects::DataType::INT8:
+        return std::make_unique<Tensor<int8_t>>(dims, strides);
+    case hipdnn_data_sdk::data_objects::DataType::FP8_E4M3:
+        return std::make_unique<Tensor<fp8_e4m3>>(dims, strides);
+    case hipdnn_data_sdk::data_objects::DataType::FP8_E5M2:
+        return std::make_unique<Tensor<fp8_e5m2>>(dims, strides);
+    default:
+        throw std::runtime_error("Unsupported data type for tensor");
+    }
+}
+
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     createTensorFromAttribute(const hipdnn_data_sdk::data_objects::TensorAttributes& attribute)
 {
     auto dims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.dims());
     auto strides
         = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.strides());
 
-    return hipdnn_data_sdk::utilities::createTensor(attribute.data_type(), dims, strides);
+    return createTensor(attribute.data_type(), dims, strides);
 }
 
 } // namespace hipdnn_test_sdk::detail
