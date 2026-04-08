@@ -39,8 +39,13 @@
 
 #include "hipblaslt_float8.h"
 #if defined(__HIP__)
+// Workaround: ROCm's amd_hip_ocp_host.hpp has a static_assert size mismatch
+// in its host-fallback path for FP6 conversions, which is taken for all
+// non-gfx950/gfx1250 device targets. FP4 is unaffected.
+#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx950__) || defined(__gfx1250__)
 #include "hipblaslt_bfloat6.h"
 #include "hipblaslt_float6.h"
+#endif
 #include "hipblaslt_float4.h"
 #endif
 #include "hipblaslt_e8.h"

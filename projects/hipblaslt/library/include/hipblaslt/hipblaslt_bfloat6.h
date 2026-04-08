@@ -27,6 +27,11 @@
 #ifndef _HIPBLASLT_BFLOAT6_H_
 #define _HIPBLASLT_BFLOAT6_H_
 
+// Workaround: ROCm's amd_hip_ocp_host.hpp has a static_assert size mismatch
+// (fp6x32_packed vs __amd_fp6x32_storage_t) in its host-fallback path, which
+// is taken for all non-gfx950/gfx1250 device targets.
+#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx950__) || defined(__gfx1250__)
+
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
@@ -417,5 +422,7 @@ struct HIPBLASLT_EXPORT hipblaslt_bf6x16
         return *this;
     }
 };
+
+#endif // !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx950__) || defined(__gfx1250__)
 
 #endif
