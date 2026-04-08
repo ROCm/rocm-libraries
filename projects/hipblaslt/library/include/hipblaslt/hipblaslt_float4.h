@@ -117,6 +117,22 @@ struct HIPBLASLT_EXPORT hipblaslt_f4x2
     {
     }
 
+    explicit HIP_HOST_DEVICE hipblaslt_f4x2(int                  val,
+                                            hip_f4_rounding_mode rm
+                                            = hip_f4_rounding_mode::standard,
+                                            uint32_t rng = 0)
+        : hipblaslt_f4x2(static_cast<float>(val), rm, rng)
+    {
+    }
+
+    explicit HIP_HOST_DEVICE hipblaslt_f4x2(uint32_t             val,
+                                            hip_f4_rounding_mode rm
+                                            = hip_f4_rounding_mode::standard,
+                                            uint32_t rng = 0)
+        : hipblaslt_f4x2(static_cast<float>(val), rm, rng)
+    {
+    }
+
     float castElement(size_t idx) const
     {
         __amd_floatx2_storage_t fp32x2 = __amd_cvt_fp4x2_to_floatx2_scale(__x, __AMD_OCP_E2M1, 0);
