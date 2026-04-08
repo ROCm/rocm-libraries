@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -679,6 +679,18 @@ public:
         return ret;
     }
 };
+
+ROCPRIM_INLINE
+hipError_t is_graph_capture(hipStream_t stream, bool& is_capturing)
+{
+    hipStreamCaptureStatus status;
+    unsigned long long     id;
+    ROCPRIM_RETURN_ON_ERROR(hipStreamGetCaptureInfo(stream, &status, &id));
+
+    is_capturing = status != hipStreamCaptureStatus::hipStreamCaptureStatusNone;
+
+    return hipSuccess;
+}
 
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
