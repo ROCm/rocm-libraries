@@ -36,7 +36,7 @@
 //
 // Templates are stored as R-string literals so the MLIR structure is
 // directly readable in source. Standard CustomOp placeholders
-// ({FUNC_NAME}, {IN<i>_DTYPE}, {OUT0_DTYPE}) are resolved by
+// ({FUNC_NAME}, {IN<i>_TYPE}, {OUT0_TYPE}) are resolved by
 // CustomOpNode::resolveMlirPlaceholders(). Scalar placeholders
 // ({DROPOUT_P}, {IS_CAUSAL}, {SCALE_CONST}, {SCALE_TYPE}, {ENABLE_GQA})
 // are resolved by SdpaImport::buildMLIR().
@@ -49,10 +49,10 @@
 // clang-format off
 static constexpr std::string_view kSdpaNoMask = R"mlir(
   func.func private @{{FUNC_NAME}}(
-      %arg0: !torch.vtensor<[?,?,?,?],{{IN0_DTYPE}}>,
-      %arg1: !torch.vtensor<[?,?,?,?],{{IN1_DTYPE}}>,
-      %arg2: !torch.vtensor<[?,?,?,?],{{IN2_DTYPE}}>)
-      -> !torch.vtensor<[?,?,?,?],{{OUT0_DTYPE}}> {{
+      %arg0: {{IN0_TYPE}},
+      %arg1: {{IN1_TYPE}},
+      %arg2: {{IN2_TYPE}})
+      -> {{OUT0_TYPE}} {{
     %none_mask = torch.constant.none
     %dropout = torch.constant.float {0}
     %is_causal = torch.constant.bool {1}
@@ -60,10 +60,10 @@ static constexpr std::string_view kSdpaNoMask = R"mlir(
     %enable_gqa = torch.constant.bool {4}
     %0 = torch.aten.scaled_dot_product_attention %arg0, %arg1, %arg2,
         %none_mask, %dropout, %is_causal, %scale, %enable_gqa :
-        !torch.vtensor<[?,?,?,?],{{IN0_DTYPE}}>, !torch.vtensor<[?,?,?,?],{{IN1_DTYPE}}>,
-        !torch.vtensor<[?,?,?,?],{{IN2_DTYPE}}>, !torch.none, !torch.float, !torch.bool,
-        {3}, !torch.bool -> !torch.vtensor<[?,?,?,?],{{OUT0_DTYPE}}>
-    return %0 : !torch.vtensor<[?,?,?,?],{{OUT0_DTYPE}}>
+        {{IN0_TYPE}}, {{IN1_TYPE}},
+        {{IN2_TYPE}}, !torch.none, !torch.float, !torch.bool,
+        {3}, !torch.bool -> {{OUT0_TYPE}}
+    return %0 : {{OUT0_TYPE}}
   }}
 )mlir";
 
@@ -71,22 +71,22 @@ static constexpr std::string_view kSdpaNoMask = R"mlir(
 // Positional args: same as kSdpaNoMask.
 static constexpr std::string_view kSdpaWithMask = R"mlir(
   func.func private @{{FUNC_NAME}}(
-      %arg0: !torch.vtensor<[?,?,?,?],{{IN0_DTYPE}}>,
-      %arg1: !torch.vtensor<[?,?,?,?],{{IN1_DTYPE}}>,
-      %arg2: !torch.vtensor<[?,?,?,?],{{IN2_DTYPE}}>,
-      %arg3: !torch.vtensor<[?,?,?,?],{{IN3_DTYPE}}>)
-      -> !torch.vtensor<[?,?,?,?],{{OUT0_DTYPE}}> {{
+      %arg0: {{IN0_TYPE}},
+      %arg1: {{IN1_TYPE}},
+      %arg2: {{IN2_TYPE}},
+      %arg3: {{IN3_TYPE}})
+      -> {{OUT0_TYPE}} {{
     %dropout = torch.constant.float {0}
     %is_causal = torch.constant.bool {1}
     %scale = {2}
     %enable_gqa = torch.constant.bool {4}
     %0 = torch.aten.scaled_dot_product_attention %arg0, %arg1, %arg2,
         %arg3, %dropout, %is_causal, %scale, %enable_gqa :
-        !torch.vtensor<[?,?,?,?],{{IN0_DTYPE}}>, !torch.vtensor<[?,?,?,?],{{IN1_DTYPE}}>,
-        !torch.vtensor<[?,?,?,?],{{IN2_DTYPE}}>, !torch.vtensor<[?,?,?,?],{{IN3_DTYPE}}>,
+        {{IN0_TYPE}}, {{IN1_TYPE}},
+        {{IN2_TYPE}}, {{IN3_TYPE}},
         !torch.float, !torch.bool,
-        {3}, !torch.bool -> !torch.vtensor<[?,?,?,?],{{OUT0_DTYPE}}>
-    return %0 : !torch.vtensor<[?,?,?,?],{{OUT0_DTYPE}}>
+        {3}, !torch.bool -> {{OUT0_TYPE}}
+    return %0 : {{OUT0_TYPE}}
   }}
 )mlir";
 // clang-format on
