@@ -31,7 +31,7 @@ void GraphDescriptor::finalize()
         THROW_IF_NULL(graph, HIPDNN_STATUS_BAD_PARAM, "GraphDescriptor::finalize: graph is null");
 
         flatbuffers::FlatBufferBuilder builder;
-        builder.Finish(hipdnn_data_sdk::data_objects::Graph::Pack(builder, graph.get()));
+        builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graph.get()));
         _graphSerializedBuffer = builder.Release();
     }
     else
@@ -43,7 +43,7 @@ void GraphDescriptor::finalize()
 
     // Verify the serialized buffer
     flatbuffers::Verifier verifier(_graphSerializedBuffer.data(), _graphSerializedBuffer.size());
-    THROW_IF_FALSE(hipdnn_data_sdk::data_objects::VerifyGraphBuffer(verifier),
+    THROW_IF_FALSE(hipdnn_flatbuffers_sdk::data_objects::VerifyGraphBuffer(verifier),
                    HIPDNN_STATUS_INTERNAL_ERROR,
                    "GraphDescriptor::finalize: serialized graph failed verification");
 
@@ -57,9 +57,10 @@ void GraphDescriptor::finalize()
     }
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> GraphDescriptor::buildGraphFromOperations()
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
+    GraphDescriptor::buildGraphFromOperations()
 {
-    auto graph = std::make_unique<hipdnn_data_sdk::data_objects::GraphT>();
+    auto graph = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::GraphT>();
 
     // Apply graph-level attributes
     graph->compute_data_type = _computeDataType;
@@ -91,7 +92,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> GraphDescriptor::buildGra
             {
                 seenTensors[uid] = tensorDesc;
                 graph->tensors.push_back(
-                    std::make_unique<hipdnn_data_sdk::data_objects::TensorAttributesT>(
+                    std::make_unique<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>(
                         tensorDesc->getData()));
             }
         }
@@ -235,7 +236,8 @@ void GraphDescriptor::getOperations(hipdnnBackendAttributeType_t attributeType,
     // Build into a temporary vector so _operations is only populated on full success.
     if(_graphSerializedBuffer.size() > 0 && _operations.empty())
     {
-        auto graphT = hipdnn_data_sdk::data_objects::UnPackGraph(_graphSerializedBuffer.data());
+        auto graphT
+            = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(_graphSerializedBuffer.data());
         auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
         std::vector<std::shared_ptr<IBackendDescriptor>> unpacked;
         unpacked.reserve(graphT->nodes.size());
@@ -396,7 +398,7 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
 
     // Parse FlatBuffer into a local GraphT to extract attributes, then re-serialize into
     // _graphSerializedBuffer. When getOperations() is called, the buffer is re-parsed on demand.
-    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> graph;
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph;
     flatbuffer_utilities::convertSerializedGraphToGraph(serializedGraph, graphByteSize, graph);
 
     // Extract graph-level attributes
@@ -408,7 +410,7 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
 
     // Cache the serialized bytes for getSerializedGraph() by re-serializing from the parsed GraphT
     flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(hipdnn_data_sdk::data_objects::Graph::Pack(builder, graph.get()));
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graph.get()));
     _graphSerializedBuffer = builder.Release();
 }
 

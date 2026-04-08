@@ -25,7 +25,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -56,9 +56,9 @@ protected:
         _tensorMap[K_REDUCTION_TENSOR_Y_UID] = TensorDescriptor::fromFlatBuffer(yAttrs);
     }
 
-    static hipdnn_data_sdk::data_objects::ReductionAttributesT createStandardReductionAttrs()
+    static hipdnn_flatbuffers_sdk::data_objects::ReductionAttributesT createStandardReductionAttrs()
     {
-        hipdnn_data_sdk::data_objects::ReductionAttributesT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::ReductionAttributesT attrs;
         attrs.in_tensor_uid = K_REDUCTION_TENSOR_X_UID;
         attrs.out_tensor_uid = K_REDUCTION_TENSOR_Y_UID;
         attrs.mode = ReductionMode::ADD;

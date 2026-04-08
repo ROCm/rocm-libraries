@@ -108,7 +108,8 @@ void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
         return;
     }
 
-    auto* graph = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Graph>(serializedGraph);
+    auto* graph
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(serializedGraph);
     const nlohmann::json j = *graph;
 
     std::ofstream file(fullPath);

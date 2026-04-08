@@ -27,7 +27,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 
 class TestSdpaFwdOperationDescriptor : public ::testing::Test
@@ -783,7 +783,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, GetAttributeTensorDescriptor)
                                                K_SDPA_TENSOR_Q_STRIDES.end());
     ASSERT_EQ(qData.dims, expectedDims);
     ASSERT_EQ(qData.strides, expectedStrides);
-    ASSERT_EQ(qData.data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    ASSERT_EQ(qData.data_type, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 }
 
 // =============================================================================

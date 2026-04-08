@@ -17,7 +17,7 @@ class EngineConfigDescriptor : public HipdnnBackendDescriptorImpl<EngineConfigDe
 {
 private:
     std::shared_ptr<const EngineDescriptor> _engine;
-    std::unique_ptr<hipdnn_data_sdk::data_objects::EngineConfigT> _engineConfigData;
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT> _engineConfigData;
     mutable flatbuffers::DetachedBuffer _engineConfigSerializedBuffer;
     int64_t _maxWorkspaceSize = INVALID_WORKSPACE_SIZE;
 

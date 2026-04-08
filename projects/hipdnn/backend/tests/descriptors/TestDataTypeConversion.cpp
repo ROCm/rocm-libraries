@@ -14,10 +14,10 @@ namespace hipdnn_backend
 namespace testing
 {
 
-using hipdnn_data_sdk::data_objects::ConvMode;
-using hipdnn_data_sdk::data_objects::DataType;
-using hipdnn_data_sdk::data_objects::PointwiseMode;
-using hipdnn_data_sdk::data_objects::ReductionMode;
+using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
+using hipdnn_flatbuffers_sdk::data_objects::DataType;
+using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
 
 // =============================================================================
 // Parameterized Data Type Conversion Tests

@@ -45,8 +45,8 @@ inline ConvOpBundle createDefaultConvOp(hipdnnDataType_t computeType = HIPDNN_DA
 }
 
 /// Finds a tensor in a GraphT by UID, returns nullptr if not found.
-inline const hipdnn_data_sdk::data_objects::TensorAttributesT*
-    findTensorByUid(const hipdnn_data_sdk::data_objects::GraphT& graphT, int64_t uid)
+inline const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT*
+    findTensorByUid(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graphT, int64_t uid)
 {
     for(const auto& tensor : graphT.tensors)
     {

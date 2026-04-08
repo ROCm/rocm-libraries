@@ -46,12 +46,12 @@ private:
     mutable std::vector<std::shared_ptr<IBackendDescriptor>> _operations;
 
     // Graph-level attributes set via setAttribute (applied during buildGraphFromOperations)
-    hipdnn_data_sdk::data_objects::DataType _computeDataType
-        = hipdnn_data_sdk::data_objects::DataType::UNSET;
-    hipdnn_data_sdk::data_objects::DataType _intermediateDataType
-        = hipdnn_data_sdk::data_objects::DataType::UNSET;
-    hipdnn_data_sdk::data_objects::DataType _ioDataType
-        = hipdnn_data_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType _computeDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType _intermediateDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType _ioDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
 
     // Preferred engine ID, empty when unset.
     std::optional<int64_t> _preferredEngineId = std::nullopt;
@@ -89,7 +89,7 @@ private:
                               void* arrayOfElements) const;
 
     // Build GraphT from operation descriptors and return it (C-API flow)
-    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> buildGraphFromOperations();
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> buildGraphFromOperations();
 
 public:
     void finalize() override;

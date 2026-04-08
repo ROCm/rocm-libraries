@@ -25,7 +25,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using hipdnn_tests::constants::K_BSQ_BLOCK_SIZE;
 using hipdnn_tests::constants::K_BSQ_TENSOR_SCALE_DIMS;
 using hipdnn_tests::constants::K_BSQ_TENSOR_SCALE_STRIDES;
