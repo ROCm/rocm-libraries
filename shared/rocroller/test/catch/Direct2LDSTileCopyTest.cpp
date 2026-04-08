@@ -59,11 +59,11 @@ namespace Direct2LDSTileCopyTest
             User("a", std::make_shared<Expression::Expression>((size_t)MN * K)));
         auto idim0    = kgraph.coordinates.addElement(SubDimension(0, exprMN, exprK));
         auto idim1    = kgraph.coordinates.addElement(SubDimension(1, exprK, expr1u));
-        auto mactile0 = kgraph.coordinates.addElement(
-            MacroTile({MN, K}, MemoryType::WAVE_Direct2LDS, {subtileMN, subtileK}));
+        auto mactile0 = kgraph.coordinates.addElement(MacroTile(
+            {MN, K}, LayoutType::ROW_MAJOR, {subtileMN, subtileK}, MemoryType::WAVE_Direct2LDS));
 
         auto mactile1 = kgraph.coordinates.addElement(
-            MacroTile({MN, K}, MemoryType::VGPR, {subtileMN, subtileK}));
+            MacroTile({MN, K}, LayoutType::ROW_MAJOR, {subtileMN, subtileK}, MemoryType::VGPR));
 
         auto odim0 = kgraph.coordinates.addElement(SubDimension(0, exprMN, exprK));
         auto odim1 = kgraph.coordinates.addElement(SubDimension(1, exprK, expr1u));

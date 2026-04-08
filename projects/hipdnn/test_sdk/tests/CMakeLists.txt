@@ -27,7 +27,12 @@ add_executable(
     utilities/TestCpuFpReferenceValidation.cpp
     utilities/TestCpuTypeUtilities.cpp
     utilities/TestCpuReferencePointwise.cpp
-    utilities/TestDynamicTolerances.cpp
+    utilities/TestDynamicTolerancesCommon.cpp
+    utilities/TestDynamicTolerancesConv.cpp
+    utilities/TestDynamicTolerancesMatmul.cpp
+    utilities/TestDynamicTolerancesPointwise.cpp
+    utilities/TestDynamicTolerancesRMSNorm.cpp
+    utilities/TestGraphTestHelpers.cpp
     utilities/TestFlatbufferDatatypeMapping.cpp
     utilities/TestFlatbufferTensorAttributesUtils.cpp
     utilities/TestLoadGraphAndTensors.cpp
@@ -72,7 +77,7 @@ add_executable(
 target_compile_options(hipdnn_test_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 target_link_libraries(
-    hipdnn_test_sdk_tests GTest::gtest GTest::gmock Threads::Threads hipdnn_test_sdk hipdnn_plugin_sdk hip::host
+    hipdnn_test_sdk_tests GTest::gtest GTest::gmock Threads::Threads hipdnn_test_sdk hipdnn_plugin_sdk
 )
 
 clang_tidy_check(hipdnn_test_sdk_tests)

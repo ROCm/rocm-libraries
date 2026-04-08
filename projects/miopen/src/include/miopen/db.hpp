@@ -201,16 +201,19 @@ public:
         auto users     = _user.FindRecord(args...);
         auto installed = _installed.FindRecord(args...);
 
-        if(users && installed)
+        if(!users)
         {
-            users->Merge(installed.value());
-            return users;
+            users = std::move(installed);
+        }
+        else
+        {
+            if(installed)
+            {
+                users->Merge(installed.value());
+            }
         }
 
-        if(users)
-            return users;
-
-        return installed;
+        return std::move(users);
     }
 
     template <bool merge = merge_records, std::enable_if_t<!merge>* = nullptr, typename... U>

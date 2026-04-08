@@ -155,7 +155,7 @@ void CustomOpOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attr
                   "CustomOpOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_CUSTOM_OP,
+        getOperationType(HIPDNN_OPERATION_TYPE_CUSTOM_OP_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,

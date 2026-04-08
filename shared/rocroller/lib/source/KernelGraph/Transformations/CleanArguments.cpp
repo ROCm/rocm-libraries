@@ -44,31 +44,6 @@ namespace rocRoller
             rocRoller::KernelGraph::CoordinateGraph::Edge visitCoordinateEdge(int      tag,
                                                                               T const& edge)
             {
-                auto divideBySize = [&](int dimTag) {
-                    using ET  = Expression::EvaluationTime;
-                    auto dim  = m_graph.coordinates.getNode(dimTag);
-                    auto size = getSize(dim);
-                    if(size && !Expression::evaluationTimes(size)[ET::Translate])
-                    {
-                        auto resultType = resultVariableType(size);
-                        if(resultType == DataType::Int32 || resultType == DataType::Int64
-                           || resultType == DataType::UInt32 || resultType == DataType::UInt64)
-                            enableDivideBy(size, m_context);
-                    }
-                };
-                if constexpr(std::same_as<Tile, T>)
-                {
-                    auto loc = m_graph.coordinates.getLocation(tag);
-                    for(int i = 1; i < loc.outgoing.size(); i++)
-                        divideBySize(loc.outgoing[i]);
-                }
-
-                if constexpr(std::same_as<Flatten, T>)
-                {
-                    auto loc = m_graph.coordinates.getLocation(tag);
-                    for(int i = 1; i < loc.incoming.size(); i++)
-                        divideBySize(loc.incoming[i]);
-                }
                 return edge;
             }
 
