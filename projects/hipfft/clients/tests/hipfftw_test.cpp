@@ -58,24 +58,18 @@ namespace
     size_t max_byte_size_for_hipfftw_tests()
     {
         auto get_io_byte_size_limit = []() {
-            size_t tmp = vramgb * ONE_GiB;
-            if(tmp == 0)
+            size_t tmp = system_memory::singleton().get_limit_bytes();
+            for(size_t dev_id = 0; dev_id < device_memory_accountant::singleton().num_devices();
+                dev_id++)
             {
-                size_t free = 0, total = 0;
-                if(hipMemGetInfo(&free, &total) == hipSuccess)
-                    tmp = total / 8;
+                tmp = std::min(
+                    tmp, device_memory_accountant::singleton().get_limit_bytes_on_device(dev_id));
             }
-            tmp = std::min(tmp, ramgb * ONE_GiB);
             tmp = std::min(tmp, max_io_gb_for_hipfftw_test * ONE_GiB);
             if(verbose > 0)
             {
-                std::cout << "Limit for the size of I/O data used in hipfftw tests: ";
-                if(tmp >= ONE_GiB)
-                    std::cout << float(tmp) / ONE_GiB << " GiB." << std ::endl;
-                else if(tmp >= ONE_MiB)
-                    std::cout << float(tmp) / ONE_MiB << " MiB." << std ::endl;
-                else
-                    std::cout << float(tmp) / ONE_KiB << " KiB." << std ::endl;
+                std::cout << "Limit for the size of I/O data used in hipfftw tests: "
+                          << byte_size_to_str(tmp) << std ::endl;
             }
             return tmp;
         };
@@ -1988,6 +1982,10 @@ namespace
             {
                 GTEST_SKIP() << e.what();
             }
+            catch(const DEVICEBUF_MEM_USAGE& e)
+            {
+                GTEST_SKIP() << e.what();
+            }
             catch(const std::bad_alloc&)
             {
                 GTEST_SKIP() << "host memory allocation failure";
@@ -2742,6 +2740,10 @@ namespace
                     GTEST_FAIL() << e.what() << "\nError code: " << e.hip_error << ".";
             }
             catch(const HOSTBUF_MEM_USAGE& e)
+            {
+                GTEST_SKIP() << e.what();
+            }
+            catch(const DEVICEBUF_MEM_USAGE& e)
             {
                 GTEST_SKIP() << e.what();
             }

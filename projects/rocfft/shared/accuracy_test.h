@@ -67,37 +67,24 @@ template <class Tparams>
 inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
 {
 
-    size_t vram_avail = 0;
-
-    if(vramgb == 0)
+    int  dev_id     = hipInvalidDeviceId;
+    auto hip_status = hipGetDevice(&dev_id);
+    if(hip_status != hipSuccess || dev_id == hipInvalidDeviceId)
     {
-        // Check free and total available memory:
-        size_t free       = 0;
-        size_t total      = 0;
-        auto   hip_status = hipMemGetInfo(&free, &total);
-        if(hip_status != hipSuccess || total == 0)
+        ++n_hip_failures;
+        std::stringstream ss;
+        ss << "hipGetDevice failed with error code " << hip_status << " reporting device ID "
+           << dev_id;
+        if(skip_runtime_fails)
         {
-            ++n_hip_failures;
-            std::stringstream ss;
-            if(total == 0)
-                ss << "hipMemGetInfo claims there there isn't any vram";
-            else
-                ss << "hipMemGetInfo failure with error " << hip_status;
-            if(skip_runtime_fails)
-            {
-                throw ROCFFT_SKIP{ss.str()};
-            }
-            else
-            {
-                throw ROCFFT_FAIL{ss.str()};
-            }
+            throw ROCFFT_SKIP{ss.str()};
         }
-        vram_avail = total;
+        else
+        {
+            throw ROCFFT_FAIL{ss.str()};
+        }
     }
-    else
-    {
-        vram_avail = vramgb * ONE_GiB;
-    }
+    const auto vram_avail = device_memory_accountant::singleton().get_usable_bytes(dev_id);
 
     // First try a quick estimation of vram footprint, to speed up skipping tests
     // that are too large to fit in the gpu (no plan created with the rocFFT backend)
@@ -107,8 +94,8 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
     if(!vram_fits_problem(raw_vram_footprint, vram_avail))
     {
         std::stringstream ss;
-        ss << "Raw problem size (" << bytes_to_GiB(raw_vram_footprint)
-           << " GiB) raw data too large for device";
+        ss << "Raw problem size (" << byte_size_to_str(raw_vram_footprint)
+           << ") exceeds usable memory on device (" << byte_size_to_str(vram_avail) << ")";
         throw ROCFFT_SKIP{ss.str()};
     }
 
@@ -128,8 +115,8 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
             std::cout << "Problem raw data won't fit on device; skipped." << std::endl;
         }
         std::stringstream ss;
-        ss << "Problem size (" << bytes_to_GiB(vram_footprint)
-           << " GiB) raw data too large for device";
+        ss << "Problem size (" << byte_size_to_str(vram_footprint)
+           << ") exceeds usable memory on device (" << byte_size_to_str(vram_avail) << ")";
         throw ROCFFT_SKIP{ss.str()};
     }
 }
@@ -729,14 +716,14 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
             std::stringstream ss;
             if(hip_status == hipErrorOutOfMemory)
             {
-                ss << "Input buffer size (" << bytes_to_GiB(ibuffer_sizes[i])
-                   << " GiB) raw data too large for device";
+                ss << "Input buffer size (" << byte_size_to_str(ibuffer_sizes[i])
+                   << ") raw data too large for device";
             }
             else
             {
                 ss << "hipMalloc failure for input buffer " << i << " size " << ibuffer_sizes[i]
-                   << "(" << bytes_to_GiB(ibuffer_sizes[i]) << " GiB)"
-                   << " with code " << hipError_to_string(hip_status);
+                   << "(" << byte_size_to_str(ibuffer_sizes[i]) << ") with code "
+                   << hipError_to_string(hip_status);
             }
             ++n_hip_failures;
             if(skip_runtime_fails)
@@ -1138,8 +1125,8 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                 ++n_hip_failures;
                 std::stringstream ss;
                 ss << "hipMalloc failure for output buffer " << i << " size " << obuffer_sizes[i]
-                   << "(" << bytes_to_GiB(obuffer_sizes[i]) << " GiB)"
-                   << " with code " << hipError_to_string(hip_status);
+                   << "(" << byte_size_to_str(obuffer_sizes[i]) << ") with code "
+                   << hipError_to_string(hip_status);
                 if(skip_runtime_fails)
                 {
                     throw ROCFFT_SKIP{ss.str()};
