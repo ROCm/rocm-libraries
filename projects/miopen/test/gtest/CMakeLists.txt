@@ -38,10 +38,6 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     list(APPEND SKIP_TESTS unit_conv_solver_ConvWinoRageRxS.cpp)
     # Disable tests that leak memory when Address Sanitizer is enabled.  These tests need to be investigated and fixed.
     list(APPEND SKIP_TESTS
-        conv_api.cpp
-        deterministic_conv_api.cpp
-        fusion_aux.cpp
-        fusion_test.cpp
         gpu_mha_backward.cpp
         gpu_mha_forward.cpp
         graphapi_convolution.cpp
@@ -60,8 +56,6 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
         graphapi_rng.cpp
         graphapi_tensor.cpp
         graphapi_variant_pack.cpp
-        log_test.cpp
-        log_test_neg.cpp
         mha_find20.cpp
         w_supertensor.cpp)
 endif()
