@@ -26,6 +26,7 @@ The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/
   .. grid-item-card:: How to
 
     * :doc:`Build rocThrust for different backends <./how-to/rocThrust-build-for-backends>`
+    * :ref:`Avoid synchronization barriers <hip-execution-policies>`
     * :doc:`Add rocThrust to a CMake project <./how-to/use-rocThrust-in-a-project>`
     * :doc:`Run tests on multiple GPUs <./how-to/run-rocThrust-tests-on-multiple-gpus>`
     * :doc:`Use HIPSTDPAR <./how-to/rocThrust-hipstdpar>`
@@ -33,10 +34,7 @@ The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/
   .. grid-item-card:: Reference
 
     * :ref:`bitwise-repro`
-    * :ref:`hipgraph-support`
-    * :ref:`hip-execution-policies`
     * :ref:`api-reference`
-    * :ref:`genindex`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
