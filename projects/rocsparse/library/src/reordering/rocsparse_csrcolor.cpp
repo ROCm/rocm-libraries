@@ -265,11 +265,10 @@ namespace rocsparse
         static constexpr uint32_t DATA_RATIO = sizeof(J) / sizeof(float);
         if(handle->wavefront_size == 32)
         {
-            static constexpr uint32_t WF_SIZE = 32;
-            static constexpr uint32_t NCOLUMNS_PER_BLOCK
-                = 16 / (DATA_RATIO > 0 ? DATA_RATIO : 1);
-            J blocks = (n - 1) / NCOLUMNS_PER_BLOCK + 1;
-            dim3          k_blocks(blocks), k_threads(WF_SIZE * NCOLUMNS_PER_BLOCK);
+            static constexpr uint32_t WF_SIZE            = 32;
+            static constexpr uint32_t NCOLUMNS_PER_BLOCK = 16 / (DATA_RATIO > 0 ? DATA_RATIO : 1);
+            J                         blocks             = (n - 1) / NCOLUMNS_PER_BLOCK + 1;
+            dim3                      k_blocks(blocks), k_threads(WF_SIZE * NCOLUMNS_PER_BLOCK);
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrcolor_assign_uncolored_kernel<NCOLUMNS_PER_BLOCK, WF_SIZE>),
@@ -286,10 +285,9 @@ namespace rocsparse
         }
         else
         {
-            static constexpr uint32_t WF_SIZE = 64;
-            static constexpr uint32_t NCOLUMNS_PER_BLOCK
-                = 16 / (DATA_RATIO > 0 ? DATA_RATIO : 1);
-            J blocks = (n - 1) / NCOLUMNS_PER_BLOCK + 1;
+            static constexpr uint32_t WF_SIZE            = 64;
+            static constexpr uint32_t NCOLUMNS_PER_BLOCK = 16 / (DATA_RATIO > 0 ? DATA_RATIO : 1);
+            J                         blocks             = (n - 1) / NCOLUMNS_PER_BLOCK + 1;
 
             dim3 k_blocks(blocks), k_threads(WF_SIZE * NCOLUMNS_PER_BLOCK);
 
@@ -480,14 +478,13 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
             // Get required size of the temporary storage
             //
             static constexpr bool s_using_double_buffers = false;
-            RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::primitives::radix_sort_pairs_buffer_size<J, J>(
-                    handle,
-                    m,
-                    0,
-                    sizeof(J) * 8,
-                    &temporary_storage_size_bytes,
-                    s_using_double_buffers)));
+            RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<J, J>(
+                handle,
+                m,
+                0,
+                sizeof(J) * 8,
+                &temporary_storage_size_bytes,
+                s_using_double_buffers)));
 
             //
             // allocate temporary storage
