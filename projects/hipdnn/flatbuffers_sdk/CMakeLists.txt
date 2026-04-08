@@ -176,7 +176,6 @@ install(
     DESTINATION ${HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR}
     COMPONENT Development
     FILES_MATCHING
-    PATTERN "*.inl"
     PATTERN "*.hpp"
     PATTERN "*.h"
     PATTERN "*.h.in" EXCLUDE
