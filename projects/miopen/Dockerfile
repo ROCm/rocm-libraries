@@ -1,6 +1,8 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+ARG BUILD_TYPE=prebuilt
+
 # ============================================================================
 # Common base image with all dependencies
 # ============================================================================
@@ -95,8 +97,8 @@ RUN pip3 install --break-system-packages -r /doc-requirements.txt && \
     usermod -a -G render,video root
 
 # ========================================================================================
-# Build from source stage - clones and builds projects from TheRock that MIOpen depends on
-# with the exception of CK and external MIOpen deps which are built separately
+# NIGHTLY: Build from source stage - clones and builds projects from TheRock that MIOpen
+# depends on, with the exception of CK and external MIOpen deps which are built separately
 # ========================================================================================
 FROM base AS build_therock
 
@@ -104,7 +106,7 @@ ARG THEROCK_ASIC=gfx90a
 ARG THEROCK_GIT_HASH=default
 ARG THEROCK_BUILD_MODE=Release
 ARG THEROCK_BUILD_PRESET=linux-release-package
-ARG BUILD_JOBS=64
+ARG BUILD_JOBS=0
 ARG ROCM_LIBRARIES_REF=default
 ARG ROCM_SYSTEMS_REF=default
 
@@ -222,14 +224,31 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
         cmake --build .; \
     else \
         echo "Building with $BUILD_JOBS parallel jobs"; \
-        cmake --build . -j$BUILD_JOBS; \
+        cmake --build . -j224; \
     fi && \
     cmake --install .
 
+# NIGHTLY target: push this image as rocm/miopen:therock
+FROM scratch AS update_therock
+COPY --from=build_therock /opt/rocm /opt/rocm
+
+#============================================================================
+# REGULAR: Use the pre-built ROCm image from TheRock to build the rest of
+# the MIOpen environment
+#============================================================================
+FROM rocm/miopen:therock AS prebuilt_therock
+
+# ============================================================================
+# Select which build stage to use
+# ============================================================================
+FROM ${BUILD_TYPE}_therock AS therock
+
 # ================================================================================
-# Build and install other 3rd party deps 
+# REGULAR: Build and install other 3rd party deps using pre-built ROCm image
 # ================================================================================
-FROM build_therock AS miopen_deps
+FROM base AS miopen_deps
+COPY --from=therock /opt/rocm /opt/rocm
+ARG THEROCK_ASIC=gfx90a
 ARG PREFIX="/usr/local"
 ARG USE_FIN="OFF"
 
@@ -263,7 +282,6 @@ ARG MIOPEN_SCCACHE=""
 ENV MIOPEN_SCCACHE=$MIOPEN_SCCACHE
 ARG COMPILER_LAUNCHER=""
 ARG MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="MiOpen-Docker-CK"
-ENV MIOPEN_SCCACHE=$MIOPEN_SCCACHE
 ARG THEROCK_ASIC=""
 ENV THEROCK_ASIC=${THEROCK_ASIC}
 
@@ -330,7 +348,7 @@ RUN set -x && \
     fi
 
 # ============================================================================
-# Common miopen development environment
+# REGULAR target: final MIOpen development environment
 # ============================================================================
 FROM base AS miopen
 
