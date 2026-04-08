@@ -544,6 +544,8 @@ inline hipError_t segmented_radix_sort_impl(
 /// In this example a device-level ascending radix sort is performed on an array of
 /// \p float values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_segmented_radix_sort.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///

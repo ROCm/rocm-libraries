@@ -326,6 +326,8 @@ hipError_t find_first_of_impl(void*          temporary_storage,
 /// In this example a device-level find_first_of is performed where inputs and keys are
 ///   represented by an array of unsigned integers.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_find_first_of.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///

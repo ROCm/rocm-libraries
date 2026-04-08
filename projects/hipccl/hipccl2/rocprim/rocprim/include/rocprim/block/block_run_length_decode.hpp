@@ -54,6 +54,8 @@ BEGIN_ROCPRIM_NAMESPACE
  * retrieving a "window" from the run-length decoded array. The window's offset can be specified and `BLOCK_THREADS *
  * DECODED_ITEMS_PER_THREAD` (i.e., referred to as `window_size`) decoded items from the specified window will be returned.
  *
+ * The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_run_length_decode.cpp).
+ *
  * \par
  * \code
  * __global__ void ExampleKernel(...)

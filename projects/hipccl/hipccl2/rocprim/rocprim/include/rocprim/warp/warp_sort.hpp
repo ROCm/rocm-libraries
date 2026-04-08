@@ -70,6 +70,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// warp_sort type, and instantiating an object that will be used to invoke a
 /// member function.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/warp/example_warp_sort.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
