@@ -587,6 +587,8 @@ inline hipError_t histogram_range_impl(void*          temporary_storage,
 /// \parblock
 /// In this example a device-level histogram of 5 bins is computed on an array of float samples.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_histogram.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
