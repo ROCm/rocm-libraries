@@ -618,7 +618,7 @@ ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
 {
     const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
-        return {};
+        return ConvSolution{miopenStatusInternalError};
 
     return loader.GetSolution(
         CKSolverType::GrpConv3dFwd, ctx, problem, config.kernel_id, config.UseTF32());

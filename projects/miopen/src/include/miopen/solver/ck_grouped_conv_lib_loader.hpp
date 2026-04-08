@@ -6,6 +6,7 @@
 #include <miopen/config.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
+#include <miopen/solver/ck_grouped_conv_status.h>
 
 #include <memory>
 #include <mutex>
@@ -139,29 +140,33 @@ private:
 
     using GetApiVersionFn = int (*)();
 
-    using KernelListSizeFn = size_t (*)(const ::CKKernelListHandle*);
-    using KernelListGetFn  = const char* (*)(const ::CKKernelListHandle*, size_t);
+    using KernelListSizeFn = ckgrpconv_status_t (*)(const ::CKKernelListHandle*, size_t*);
+    using KernelListGetFn  = ckgrpconv_status_t (*)(const ::CKKernelListHandle*,
+                                                   size_t,
+                                                   const char**);
     using KernelListFreeFn = void (*)(::CKKernelListHandle*);
 
     using SolutionFreeFn = void (*)(ConvSolution*);
 
-    using FillValidKernelsFn = ::CKKernelListHandle* (*)(const miopen::conv::ProblemDescription*,
-                                                         miopenDataType_t,
-                                                         bool);
-    using IsApplicableFn     = bool (*)(const miopen::conv::ProblemDescription*,
-                                    miopenDataType_t,
-                                    bool);
-    using IsArgsSupportedFn  = bool (*)(const miopen::conv::ProblemDescription*,
-                                       const char*,
-                                       miopenDataType_t,
-                                       bool);
-    using GetWorkspaceSizeFn = size_t (*)(const miopen::conv::ProblemDescription*,
-                                          miopenDataType_t,
-                                          bool);
-    using GetSolutionFn      = ConvSolution* (*)(const ExecutionContext*,
-                                            const miopen::conv::ProblemDescription*,
-                                            const char*,
-                                            bool);
+    using FillValidKernelsFn = ckgrpconv_status_t (*)(const miopen::conv::ProblemDescription*,
+                                                      miopenDataType_t,
+                                                      bool,
+                                                      ::CKKernelListHandle**);
+    using IsApplicableFn     = ckgrpconv_status_t (*)(const miopen::conv::ProblemDescription*,
+                                                  miopenDataType_t,
+                                                  bool,
+                                                  bool*);
+    using IsArgsSupportedFn  = ckgrpconv_status_t (*)(
+        const miopen::conv::ProblemDescription*, const char*, miopenDataType_t, bool, bool*);
+    using GetWorkspaceSizeFn = ckgrpconv_status_t (*)(const miopen::conv::ProblemDescription*,
+                                                      miopenDataType_t,
+                                                      bool,
+                                                      size_t*);
+    using GetSolutionFn      = ckgrpconv_status_t (*)(const ExecutionContext*,
+                                                 const miopen::conv::ProblemDescription*,
+                                                 const char*,
+                                                 bool,
+                                                 ConvSolution**);
 
     // -- Function pointers ----------------------------------------------------
     GetApiVersionFn get_api_version_fn_ = nullptr;
@@ -172,7 +177,10 @@ private:
 
     SolutionFreeFn solution_free_fn_ = nullptr;
 
-    using GetAllKernelTypeStringsFn = CKKernelListHandle* (*)();
+    using GetLastErrorStringFn                     = void (*)(const char**);
+    GetLastErrorStringFn get_last_error_string_fn_ = nullptr;
+
+    using GetAllKernelTypeStringsFn = ckgrpconv_status_t (*)(::CKKernelListHandle**);
 
     struct SolverFns
     {
@@ -186,11 +194,17 @@ private:
 
     SolverFns solver_fns_[static_cast<int>(CKSolverType::Count)];
 
-    // Helper: extract kernel list from handle
-    std::vector<std::string> ExtractKernelList(::CKKernelListHandle* handle) const;
+    // Check status code and throw on failure, including last-error context.
+    void CheckStatus(ckgrpconv_status_t status, const char* operation) const;
 
-    // Helper: extract ConvSolution from pointer
-    ConvSolution ExtractSolution(ConvSolution* ptr) const;
+    // Helper: check status and extract kernel list from handle
+    std::vector<std::string> ExtractKernelList(ckgrpconv_status_t status,
+                                               ::CKKernelListHandle* handle,
+                                               const char* operation) const;
+
+    // Helper: check status and extract ConvSolution from pointer
+    ConvSolution
+    ExtractSolution(ckgrpconv_status_t status, ConvSolution* ptr, const char* operation) const;
 };
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING

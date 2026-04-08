@@ -9,6 +9,7 @@
 #include "ck_grouped_conv_common.hpp"
 #include "ck_grouped_conv_impl_helpers.hpp"
 #include <miopen/conv_solution.hpp>
+#include <miopen/solver/ck_grouped_conv_error.hpp>
 #include <miopen/solver/ck_grouped_conv_interface.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/execution_context.hpp>
@@ -418,84 +419,82 @@ using miopen::solver::InitInvokerFactoryFwdNCHW;
 using miopen::solver::InitInvokerFactoryNHWC;
 using miopen::solver::MakeSolutionGroupConvImplicitGemmXdlops;
 
-extern "C" CKKernelListHandle* ckgrpconv_fused_grp_activ_fill_valid_kernels(
-    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool /*use_tf32*/)
+extern "C" ckgrpconv_status_t
+ckgrpconv_fused_grp_activ_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
+                                             miopenDataType_t data_type,
+                                             bool /*use_tf32*/,
+                                             CKKernelListHandle** out_handle)
 {
-    try
-    {
+    return ckgrpconv_try_catch([&]() {
+        CKGRPCONV_THROW_IF_NULL(out_handle, CKGRPCONV_STATUS_BAD_PARAM, "Null out_handle");
+        CKGRPCONV_THROW_IF_NULL(problem, CKGRPCONV_STATUS_BAD_PARAM, "Null problem");
         auto result     = std::make_unique<CKKernelListHandle>();
         result->kernels = DispatchByDataType(data_type, [&](auto type_val) {
             return FillValidKernelsForDim<decltype(type_val)>(*problem);
         });
-        return result.release();
-    }
-    catch(...)
-    {
-        return nullptr;
-    }
+        *out_handle     = result.release();
+    });
 }
 
-extern "C" bool ckgrpconv_fused_grp_activ_is_applicable(
-    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool /*use_tf32*/)
+extern "C" ckgrpconv_status_t
+ckgrpconv_fused_grp_activ_is_applicable(const miopen::conv::ProblemDescription* problem,
+                                        miopenDataType_t data_type,
+                                        bool /*use_tf32*/,
+                                        bool* out_result)
 {
-    try
-    {
-        return DispatchByDataType(data_type, [&](auto type_val) {
+    return ckgrpconv_try_catch([&]() {
+        CKGRPCONV_THROW_IF_NULL(out_result, CKGRPCONV_STATUS_BAD_PARAM, "Null out_result");
+        CKGRPCONV_THROW_IF_NULL(problem, CKGRPCONV_STATUS_BAD_PARAM, "Null problem");
+        *out_result = DispatchByDataType(data_type, [&](auto type_val) {
             return CheckCKApplicabilityForDim<decltype(type_val)>(*problem);
         });
-    }
-    catch(...)
-    {
-        return false;
-    }
+    });
 }
 
-extern "C" bool
+extern "C" ckgrpconv_status_t
 ckgrpconv_fused_grp_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
                                             const char* kernel_id,
                                             miopenDataType_t data_type,
-                                            bool /*use_tf32*/)
+                                            bool /*use_tf32*/,
+                                            bool* out_result)
 {
-    try
-    {
-        if(!kernel_id)
-            return false;
+    return ckgrpconv_try_catch([&]() {
+        CKGRPCONV_THROW_IF_NULL(out_result, CKGRPCONV_STATUS_BAD_PARAM, "Null out_result");
+        CKGRPCONV_THROW_IF_NULL(problem, CKGRPCONV_STATUS_BAD_PARAM, "Null problem");
+        CKGRPCONV_THROW_IF_NULL(kernel_id, CKGRPCONV_STATUS_BAD_PARAM, "Null kernel_id");
         std::string kid(kernel_id);
-        return DispatchByDataType(data_type, [&](auto type_val) {
+        *out_result = DispatchByDataType(data_type, [&](auto type_val) {
             return CheckIsArgSupportedForDim<decltype(type_val)>(*problem, kid);
         });
-    }
-    catch(...)
-    {
-        return false;
-    }
+    });
 }
 
-extern "C" size_t
+extern "C" ckgrpconv_status_t
 ckgrpconv_fused_grp_activ_get_workspace_size(const miopen::conv::ProblemDescription* problem,
                                              miopenDataType_t /*data_type*/,
-                                             bool /*use_tf32*/)
+                                             bool /*use_tf32*/,
+                                             size_t* out_size)
 {
-    try
-    {
-        return miopen::solver::GetWorkspaceSizeLayoutTransformConv(*problem);
-    }
-    catch(...)
-    {
-        return 0;
-    }
+    return ckgrpconv_try_catch([&]() {
+        CKGRPCONV_THROW_IF_NULL(out_size, CKGRPCONV_STATUS_BAD_PARAM, "Null out_size");
+        CKGRPCONV_THROW_IF_NULL(problem, CKGRPCONV_STATUS_BAD_PARAM, "Null problem");
+        *out_size = miopen::solver::GetWorkspaceSizeLayoutTransformConv(*problem);
+    });
 }
 
-extern "C" miopen::solver::ConvSolution*
+extern "C" ckgrpconv_status_t
 ckgrpconv_fused_grp_activ_get_solution(const miopen::ExecutionContext* ctx,
                                        const miopen::conv::ProblemDescription* problem,
                                        const char* kernel_id,
-                                       bool /*use_tf32*/)
+                                       bool /*use_tf32*/,
+                                       miopen::solver::ConvSolution** out_solution)
 {
-    try
-    {
-        if(!ctx || !problem || !kernel_id)
-            return nullptr;
+    return ckgrpconv_try_catch([&]() {
+        CKGRPCONV_THROW_IF_NULL(out_solution, CKGRPCONV_STATUS_BAD_PARAM, "Null out_solution");
+        CKGRPCONV_THROW_IF_NULL(ctx, CKGRPCONV_STATUS_BAD_PARAM, "Null ctx");
+        CKGRPCONV_THROW_IF_NULL(problem, CKGRPCONV_STATUS_BAD_PARAM, "Null problem");
+        CKGRPCONV_THROW_IF_NULL(kernel_id, CKGRPCONV_STATUS_BAD_PARAM, "Null kernel_id");
+
         std::string kid(kernel_id);
 
         auto make_solution = [&](auto ndim_constant) {
@@ -538,10 +537,6 @@ ckgrpconv_fused_grp_activ_get_solution(const miopen::ExecutionContext* ctx,
         else
             solution = make_solution(std::integral_constant<int, 2>{});
 
-        return new miopen::solver::ConvSolution(std::move(solution));
-    }
-    catch(...)
-    {
-        return nullptr;
-    }
+        *out_solution = new miopen::solver::ConvSolution(std::move(solution));
+    });
 }

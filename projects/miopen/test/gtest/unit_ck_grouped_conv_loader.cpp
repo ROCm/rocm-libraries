@@ -4,12 +4,15 @@
 #include <gtest/gtest.h>
 #include <miopen/env.hpp>
 #include <miopen/filesystem.hpp>
+#include <miopen/solver/ck_grouped_conv_error.hpp>
 #include <miopen/solver/ck_grouped_conv_lib_loader.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv_solution.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/tensor.hpp>
+
+#include <thread>
 
 #if MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime.h>
@@ -431,4 +434,308 @@ TEST(CPU_CKGroupedConvLoader_NONE, IsDeterministicSplitKValid)
     // Deterministic mode with parse failures: invalid
     EXPECT_FALSE(IsDeterministicSplitKValid("Kernel+abc", true));
     EXPECT_FALSE(IsDeterministicSplitKValid("Kernel+", true));
+}
+
+// -- Error infrastructure tests (CPU, no GPU required) ------------------------
+
+TEST(CPU_CKGroupedConvError_NONE, LastErrorSetAndGet)
+{
+    // Setting a non-success status stores the message
+    CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_BAD_PARAM, "test error message");
+    EXPECT_STREQ(CKGrpConvLastError::getLastError(), "test error message");
+
+    // Setting SUCCESS does NOT overwrite the buffer
+    CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_SUCCESS, "should not appear");
+    EXPECT_STREQ(CKGrpConvLastError::getLastError(), "test error message");
+
+    // Setting another error overwrites the buffer
+    CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_INTERNAL_ERROR, "second error");
+    EXPECT_STREQ(CKGrpConvLastError::getLastError(), "second error");
+
+    // Null message clears the buffer
+    CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_BAD_PARAM, nullptr);
+    EXPECT_STREQ(CKGrpConvLastError::getLastError(), "");
+}
+
+TEST(CPU_CKGroupedConvError_NONE, LastErrorThreadIsolation)
+{
+    // Set an error on the main thread
+    CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_BAD_PARAM, "main thread error");
+
+    std::string child_error;
+    std::thread t([&child_error]() {
+        // Child thread should see empty last error (thread-local)
+        child_error = CKGrpConvLastError::getLastError();
+    });
+    t.join();
+
+    EXPECT_EQ(child_error, "") << "Child thread should have empty last error";
+    EXPECT_STREQ(CKGrpConvLastError::getLastError(), "main thread error")
+        << "Main thread error should be unaffected";
+}
+
+TEST(CPU_CKGroupedConvError_NONE, TryCatchSuccess)
+{
+    auto status = ckgrpconv_try_catch([]() {
+        // no-op, no throw
+    });
+    EXPECT_EQ(status, CKGRPCONV_STATUS_SUCCESS);
+}
+
+TEST(CPU_CKGroupedConvError_NONE, TryCatchCKGrpConvException)
+{
+    auto status = ckgrpconv_try_catch(
+        []() { throw CKGrpConvException(CKGRPCONV_STATUS_BAD_PARAM, "bad parameter test"); });
+    EXPECT_EQ(status, CKGRPCONV_STATUS_BAD_PARAM);
+    EXPECT_STREQ(CKGrpConvLastError::getLastError(), "bad parameter test");
+}
+
+TEST(CPU_CKGroupedConvError_NONE, TryCatchStdException)
+{
+    auto status = ckgrpconv_try_catch([]() { throw std::runtime_error("std runtime error test"); });
+    EXPECT_EQ(status, CKGRPCONV_STATUS_INTERNAL_ERROR);
+    EXPECT_STREQ(CKGrpConvLastError::getLastError(), "std runtime error test");
+}
+
+TEST(CPU_CKGroupedConvError_NONE, TryCatchUnknownException)
+{
+    auto status = ckgrpconv_try_catch([]() {
+        throw 42; // NOLINT(hicpp-exception-baseclass)
+    });
+    EXPECT_EQ(status, CKGRPCONV_STATUS_INTERNAL_ERROR);
+    EXPECT_STREQ(CKGrpConvLastError::getLastError(), "Unknown exception occurred");
+}
+
+TEST(CPU_CKGroupedConvError_NONE, StatusToString)
+{
+    EXPECT_STREQ(toString(CKGRPCONV_STATUS_SUCCESS), "CKGRPCONV_STATUS_SUCCESS");
+    EXPECT_STREQ(toString(CKGRPCONV_STATUS_BAD_PARAM), "CKGRPCONV_STATUS_BAD_PARAM");
+    EXPECT_STREQ(toString(CKGRPCONV_STATUS_INVALID_VALUE), "CKGRPCONV_STATUS_INVALID_VALUE");
+    EXPECT_STREQ(toString(CKGRPCONV_STATUS_INTERNAL_ERROR), "CKGRPCONV_STATUS_INTERNAL_ERROR");
+    EXPECT_STREQ(toString(CKGRPCONV_STATUS_ALLOC_FAILED), "CKGRPCONV_STATUS_ALLOC_FAILED");
+    EXPECT_STREQ(toString(static_cast<ckgrpconv_status_t>(99)), "CKGRPCONV_STATUS_UNKNOWN");
+}
+
+// -- CKGrpConvException direct tests -----------------------------------------
+
+TEST(CPU_CKGroupedConvError_NONE, ExceptionStoresStatusAndMessage)
+{
+    CKGrpConvException ex(CKGRPCONV_STATUS_INVALID_VALUE, "invalid value message");
+    EXPECT_EQ(ex.getStatus(), CKGRPCONV_STATUS_INVALID_VALUE);
+    EXPECT_STREQ(ex.what(), "invalid value message");
+}
+
+TEST(CPU_CKGroupedConvError_NONE, ExceptionIsStdException)
+{
+    CKGrpConvException ex(CKGRPCONV_STATUS_ALLOC_FAILED, "alloc failed");
+    const std::exception& base = ex;
+    EXPECT_STREQ(base.what(), "alloc failed");
+}
+
+TEST(CPU_CKGroupedConvError_NONE, ExceptionCopyPreservesFields)
+{
+    CKGrpConvException original(CKGRPCONV_STATUS_BAD_PARAM, "original message");
+    CKGrpConvException copy(original); // NOLINT(performance-unnecessary-copy-initialization)
+    EXPECT_EQ(copy.getStatus(), CKGRPCONV_STATUS_BAD_PARAM);
+    EXPECT_STREQ(copy.what(), "original message");
+}
+
+// -- THROW_IF macro tests ----------------------------------------------------
+
+TEST(CPU_CKGroupedConvError_NONE, ThrowIfNullThrowsOnNull)
+{
+    int* ptr = nullptr;
+    EXPECT_THROW(
+        { CKGRPCONV_THROW_IF_NULL(ptr, CKGRPCONV_STATUS_BAD_PARAM, "null pointer"); },
+        CKGrpConvException);
+
+    try
+    {
+        CKGRPCONV_THROW_IF_NULL(ptr, CKGRPCONV_STATUS_BAD_PARAM, "null pointer detail");
+        FAIL() << "Expected CKGrpConvException";
+    }
+    catch(const CKGrpConvException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), CKGRPCONV_STATUS_BAD_PARAM);
+        EXPECT_STREQ(ex.what(), "null pointer detail");
+    }
+}
+
+TEST(CPU_CKGroupedConvError_NONE, ThrowIfNullPassesOnNonNull)
+{
+    int value = 42;
+    int* ptr  = &value;
+    EXPECT_NO_THROW(
+        { CKGRPCONV_THROW_IF_NULL(ptr, CKGRPCONV_STATUS_BAD_PARAM, "should not throw"); });
+}
+
+TEST(CPU_CKGroupedConvError_NONE, ThrowIfFalseThrowsOnFalse)
+{
+    try
+    {
+        CKGRPCONV_THROW_IF_FALSE(false, CKGRPCONV_STATUS_INVALID_VALUE, "condition was false");
+        FAIL() << "Expected CKGrpConvException";
+    }
+    catch(const CKGrpConvException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), CKGRPCONV_STATUS_INVALID_VALUE);
+        EXPECT_STREQ(ex.what(), "condition was false");
+    }
+}
+
+TEST(CPU_CKGroupedConvError_NONE, ThrowIfFalsePassesOnTrue)
+{
+    EXPECT_NO_THROW(
+        { CKGRPCONV_THROW_IF_FALSE(true, CKGRPCONV_STATUS_INVALID_VALUE, "should not throw"); });
+}
+
+TEST(CPU_CKGroupedConvError_NONE, ThrowIfTrueThrowsOnTrue)
+{
+    try
+    {
+        CKGRPCONV_THROW_IF_TRUE(true, CKGRPCONV_STATUS_INTERNAL_ERROR, "condition was true");
+        FAIL() << "Expected CKGrpConvException";
+    }
+    catch(const CKGrpConvException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), CKGRPCONV_STATUS_INTERNAL_ERROR);
+        EXPECT_STREQ(ex.what(), "condition was true");
+    }
+}
+
+TEST(CPU_CKGroupedConvError_NONE, ThrowIfTruePassesOnFalse)
+{
+    EXPECT_NO_THROW(
+        { CKGRPCONV_THROW_IF_TRUE(false, CKGRPCONV_STATUS_INTERNAL_ERROR, "should not throw"); });
+}
+
+TEST(CPU_CKGroupedConvError_NONE, ThrowIfNeThrowsOnNotEqual)
+{
+    try
+    {
+        CKGRPCONV_THROW_IF_NE(3, 5, CKGRPCONV_STATUS_INVALID_VALUE, "values not equal");
+        FAIL() << "Expected CKGrpConvException";
+    }
+    catch(const CKGrpConvException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), CKGRPCONV_STATUS_INVALID_VALUE);
+        EXPECT_STREQ(ex.what(), "values not equal");
+    }
+}
+
+TEST(CPU_CKGroupedConvError_NONE, ThrowIfNePassesOnEqual)
+{
+    EXPECT_NO_THROW(
+        { CKGRPCONV_THROW_IF_NE(7, 7, CKGRPCONV_STATUS_INVALID_VALUE, "should not throw"); });
+}
+
+TEST(CPU_CKGroupedConvError_NONE, ThrowIfEqThrowsOnEqual)
+{
+    try
+    {
+        CKGRPCONV_THROW_IF_EQ(10, 10, CKGRPCONV_STATUS_BAD_PARAM, "values equal");
+        FAIL() << "Expected CKGrpConvException";
+    }
+    catch(const CKGrpConvException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), CKGRPCONV_STATUS_BAD_PARAM);
+        EXPECT_STREQ(ex.what(), "values equal");
+    }
+}
+
+TEST(CPU_CKGroupedConvError_NONE, ThrowIfEqPassesOnNotEqual)
+{
+    EXPECT_NO_THROW(
+        { CKGRPCONV_THROW_IF_EQ(1, 2, CKGRPCONV_STATUS_BAD_PARAM, "should not throw"); });
+}
+
+// -- LastError additional coverage -------------------------------------------
+
+TEST(CPU_CKGroupedConvError_NONE, LastErrorSetReturnsStatus)
+{
+    auto result = CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_BAD_PARAM, "msg");
+    EXPECT_EQ(result, CKGRPCONV_STATUS_BAD_PARAM);
+
+    result = CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_ALLOC_FAILED, "alloc");
+    EXPECT_EQ(result, CKGRPCONV_STATUS_ALLOC_FAILED);
+
+    result = CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_SUCCESS, "ignored");
+    EXPECT_EQ(result, CKGRPCONV_STATUS_SUCCESS);
+}
+
+TEST(CPU_CKGroupedConvError_NONE, LastErrorStdStringOverload)
+{
+    std::string msg = "std::string overload test";
+    CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_INTERNAL_ERROR, msg);
+    EXPECT_STREQ(CKGrpConvLastError::getLastError(), "std::string overload test");
+}
+
+TEST(CPU_CKGroupedConvError_NONE, LastErrorTruncatesLongMessage)
+{
+    // Create a message longer than CKGRPCONV_ERROR_STRING_MAX_LENGTH
+    std::string long_msg(CKGRPCONV_ERROR_STRING_MAX_LENGTH + 100, 'X');
+    CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_INTERNAL_ERROR, long_msg);
+
+    const char* stored = CKGrpConvLastError::getLastError();
+    auto stored_len    = std::strlen(stored);
+    EXPECT_EQ(stored_len, CKGRPCONV_ERROR_STRING_MAX_LENGTH - 1)
+        << "Stored message should be truncated to buffer size - 1";
+    EXPECT_EQ(stored[stored_len], '\0') << "Stored message must be null-terminated";
+}
+
+// -- tryCatch status preservation for each status code -----------------------
+
+TEST(CPU_CKGroupedConvError_NONE, TryCatchPreservesAllStatusCodes)
+{
+    const ckgrpconv_status_t codes[] = {
+        CKGRPCONV_STATUS_BAD_PARAM,
+        CKGRPCONV_STATUS_INVALID_VALUE,
+        CKGRPCONV_STATUS_INTERNAL_ERROR,
+        CKGRPCONV_STATUS_ALLOC_FAILED,
+    };
+
+    for(auto code : codes)
+    {
+        auto status =
+            ckgrpconv_try_catch([code]() { throw CKGrpConvException(code, toString(code)); });
+        EXPECT_EQ(status, code) << "tryCatch should preserve status " << toString(code);
+        EXPECT_STREQ(CKGrpConvLastError::getLastError(), toString(code));
+    }
+}
+
+// -- Throw macros through tryCatch (end-to-end error propagation) ------------
+
+TEST(CPU_CKGroupedConvError_NONE, ThrowIfNullPropagatesThroughTryCatch)
+{
+    int* ptr    = nullptr;
+    auto status = ckgrpconv_try_catch([&]() {
+        CKGRPCONV_THROW_IF_NULL(ptr, CKGRPCONV_STATUS_BAD_PARAM, "null ptr in tryCatch");
+    });
+    EXPECT_EQ(status, CKGRPCONV_STATUS_BAD_PARAM);
+    EXPECT_STREQ(CKGrpConvLastError::getLastError(), "null ptr in tryCatch");
+}
+
+TEST(CPU_CKGroupedConvError_NONE, ThrowIfFalsePropagatesThroughTryCatch)
+{
+    auto status = ckgrpconv_try_catch([]() {
+        size_t idx  = 10;
+        size_t size = 5;
+        CKGRPCONV_THROW_IF_FALSE(idx < size, CKGRPCONV_STATUS_INVALID_VALUE, "Index out of range");
+    });
+    EXPECT_EQ(status, CKGRPCONV_STATUS_INVALID_VALUE);
+    EXPECT_STREQ(CKGrpConvLastError::getLastError(), "Index out of range");
+}
+
+TEST(CPU_CKGroupedConvError_NONE, NoThrowOnValidInputsThroughTryCatch)
+{
+    int value   = 42;
+    int* ptr    = &value;
+    auto status = ckgrpconv_try_catch([&]() {
+        CKGRPCONV_THROW_IF_NULL(ptr, CKGRPCONV_STATUS_BAD_PARAM, "should not throw");
+        CKGRPCONV_THROW_IF_FALSE(true, CKGRPCONV_STATUS_INVALID_VALUE, "should not throw");
+        CKGRPCONV_THROW_IF_TRUE(false, CKGRPCONV_STATUS_INTERNAL_ERROR, "should not throw");
+        CKGRPCONV_THROW_IF_NE(1, 1, CKGRPCONV_STATUS_BAD_PARAM, "should not throw");
+        CKGRPCONV_THROW_IF_EQ(1, 2, CKGRPCONV_STATUS_BAD_PARAM, "should not throw");
+    });
+    EXPECT_EQ(status, CKGRPCONV_STATUS_SUCCESS);
 }

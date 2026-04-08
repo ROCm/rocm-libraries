@@ -515,7 +515,7 @@ ConvSolution ConvHipImplicitGemm3DGroupWrwXdlops::GetSolution(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
-        return {};
+        return ConvSolution{miopenStatusInternalError};
 
     return loader.GetSolution(
         CKSolverType::GrpConv3dWrw, ctx, problem, config.kernel_id, config.UseTF32());

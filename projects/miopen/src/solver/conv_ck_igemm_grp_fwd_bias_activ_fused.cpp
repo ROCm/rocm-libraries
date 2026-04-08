@@ -197,7 +197,7 @@ ConvSolution ConvCKIgemmGrpFwdBiasActivFused::GetSolution(
 {
     const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
-        return {};
+        return ConvSolution{miopenStatusInternalError};
 
     const auto conv_problem = fdesc_problem.GetConvProblem(0, miopen::conv::Direction::Forward);
     return loader.GetSolution(

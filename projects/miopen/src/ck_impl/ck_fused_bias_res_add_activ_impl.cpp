@@ -8,6 +8,7 @@
 
 #include "ck_grouped_conv_common.hpp"
 #include <miopen/conv_solution.hpp>
+#include <miopen/solver/ck_grouped_conv_error.hpp>
 #include <miopen/solver/ck_grouped_conv_interface.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/execution_context.hpp>
@@ -259,78 +260,81 @@ auto DispatchFusedByDataType(miopenDataType_t dtype, Fn&& fn)
 
 using miopen::solver::InitAnyInvokerFactory;
 
-extern "C" CKKernelListHandle* ckgrpconv_fused_bias_res_add_activ_fill_valid_kernels(
-    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool /*use_tf32*/)
+extern "C" ckgrpconv_status_t ckgrpconv_fused_bias_res_add_activ_fill_valid_kernels(
+    const miopen::conv::ProblemDescription* problem,
+    miopenDataType_t data_type,
+    bool /*use_tf32*/,
+    CKKernelListHandle** out_handle)
 {
-    try
-    {
+    return ckgrpconv_try_catch([&]() {
+        CKGRPCONV_THROW_IF_NULL(out_handle, CKGRPCONV_STATUS_BAD_PARAM, "Null out_handle");
+        CKGRPCONV_THROW_IF_NULL(problem, CKGRPCONV_STATUS_BAD_PARAM, "Null problem");
         auto result     = std::make_unique<CKKernelListHandle>();
         result->kernels = DispatchFusedByDataType(data_type, [&](auto data_val, auto accum_val) {
             return FillValidKernels<decltype(data_val), decltype(accum_val)>(*problem);
         });
-        return result.release();
-    }
-    catch(...)
-    {
-        return nullptr;
-    }
+        *out_handle     = result.release();
+    });
 }
 
-extern "C" bool ckgrpconv_fused_bias_res_add_activ_is_applicable(
-    const miopen::conv::ProblemDescription* problem, miopenDataType_t data_type, bool /*use_tf32*/)
+extern "C" ckgrpconv_status_t
+ckgrpconv_fused_bias_res_add_activ_is_applicable(const miopen::conv::ProblemDescription* problem,
+                                                 miopenDataType_t data_type,
+                                                 bool /*use_tf32*/,
+                                                 bool* out_result)
 {
-    try
-    {
-        return DispatchFusedByDataType(data_type, [&](auto data_val, auto accum_val) {
+    return ckgrpconv_try_catch([&]() {
+        CKGRPCONV_THROW_IF_NULL(out_result, CKGRPCONV_STATUS_BAD_PARAM, "Null out_result");
+        CKGRPCONV_THROW_IF_NULL(problem, CKGRPCONV_STATUS_BAD_PARAM, "Null problem");
+        *out_result = DispatchFusedByDataType(data_type, [&](auto data_val, auto accum_val) {
             return CheckCKApplicability<decltype(data_val), decltype(accum_val)>(*problem);
         });
-    }
-    catch(...)
-    {
-        return false;
-    }
+    });
 }
 
-extern "C" bool ckgrpconv_fused_bias_res_add_activ_is_args_supported(
+extern "C" ckgrpconv_status_t ckgrpconv_fused_bias_res_add_activ_is_args_supported(
     const miopen::conv::ProblemDescription* problem,
     const char* kernel_id,
     miopenDataType_t data_type,
-    bool /*use_tf32*/)
+    bool /*use_tf32*/,
+    bool* out_result)
 {
-    try
-    {
-        if(!kernel_id)
-            return false;
+    return ckgrpconv_try_catch([&]() {
+        CKGRPCONV_THROW_IF_NULL(out_result, CKGRPCONV_STATUS_BAD_PARAM, "Null out_result");
+        CKGRPCONV_THROW_IF_NULL(problem, CKGRPCONV_STATUS_BAD_PARAM, "Null problem");
+        CKGRPCONV_THROW_IF_NULL(kernel_id, CKGRPCONV_STATUS_BAD_PARAM, "Null kernel_id");
         std::string kid(kernel_id);
-        return DispatchFusedByDataType(data_type, [&](auto data_val, auto accum_val) {
+        *out_result = DispatchFusedByDataType(data_type, [&](auto data_val, auto accum_val) {
             return CheckIsArgSupported<decltype(data_val), decltype(accum_val)>(*problem, kid);
         });
-    }
-    catch(...)
-    {
-        return false;
-    }
+    });
 }
 
-extern "C" size_t ckgrpconv_fused_bias_res_add_activ_get_workspace_size(
+extern "C" ckgrpconv_status_t ckgrpconv_fused_bias_res_add_activ_get_workspace_size(
     const miopen::conv::ProblemDescription* /*problem*/,
     miopenDataType_t /*data_type*/,
-    bool /*use_tf32*/)
+    bool /*use_tf32*/,
+    size_t* out_size)
 {
-    // Fused Conv+ScaleAdd+Bias+ReLU CK kernels do not require CK-level workspace.
-    return 0;
+    return ckgrpconv_try_catch([&]() {
+        CKGRPCONV_THROW_IF_NULL(out_size, CKGRPCONV_STATUS_BAD_PARAM, "Null out_size");
+        // Fused Conv+ScaleAdd+Bias+ReLU CK kernels do not require CK-level workspace.
+        *out_size = 0;
+    });
 }
 
-extern "C" miopen::solver::ConvSolution*
+extern "C" ckgrpconv_status_t
 ckgrpconv_fused_bias_res_add_activ_get_solution(const miopen::ExecutionContext* /*ctx*/,
                                                 const miopen::conv::ProblemDescription* problem,
                                                 const char* kernel_id,
-                                                bool /*use_tf32*/)
+                                                bool /*use_tf32*/,
+                                                miopen::solver::ConvSolution** out_solution)
 {
-    try
-    {
-        if(!problem || !kernel_id)
-            return nullptr;
+    return ckgrpconv_try_catch([&]() {
+        CKGRPCONV_THROW_IF_NULL(out_solution, CKGRPCONV_STATUS_BAD_PARAM, "Null out_solution");
+        CKGRPCONV_THROW_IF_NULL(problem, CKGRPCONV_STATUS_BAD_PARAM, "Null problem");
+        CKGRPCONV_THROW_IF_NULL(kernel_id, CKGRPCONV_STATUS_BAD_PARAM, "Null kernel_id");
+
         std::string kid(kernel_id);
 
         using ParamType = miopen::fusion::FusionInvokeParams;
@@ -354,13 +358,9 @@ ckgrpconv_fused_bias_res_add_activ_get_solution(const miopen::ExecutionContext* 
             solution = InitAnyInvokerFactory<DeviceOp<ck::bhalf_t, ck::bhalf_t>, CKArgs, ParamType>(
                 *problem, kid);
             break;
-        default: return nullptr;
+        default: throw CKGrpConvException(CKGRPCONV_STATUS_INVALID_VALUE, "Unsupported data type");
         }
 
-        return new miopen::solver::ConvSolution(std::move(solution));
-    }
-    catch(...)
-    {
-        return nullptr;
-    }
+        *out_solution = new miopen::solver::ConvSolution(std::move(solution));
+    });
 }

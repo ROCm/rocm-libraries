@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <miopen/solver/ck_grouped_conv_lib_loader.hpp>
+#include <miopen/solver/ck_grouped_conv_error.hpp>
 #include <miopen/solver/ck_grouped_conv_interface.hpp>
 #include <miopen/conv_solution.hpp>
 #include <miopen/execution_context.hpp>
@@ -144,6 +145,19 @@ void* ResolveDynamicSymbol(void* handle, const char* symbol_name)
 #endif
 }
 
+miopenStatus_t toMiopenStatus(ckgrpconv_status_t status)
+{
+    switch(status)
+    {
+    case CKGRPCONV_STATUS_SUCCESS: return miopenStatusSuccess;
+    case CKGRPCONV_STATUS_BAD_PARAM: return miopenStatusBadParm;
+    case CKGRPCONV_STATUS_INVALID_VALUE: return miopenStatusInvalidValue;
+    case CKGRPCONV_STATUS_INTERNAL_ERROR: return miopenStatusInternalError;
+    case CKGRPCONV_STATUS_ALLOC_FAILED: return miopenStatusAllocFailed;
+    default: return miopenStatusInternalError;
+    }
+}
+
 } // namespace
 
 // -- Singleton infrastructure -------------------------------------------------
@@ -284,6 +298,7 @@ void CKGroupedConvLibLoader::BindRequiredCommonSymbols(std::vector<std::string>&
     bind_symbol(kernel_list_get_fn_, "ckgrpconv_kernel_list_get");
     bind_symbol(kernel_list_free_fn_, "ckgrpconv_kernel_list_free");
     bind_symbol(solution_free_fn_, "ckgrpconv_solution_free");
+    bind_symbol(get_last_error_string_fn_, "ckgrpconv_get_last_error_string");
 }
 
 void CKGroupedConvLibLoader::BindSolverSymbols(CKSolverType solver,
@@ -371,30 +386,55 @@ bool CKGroupedConvLibLoader::LoadSymbols()
 
 // -- Helpers ------------------------------------------------------------------
 
-std::vector<std::string> CKGroupedConvLibLoader::ExtractKernelList(CKKernelListHandle* handle) const
+void CKGroupedConvLibLoader::CheckStatus(ckgrpconv_status_t status, const char* operation) const
 {
-    if(handle == nullptr)
+    if(status == CKGRPCONV_STATUS_SUCCESS)
+        return;
+    const char* error_msg = "";
+    if(get_last_error_string_fn_ != nullptr)
+        get_last_error_string_fn_(&error_msg);
+    MIOPEN_THROW(toMiopenStatus(status),
+                 std::string("CK grouped conv ") + operation +
+                     " failed. Status: " + toString(status) + "(" + std::to_string(status) + ")" +
+                     ", Error: " + (error_msg != nullptr ? error_msg : ""));
+}
+
+std::vector<std::string> CKGroupedConvLibLoader::ExtractKernelList(ckgrpconv_status_t status,
+                                                                   CKKernelListHandle* handle,
+                                                                   const char* operation) const
+{
+    // RAII guard: ensure handle is freed even if CheckStatus throws
+    auto handle_guard =
+        std::unique_ptr<CKKernelListHandle, KernelListFreeFn>(handle, kernel_list_free_fn_);
+
+    CheckStatus(status, operation);
+    if(handle_guard == nullptr)
         return {};
     std::vector<std::string> result;
-    const size_t n = kernel_list_size_fn_(handle);
+    size_t n = 0;
+    CheckStatus(kernel_list_size_fn_(handle_guard.get(), &n), "kernel_list_size");
     result.reserve(n);
     for(size_t i = 0; i < n; ++i)
     {
-        const char* s = kernel_list_get_fn_(handle, i);
+        const char* s = nullptr;
+        CheckStatus(kernel_list_get_fn_(handle_guard.get(), i, &s), "kernel_list_get");
         if(s != nullptr)
             result.emplace_back(s);
     }
-    kernel_list_free_fn_(handle);
     return result;
 }
 
-ConvSolution CKGroupedConvLibLoader::ExtractSolution(ConvSolution* ptr) const
+ConvSolution CKGroupedConvLibLoader::ExtractSolution(ckgrpconv_status_t status,
+                                                     ConvSolution* ptr,
+                                                     const char* operation) const
 {
-    if(ptr == nullptr)
+    // RAII guard: ensure ptr is freed even if CheckStatus throws
+    auto ptr_guard = std::unique_ptr<ConvSolution, SolutionFreeFn>(ptr, solution_free_fn_);
+
+    CheckStatus(status, operation);
+    if(ptr_guard == nullptr)
         return ConvSolution{miopenStatusInternalError};
-    ConvSolution result = std::move(*ptr);
-    solution_free_fn_(ptr);
-    return result;
+    return std::move(*ptr_guard);
 }
 
 // -- Solver-parameterized wrappers --------------------------------------------
@@ -407,8 +447,10 @@ CKGroupedConvLibLoader::FillValidKernels(CKSolverType solver,
 {
     if(!IsLoaded())
         return {};
-    return ExtractKernelList(
-        solver_fns_[ToSolverIndex(solver)].fill_valid_kernels(&problem, dtype, use_tf32));
+    CKKernelListHandle* handle = nullptr;
+    auto status =
+        solver_fns_[ToSolverIndex(solver)].fill_valid_kernels(&problem, dtype, use_tf32, &handle);
+    return ExtractKernelList(status, handle, "fill_valid_kernels");
 }
 
 std::vector<std::string>
@@ -433,7 +475,11 @@ bool CKGroupedConvLibLoader::IsApplicable(CKSolverType solver,
 {
     if(!IsLoaded())
         return false;
-    return solver_fns_[ToSolverIndex(solver)].is_applicable(&problem, dtype, use_tf32);
+    bool result = false;
+    auto status =
+        solver_fns_[ToSolverIndex(solver)].is_applicable(&problem, dtype, use_tf32, &result);
+    CheckStatus(status, "is_applicable");
+    return result;
 }
 
 bool CKGroupedConvLibLoader::IsArgsSupported(CKSolverType solver,
@@ -444,8 +490,11 @@ bool CKGroupedConvLibLoader::IsArgsSupported(CKSolverType solver,
 {
     if(!IsLoaded())
         return false;
-    return solver_fns_[ToSolverIndex(solver)].is_args_supported(
-        &problem, kernel_id.c_str(), dtype, use_tf32);
+    bool result = false;
+    auto status = solver_fns_[ToSolverIndex(solver)].is_args_supported(
+        &problem, kernel_id.c_str(), dtype, use_tf32, &result);
+    CheckStatus(status, "is_args_supported");
+    return result;
 }
 
 size_t CKGroupedConvLibLoader::GetWorkspaceSize(CKSolverType solver,
@@ -455,7 +504,11 @@ size_t CKGroupedConvLibLoader::GetWorkspaceSize(CKSolverType solver,
 {
     if(!IsLoaded())
         return 0;
-    return solver_fns_[ToSolverIndex(solver)].get_workspace_size(&problem, dtype, use_tf32);
+    size_t result = 0;
+    auto status =
+        solver_fns_[ToSolverIndex(solver)].get_workspace_size(&problem, dtype, use_tf32, &result);
+    CheckStatus(status, "get_workspace_size");
+    return result;
 }
 
 ConvSolution CKGroupedConvLibLoader::GetSolution(CKSolverType solver,
@@ -466,8 +519,10 @@ ConvSolution CKGroupedConvLibLoader::GetSolution(CKSolverType solver,
 {
     if(!IsLoaded())
         return ConvSolution{miopenStatusInternalError};
-    return ExtractSolution(solver_fns_[ToSolverIndex(solver)].get_solution(
-        &ctx, &problem, kernel_id.c_str(), use_tf32));
+    ConvSolution* ptr = nullptr;
+    auto status       = solver_fns_[ToSolverIndex(solver)].get_solution(
+        &ctx, &problem, kernel_id.c_str(), use_tf32, &ptr);
+    return ExtractSolution(status, ptr, "get_solution");
 }
 
 std::vector<std::string> CKGroupedConvLibLoader::GetAllKernelTypeStrings(CKSolverType solver) const
@@ -477,7 +532,9 @@ std::vector<std::string> CKGroupedConvLibLoader::GetAllKernelTypeStrings(CKSolve
     auto fn = solver_fns_[ToSolverIndex(solver)].get_all_kernel_types;
     if(fn == nullptr)
         return {};
-    return ExtractKernelList(fn());
+    CKKernelListHandle* handle = nullptr;
+    auto status                = fn(&handle);
+    return ExtractKernelList(status, handle, "get_all_kernel_type_strings");
 }
 
 } // namespace solver
