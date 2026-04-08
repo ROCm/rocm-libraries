@@ -4,8 +4,8 @@
 #pragma once
 
 #include "BackendDescriptor.hpp"
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 
 namespace hipdnn_backend
 {

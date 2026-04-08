@@ -7,10 +7,10 @@
 #include <atomic>
 #include <flatbuffers/flatbuffers.h>
 #include <fstream>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
-#include <hipdnn_data_sdk/utilities/json/Graph.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <iomanip>
 #include <mutex>
 #include <nlohmann/json.hpp>

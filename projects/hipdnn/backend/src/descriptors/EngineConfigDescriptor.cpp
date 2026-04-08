@@ -11,8 +11,8 @@
 #include "KnobSettingDescriptor.hpp"
 #include "handle/Handle.hpp"
 
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/KnobSettingWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/KnobSettingWrapper.hpp>
 
 namespace hipdnn_backend
 {

@@ -9,9 +9,9 @@
 #include "descriptors/TensorDescriptor.hpp"
 #include <array>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <vector>
 
 namespace hipdnn_backend

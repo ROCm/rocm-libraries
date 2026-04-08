@@ -5,7 +5,7 @@
 #include "TestMacros.hpp"
 #include "descriptors/DataTypeConversion.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
 
 #include <string>
 

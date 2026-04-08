@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <mutex>
 #include <vector>
 

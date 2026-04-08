@@ -4,7 +4,7 @@
 #pragma once
 
 #include "HipdnnStatus.h"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <memory>
 
 namespace hipdnn_backend::flatbuffer_utilities

@@ -6,7 +6,7 @@
 #include "DescriptorTestUtils.hpp"
 #include "TensorDescriptorTestUtils.hpp"
 #include "hipdnn_backend.h"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
