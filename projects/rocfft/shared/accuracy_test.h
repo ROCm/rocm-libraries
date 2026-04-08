@@ -135,7 +135,7 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
 }
 
 template <typename Tfloat>
-bool fftw_plan_uses_bluestein(const typename fftw_trait<Tfloat>::fftw_plan_type& cpu_plan)
+bool fftw_plan_uses_bluestein(const fftw_plan_wrapper_t<Tfloat>& cpu_plan)
 {
 #ifdef FFTW_HAVE_SPRINT_PLAN
     char*       print_plan_c_str = fftw_sprint_plan<Tfloat>(cpu_plan);
@@ -174,11 +174,11 @@ static auto allocate_cpu_fft_buffer(const fft_precision        precision,
 }
 
 template <typename Tfloat>
-inline void execute_cpu_fft(fft_params&                                  params,
-                            fft_params&                                  contiguous_params,
-                            typename fftw_trait<Tfloat>::fftw_plan_type& cpu_plan,
-                            std::vector<hostbuf>&                        cpu_input,
-                            std::vector<hostbuf>&                        cpu_output)
+inline void execute_cpu_fft(fft_params&                  params,
+                            fft_params&                  contiguous_params,
+                            fftw_plan_wrapper_t<Tfloat>& cpu_plan,
+                            std::vector<hostbuf>&        cpu_input,
+                            std::vector<hostbuf>&        cpu_output)
 {
     // CPU output might not be allocated already for us, if FFTW never
     // needed an output buffer during planning
@@ -204,11 +204,9 @@ inline void execute_cpu_fft(fft_params&                                  params,
     apply_load_callback(params, *input_ptr);
     params.apply_host_load_ops(*input_ptr);
     fftw_run<Tfloat>(contiguous_params.transform_type, cpu_plan, *input_ptr, cpu_output);
-    // clean up
-    fftw_destroy_plan_type(cpu_plan);
     // ask FFTW to fully clean up, since it tries to cache plan details
+    cpu_plan.reset();
     fftw_cleanup();
-    cpu_plan = nullptr;
     params.apply_host_store_ops(cpu_output);
     apply_store_callback(params, cpu_output);
 }
@@ -863,7 +861,8 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
 
     // Create FFTW plan - this may write to input, but that's fine
     // since there's nothing in there right now
-    typename fftw_trait<Tfloat>::fftw_plan_type cpu_plan = nullptr;
+    fftw_plan_wrapper_t<Tfloat> cpu_plan = fftw_trait<Tfloat>::make_wrapper(nullptr);
+
     if(run_fftw)
     {
         // Normally, we would want to defer allocation of CPU output

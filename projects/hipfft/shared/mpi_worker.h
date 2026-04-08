@@ -462,19 +462,17 @@ static void
 template <typename Tfloat>
 void execute_reference_fft(const fft_params& params, std::vector<hostbuf>& input)
 {
-    auto cpu_plan = fftw_plan_via_rocfft<Tfloat>(params.length,
-                                                 params.istride,
-                                                 params.ostride,
-                                                 params.nbatch,
-                                                 params.idist,
-                                                 params.odist,
-                                                 params.transform_type,
-                                                 input,
-                                                 input);
+    fftw_plan_wrapper_t<Tfloat> cpu_plan = fftw_plan_via_rocfft<Tfloat>(params.length,
+                                                                        params.istride,
+                                                                        params.ostride,
+                                                                        params.nbatch,
+                                                                        params.idist,
+                                                                        params.odist,
+                                                                        params.transform_type,
+                                                                        input,
+                                                                        input);
 
     fftw_run<Tfloat>(params.transform_type, cpu_plan, input, input);
-
-    fftw_destroy_plan_type(cpu_plan);
 }
 
 bool   use_fftw_wisdom = false;
