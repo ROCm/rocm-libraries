@@ -168,8 +168,7 @@ std::mutex& CkImplLibLoader::CacheMutex()
     return mtx;
 }
 
-std::unordered_map<std::string, std::unique_ptr<CkImplLibLoader>>&
-CkImplLibLoader::Cache()
+std::unordered_map<std::string, std::unique_ptr<CkImplLibLoader>>& CkImplLibLoader::Cache()
 {
     static std::unordered_map<std::string, std::unique_ptr<CkImplLibLoader>> cache;
     return cache;
@@ -268,8 +267,8 @@ void CkImplLibLoader::OpenRuntimeLibraryForDevice(const std::string& device_name
     if(lib_version != CK_IMPL_API_VERSION)
     {
         MIOPEN_LOG_W("CK grouped conv API version mismatch for device "
-                     << StripDeviceSuffix(device_name) << ": expected "
-                     << CK_IMPL_API_VERSION << ", got " << lib_version);
+                     << StripDeviceSuffix(device_name) << ": expected " << CK_IMPL_API_VERSION
+                     << ", got " << lib_version);
         loaded_ = false;
         return;
     }
@@ -302,8 +301,8 @@ void CkImplLibLoader::BindRequiredCommonSymbols(std::vector<std::string>& missin
 }
 
 void CkImplLibLoader::BindSolverSymbols(CKSolverType solver,
-                                               const char* prefix,
-                                               std::vector<std::string>& missing)
+                                        const char* prefix,
+                                        std::vector<std::string>& missing)
 {
     auto bind_symbol = [this, &missing](auto& member, const char* symbol_name) {
         using FnPtr = std::remove_reference_t<decltype(member)>;
@@ -401,8 +400,8 @@ void CkImplLibLoader::CheckStatus(ck_impl_status_t status, const char* operation
 }
 
 std::vector<std::string> CkImplLibLoader::ExtractKernelList(ck_impl_status_t status,
-                                                                   CKKernelListHandle* handle,
-                                                                   const char* operation) const
+                                                            CKKernelListHandle* handle,
+                                                            const char* operation) const
 {
     // RAII guard: ensure handle is freed even if CheckStatus throws
     auto handle_guard =
@@ -426,8 +425,8 @@ std::vector<std::string> CkImplLibLoader::ExtractKernelList(ck_impl_status_t sta
 }
 
 ConvSolution CkImplLibLoader::ExtractSolution(ck_impl_status_t status,
-                                                     ConvSolution* ptr,
-                                                     const char* operation) const
+                                              ConvSolution* ptr,
+                                              const char* operation) const
 {
     // RAII guard: ensure ptr is freed even if CheckStatus throws
     auto ptr_guard = std::unique_ptr<ConvSolution, SolutionFreeFn>(ptr, solution_free_fn_);
@@ -440,11 +439,10 @@ ConvSolution CkImplLibLoader::ExtractSolution(ck_impl_status_t status,
 
 // -- Solver-parameterized wrappers --------------------------------------------
 
-std::vector<std::string>
-CkImplLibLoader::FillValidKernels(CKSolverType solver,
-                                         const conv::ProblemDescription& problem,
-                                         miopenDataType_t dtype,
-                                         bool use_tf32) const
+std::vector<std::string> CkImplLibLoader::FillValidKernels(CKSolverType solver,
+                                                           const conv::ProblemDescription& problem,
+                                                           miopenDataType_t dtype,
+                                                           bool use_tf32) const
 {
     if(!IsLoaded())
         return {};
@@ -456,9 +454,9 @@ CkImplLibLoader::FillValidKernels(CKSolverType solver,
 
 std::vector<std::string>
 CkImplLibLoader::FillValidKernelsWithTf32Fallback(CKSolverType solver,
-                                                         const conv::ProblemDescription& problem,
-                                                         miopenDataType_t dtype,
-                                                         bool& use_tf32) const
+                                                  const conv::ProblemDescription& problem,
+                                                  miopenDataType_t dtype,
+                                                  bool& use_tf32) const
 {
     auto result = FillValidKernels(solver, problem, dtype, use_tf32);
     if(result.empty() && use_tf32)
@@ -470,9 +468,9 @@ CkImplLibLoader::FillValidKernelsWithTf32Fallback(CKSolverType solver,
 }
 
 bool CkImplLibLoader::IsApplicable(CKSolverType solver,
-                                          const conv::ProblemDescription& problem,
-                                          miopenDataType_t dtype,
-                                          bool use_tf32) const
+                                   const conv::ProblemDescription& problem,
+                                   miopenDataType_t dtype,
+                                   bool use_tf32) const
 {
     if(!IsLoaded())
         return false;
@@ -484,10 +482,10 @@ bool CkImplLibLoader::IsApplicable(CKSolverType solver,
 }
 
 bool CkImplLibLoader::IsArgsSupported(CKSolverType solver,
-                                             const conv::ProblemDescription& problem,
-                                             const std::string& kernel_id,
-                                             miopenDataType_t dtype,
-                                             bool use_tf32) const
+                                      const conv::ProblemDescription& problem,
+                                      const std::string& kernel_id,
+                                      miopenDataType_t dtype,
+                                      bool use_tf32) const
 {
     if(!IsLoaded())
         return false;
@@ -499,9 +497,9 @@ bool CkImplLibLoader::IsArgsSupported(CKSolverType solver,
 }
 
 size_t CkImplLibLoader::GetWorkspaceSize(CKSolverType solver,
-                                                const conv::ProblemDescription& problem,
-                                                miopenDataType_t dtype,
-                                                bool use_tf32) const
+                                         const conv::ProblemDescription& problem,
+                                         miopenDataType_t dtype,
+                                         bool use_tf32) const
 {
     if(!IsLoaded())
         return 0;
@@ -513,10 +511,10 @@ size_t CkImplLibLoader::GetWorkspaceSize(CKSolverType solver,
 }
 
 ConvSolution CkImplLibLoader::GetSolution(CKSolverType solver,
-                                                 const ExecutionContext& ctx,
-                                                 const conv::ProblemDescription& problem,
-                                                 const std::string& kernel_id,
-                                                 bool use_tf32) const
+                                          const ExecutionContext& ctx,
+                                          const conv::ProblemDescription& problem,
+                                          const std::string& kernel_id,
+                                          bool use_tf32) const
 {
     if(!IsLoaded())
         return ConvSolution{miopenStatusInternalError};

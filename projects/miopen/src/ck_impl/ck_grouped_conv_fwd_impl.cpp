@@ -199,9 +199,9 @@ using miopen::solver::MakeSolutionGroupConvImplicitGemmXdlops;
 
 extern "C" ck_impl_status_t
 ck_impl_fwd_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
-                                 miopenDataType_t data_type,
-                                 bool use_tf32,
-                                 CKKernelListHandle** out_handle)
+                               miopenDataType_t data_type,
+                               bool use_tf32,
+                               CKKernelListHandle** out_handle)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_handle, CK_IMPL_STATUS_BAD_PARAM, "Null out_handle");
@@ -216,9 +216,9 @@ ck_impl_fwd_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
 
 extern "C" ck_impl_status_t
 ck_impl_fwd_is_applicable(const miopen::conv::ProblemDescription* problem,
-                            miopenDataType_t data_type,
-                            bool use_tf32,
-                            bool* out_result)
+                          miopenDataType_t data_type,
+                          bool use_tf32,
+                          bool* out_result)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_result, CK_IMPL_STATUS_BAD_PARAM, "Null out_result");
@@ -231,10 +231,10 @@ ck_impl_fwd_is_applicable(const miopen::conv::ProblemDescription* problem,
 
 extern "C" ck_impl_status_t
 ck_impl_fwd_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                const char* kernel_id,
-                                miopenDataType_t data_type,
-                                bool use_tf32,
-                                bool* out_result)
+                              const char* kernel_id,
+                              miopenDataType_t data_type,
+                              bool use_tf32,
+                              bool* out_result)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_result, CK_IMPL_STATUS_BAD_PARAM, "Null out_result");
@@ -249,9 +249,9 @@ ck_impl_fwd_is_args_supported(const miopen::conv::ProblemDescription* problem,
 
 extern "C" ck_impl_status_t
 ck_impl_fwd_get_workspace_size(const miopen::conv::ProblemDescription* /*problem*/,
-                                 miopenDataType_t /*data_type*/,
-                                 bool /*use_tf32*/,
-                                 size_t* out_size)
+                               miopenDataType_t /*data_type*/,
+                               bool /*use_tf32*/,
+                               size_t* out_size)
 {
     // FWD grouped convolution CK kernels do not use split-k and never
     // require CK-level workspace.  Layout transform workspace (NCHW to NHWC)
@@ -265,10 +265,10 @@ ck_impl_fwd_get_workspace_size(const miopen::conv::ProblemDescription* /*problem
 
 extern "C" ck_impl_status_t
 ck_impl_fwd_get_solution(const miopen::ExecutionContext* ctx,
-                           const miopen::conv::ProblemDescription* problem,
-                           const char* kernel_id,
-                           bool use_tf32,
-                           miopen::solver::ConvSolution** out_solution)
+                         const miopen::conv::ProblemDescription* problem,
+                         const char* kernel_id,
+                         bool use_tf32,
+                         miopen::solver::ConvSolution** out_solution)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_solution, CK_IMPL_STATUS_BAD_PARAM, "Null out_solution");

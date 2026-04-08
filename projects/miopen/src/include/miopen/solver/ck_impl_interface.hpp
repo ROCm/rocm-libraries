@@ -82,378 +82,375 @@ CK_IMPL_API void ck_impl_solution_free(miopen::solver::ConvSolution* solution);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fwd_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
-                                 miopenDataType_t data_type,
-                                 bool use_tf32,
-                                 CKKernelListHandle** out_handle);
+                               miopenDataType_t data_type,
+                               bool use_tf32,
+                               CKKernelListHandle** out_handle);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fwd_is_applicable(const miopen::conv::ProblemDescription* problem,
-                            miopenDataType_t data_type,
-                            bool use_tf32,
-                            bool* out_result);
+                          miopenDataType_t data_type,
+                          bool use_tf32,
+                          bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fwd_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                const char* kernel_id,
-                                miopenDataType_t data_type,
-                                bool use_tf32,
-                                bool* out_result);
+                              const char* kernel_id,
+                              miopenDataType_t data_type,
+                              bool use_tf32,
+                              bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fwd_get_workspace_size(const miopen::conv::ProblemDescription* problem,
-                                 miopenDataType_t data_type,
-                                 bool use_tf32,
-                                 size_t* out_size);
+                               miopenDataType_t data_type,
+                               bool use_tf32,
+                               size_t* out_size);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fwd_get_solution(const miopen::ExecutionContext* ctx,
-                           const miopen::conv::ProblemDescription* problem,
-                           const char* kernel_id,
-                           bool use_tf32,
-                           miopen::solver::ConvSolution** out_solution);
+                         const miopen::conv::ProblemDescription* problem,
+                         const char* kernel_id,
+                         bool use_tf32,
+                         miopen::solver::ConvSolution** out_solution);
 
 // -- BWD direction ----------------------------------------------------------
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_bwd_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
-                                 miopenDataType_t data_type,
-                                 bool use_tf32,
-                                 CKKernelListHandle** out_handle);
+                               miopenDataType_t data_type,
+                               bool use_tf32,
+                               CKKernelListHandle** out_handle);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_bwd_is_applicable(const miopen::conv::ProblemDescription* problem,
-                            miopenDataType_t data_type,
-                            bool use_tf32,
-                            bool* out_result);
+                          miopenDataType_t data_type,
+                          bool use_tf32,
+                          bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_bwd_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                const char* kernel_id,
-                                miopenDataType_t data_type,
-                                bool use_tf32,
-                                bool* out_result);
+                              const char* kernel_id,
+                              miopenDataType_t data_type,
+                              bool use_tf32,
+                              bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_bwd_get_workspace_size(const miopen::conv::ProblemDescription* problem,
-                                 miopenDataType_t data_type,
-                                 bool use_tf32,
-                                 size_t* out_size);
+                               miopenDataType_t data_type,
+                               bool use_tf32,
+                               size_t* out_size);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_bwd_get_solution(const miopen::ExecutionContext* ctx,
-                           const miopen::conv::ProblemDescription* problem,
-                           const char* kernel_id,
-                           bool use_tf32,
-                           miopen::solver::ConvSolution** out_solution);
+                         const miopen::conv::ProblemDescription* problem,
+                         const char* kernel_id,
+                         bool use_tf32,
+                         miopen::solver::ConvSolution** out_solution);
 
 // -- WRW direction ----------------------------------------------------------
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_wrw_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
-                                 miopenDataType_t data_type,
-                                 bool use_tf32,
-                                 CKKernelListHandle** out_handle);
+                               miopenDataType_t data_type,
+                               bool use_tf32,
+                               CKKernelListHandle** out_handle);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_wrw_is_applicable(const miopen::conv::ProblemDescription* problem,
-                            miopenDataType_t data_type,
-                            bool use_tf32,
-                            bool* out_result);
+                          miopenDataType_t data_type,
+                          bool use_tf32,
+                          bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_wrw_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                const char* kernel_id,
-                                miopenDataType_t data_type,
-                                bool use_tf32,
-                                bool* out_result);
+                              const char* kernel_id,
+                              miopenDataType_t data_type,
+                              bool use_tf32,
+                              bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_wrw_get_workspace_size(const miopen::conv::ProblemDescription* problem,
-                                 miopenDataType_t data_type,
-                                 bool use_tf32,
-                                 size_t* out_size);
+                               miopenDataType_t data_type,
+                               bool use_tf32,
+                               size_t* out_size);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_wrw_get_solution(const miopen::ExecutionContext* ctx,
-                           const miopen::conv::ProblemDescription* problem,
-                           const char* kernel_id,
-                           bool use_tf32,
-                           miopen::solver::ConvSolution** out_solution);
+                         const miopen::conv::ProblemDescription* problem,
+                         const char* kernel_id,
+                         bool use_tf32,
+                         miopen::solver::ConvSolution** out_solution);
 
 // -- 3D grouped FWD (S6) ---------------------------------------------------
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_fwd_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
-                                    miopenDataType_t data_type,
-                                    bool use_tf32,
-                                    CKKernelListHandle** out_handle);
+                                  miopenDataType_t data_type,
+                                  bool use_tf32,
+                                  CKKernelListHandle** out_handle);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_fwd_is_applicable(const miopen::conv::ProblemDescription* problem,
-                               miopenDataType_t data_type,
-                               bool use_tf32,
-                               bool* out_result);
+                             miopenDataType_t data_type,
+                             bool use_tf32,
+                             bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_fwd_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                   const char* kernel_id,
-                                   miopenDataType_t data_type,
-                                   bool use_tf32,
-                                   bool* out_result);
+                                 const char* kernel_id,
+                                 miopenDataType_t data_type,
+                                 bool use_tf32,
+                                 bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_fwd_get_workspace_size(const miopen::conv::ProblemDescription* problem,
-                                    miopenDataType_t data_type,
-                                    bool use_tf32,
-                                    size_t* out_size);
+                                  miopenDataType_t data_type,
+                                  bool use_tf32,
+                                  size_t* out_size);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_fwd_get_solution(const miopen::ExecutionContext* ctx,
-                              const miopen::conv::ProblemDescription* problem,
-                              const char* kernel_id,
-                              bool use_tf32,
-                              miopen::solver::ConvSolution** out_solution);
+                            const miopen::conv::ProblemDescription* problem,
+                            const char* kernel_id,
+                            bool use_tf32,
+                            miopen::solver::ConvSolution** out_solution);
 
 // -- 3D grouped BWD (S7) ---------------------------------------------------
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_bwd_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
-                                    miopenDataType_t data_type,
-                                    bool use_tf32,
-                                    CKKernelListHandle** out_handle);
+                                  miopenDataType_t data_type,
+                                  bool use_tf32,
+                                  CKKernelListHandle** out_handle);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_bwd_is_applicable(const miopen::conv::ProblemDescription* problem,
-                               miopenDataType_t data_type,
-                               bool use_tf32,
-                               bool* out_result);
+                             miopenDataType_t data_type,
+                             bool use_tf32,
+                             bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_bwd_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                   const char* kernel_id,
-                                   miopenDataType_t data_type,
-                                   bool use_tf32,
-                                   bool* out_result);
+                                 const char* kernel_id,
+                                 miopenDataType_t data_type,
+                                 bool use_tf32,
+                                 bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_bwd_get_workspace_size(const miopen::conv::ProblemDescription* problem,
-                                    miopenDataType_t data_type,
-                                    bool use_tf32,
-                                    size_t* out_size);
+                                  miopenDataType_t data_type,
+                                  bool use_tf32,
+                                  size_t* out_size);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_bwd_get_solution(const miopen::ExecutionContext* ctx,
-                              const miopen::conv::ProblemDescription* problem,
-                              const char* kernel_id,
-                              bool use_tf32,
-                              miopen::solver::ConvSolution** out_solution);
+                            const miopen::conv::ProblemDescription* problem,
+                            const char* kernel_id,
+                            bool use_tf32,
+                            miopen::solver::ConvSolution** out_solution);
 
 // -- 3D grouped WRW (S8) ---------------------------------------------------
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_wrw_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
-                                    miopenDataType_t data_type,
-                                    bool use_tf32,
-                                    CKKernelListHandle** out_handle);
+                                  miopenDataType_t data_type,
+                                  bool use_tf32,
+                                  CKKernelListHandle** out_handle);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_wrw_is_applicable(const miopen::conv::ProblemDescription* problem,
-                               miopenDataType_t data_type,
-                               bool use_tf32,
-                               bool* out_result);
+                             miopenDataType_t data_type,
+                             bool use_tf32,
+                             bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_wrw_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                   const char* kernel_id,
-                                   miopenDataType_t data_type,
-                                   bool use_tf32,
-                                   bool* out_result);
+                                 const char* kernel_id,
+                                 miopenDataType_t data_type,
+                                 bool use_tf32,
+                                 bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_wrw_get_workspace_size(const miopen::conv::ProblemDescription* problem,
-                                    miopenDataType_t data_type,
-                                    bool use_tf32,
-                                    size_t* out_size);
+                                  miopenDataType_t data_type,
+                                  bool use_tf32,
+                                  size_t* out_size);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_3d_wrw_get_solution(const miopen::ExecutionContext* ctx,
-                              const miopen::conv::ProblemDescription* problem,
-                              const char* kernel_id,
-                              bool use_tf32,
-                              miopen::solver::ConvSolution** out_solution);
+                            const miopen::conv::ProblemDescription* problem,
+                            const char* kernel_id,
+                            bool use_tf32,
+                            miopen::solver::ConvSolution** out_solution);
 
 // -- Fused Conv+Bias+ReLU (non-grouped, FP16) ---------------------------------
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fused_bias_activ_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
-                                              miopenDataType_t data_type,
-                                              bool use_tf32,
-                                              CKKernelListHandle** out_handle);
+                                            miopenDataType_t data_type,
+                                            bool use_tf32,
+                                            CKKernelListHandle** out_handle);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fused_bias_activ_is_applicable(const miopen::conv::ProblemDescription* problem,
-                                         miopenDataType_t data_type,
-                                         bool use_tf32,
-                                         bool* out_result);
+                                       miopenDataType_t data_type,
+                                       bool use_tf32,
+                                       bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fused_bias_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                             const char* kernel_id,
-                                             miopenDataType_t data_type,
-                                             bool use_tf32,
-                                             bool* out_result);
+                                           const char* kernel_id,
+                                           miopenDataType_t data_type,
+                                           bool use_tf32,
+                                           bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fused_bias_activ_get_workspace_size(const miopen::conv::ProblemDescription* problem,
-                                              miopenDataType_t data_type,
-                                              bool use_tf32,
-                                              size_t* out_size);
+                                            miopenDataType_t data_type,
+                                            bool use_tf32,
+                                            size_t* out_size);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fused_bias_activ_get_solution(const miopen::ExecutionContext* ctx,
-                                        const miopen::conv::ProblemDescription* problem,
-                                        const char* kernel_id,
-                                        bool use_tf32,
-                                        miopen::solver::ConvSolution** out_solution);
+                                      const miopen::conv::ProblemDescription* problem,
+                                      const char* kernel_id,
+                                      bool use_tf32,
+                                      miopen::solver::ConvSolution** out_solution);
 
 // -- Fused Conv+ScaleAdd+Bias+ReLU --------------------------------------------
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_fused_bias_res_add_activ_fill_valid_kernels(
-    const miopen::conv::ProblemDescription* problem,
-    miopenDataType_t data_type,
-    bool use_tf32,
-    CKKernelListHandle** out_handle);
+ck_impl_fused_bias_res_add_activ_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
+                                                    miopenDataType_t data_type,
+                                                    bool use_tf32,
+                                                    CKKernelListHandle** out_handle);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fused_bias_res_add_activ_is_applicable(const miopen::conv::ProblemDescription* problem,
-                                                 miopenDataType_t data_type,
-                                                 bool use_tf32,
-                                                 bool* out_result);
+                                               miopenDataType_t data_type,
+                                               bool use_tf32,
+                                               bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_fused_bias_res_add_activ_is_args_supported(
-    const miopen::conv::ProblemDescription* problem,
-    const char* kernel_id,
-    miopenDataType_t data_type,
-    bool use_tf32,
-    bool* out_result);
+ck_impl_fused_bias_res_add_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
+                                                   const char* kernel_id,
+                                                   miopenDataType_t data_type,
+                                                   bool use_tf32,
+                                                   bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_fused_bias_res_add_activ_get_workspace_size(
-    const miopen::conv::ProblemDescription* problem,
-    miopenDataType_t data_type,
-    bool use_tf32,
-    size_t* out_size);
+ck_impl_fused_bias_res_add_activ_get_workspace_size(const miopen::conv::ProblemDescription* problem,
+                                                    miopenDataType_t data_type,
+                                                    bool use_tf32,
+                                                    size_t* out_size);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fused_bias_res_add_activ_get_solution(const miopen::ExecutionContext* ctx,
-                                                const miopen::conv::ProblemDescription* problem,
-                                                const char* kernel_id,
-                                                bool use_tf32,
-                                                miopen::solver::ConvSolution** out_solution);
+                                              const miopen::conv::ProblemDescription* problem,
+                                              const char* kernel_id,
+                                              bool use_tf32,
+                                              miopen::solver::ConvSolution** out_solution);
 
 // -- Fused Grouped Conv+Activation(Clamp) -------------------------------------
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fused_grp_activ_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
-                                             miopenDataType_t data_type,
-                                             bool use_tf32,
-                                             CKKernelListHandle** out_handle);
-
-CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_fused_grp_activ_is_applicable(const miopen::conv::ProblemDescription* problem,
-                                        miopenDataType_t data_type,
-                                        bool use_tf32,
-                                        bool* out_result);
-
-CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_fused_grp_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                            const char* kernel_id,
-                                            miopenDataType_t data_type,
-                                            bool use_tf32,
-                                            bool* out_result);
-
-CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_fused_grp_activ_get_workspace_size(const miopen::conv::ProblemDescription* problem,
-                                             miopenDataType_t data_type,
-                                             bool use_tf32,
-                                             size_t* out_size);
-
-CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_fused_grp_activ_get_solution(const miopen::ExecutionContext* ctx,
-                                       const miopen::conv::ProblemDescription* problem,
-                                       const char* kernel_id,
-                                       bool use_tf32,
-                                       miopen::solver::ConvSolution** out_solution);
-
-// -- Fused Grouped Conv+Bias+Activation(AddClamp) -----------------------------
-
-CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_fused_grp_bias_activ_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
-                                                  miopenDataType_t data_type,
-                                                  bool use_tf32,
-                                                  CKKernelListHandle** out_handle);
-
-CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_fused_grp_bias_activ_is_applicable(const miopen::conv::ProblemDescription* problem,
-                                             miopenDataType_t data_type,
-                                             bool use_tf32,
-                                             bool* out_result);
-
-CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_fused_grp_bias_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                                 const char* kernel_id,
-                                                 miopenDataType_t data_type,
-                                                 bool use_tf32,
-                                                 bool* out_result);
-
-CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_fused_grp_bias_activ_get_workspace_size(const miopen::conv::ProblemDescription* problem,
-                                                  miopenDataType_t data_type,
-                                                  bool use_tf32,
-                                                  size_t* out_size);
-
-CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_fused_grp_bias_activ_get_solution(const miopen::ExecutionContext* ctx,
-                                            const miopen::conv::ProblemDescription* problem,
-                                            const char* kernel_id,
-                                            bool use_tf32,
-                                            miopen::solver::ConvSolution** out_solution);
-
-// -- Depthwise Conv FWD (custom CK kernel, FP16) ---------------------------------
-
-CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_depthwise_fwd_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
                                            miopenDataType_t data_type,
                                            bool use_tf32,
                                            CKKernelListHandle** out_handle);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_depthwise_fwd_is_applicable(const miopen::conv::ProblemDescription* problem,
+ck_impl_fused_grp_activ_is_applicable(const miopen::conv::ProblemDescription* problem,
                                       miopenDataType_t data_type,
                                       bool use_tf32,
                                       bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_depthwise_fwd_is_args_supported(const miopen::conv::ProblemDescription* problem,
+ck_impl_fused_grp_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
                                           const char* kernel_id,
                                           miopenDataType_t data_type,
                                           bool use_tf32,
                                           bool* out_result);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_depthwise_fwd_get_workspace_size(const miopen::conv::ProblemDescription* problem,
+ck_impl_fused_grp_activ_get_workspace_size(const miopen::conv::ProblemDescription* problem,
                                            miopenDataType_t data_type,
                                            bool use_tf32,
                                            size_t* out_size);
 
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
-ck_impl_depthwise_fwd_get_solution(const miopen::ExecutionContext* ctx,
+ck_impl_fused_grp_activ_get_solution(const miopen::ExecutionContext* ctx,
                                      const miopen::conv::ProblemDescription* problem,
                                      const char* kernel_id,
                                      bool use_tf32,
                                      miopen::solver::ConvSolution** out_solution);
+
+// -- Fused Grouped Conv+Bias+Activation(AddClamp) -----------------------------
+
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_fused_grp_bias_activ_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
+                                                miopenDataType_t data_type,
+                                                bool use_tf32,
+                                                CKKernelListHandle** out_handle);
+
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_fused_grp_bias_activ_is_applicable(const miopen::conv::ProblemDescription* problem,
+                                           miopenDataType_t data_type,
+                                           bool use_tf32,
+                                           bool* out_result);
+
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_fused_grp_bias_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
+                                               const char* kernel_id,
+                                               miopenDataType_t data_type,
+                                               bool use_tf32,
+                                               bool* out_result);
+
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_fused_grp_bias_activ_get_workspace_size(const miopen::conv::ProblemDescription* problem,
+                                                miopenDataType_t data_type,
+                                                bool use_tf32,
+                                                size_t* out_size);
+
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_fused_grp_bias_activ_get_solution(const miopen::ExecutionContext* ctx,
+                                          const miopen::conv::ProblemDescription* problem,
+                                          const char* kernel_id,
+                                          bool use_tf32,
+                                          miopen::solver::ConvSolution** out_solution);
+
+// -- Depthwise Conv FWD (custom CK kernel, FP16) ---------------------------------
+
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_depthwise_fwd_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
+                                         miopenDataType_t data_type,
+                                         bool use_tf32,
+                                         CKKernelListHandle** out_handle);
+
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_depthwise_fwd_is_applicable(const miopen::conv::ProblemDescription* problem,
+                                    miopenDataType_t data_type,
+                                    bool use_tf32,
+                                    bool* out_result);
+
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_depthwise_fwd_is_args_supported(const miopen::conv::ProblemDescription* problem,
+                                        const char* kernel_id,
+                                        miopenDataType_t data_type,
+                                        bool use_tf32,
+                                        bool* out_result);
+
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_depthwise_fwd_get_workspace_size(const miopen::conv::ProblemDescription* problem,
+                                         miopenDataType_t data_type,
+                                         bool use_tf32,
+                                         size_t* out_size);
+
+CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
+ck_impl_depthwise_fwd_get_solution(const miopen::ExecutionContext* ctx,
+                                   const miopen::conv::ProblemDescription* problem,
+                                   const char* kernel_id,
+                                   bool use_tf32,
+                                   miopen::solver::ConvSolution** out_solution);
 
 // -- Get all kernel type strings (for test/metadata validation) -----------------
 

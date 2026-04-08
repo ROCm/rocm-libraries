@@ -66,8 +66,7 @@ class CkImplLibLoader
 {
 public:
     /// Thread-safe accessor returning a cached per-device singleton.
-    MIOPEN_INTERNALS_EXPORT static const CkImplLibLoader&
-    Get(const std::string& device_name);
+    MIOPEN_INTERNALS_EXPORT static const CkImplLibLoader& Get(const std::string& device_name);
 
     MIOPEN_INTERNALS_EXPORT bool IsLoaded() const { return loaded_; }
 
@@ -142,32 +141,30 @@ private:
     using GetApiVersionFn = int (*)();
 
     using KernelListSizeFn = ck_impl_status_t (*)(const ::CKKernelListHandle*, size_t*);
-    using KernelListGetFn  = ck_impl_status_t (*)(const ::CKKernelListHandle*,
-                                                   size_t,
-                                                   const char**);
+    using KernelListGetFn = ck_impl_status_t (*)(const ::CKKernelListHandle*, size_t, const char**);
     using KernelListFreeFn = void (*)(::CKKernelListHandle*);
 
     using SolutionFreeFn = void (*)(ConvSolution*);
 
     using FillValidKernelsFn = ck_impl_status_t (*)(const miopen::conv::ProblemDescription*,
-                                                      miopenDataType_t,
-                                                      bool,
-                                                      ::CKKernelListHandle**);
+                                                    miopenDataType_t,
+                                                    bool,
+                                                    ::CKKernelListHandle**);
     using IsApplicableFn     = ck_impl_status_t (*)(const miopen::conv::ProblemDescription*,
-                                                  miopenDataType_t,
-                                                  bool,
-                                                  bool*);
+                                                miopenDataType_t,
+                                                bool,
+                                                bool*);
     using IsArgsSupportedFn  = ck_impl_status_t (*)(
         const miopen::conv::ProblemDescription*, const char*, miopenDataType_t, bool, bool*);
     using GetWorkspaceSizeFn = ck_impl_status_t (*)(const miopen::conv::ProblemDescription*,
-                                                      miopenDataType_t,
-                                                      bool,
-                                                      size_t*);
+                                                    miopenDataType_t,
+                                                    bool,
+                                                    size_t*);
     using GetSolutionFn      = ck_impl_status_t (*)(const ExecutionContext*,
-                                                 const miopen::conv::ProblemDescription*,
-                                                 const char*,
-                                                 bool,
-                                                 ConvSolution**);
+                                               const miopen::conv::ProblemDescription*,
+                                               const char*,
+                                               bool,
+                                               ConvSolution**);
 
     // -- Function pointers ----------------------------------------------------
     GetApiVersionFn get_api_version_fn_ = nullptr;

@@ -378,7 +378,7 @@ struct CKArgs
 
 std::vector<std::string> FillValidKernels(const ProblemDescription& problem)
 {
-    const auto ck_args            = CKArgs{problem};
+    const auto ck_args             = CKArgs{problem};
     constexpr uint32_t kernelCount = std::tuple_size_v<DeviceConvFwdFactory>;
     std::vector<std::string> valid_kernels;
 
@@ -395,9 +395,9 @@ std::vector<std::string> FillValidKernels(const ProblemDescription& problem)
 
 bool CheckCKApplicability(const ProblemDescription& problem)
 {
-    const auto ck_args            = CKArgs{problem};
+    const auto ck_args             = CKArgs{problem};
     constexpr uint32_t kernelCount = std::tuple_size_v<DeviceConvFwdFactory>;
-    bool found                    = false;
+    bool found                     = false;
 
     ck::static_for<0, kernelCount, 1>{}([&](auto i) -> void {
         if(found)
@@ -414,9 +414,9 @@ bool CheckCKApplicability(const ProblemDescription& problem)
 
 bool CheckIsArgSupported(const ProblemDescription& problem, const std::string& kernel_id)
 {
-    const auto ck_args            = CKArgs{problem};
+    const auto ck_args             = CKArgs{problem};
     constexpr uint32_t kernelCount = std::tuple_size_v<DeviceConvFwdFactory>;
-    bool supported                = false;
+    bool supported                 = false;
 
     ck::static_for<0, kernelCount, 1>{}([&](auto i) -> void {
         const auto conv_ptr = std::get<i>(DeviceConvFwdFactory{});
@@ -437,9 +437,9 @@ bool CheckIsArgSupported(const ProblemDescription& problem, const std::string& k
 
 extern "C" ck_impl_status_t
 ck_impl_depthwise_fwd_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
-                                           miopenDataType_t data_type,
-                                           bool /*use_tf32*/,
-                                           CKKernelListHandle** out_handle)
+                                         miopenDataType_t data_type,
+                                         bool /*use_tf32*/,
+                                         CKKernelListHandle** out_handle)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_handle, CK_IMPL_STATUS_BAD_PARAM, "Null out_handle");
@@ -453,9 +453,9 @@ ck_impl_depthwise_fwd_fill_valid_kernels(const miopen::conv::ProblemDescription*
 
 extern "C" ck_impl_status_t
 ck_impl_depthwise_fwd_is_applicable(const miopen::conv::ProblemDescription* problem,
-                                      miopenDataType_t data_type,
-                                      bool /*use_tf32*/,
-                                      bool* out_result)
+                                    miopenDataType_t data_type,
+                                    bool /*use_tf32*/,
+                                    bool* out_result)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_result, CK_IMPL_STATUS_BAD_PARAM, "Null out_result");
@@ -471,10 +471,10 @@ ck_impl_depthwise_fwd_is_applicable(const miopen::conv::ProblemDescription* prob
 
 extern "C" ck_impl_status_t
 ck_impl_depthwise_fwd_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                          const char* kernel_id,
-                                          miopenDataType_t data_type,
-                                          bool /*use_tf32*/,
-                                          bool* out_result)
+                                        const char* kernel_id,
+                                        miopenDataType_t data_type,
+                                        bool /*use_tf32*/,
+                                        bool* out_result)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_result, CK_IMPL_STATUS_BAD_PARAM, "Null out_result");
@@ -492,9 +492,9 @@ ck_impl_depthwise_fwd_is_args_supported(const miopen::conv::ProblemDescription* 
 
 extern "C" ck_impl_status_t
 ck_impl_depthwise_fwd_get_workspace_size(const miopen::conv::ProblemDescription* /*problem*/,
-                                           miopenDataType_t /*data_type*/,
-                                           bool /*use_tf32*/,
-                                           size_t* out_size)
+                                         miopenDataType_t /*data_type*/,
+                                         bool /*use_tf32*/,
+                                         size_t* out_size)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_size, CK_IMPL_STATUS_BAD_PARAM, "Null out_size");
@@ -504,10 +504,10 @@ ck_impl_depthwise_fwd_get_workspace_size(const miopen::conv::ProblemDescription*
 
 extern "C" ck_impl_status_t
 ck_impl_depthwise_fwd_get_solution(const miopen::ExecutionContext* ctx,
-                                     const miopen::conv::ProblemDescription* problem,
-                                     const char* kernel_id,
-                                     bool /*use_tf32*/,
-                                     miopen::solver::ConvSolution** out_solution)
+                                   const miopen::conv::ProblemDescription* problem,
+                                   const char* kernel_id,
+                                   bool /*use_tf32*/,
+                                   miopen::solver::ConvSolution** out_solution)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_solution, CK_IMPL_STATUS_BAD_PARAM, "Null out_solution");
@@ -530,20 +530,20 @@ ck_impl_depthwise_fwd_get_solution(const miopen::ExecutionContext* ctx,
             if(device_conv_fwd_instance.GetTypeString() != kid)
                 return;
 
-            found = true;
+            found         = true;
             auto conv_ptr = std::make_shared<DeviceConvFwdInstance>();
 
-            solution.invoker_factory = [conv_ptr = std::move(conv_ptr),
-                                         ck_args  = CKArgs{*problem}](
-                                            const std::vector<miopen::Kernel>&) {
+            solution.invoker_factory = [conv_ptr = std::move(conv_ptr), ck_args = CKArgs{*problem}](
+                                           const std::vector<miopen::Kernel>&) {
                 return [conv_ptr = std::move(conv_ptr),
                         ck_args](const miopen::Handle& handle,
                                  const miopen::AnyInvokeParams& primitive_params) {
-                    const auto& fwd_ctx =
-                        primitive_params.CastTo<miopen::conv::DataInvokeParams>();
-                    auto invoker  = conv_ptr->MakeInvoker();
-                    auto argument = ck_args.MakeArgument(
-                        *conv_ptr.get(), fwd_ctx.tensors.in, fwd_ctx.tensors.w, fwd_ctx.tensors.out);
+                    const auto& fwd_ctx = primitive_params.CastTo<miopen::conv::DataInvokeParams>();
+                    auto invoker        = conv_ptr->MakeInvoker();
+                    auto argument       = ck_args.MakeArgument(*conv_ptr.get(),
+                                                         fwd_ctx.tensors.in,
+                                                         fwd_ctx.tensors.w,
+                                                         fwd_ctx.tensors.out);
 
                     {
                         {

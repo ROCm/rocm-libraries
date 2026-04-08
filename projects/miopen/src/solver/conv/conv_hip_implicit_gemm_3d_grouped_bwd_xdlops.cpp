@@ -54,9 +54,15 @@ namespace {
 // ck::tf32_t) that were previously used as template arguments to
 // RunParameterPredictionModel. The DataType template parameter is unused in the
 // function body — these tags only drive the mode_use_tf32 constexpr check.
-struct HalfTag {};
-struct BFloat16Tag {};
-struct TF32Tag {};
+struct HalfTag
+{
+};
+struct BFloat16Tag
+{
+};
+struct TF32Tag
+{
+};
 } // namespace
 
 using ProblemDescription = miopen::conv::ProblemDescription;

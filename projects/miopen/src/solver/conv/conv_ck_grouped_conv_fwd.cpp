@@ -34,8 +34,7 @@ void PerformanceConfigConvDepthwiseFwd2D::HeuristicInit(
     if(!loader.IsLoaded())
         return;
 
-    valid_kernels =
-        loader.FillValidKernels(CKSolverType::DepthwiseFwd, problem, data_type, false);
+    valid_kernels = loader.FillValidKernels(CKSolverType::DepthwiseFwd, problem, data_type, false);
 
     if(!valid_kernels.empty())
     {

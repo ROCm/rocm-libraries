@@ -203,9 +203,9 @@ bool CheckIsArgSupported(const ProblemDescription& problem, const std::string& k
 
 extern "C" ck_impl_status_t
 ck_impl_fused_bias_activ_fill_valid_kernels(const miopen::conv::ProblemDescription* problem,
-                                              miopenDataType_t data_type,
-                                              bool /*use_tf32*/,
-                                              CKKernelListHandle** out_handle)
+                                            miopenDataType_t data_type,
+                                            bool /*use_tf32*/,
+                                            CKKernelListHandle** out_handle)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_handle, CK_IMPL_STATUS_BAD_PARAM, "Null out_handle");
@@ -219,9 +219,9 @@ ck_impl_fused_bias_activ_fill_valid_kernels(const miopen::conv::ProblemDescripti
 
 extern "C" ck_impl_status_t
 ck_impl_fused_bias_activ_is_applicable(const miopen::conv::ProblemDescription* problem,
-                                         miopenDataType_t data_type,
-                                         bool /*use_tf32*/,
-                                         bool* out_result)
+                                       miopenDataType_t data_type,
+                                       bool /*use_tf32*/,
+                                       bool* out_result)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_result, CK_IMPL_STATUS_BAD_PARAM, "Null out_result");
@@ -237,10 +237,10 @@ ck_impl_fused_bias_activ_is_applicable(const miopen::conv::ProblemDescription* p
 
 extern "C" ck_impl_status_t
 ck_impl_fused_bias_activ_is_args_supported(const miopen::conv::ProblemDescription* problem,
-                                             const char* kernel_id,
-                                             miopenDataType_t data_type,
-                                             bool /*use_tf32*/,
-                                             bool* out_result)
+                                           const char* kernel_id,
+                                           miopenDataType_t data_type,
+                                           bool /*use_tf32*/,
+                                           bool* out_result)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_result, CK_IMPL_STATUS_BAD_PARAM, "Null out_result");
@@ -258,9 +258,9 @@ ck_impl_fused_bias_activ_is_args_supported(const miopen::conv::ProblemDescriptio
 
 extern "C" ck_impl_status_t
 ck_impl_fused_bias_activ_get_workspace_size(const miopen::conv::ProblemDescription* /*problem*/,
-                                              miopenDataType_t /*data_type*/,
-                                              bool /*use_tf32*/,
-                                              size_t* out_size)
+                                            miopenDataType_t /*data_type*/,
+                                            bool /*use_tf32*/,
+                                            size_t* out_size)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_size, CK_IMPL_STATUS_BAD_PARAM, "Null out_size");
@@ -270,10 +270,10 @@ ck_impl_fused_bias_activ_get_workspace_size(const miopen::conv::ProblemDescripti
 
 extern "C" ck_impl_status_t
 ck_impl_fused_bias_activ_get_solution(const miopen::ExecutionContext* ctx,
-                                        const miopen::conv::ProblemDescription* problem,
-                                        const char* kernel_id,
-                                        bool /*use_tf32*/,
-                                        miopen::solver::ConvSolution** out_solution)
+                                      const miopen::conv::ProblemDescription* problem,
+                                      const char* kernel_id,
+                                      bool /*use_tf32*/,
+                                      miopen::solver::ConvSolution** out_solution)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_solution, CK_IMPL_STATUS_BAD_PARAM, "Null out_solution");
