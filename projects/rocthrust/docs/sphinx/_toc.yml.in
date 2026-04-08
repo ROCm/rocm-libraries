@@ -18,6 +18,11 @@ subtrees:
     title: Installing on Linux and Windows with CMake
 
 
+- caption: Conceptual
+  entries:
+  - file: conceptual/rocThrust-synchronization-and-blocking
+    title: Synchronization and blocking
+
 - caption: How to
   entries:
   - file: how-to/rocThrust-build-for-backends.rst

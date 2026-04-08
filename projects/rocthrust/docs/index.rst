@@ -23,6 +23,10 @@ The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/
     * :doc:`Installing on Windows <install/rocThrust-rmake-install>`
     * :doc:`Installing on Linux and Windows with CMake <install/rocThrust-install-with-cmake>`
 
+  .. grid-item-card:: Conceptual
+
+    * :ref:`Synchronization and blocking <synchronization-and-blocking>`
+
   .. grid-item-card:: How to
 
     * :doc:`Build rocThrust for different backends <./how-to/rocThrust-build-for-backends>`

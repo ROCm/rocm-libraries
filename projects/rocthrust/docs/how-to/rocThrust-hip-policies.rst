@@ -10,39 +10,9 @@ Avoiding synchronization barriers
 
 The ``hip_rocprim::par_nosync`` execution policy provides a way to avoid synchronization barriers when running algorithms.
 
-``hip_rocprim::par_nosync`` and ``hip_rocprim::par`` are both parallel non-deterministic policies. ``hip_rocprim::par`` is synchronous and blocking with respect to the host. Under ``hip_rocprim::par``, algorithms are launched in parallel on the device, but the host blocks on each algorithm. The next algorithm won't be launched until each algorithm finishes.
+``hip_rocprim::par_nosync`` and ``hip_rocprim::par`` are both parallel non-deterministic policies. ``hip_rocprim::par`` is :ref:`synchronous and blocking with respect to the host <synchronization-and-blocking>`. Under ``hip_rocprim::par``, algorithms are launched in parallel on the device, but the host blocks on each algorithm. The next algorithm won't be launched until each algorithm finishes.
 
-The ``hip_rocprim::par_nosync`` policy can be used to avoid this synchronization barrier. 
-
-When using the ``hip_rocprim::par_nosync`` policy, the host doesn't block on the algorithms running on the GPU and can perform other work while waiting for the GPU to finish running the algorithms.  The host and device should be explicitly synchronized before accessing results.
-
-For example, when using the ``hip_rocprim::par`` policy, ``thrust::count`` and ``thrust::reduce`` are both blocking with respect to the host, and their results on the host are available without any explicit synchronization:
-
-.. code:: cpp
-
-  auto par_policy = thrust::hip_rocprim::par;
-  int count = thrust::count(par_policy, d_vec1.begin(), d_vec1.end(), 50);
-  int reduction = thrust::reduce(par_policy, d_vec2.begin(), d_vec2.end());
-
-  std::cout << "par results:" << std::endl;
-  std::cout << "count: " << count << std::endl;
-  std::cout << "reduction: " << reduction << std::endl;
-
-When using the ``hip_rocprim::par_nosync`` policy, ``thrust::count`` and ``thrust::reduce`` are asynchronous with respect to the host. The host can do other work while the algorithms are running on the device. ``hipDeviceSynchronize()`` should be called to ensure synchronization before accessing results:
-
-.. code:: cpp
-
-  auto nosync_policy = thrust::hip_rocprim::par_nosync;
-  int count2 = thrust::count(nosync_policy, d_vec1.begin(), d_vec1.end(), 50);
-  int reduction2 = thrust::reduce(nosync_policy, d_vec2.begin(), d_vec2.end());
-  
-  DoHostSideWork();
-
-  hipDeviceSynchronize();
-
-  std::cout << "par_nosync results:" << std::endl;
-  std::cout << "count: " << count2 << std::endl;
-  std::cout << "reduction: " << reduction2 << std::endl;
+The ``hip_rocprim::par_nosync`` policy can be used to avoid this synchronization barrier. Synchronization can be skipped when possible under the ``hip_rocprim::par_nosync`` policy. Under this policy, the host has the possibility of not blocking on the algorithms running on the GPU. The CPU can then perform other work while waiting for the GPU to finish running the algorithms. The host and device should be explicitly synchronized before accessing results. 
 
 .. note:: 
 
