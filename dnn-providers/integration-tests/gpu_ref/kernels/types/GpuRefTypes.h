@@ -45,16 +45,8 @@ __device__ inline T fromAccum(COMPUTE_TYPE x, T* /*tag*/)
 }
 
 // --- fabs overloads ---
-
-__device__ inline float fabs(float x)
-{
-    return __builtin_fabsf(x);
-}
-
-__device__ inline double fabs(double x)
-{
-    return __builtin_fabs(x);
-}
+// float and double overloads are provided by hiprtc_runtime.h;
+// only _Float16 and __bf16 need custom overloads.
 
 __device__ inline _Float16 fabs(_Float16 x)
 {
@@ -68,16 +60,6 @@ __device__ inline __bf16 fabs(__bf16 x)
 
 // --- isnan overloads ---
 
-__device__ inline bool isnan(float x)
-{
-    return __builtin_isnan(x);
-}
-
-__device__ inline bool isnan(double x)
-{
-    return __builtin_isnan(x);
-}
-
 __device__ inline bool isnan(_Float16 x)
 {
     return __builtin_isnan(x);
@@ -89,16 +71,6 @@ __device__ inline bool isnan(__bf16 x)
 }
 
 // --- isinf overloads ---
-
-__device__ inline bool isinf(float x)
-{
-    return __builtin_isinf(x);
-}
-
-__device__ inline bool isinf(double x)
-{
-    return __builtin_isinf(x);
-}
 
 __device__ inline bool isinf(_Float16 x)
 {

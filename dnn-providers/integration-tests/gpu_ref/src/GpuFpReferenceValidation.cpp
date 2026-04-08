@@ -3,15 +3,12 @@
 
 #include <hipdnn_gpu_ref/GpuFpReferenceValidation.hpp>
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <cstdint>
+#include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
 #include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
 #include <hipdnn_gpu_ref/detail/HipRtcTypeName.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
-
-#include <cstdint>
-#include <hip/hip_runtime.h>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -104,23 +101,12 @@ bool GpuFpReferenceValidation<T>::allClose(
     }
 
     // GPU kernel uses linear indexing — only valid for packed (contiguous) tensors.
-    // Non-packed tensors have gaps in memory that would cause incorrect comparisons.
     if(!reference.isPacked() || !implementation.isPacked())
     {
-        HIPDNN_SDK_LOG_INFO("Tensors are not packed, falling back to CPU validator for "
-                            "stride-aware comparison");
-        return cpuFallback(reference, implementation);
+        throw std::runtime_error("GPU validator requires packed (contiguous) tensors");
     }
 
-    try
-    {
-        return gpuAllClose(reference, implementation);
-    }
-    catch(const std::exception& e)
-    {
-        HIPDNN_SDK_LOG_WARN("GPU validation failed, falling back to CPU validator: " << e.what());
-        return cpuFallback(reference, implementation);
-    }
+    return gpuAllClose(reference, implementation);
 }
 
 template <class T>
@@ -159,24 +145,7 @@ bool GpuFpReferenceValidation<T>::gpuAllClose(
     flagBuf.markDeviceModified();
     auto hostFlag = flagBuf.hostData()[0];
 
-    if(hostFlag != 0)
-    {
-        HIPDNN_SDK_LOG_INFO(
-            "GPU validation detected failure, falling back to CPU for detailed diagnostics");
-        return cpuFallback(reference, implementation);
-    }
-
-    return true;
-}
-
-template <class T>
-bool GpuFpReferenceValidation<T>::cpuFallback(
-    hipdnn_data_sdk::utilities::ITensor& reference,
-    hipdnn_data_sdk::utilities::ITensor& implementation) const
-{
-    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<T> cpuValidator(_absoluteTolerance,
-                                                                               _relativeTolerance);
-    return cpuValidator.allClose(reference, implementation);
+    return hostFlag == 0;
 }
 
 // --- GpuIntReferenceValidation<T> ---
@@ -199,20 +168,10 @@ bool GpuIntReferenceValidation<T>::allClose(
 
     if(!reference.isPacked() || !implementation.isPacked())
     {
-        HIPDNN_SDK_LOG_INFO("Tensors are not packed, falling back to CPU validator for "
-                            "stride-aware comparison");
-        return cpuFallback(reference, implementation);
+        throw std::runtime_error("GPU validator requires packed (contiguous) tensors");
     }
 
-    try
-    {
-        return gpuExact(reference, implementation);
-    }
-    catch(const std::exception& e)
-    {
-        HIPDNN_SDK_LOG_WARN("GPU validation failed, falling back to CPU validator: " << e.what());
-        return cpuFallback(reference, implementation);
-    }
+    return gpuExact(reference, implementation);
 }
 
 template <class T>
@@ -248,23 +207,7 @@ bool GpuIntReferenceValidation<T>::gpuExact(
     flagBuf.markDeviceModified();
     auto hostFlag = flagBuf.hostData()[0];
 
-    if(hostFlag != 0)
-    {
-        HIPDNN_SDK_LOG_INFO("GPU integer validation detected failure, falling back to CPU "
-                            "for detailed diagnostics");
-        return cpuFallback(reference, implementation);
-    }
-
-    return true;
-}
-
-template <class T>
-bool GpuIntReferenceValidation<T>::cpuFallback(
-    hipdnn_data_sdk::utilities::ITensor& reference,
-    hipdnn_data_sdk::utilities::ITensor& implementation) const
-{
-    const hipdnn_test_sdk::utilities::CpuIntReferenceValidation<T> cpuValidator;
-    return cpuValidator.allClose(reference, implementation);
+    return hostFlag == 0;
 }
 
 // --- Non-template factory ---

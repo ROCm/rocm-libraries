@@ -16,8 +16,7 @@ namespace hipdnn_gpu_ref
 
 // GPU-based floating-point tensor validator implementing IReferenceValidation.
 // Launches a HipRTC kernel to perform element-wise tolerance comparison on the GPU
-// using a single atomic failure flag. On failure, falls back to CpuFpReferenceValidation
-// for detailed per-element diagnostics. Also falls back on GPU errors.
+// using a single atomic failure flag. Only supports packed (contiguous) tensors.
 template <class T>
 class GpuFpReferenceValidation : public hipdnn_test_sdk::utilities::IReferenceValidation
 {
@@ -38,16 +37,13 @@ private:
     bool gpuAllClose(hipdnn_data_sdk::utilities::ITensor& reference,
                      hipdnn_data_sdk::utilities::ITensor& implementation) const;
 
-    bool cpuFallback(hipdnn_data_sdk::utilities::ITensor& reference,
-                     hipdnn_data_sdk::utilities::ITensor& implementation) const;
-
     float _absoluteTolerance;
     float _relativeTolerance;
 };
 
 // GPU-based integer tensor validator implementing IReferenceValidation.
 // Requires exact equality between reference and implementation tensors.
-// Falls back to CpuIntReferenceValidation on GPU errors.
+// Only supports packed (contiguous) tensors.
 template <class T>
 class GpuIntReferenceValidation : public hipdnn_test_sdk::utilities::IReferenceValidation
 {
@@ -61,9 +57,6 @@ public:
 private:
     bool gpuExact(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const;
-
-    bool cpuFallback(hipdnn_data_sdk::utilities::ITensor& reference,
-                     hipdnn_data_sdk::utilities::ITensor& implementation) const;
 };
 
 // Suppress implicit instantiation — definitions are in GpuFpReferenceValidation.cpp
