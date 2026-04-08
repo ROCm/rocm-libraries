@@ -42,6 +42,18 @@ std::shared_ptr<EnginePluginManager> persistentPmPtr;
 
 } // namespace
 
+void EnginePluginResourceManager::setPluginLogLevel(hipdnnSeverity_t level)
+{
+    const std::lock_guard<std::mutex> lock(pluginMutex);
+    if(auto pm = pmPtr.lock())
+    {
+        for(const auto& plugin : pm->getPlugins())
+        {
+            plugin->setLogLevel(level);
+        }
+    }
+}
+
 void EnginePluginResourceManager::setPluginPaths(
     const std::vector<std::filesystem::path>& pluginPaths,
     hipdnnPluginLoadingMode_ext_t loadingMode)
@@ -365,7 +377,8 @@ void EnginePluginResourceManager::setStream(hipStream_t stream) const
 }
 
 std::vector<int64_t>
-    EnginePluginResourceManager::getApplicableEngineIds(const GraphDescriptor* graphDesc) const
+    EnginePluginResourceManager::getApplicableEngineIds(const GraphDescriptor* graphDesc,
+                                                        bool findFirst) const
 {
     THROW_IF_NULL(graphDesc, HIPDNN_STATUS_INTERNAL_ERROR, "Graph descriptor cannot be null");
 
@@ -392,6 +405,11 @@ std::vector<int64_t>
                                       "Engine ID " + std::to_string(id)
                                           + " is already associated with a different plugin");
             }
+        }
+
+        if(findFirst && !engineIds.empty())
+        {
+            break;
         }
     }
 

@@ -78,9 +78,17 @@ inline Error
 
     // Set compute data type
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT,
+                                                 HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT,
                                                  attributes.compute_data_type,
                                                  "rmsnorm compute data type"));
+
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(
+            opDesc.get(), HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "rmsnorm operation name"));
+    }
 
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "rmsnorm operation descriptor"));

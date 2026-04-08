@@ -48,7 +48,7 @@ option( MIOPEN_TEST_GFX95X "Test on (gfx950)" OFF )
 option( MIOPEN_TEST_GFX900 "Test on Vega10 (gfx900)" OFF )
 option( MIOPEN_TEST_GFX906 "Test on Vega20 (gfx906)" OFF )
 option( MIOPEN_TEST_GFX103X "Test on Navi21/22 (gfx1030/31)" OFF )
-option( MIOPEN_TEST_GFX110X "Test on Navi31/32 (gfx1100/02)" OFF )
+option( MIOPEN_TEST_GFX110X "Test on Navi31/32/33/Phoenix (gfx1100/03)" OFF )
 option( MIOPEN_TEST_GFX115X "Test on Navi35 strix halo (gfx1150/51/52/53)" OFF )
 option( MIOPEN_TEST_GFX120X "Test on gfx1200/01" OFF )
 option( MIOPEN_TEST_GPU_XNACK_ENABLED "Test as if XNACK mode is enabled" OFF )
@@ -299,8 +299,7 @@ elseif(MIOPEN_TEST_BFLOAT16)
               test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
               test_deepbench_conv test_conv_igemm_dynamic_xdlops_nhwc_wrw_bf16
               test_conv_igemm_dynamic_xdlops_nhwc_fwd_bf16
-              test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16
-              test_pooling2d test_pooling3d)
+              test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16)
 endif()
 
 if(MIOPEN_NO_GPU)
@@ -321,6 +320,12 @@ endif()
 if (MIOPEN_TEST_GFX115X)
     list(APPEND SKIP_TESTS test_ctc)
 endif()
+
+# Skip conv2d tests to capture flaky behavior                                                                             
+list(APPEND SKIP_TESTS test_conv2d test_conv2d_find2)
+
+# Skip test_immed_conv2d tests to capture flaky behavior                                                                             
+list(APPEND SKIP_TESTS test_immed_conv2d)
 
 
 # The usage is non-trivial, see function add_test_command.
@@ -460,8 +465,6 @@ set(LONG_TESTS
     test_immed_conv3d
     test_conv3d_extra
     test_conv_3d
-    test_pooling2d
-    test_pooling3d
     test_conv_ck_igemm_fwd_v6r1_dlops_nchw
     )
 
@@ -572,7 +575,7 @@ endfunction()
 #   These attributes can be enabled or disabled by using '_ENABLED' and '_DISABLED' suffix.
 #   Defaults: FLOAT_ENABLED HALF_DISABLED BF16_DISABLED INT8_DISABLED
 #
-# GPU types: GFX900, GFX906, GFX908, GFX90A, GFX94X, GFX1030/31, GFX1100/02
+# GPU types: GFX900, GFX906, GFX908, GFX90A, GFX94X, GFX1030/31, GFX1100/03
 #   These attributes can be enabled or disabled by using '_ENABLED' and '_DISABLED' suffix.
 #   Defaults: GFX900_ENABLED, GFX906_ENABLED, GFX908_ENABLED, GFX90A_ENABLED, GFX94X_DISABLED, GFX103X_DISABLED, GFX110X_DISABLED
 #

@@ -681,6 +681,10 @@ pushd .
     tensile_opt="${tensile_opt} -DHIPSPARSELT_ENABLE_MARKER=OFF"
   fi
 
+  if [[ "${keep_build_tmp}" == true ]]; then
+    tensile_opt="${tensile_opt} -DTENSILELITE_KEEP_BUILD_TMP=ON"
+  fi
+
   echo $cmake_common_options
   cmake_common_options="${cmake_common_options} ${tensile_opt}"
 
