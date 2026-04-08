@@ -4,6 +4,7 @@
 #include "FlatbufferTestUtils.hpp"
 #include "FlatbufferUtilities.hpp"
 #include "HipdnnException.hpp"
+#include "ScopedBackendDescriptor.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/GraphDescriptor.hpp"
 #include "hipdnn_backend.h"
@@ -16,6 +17,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
+using hipdnn_backend::test_utilities::ScopedBackendDescriptor;
 
 class TestGraphDescriptor : public ::testing::Test
 {
@@ -42,8 +44,25 @@ public:
         EXPECT_EQ(graph1.compute_data_type, graph2.compute_data_type);
         EXPECT_EQ(graph1.intermediate_data_type, graph2.intermediate_data_type);
         EXPECT_EQ(graph1.io_data_type, graph2.io_data_type);
-        EXPECT_EQ(graph1.tensors.size(), graph2.tensors.size());
-        EXPECT_EQ(graph1.nodes.size(), graph2.nodes.size());
+        EXPECT_EQ(graph1.preferred_engine_id, graph2.preferred_engine_id);
+
+        ASSERT_EQ(graph1.tensors.size(), graph2.tensors.size());
+        for(size_t i = 0; i < graph1.tensors.size(); ++i)
+        {
+            SCOPED_TRACE("tensor[" + std::to_string(i) + "]");
+            ASSERT_NE(graph1.tensors[i], nullptr);
+            ASSERT_NE(graph2.tensors[i], nullptr);
+            EXPECT_EQ(*graph1.tensors[i], *graph2.tensors[i]);
+        }
+
+        ASSERT_EQ(graph1.nodes.size(), graph2.nodes.size());
+        for(size_t i = 0; i < graph1.nodes.size(); ++i)
+        {
+            SCOPED_TRACE("node[" + std::to_string(i) + "]");
+            ASSERT_NE(graph1.nodes[i], nullptr);
+            ASSERT_NE(graph2.nodes[i], nullptr);
+            EXPECT_EQ(*graph1.nodes[i], *graph2.nodes[i]);
+        }
     }
 };
 
@@ -245,16 +264,15 @@ TEST_F(TestGraphDescriptor, JsonSerializeNullSize)
     auto builder = createValidGraph();
     auto serializedGraph = builder.Release();
 
-    hipdnnBackendDescriptor_t desc = nullptr;
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
     auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
-        &desc, serializedGraph.data(), serializedGraph.size());
+        &rawDesc, serializedGraph.data(), serializedGraph.size());
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(desc, nullptr);
+    ASSERT_NE(rawDesc, nullptr);
+    const ScopedBackendDescriptor desc(rawDesc);
 
-    status = hipdnnBackendGetSerializedJsonGraph_ext(desc, 0, nullptr, nullptr);
+    status = hipdnnBackendGetSerializedJsonGraph_ext(desc.get(), 0, nullptr, nullptr);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
-
-    hipdnnBackendDestroyDescriptor(desc);
 }
 
 TEST_F(TestGraphDescriptor, JsonSerializeInsufficientBuffer)
@@ -262,15 +280,16 @@ TEST_F(TestGraphDescriptor, JsonSerializeInsufficientBuffer)
     auto builder = createValidGraph();
     auto serializedGraph = builder.Release();
 
-    hipdnnBackendDescriptor_t desc = nullptr;
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
     auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
-        &desc, serializedGraph.data(), serializedGraph.size());
+        &rawDesc, serializedGraph.data(), serializedGraph.size());
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(desc, nullptr);
+    ASSERT_NE(rawDesc, nullptr);
+    const ScopedBackendDescriptor desc(rawDesc);
 
     // Query the required size
     size_t requiredSize = 0;
-    status = hipdnnBackendGetSerializedJsonGraph_ext(desc, 0, &requiredSize, nullptr);
+    status = hipdnnBackendGetSerializedJsonGraph_ext(desc.get(), 0, &requiredSize, nullptr);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(requiredSize, 0u);
 
@@ -278,10 +297,8 @@ TEST_F(TestGraphDescriptor, JsonSerializeInsufficientBuffer)
     std::vector<char> buffer(requiredSize - 1);
     size_t returnedSize = 0;
     status = hipdnnBackendGetSerializedJsonGraph_ext(
-        desc, buffer.size(), &returnedSize, buffer.data());
+        desc.get(), buffer.size(), &returnedSize, buffer.data());
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT);
-
-    hipdnnBackendDestroyDescriptor(desc);
 }
 
 TEST_F(TestGraphDescriptor, JsonSerializeOversizedBuffer)
@@ -289,15 +306,16 @@ TEST_F(TestGraphDescriptor, JsonSerializeOversizedBuffer)
     auto builder = createValidGraph();
     auto serializedGraph = builder.Release();
 
-    hipdnnBackendDescriptor_t desc = nullptr;
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
     auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
-        &desc, serializedGraph.data(), serializedGraph.size());
+        &rawDesc, serializedGraph.data(), serializedGraph.size());
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(desc, nullptr);
+    ASSERT_NE(rawDesc, nullptr);
+    const ScopedBackendDescriptor desc(rawDesc);
 
     // Query the required size
     size_t requiredSize = 0;
-    status = hipdnnBackendGetSerializedJsonGraph_ext(desc, 0, &requiredSize, nullptr);
+    status = hipdnnBackendGetSerializedJsonGraph_ext(desc.get(), 0, &requiredSize, nullptr);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(requiredSize, 0u);
 
@@ -305,15 +323,13 @@ TEST_F(TestGraphDescriptor, JsonSerializeOversizedBuffer)
     std::vector<char> buffer(requiredSize + 64);
     size_t returnedSize = 0;
     status = hipdnnBackendGetSerializedJsonGraph_ext(
-        desc, buffer.size(), &returnedSize, buffer.data());
+        desc.get(), buffer.size(), &returnedSize, buffer.data());
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(returnedSize, requiredSize);
 
     // Verify the JSON content is valid
     auto parsed = nlohmann::json::parse(buffer.data());
     EXPECT_TRUE(parsed.contains("name"));
-
-    hipdnnBackendDestroyDescriptor(desc);
 }
 
 TEST_F(TestGraphDescriptor, JsonDeserializeNullInput)
@@ -336,15 +352,16 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaApi)
     auto builder = createValidGraph();
     auto serializedGraph = builder.Release();
 
-    hipdnnBackendDescriptor_t desc1 = nullptr;
+    hipdnnBackendDescriptor_t rawDesc1 = nullptr;
     auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
-        &desc1, serializedGraph.data(), serializedGraph.size());
+        &rawDesc1, serializedGraph.data(), serializedGraph.size());
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(desc1, nullptr);
+    ASSERT_NE(rawDesc1, nullptr);
+    const ScopedBackendDescriptor scopedDesc1(rawDesc1);
 
     // Serialize to JSON via C API: first query the size
     size_t jsonSize = 0;
-    status = hipdnnBackendGetSerializedJsonGraph_ext(desc1, 0, &jsonSize, nullptr);
+    status = hipdnnBackendGetSerializedJsonGraph_ext(scopedDesc1.get(), 0, &jsonSize, nullptr);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(jsonSize, 0u);
 
@@ -352,19 +369,20 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaApi)
     std::vector<char> jsonBuffer(jsonSize);
     size_t returnedSize = 0;
     status = hipdnnBackendGetSerializedJsonGraph_ext(
-        desc1, jsonBuffer.size(), &returnedSize, jsonBuffer.data());
+        scopedDesc1.get(), jsonBuffer.size(), &returnedSize, jsonBuffer.data());
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
     // Deserialize from JSON via C API
-    hipdnnBackendDescriptor_t desc2 = nullptr;
+    hipdnnBackendDescriptor_t rawDesc2 = nullptr;
     status = hipdnnBackendCreateAndDeserializeJsonGraph_ext(
-        &desc2, jsonBuffer.data(), std::strlen(jsonBuffer.data()));
+        &rawDesc2, jsonBuffer.data(), std::strlen(jsonBuffer.data()));
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(desc2, nullptr);
+    ASSERT_NE(rawDesc2, nullptr);
+    const ScopedBackendDescriptor scopedDesc2(rawDesc2);
 
     // Verify the round-tripped graph matches by extracting binary from both
-    auto graphDesc1 = desc1->asDescriptor<GraphDescriptor>();
-    auto graphDesc2 = desc2->asDescriptor<GraphDescriptor>();
+    auto graphDesc1 = scopedDesc1.get()->asDescriptor<GraphDescriptor>();
+    auto graphDesc2 = scopedDesc2.get()->asDescriptor<GraphDescriptor>();
 
     // desc1 buffer was populated by the GetSerializedJsonGraph call above.
     // desc2 needs explicit buildSerializedGraph() since it was only deserialized.
@@ -379,9 +397,6 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaApi)
         = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary2.ptr));
 
     verifyGraphsEquivalent(*graph1, *graph2);
-
-    hipdnnBackendDestroyDescriptor(desc1);
-    hipdnnBackendDestroyDescriptor(desc2);
 }
 
 TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
@@ -462,51 +477,48 @@ TEST_F(TestGraphDescriptor, BinarySerializeNullSize)
     auto builder = createValidGraph();
     auto serializedGraph = builder.Release();
 
-    hipdnnBackendDescriptor_t desc = nullptr;
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
     auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
-        &desc, serializedGraph.data(), serializedGraph.size());
+        &rawDesc, serializedGraph.data(), serializedGraph.size());
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(desc, nullptr);
+    ASSERT_NE(rawDesc, nullptr);
+    const ScopedBackendDescriptor desc(rawDesc);
 
-    status = hipdnnBackendGetSerializedBinaryGraph_ext(desc, 0, nullptr, nullptr);
+    status = hipdnnBackendGetSerializedBinaryGraph_ext(desc.get(), 0, nullptr, nullptr);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
-
-    hipdnnBackendDestroyDescriptor(desc);
 }
 
 TEST_F(TestGraphDescriptor, BinarySerializeEmptyGraph)
 {
     // Create a graph descriptor with no operations via the C API
-    hipdnnBackendDescriptor_t desc = nullptr;
-    auto status = hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &desc);
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
+    auto status = hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &rawDesc);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(desc, nullptr);
+    ASSERT_NE(rawDesc, nullptr);
+    const ScopedBackendDescriptor desc(rawDesc);
 
     // Serializing a graph with no operations produces a valid (empty) FlatBuffer.
     // finalize() is the gate that enforces non-empty operations for execution.
     size_t size = 0;
-    status = hipdnnBackendGetSerializedBinaryGraph_ext(desc, 0, &size, nullptr);
+    status = hipdnnBackendGetSerializedBinaryGraph_ext(desc.get(), 0, &size, nullptr);
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
     EXPECT_GT(size, 0u);
-
-    hipdnnBackendDestroyDescriptor(desc);
 }
 
 TEST_F(TestGraphDescriptor, JsonSerializeEmptyGraph)
 {
     // Create a graph descriptor with no operations via the C API
-    hipdnnBackendDescriptor_t desc = nullptr;
-    auto status = hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &desc);
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
+    auto status = hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &rawDesc);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(desc, nullptr);
+    ASSERT_NE(rawDesc, nullptr);
+    const ScopedBackendDescriptor desc(rawDesc);
 
     // Serializing a graph with no operations produces valid JSON
     size_t size = 0;
-    status = hipdnnBackendGetSerializedJsonGraph_ext(desc, 0, &size, nullptr);
+    status = hipdnnBackendGetSerializedJsonGraph_ext(desc.get(), 0, &size, nullptr);
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
     EXPECT_GT(size, 0u);
-
-    hipdnnBackendDestroyDescriptor(desc);
 }
 
 // ============================================================================
@@ -534,14 +546,12 @@ TEST_F(TestGraphDescriptor, MalformedJsonViaCApiReturnsBadParam)
 TEST_F(TestGraphDescriptor, BinaryDeserializeCorruptedData)
 {
     const std::vector<uint8_t> garbageData = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04};
-    hipdnnBackendDescriptor_t desc = nullptr;
-    auto status
-        = hipdnnBackendCreateAndDeserializeGraph_ext(&desc, garbageData.data(), garbageData.size());
-    EXPECT_NE(status, HIPDNN_STATUS_SUCCESS);
-    if(desc != nullptr)
-    {
-        hipdnnBackendDestroyDescriptor(desc);
-    }
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
+    auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
+        &rawDesc, garbageData.data(), garbageData.size());
+    EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(rawDesc, nullptr);
+    const ScopedBackendDescriptor desc(rawDesc);
 }
 
 // ============================================================================
@@ -553,15 +563,16 @@ TEST_F(TestGraphDescriptor, BinarySerializeInsufficientBuffer)
     auto builder = createValidGraph();
     auto serializedGraph = builder.Release();
 
-    hipdnnBackendDescriptor_t desc = nullptr;
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
     auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
-        &desc, serializedGraph.data(), serializedGraph.size());
+        &rawDesc, serializedGraph.data(), serializedGraph.size());
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(desc, nullptr);
+    ASSERT_NE(rawDesc, nullptr);
+    const ScopedBackendDescriptor desc(rawDesc);
 
     // Query the required size
     size_t requiredSize = 0;
-    status = hipdnnBackendGetSerializedBinaryGraph_ext(desc, 0, &requiredSize, nullptr);
+    status = hipdnnBackendGetSerializedBinaryGraph_ext(desc.get(), 0, &requiredSize, nullptr);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(requiredSize, 0u);
 
@@ -569,10 +580,8 @@ TEST_F(TestGraphDescriptor, BinarySerializeInsufficientBuffer)
     std::vector<uint8_t> buffer(requiredSize - 1);
     size_t returnedSize = 0;
     status = hipdnnBackendGetSerializedBinaryGraph_ext(
-        desc, buffer.size(), &returnedSize, buffer.data());
+        desc.get(), buffer.size(), &returnedSize, buffer.data());
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT);
-
-    hipdnnBackendDestroyDescriptor(desc);
 }
 
 TEST_F(TestGraphDescriptor, BinarySerializeOversizedBuffer)
@@ -580,15 +589,16 @@ TEST_F(TestGraphDescriptor, BinarySerializeOversizedBuffer)
     auto builder = createValidGraph();
     auto serializedGraph = builder.Release();
 
-    hipdnnBackendDescriptor_t desc = nullptr;
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
     auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
-        &desc, serializedGraph.data(), serializedGraph.size());
+        &rawDesc, serializedGraph.data(), serializedGraph.size());
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(desc, nullptr);
+    ASSERT_NE(rawDesc, nullptr);
+    const ScopedBackendDescriptor desc(rawDesc);
 
     // Query the required size
     size_t requiredSize = 0;
-    status = hipdnnBackendGetSerializedBinaryGraph_ext(desc, 0, &requiredSize, nullptr);
+    status = hipdnnBackendGetSerializedBinaryGraph_ext(desc.get(), 0, &requiredSize, nullptr);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(requiredSize, 0u);
 
@@ -596,15 +606,13 @@ TEST_F(TestGraphDescriptor, BinarySerializeOversizedBuffer)
     std::vector<uint8_t> buffer(requiredSize + 64);
     size_t returnedSize = 0;
     status = hipdnnBackendGetSerializedBinaryGraph_ext(
-        desc, buffer.size(), &returnedSize, buffer.data());
+        desc.get(), buffer.size(), &returnedSize, buffer.data());
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(returnedSize, requiredSize);
 
     // Verify the binary content is valid
     flatbuffers::Verifier verifier(buffer.data(), returnedSize);
     ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>());
-
-    hipdnnBackendDestroyDescriptor(desc);
 }
 
 TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
@@ -613,15 +621,16 @@ TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
     auto builder = createValidGraph();
     auto serializedGraph = builder.Release();
 
-    hipdnnBackendDescriptor_t desc1 = nullptr;
+    hipdnnBackendDescriptor_t rawDesc1 = nullptr;
     auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
-        &desc1, serializedGraph.data(), serializedGraph.size());
+        &rawDesc1, serializedGraph.data(), serializedGraph.size());
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(desc1, nullptr);
+    ASSERT_NE(rawDesc1, nullptr);
+    const ScopedBackendDescriptor scopedDesc1(rawDesc1);
 
     // Serialize to binary via C API: first query the size
     size_t binarySize = 0;
-    status = hipdnnBackendGetSerializedBinaryGraph_ext(desc1, 0, &binarySize, nullptr);
+    status = hipdnnBackendGetSerializedBinaryGraph_ext(scopedDesc1.get(), 0, &binarySize, nullptr);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(binarySize, 0u);
 
@@ -629,18 +638,20 @@ TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
     std::vector<uint8_t> binaryBuffer(binarySize);
     size_t returnedSize = 0;
     status = hipdnnBackendGetSerializedBinaryGraph_ext(
-        desc1, binaryBuffer.size(), &returnedSize, binaryBuffer.data());
+        scopedDesc1.get(), binaryBuffer.size(), &returnedSize, binaryBuffer.data());
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
     // Deserialize from binary via C API
-    hipdnnBackendDescriptor_t desc2 = nullptr;
-    status = hipdnnBackendCreateAndDeserializeGraph_ext(&desc2, binaryBuffer.data(), returnedSize);
+    hipdnnBackendDescriptor_t rawDesc2 = nullptr;
+    status
+        = hipdnnBackendCreateAndDeserializeGraph_ext(&rawDesc2, binaryBuffer.data(), returnedSize);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(desc2, nullptr);
+    ASSERT_NE(rawDesc2, nullptr);
+    const ScopedBackendDescriptor scopedDesc2(rawDesc2);
 
     // Verify the round-tripped graph matches
-    auto graphDesc1 = desc1->asDescriptor<GraphDescriptor>();
-    auto graphDesc2 = desc2->asDescriptor<GraphDescriptor>();
+    auto graphDesc1 = scopedDesc1.get()->asDescriptor<GraphDescriptor>();
+    auto graphDesc2 = scopedDesc2.get()->asDescriptor<GraphDescriptor>();
 
     // desc1 buffer was populated by the GetSerializedBinaryGraph call above.
     // desc2 needs explicit buildSerializedGraph() since it was only deserialized.
@@ -655,7 +666,4 @@ TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
         = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary2.ptr));
 
     verifyGraphsEquivalent(*graph1, *graph2);
-
-    hipdnnBackendDestroyDescriptor(desc1);
-    hipdnnBackendDestroyDescriptor(desc2);
 }

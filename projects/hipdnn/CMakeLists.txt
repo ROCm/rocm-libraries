@@ -197,7 +197,8 @@ list(
     -Wformat=2 # Enable stricter format string checks
     -Winit-self # Warn about variables initialized with itself
     -Wunreachable-code # Warn about unreachable code
-    -Wno-error=unused-command-line-argument # Disable error for unused command line arguments
+    $<$<CXX_COMPILER_ID:Clang>:-Wno-error=unused-command-line-argument> # Clang: disable error for unused command line arguments
+    -Wno-error=null-dereference # Downgrade null-dereference to warning (false positives with flatbuffers in backend/data_sdk)
     -Wswitch-default # Warn if a switch statement does not have a default case
 )
 

@@ -1223,6 +1223,21 @@ public:
         return deserialize(handle, data);
     }
 
+    /** @brief Deserialize a graph from a binary byte vector (structure only).
+     *
+     * Convenience wrapper around deserialize() for API symmetry with to_binary().
+     * The backend descriptor is not finalized. Call build_operation_graph()
+     * afterwards to finalize for execution.
+     *
+     * @param data The binary data to deserialize.
+     * @return Error indicating success or failure.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error from_binary(const std::vector<uint8_t>& data)
+    {
+        return deserialize(data);
+    }
+
     /** @brief Deserialize a graph from a binary byte vector with handle.
      *
      * Unpacks the serialized graph, reconstructs frontend nodes and attributes,
@@ -1359,6 +1374,21 @@ public:
     Error from_json(hipdnnHandle_t handle, const std::string& json)
     {
         return deserialize(handle, json);
+    }
+
+    /** @brief Deserialize a graph from a JSON string (structure only).
+     *
+     * Convenience wrapper around deserialize() for API symmetry with to_json().
+     * The backend descriptor is not finalized. Call build_operation_graph()
+     * afterwards to finalize for execution.
+     *
+     * @param json The JSON string to deserialize.
+     * @return Error indicating success or failure.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error from_json(const std::string& json)
+    {
+        return deserialize(json);
     }
 
     /** @brief Deserialize a graph from a JSON string with handle.

@@ -418,17 +418,16 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithoutHandle)
 TEST_F(IntegrationGraphLifting, EmptyGraphDescriptorReturnsError)
 {
     // Create a backend graph descriptor with no operations
-    hipdnnBackendDescriptor_t desc = nullptr;
-    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &desc),
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &rawDesc),
               HIPDNN_STATUS_SUCCESS);
+    const detail::ScopedHipdnnBackendDescriptor desc(rawDesc);
 
     // Attempt to lift — should return an error since no operations are set
     auto graph = std::make_shared<TestableGraph>();
-    auto result = graph->fromBackendDescriptor(desc);
+    auto result = graph->fromBackendDescriptor(desc.get());
     EXPECT_NE(result.code, ErrorCode::OK)
         << "fromBackendDescriptor should fail on a descriptor with no operations";
-
-    hipdnnBackendDestroyDescriptor(desc);
 }
 
 // Verifies that deserialize returns an error (not a crash) when
