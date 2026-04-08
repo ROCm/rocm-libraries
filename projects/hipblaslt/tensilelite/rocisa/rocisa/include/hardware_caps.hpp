@@ -201,6 +201,9 @@ inline std::map<std::string, int>
                                        assemblerPath,
                                        "v_wmma_f32_16x16x4_f32 v[0:7], v[8:9], v[8:9], v[0:7]",
                                        isDebug);
+    // If HasWMMA_V3 is set, force HasWMMA_V2 off so the wmma_v3 path is used
+    if(rv["HasWMMA_V3"])
+        rv["HasWMMA_V2"] = false;
     rv["HasWMMA_V3_f64"]
         = tryAssembler(isaVersion,
                        assemblerPath,
