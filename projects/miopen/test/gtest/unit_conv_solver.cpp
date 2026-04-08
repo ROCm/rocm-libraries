@@ -29,7 +29,6 @@
 #include <miopen/errors.hpp>
 #include <miopen/generic_search.hpp>
 #include <miopen/any_solver.hpp>
-#include <miopen/solver/ck_grouped_conv_lib_loader.hpp>
 
 #include "unit_conv_solver.hpp"
 
@@ -273,8 +272,7 @@ UnitTestConvSolverParams::UnitTestConvSolverParams(Gpu supported_devs_)
       use_cpu_ref(false),
       use_gpu_ref(false),
       tunable(false),
-      check_xnack_disabled(false),
-      uses_ck_dynamic_lib(false)
+      check_xnack_disabled(false)
 {
 }
 
@@ -289,8 +287,6 @@ void UnitTestConvSolverParams::Tunable(std::size_t iterations_max_)
 }
 
 void UnitTestConvSolverParams::CheckXnackDisabled() { check_xnack_disabled = true; }
-
-void UnitTestConvSolverParams::UsesCKDynamicLib() { uses_ck_dynamic_lib = true; }
 
 void UnitTestConvSolverParams::SetConvAttrFp16Alt(uint64_t value) { conv_attr_fp16_alt = value; }
 
@@ -921,15 +917,6 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
         // std::cout << "IsApplicable: " << is_applicable << std::endl;
         if(is_applicable != supported)
         {
-            // If the solver uses CK dynamic libraries and the library for this
-            // device wasn't built, the solver correctly reports not-applicable.
-            if(params.uses_ck_dynamic_lib && supported && !is_applicable)
-            {
-                const auto& loader =
-                    miopen::solver::CKGroupedConvLibLoader::Get(std::string(dev_descr.name));
-                if(!loader.IsLoaded())
-                    continue;
-            }
             GTEST_FAIL() << dev_descr << " is" << (is_applicable ? "" : " not")
                          << " applicable for " << solver.SolverDbId() << " but "
                          << (supported ? "" : "not ") << "marked as supported";
