@@ -1960,6 +1960,10 @@ struct json
             // Copy nested JSON.
             m_map[std::string(key)] = std::make_shared<json>(value);
         }
+        else if constexpr(std::is_convertible_v<T, std::string_view>)
+        {
+            m_map[std::string(key)] = std::string(std::string_view(value));
+        }
         else
         {
             m_map[std::string(key)] = value;
