@@ -1,19 +1,19 @@
 {
     "tile_config": {
         "tile_m": {
-            "values": [
-                256
-            ]
+            "max": 256,
+            "min": 64,
+            "step": 256
         },
         "tile_n": {
-            "values": [
-                256
-            ]
+            "max": 256,
+            "min": 64,
+            "step": 256
         },
         "tile_k": {
-            "values": [
-                32
-            ]
+            "max": 256,
+            "min": 64,
+            "step": 256
         },
         "warp_m": {
             "values": [
@@ -32,34 +32,38 @@
         },
         "warp_tile_m": {
             "values": [
-                32
+                16
             ]
         },
         "warp_tile_n": {
             "values": [
-                32
+                16
             ]
         },
         "warp_tile_k": {
             "values": [
-                16
+                32
             ]
         }
     },
     "trait_config": {
         "pipeline": {
             "values": [
-                "compv4"
+                "compv3",
+                "compv4",
+                "mem"
             ]
         },
         "scheduler": {
             "values": [
-                "intrawave"
+                "intrawave",
+                "interwave"
             ]
         },
         "epilogue": {
             "values": [
-                "cshuffle"
+                "cshuffle",
+                "default"
             ]
         },
         "pad_m": {
@@ -75,6 +79,12 @@
         "pad_k": {
             "values": [
                 false
+            ]
+        },
+        "persistent": {
+            "values": [
+                false,
+                true
             ]
         }
     },
