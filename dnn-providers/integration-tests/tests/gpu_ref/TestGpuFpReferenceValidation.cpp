@@ -120,6 +120,28 @@ TYPED_TEST(TestGpuFpValidation, NaNFails)
     ASSERT_FALSE(validator.allClose(ref, impl));
 }
 
+TYPED_TEST(TestGpuFpValidation, NaNInReferenceFails)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<TypeParam> ref({4});
+    Tensor<TypeParam> impl({4});
+
+    auto* refHost = ref.memory().hostData();
+    auto* implHost = impl.memory().hostData();
+    for(size_t i = 0; i < ref.elementCount(); ++i)
+    {
+        refHost[i] = static_cast<TypeParam>(1.0f);
+        implHost[i] = static_cast<TypeParam>(1.0f);
+    }
+
+    // Set one element to NaN in the reference
+    refHost[0] = static_cast<TypeParam>(std::numeric_limits<float>::quiet_NaN());
+
+    const GpuFpReferenceValidation<TypeParam> validator(1.0f, 1.0f);
+    ASSERT_FALSE(validator.allClose(ref, impl));
+}
+
 TYPED_TEST(TestGpuFpValidation, InfFails)
 {
     SKIP_IF_NO_DEVICES();
@@ -137,6 +159,28 @@ TYPED_TEST(TestGpuFpValidation, InfFails)
 
     // Set one element to Inf in the reference
     refHost[0] = static_cast<TypeParam>(std::numeric_limits<float>::infinity());
+
+    const GpuFpReferenceValidation<TypeParam> validator(1.0f, 1.0f);
+    ASSERT_FALSE(validator.allClose(ref, impl));
+}
+
+TYPED_TEST(TestGpuFpValidation, InfInImplementationFails)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<TypeParam> ref({4});
+    Tensor<TypeParam> impl({4});
+
+    auto* refHost = ref.memory().hostData();
+    auto* implHost = impl.memory().hostData();
+    for(size_t i = 0; i < ref.elementCount(); ++i)
+    {
+        refHost[i] = static_cast<TypeParam>(1.0f);
+        implHost[i] = static_cast<TypeParam>(1.0f);
+    }
+
+    // Set one element to Inf in the implementation
+    implHost[0] = static_cast<TypeParam>(std::numeric_limits<float>::infinity());
 
     const GpuFpReferenceValidation<TypeParam> validator(1.0f, 1.0f);
     ASSERT_FALSE(validator.allClose(ref, impl));
@@ -165,6 +209,17 @@ TYPED_TEST(TestGpuFpValidation, DimensionMismatchFails)
 
     const GpuFpReferenceValidation<TypeParam> validator;
     ASSERT_FALSE(validator.allClose(ref, impl));
+}
+
+TYPED_TEST(TestGpuFpValidation, EmptyTensorsPasses)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<TypeParam> ref(std::vector<int64_t>{});
+    Tensor<TypeParam> impl(std::vector<int64_t>{});
+
+    const GpuFpReferenceValidation<TypeParam> validator(0.0f, 0.0f);
+    ASSERT_TRUE(validator.allClose(ref, impl));
 }
 
 TYPED_TEST(TestGpuFpValidation, RelativeToleranceWorks)
@@ -273,6 +328,17 @@ TYPED_TEST(TestGpuIntValidation, DimensionMismatchFails)
     ASSERT_FALSE(validator.allClose(ref, impl));
 }
 
+TYPED_TEST(TestGpuIntValidation, EmptyTensorsPasses)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<TypeParam> ref(std::vector<int64_t>{});
+    Tensor<TypeParam> impl(std::vector<int64_t>{});
+
+    const GpuIntReferenceValidation<TypeParam> validator;
+    ASSERT_TRUE(validator.allClose(ref, impl));
+}
+
 // ============================================================================
 // Factory function tests
 // ============================================================================
@@ -324,6 +390,59 @@ TEST(TestGpuValidatorFactory, CreatesInt32Validator)
     const auto validator
         = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::INT32);
     ASSERT_NE(validator, nullptr);
+}
+
+TEST(TestGpuValidatorFactory, FloatValidatorPassesMatchingData)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto validator
+        = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::FLOAT, 0.0f, 0.0f);
+    ASSERT_NE(validator, nullptr);
+
+    Tensor<float> ref({4});
+    Tensor<float> impl({4});
+
+    auto* refHost = ref.memory().hostData();
+    auto* implHost = impl.memory().hostData();
+    for(size_t i = 0; i < ref.elementCount(); ++i)
+    {
+        refHost[i] = static_cast<float>(i);
+        implHost[i] = static_cast<float>(i);
+    }
+
+    ASSERT_TRUE(validator->allClose(ref, impl));
+
+    // Introduce a mismatch to confirm the validator actually checks values
+    implHost[0] = 999.0f;
+    impl.markHostModified();
+    ASSERT_FALSE(validator->allClose(ref, impl));
+}
+
+TEST(TestGpuValidatorFactory, Int32ValidatorPassesMatchingData)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto validator = createGpuAllCloseValidator(hipdnn_data_sdk::data_objects::DataType::INT32);
+    ASSERT_NE(validator, nullptr);
+
+    Tensor<int32_t> ref({4});
+    Tensor<int32_t> impl({4});
+
+    auto* refHost = ref.memory().hostData();
+    auto* implHost = impl.memory().hostData();
+    for(size_t i = 0; i < ref.elementCount(); ++i)
+    {
+        refHost[i] = static_cast<int32_t>(i);
+        implHost[i] = static_cast<int32_t>(i);
+    }
+
+    ASSERT_TRUE(validator->allClose(ref, impl));
+
+    // Introduce a mismatch to confirm the validator actually checks values
+    implHost[0] = 999;
+    impl.markHostModified();
+    ASSERT_FALSE(validator->allClose(ref, impl));
 }
 
 TEST(TestGpuValidatorFactory, ThrowsOnUnsupportedType)
