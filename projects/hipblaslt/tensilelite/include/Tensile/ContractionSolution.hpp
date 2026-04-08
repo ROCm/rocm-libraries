@@ -186,6 +186,8 @@ namespace TensileLite
         bool DirectToLdsA = false;
         bool DirectToLdsB = false;
 
+        int expertSchedulingMode = 0;
+
         std::array<int, 2> waveGroup;
     };
 

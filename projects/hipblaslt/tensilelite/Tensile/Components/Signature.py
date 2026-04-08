@@ -210,6 +210,9 @@ class SignatureDefault(Signature):
         userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.alphaMaxSize
         userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.betaMaxSize
 
+        if kernel["ExpertSchedulingMode"] > 0:
+            signature.addArg( "ESMsupportedWorkaround", SVK.SIG_VALUE,               "u32")
+
         if kernel["StreamK"]:
             # StreamK args
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")

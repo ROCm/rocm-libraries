@@ -730,6 +730,19 @@ namespace TensileLite
             if(problem.betaType() == rocisa::DataType::Half)
                 args.append("beta_2", inputs.beta, problem.betaType());
         }
+
+        if(sizeMapping.expertSchedulingMode > 0)
+        {
+            int32_t esmSupported = 0;
+#if HIP_VERSION >= 70353390
+            int deviceId = 0;
+            HIP_CHECK_EXC(hipGetDevice(&deviceId));
+            HIP_CHECK_EXC(hipDeviceGetAttribute(
+                &esmSupported, hipDeviceAttributeExpertSchedMode, deviceId));
+#endif
+            args.template append<int32_t>("ESMsupportedWorkaround", esmSupported);
+        }
+
         // Additional check for General Batched GEMM until GSU and StreamK are supported
         // in General Batched GEMM
         if(sizeMapping.streamK != 0)
