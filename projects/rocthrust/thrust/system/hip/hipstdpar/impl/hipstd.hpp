@@ -45,8 +45,12 @@
 
 #  include <cstddef>
 #  include <iterator>
+#  include <new>
 #  include <type_traits>
 #  include <utility>
+
+#  include <hip/hip_runtime_api.h>
+#  include <thrust/system/hip/detail/util.h>
 
 namespace hipstd
 {
@@ -96,6 +100,81 @@ inline constexpr
                              "warning"))) void
   unsupported_iterator_category() noexcept
 {}
+
+namespace detail
+{
+
+// Ensures a non-trivially-destructible callable outlives any asynchronous
+// kernel that references it.  The callable is placement-new'd into GPU-
+// accessible memory whose lifetime is controlled by this guard.
+//
+//   * When --hipstdpar-interpose-alloc is active (no XNACK / no transparent
+//     paging) hipMallocManaged is used so that both host and device can
+//     access the callable.
+//
+//   * Otherwise hipMalloc is used, which is faster; XNACK guarantees that
+//     the host can still access device memory directly.
+template <typename Fn>
+class device_callable_guard
+{
+public:
+  explicit device_callable_guard(Fn&& fn)
+  {
+#  if defined(__HIPSTDPAR_INTERPOSE_ALLOC__) || defined(__HIPSTDPAR_INTERPOSE_ALLOC_V1__)
+    hipError_t status = ::hipMallocManaged(reinterpret_cast<void**>(&fn_ptr_), sizeof(Fn));
+#  else
+    hipError_t status = ::hipMalloc(reinterpret_cast<void**>(&fn_ptr_), sizeof(Fn));
+#  endif
+    ::thrust::hip_rocprim::throw_on_error(status, "hipstdpar: failed to allocate device callable");
+    ::new (static_cast<void*>(fn_ptr_)) Fn(::std::move(fn));
+  }
+
+  device_callable_guard(const device_callable_guard&)            = delete;
+  device_callable_guard& operator=(const device_callable_guard&) = delete;
+
+  ~device_callable_guard()
+  {
+    if (fn_ptr_ != nullptr)
+    {
+      fn_ptr_->~Fn();
+      (void) ::hipFree(fn_ptr_);
+    }
+  }
+
+  Fn* get() const noexcept
+  {
+    return fn_ptr_;
+  }
+
+  void destroy_and_free()
+  {
+    if (fn_ptr_ == nullptr)
+    {
+      return;
+    }
+    fn_ptr_->~Fn();
+    hipError_t status = ::hipFree(fn_ptr_);
+    fn_ptr_           = nullptr;
+    ::thrust::hip_rocprim::throw_on_error(status, "hipstdpar: failed to free device callable");
+  }
+
+private:
+  Fn* fn_ptr_ = nullptr;
+};
+
+template <typename Fn>
+struct callable_proxy
+{
+  Fn* fn_ptr;
+
+  template <typename... Args>
+  THRUST_HIP_FUNCTION void operator()(Args&&... args) const
+  {
+    (*fn_ptr)(::std::forward<Args>(args)...);
+  }
+};
+
+} // namespace detail
 } // namespace hipstd
 #else // __HIPSTDPAR__
 #  error "__HIPSTDPAR__ should be defined. Please use the '--hipstdpar' compile option."

@@ -30,15 +30,15 @@ struct ConvOpBundle
 inline ConvOpBundle createDefaultConvOp(hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
 {
     ConvOpBundle bundle;
-    bundle.xDesc = createFinalizedTensor(hipdnn_tests::constants::K_TENSOR_X_UID);
-    bundle.wDesc
-        = createFinalizedTensor(hipdnn_tests::constants::K_TENSOR_W_UID,
-                                hipdnn_tests::toVec(hipdnn_tests::constants::K_TENSOR_W_DIMS),
-                                hipdnn_tests::toVec(hipdnn_tests::constants::K_TENSOR_W_STRIDES));
-    bundle.yDesc
-        = createFinalizedTensor(hipdnn_tests::constants::K_TENSOR_Y_UID,
-                                hipdnn_tests::toVec(hipdnn_tests::constants::K_TENSOR_Y_DIMS),
-                                hipdnn_tests::toVec(hipdnn_tests::constants::K_TENSOR_Y_STRIDES));
+    bundle.xDesc = createFinalizedTensor(hipdnn_tests::constants::K_FPROP_TENSOR_X_UID);
+    bundle.wDesc = createFinalizedTensor(
+        hipdnn_tests::constants::K_FPROP_TENSOR_W_UID,
+        hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_TENSOR_W_DIMS),
+        hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_TENSOR_W_STRIDES));
+    bundle.yDesc = createFinalizedTensor(
+        hipdnn_tests::constants::K_FPROP_TENSOR_Y_UID,
+        hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_TENSOR_Y_DIMS),
+        hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_TENSOR_Y_STRIDES));
     bundle.convOp = createFinalizedConvOp(
         bundle.xDesc.get(), bundle.wDesc.get(), bundle.yDesc.get(), computeType);
     return bundle;

@@ -162,6 +162,7 @@ def _preview_files(config, mode: str) -> list[str]:
         "fragments/cmake_entries.txt",
         "fragments/node_factory_case.txt",
         "fragments/operation_unpacker_case.txt",
+        "fragments/operation_unpacker_test.txt",
         "fragments/operation_type_enum.txt",
         "fragments/node_unpack_override.txt",
     ]
@@ -193,10 +194,12 @@ def _preview_files(config, mode: str) -> list[str]:
     lift_fragments = [
         "fragments/node_factory_case.txt",
         "fragments/operation_unpacker_case.txt",
+        "fragments/operation_unpacker_test.txt",
         "fragments/operation_type_enum.txt",
         "fragments/node_unpack_override.txt",
         "fragments/descriptor_lifting_additions.txt",
         "fragments/packer_name_addition.txt",
+        "fragments/packer_name_test.txt",
     ]
 
     if mode == MODE_BACKEND:
@@ -221,6 +224,12 @@ def _preview_files(config, mode: str) -> list[str]:
             files.append(f"fragments/mode_backend_plumbing_{df.name}.txt")
             files.append(f"fragments/mode_frontend_plumbing_{df.name}.txt")
             files.append(f"fragments/mode_frontend_tests_{df.name}.txt")
+
+    # Constants file (only when no pre-existing constants header)
+    if not config.test_data.constants_include:
+        constants_path = f"test_sdk/include/hipdnn_test_sdk/constants/{config.effective_constants_include}.hpp"
+        if mode in (MODE_BACKEND, MODE_FULL, MODE_LIFT_ONLY):
+            files.append(constants_path)
 
     return files
 

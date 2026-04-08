@@ -810,7 +810,7 @@ public:
         // Use fdeep to run TunaNetND inference
         const int dim                = problem.Is3d() ? 3 : 2;
         const std::string model_path = ModelNDPath(device_name, dim);
-        const auto model             = fdeep::load_model(model_path);
+        const auto model             = fdeep::load_model(model_path, true, fdeep::dev_null_logger);
         MIOPEN_LOG_I2("TunaNetNDModel: Loaded fdeep model from " << model_path << ".");
 
         // Convert features to fdeep tensor

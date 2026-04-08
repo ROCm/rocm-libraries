@@ -1293,6 +1293,26 @@ TEST_P(TestGraphSerializationRoundTrip, PassByValueTensor)
     roundTripAndCompare(graph);
 }
 
+TEST_P(TestGraphSerializationRoundTrip, PassByValueTensorInt64)
+{
+    Graph graph;
+    graph.set_name("pass_by_value_int64_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+
+    // Create a scalar pass-by-value INT64 tensor (e.g., for SDPA seed/offset)
+    auto seed = std::make_shared<TensorAttributes>(int64_t{42});
+    seed->set_uid(2);
+
+    // Scale x by seed using MUL
+    PointwiseAttributes mulAttrs;
+    mulAttrs.set_mode(PointwiseMode::MUL);
+    graph.pointwise(x, seed, mulAttrs);
+
+    roundTripAndCompare(graph);
+}
+
 TEST_P(TestGraphSerializationRoundTrip, TensorLike)
 {
     Graph graph;
@@ -1648,10 +1668,10 @@ TEST_P(TestGraphSerializationRoundTrip, RMSNormNodeWithBias)
     roundTripAndCompare(graph);
 }
 
-TEST_P(TestGraphSerializationRoundTrip, SdpaFpropNode)
+TEST_P(TestGraphSerializationRoundTrip, SdpaFwdNode)
 {
     Graph graph;
-    graph.set_name("sdpa_fprop_test");
+    graph.set_name("sdpa_fwd_test");
     graph.set_compute_data_type(DataType::FLOAT);
     graph.set_io_data_type(DataType::HALF);
 
