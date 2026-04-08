@@ -3,20 +3,20 @@
 
 #pragma once
 
-/// \file ck_grouped_conv_error.hpp
-/// Error infrastructure for the CK grouped convolution implementation library.
+/// \file ck_impl_error.hpp
+/// Error infrastructure for the CK implementation library.
 ///
 /// This header is used by the ck_impl files (CK library side) and provides:
-/// - CKGrpConvException: typed exception carrying a status code
-/// - CKGRPCONV_THROW_IF_* macros: throw helpers for input validation
-/// - CKGrpConvLastError: thread-local last-error string storage
-/// - ckgrpconv_try_catch(): exception-safe C-API boundary wrapper
-/// - toString(ckgrpconv_status_t): diagnostic string helper
+/// - CkImplException: typed exception carrying a status code
+/// - CK_IMPL_THROW_IF_* macros: throw helpers for input validation
+/// - CkImplLastError: thread-local last-error string storage
+/// - ck_impl_try_catch(): exception-safe C-API boundary wrapper
+/// - toString(ck_impl_status_t): diagnostic string helper
 ///
 /// Follows the same patterns as hipDNN's PluginException.hpp,
 /// PluginLastErrorManager.hpp, PluginHelpers.hpp, and PluginDataTypeHelpers.hpp.
 
-#include <miopen/solver/ck_grouped_conv_status.h>
+#include <miopen/solver/ck_impl_status.h>
 
 #include <cstring>
 #include <exception>
@@ -27,20 +27,20 @@
 // Exception class (follows HipdnnPluginException)
 // ---------------------------------------------------------------------------
 
-class CKGrpConvException : public std::exception
+class CkImplException : public std::exception
 {
 public:
-    explicit CKGrpConvException(ckgrpconv_status_t status, std::string message)
+    explicit CkImplException(ck_impl_status_t status, std::string message)
         : _status(status), _message(std::move(message))
     {
     }
 
     const char* what() const noexcept override { return _message.c_str(); }
 
-    ckgrpconv_status_t getStatus() const noexcept { return _status; }
+    ck_impl_status_t getStatus() const noexcept { return _status; }
 
 private:
-    ckgrpconv_status_t _status;
+    ck_impl_status_t _status;
     std::string _message;
 };
 
@@ -49,48 +49,48 @@ private:
 // ---------------------------------------------------------------------------
 
 // NOLINTBEGIN(bugprone-macro-parentheses) message is a string expression
-#define CKGRPCONV_THROW_IF_NULL(x, failureStatus, message)    \
+#define CK_IMPL_THROW_IF_NULL(x, failureStatus, message)    \
     do                                                        \
     {                                                         \
         if((x) == nullptr)                                    \
         {                                                     \
-            throw CKGrpConvException(failureStatus, message); \
+            throw CkImplException(failureStatus, message); \
         }                                                     \
     } while(0)
 
-#define CKGRPCONV_THROW_IF_FALSE(x, failureStatus, message)   \
+#define CK_IMPL_THROW_IF_FALSE(x, failureStatus, message)   \
     do                                                        \
     {                                                         \
         if(!(x))                                              \
         {                                                     \
-            throw CKGrpConvException(failureStatus, message); \
+            throw CkImplException(failureStatus, message); \
         }                                                     \
     } while(0)
 
-#define CKGRPCONV_THROW_IF_TRUE(x, failureStatus, message)    \
+#define CK_IMPL_THROW_IF_TRUE(x, failureStatus, message)    \
     do                                                        \
     {                                                         \
         if(x)                                                 \
         {                                                     \
-            throw CKGrpConvException(failureStatus, message); \
+            throw CkImplException(failureStatus, message); \
         }                                                     \
     } while(0)
 
-#define CKGRPCONV_THROW_IF_NE(x, y, failureStatus, message)   \
+#define CK_IMPL_THROW_IF_NE(x, y, failureStatus, message)   \
     do                                                        \
     {                                                         \
         if((x) != (y))                                        \
         {                                                     \
-            throw CKGrpConvException(failureStatus, message); \
+            throw CkImplException(failureStatus, message); \
         }                                                     \
     } while(0)
 
-#define CKGRPCONV_THROW_IF_EQ(x, y, failureStatus, message)   \
+#define CK_IMPL_THROW_IF_EQ(x, y, failureStatus, message)   \
     do                                                        \
     {                                                         \
         if((x) == (y))                                        \
         {                                                     \
-            throw CKGrpConvException(failureStatus, message); \
+            throw CkImplException(failureStatus, message); \
         }                                                     \
     } while(0)
 // NOLINTEND(bugprone-macro-parentheses)
@@ -99,12 +99,12 @@ private:
 // Thread-local last-error manager (follows PluginLastErrorManager)
 // ---------------------------------------------------------------------------
 
-class CKGrpConvLastError
+class CkImplLastError
 {
 public:
-    static ckgrpconv_status_t setLastError(ckgrpconv_status_t status, const char* message)
+    static ck_impl_status_t setLastError(ck_impl_status_t status, const char* message)
     {
-        if(status == CKGRPCONV_STATUS_SUCCESS)
+        if(status == CK_IMPL_STATUS_SUCCESS)
         {
             return status;
         }
@@ -112,8 +112,8 @@ public:
         auto* buf = buffer();
         if(message != nullptr)
         {
-            std::strncpy(buf, message, CKGRPCONV_ERROR_STRING_MAX_LENGTH - 1);
-            buf[CKGRPCONV_ERROR_STRING_MAX_LENGTH - 1] = '\0';
+            std::strncpy(buf, message, CK_IMPL_ERROR_STRING_MAX_LENGTH - 1);
+            buf[CK_IMPL_ERROR_STRING_MAX_LENGTH - 1] = '\0';
         }
         else
         {
@@ -123,7 +123,7 @@ public:
         return status;
     }
 
-    static ckgrpconv_status_t setLastError(ckgrpconv_status_t status, const std::string& message)
+    static ck_impl_status_t setLastError(ck_impl_status_t status, const std::string& message)
     {
         return setLastError(status, message.c_str());
     }
@@ -136,7 +136,7 @@ private:
     static char* buffer()
     {
         // NOLINTNEXTLINE
-        static thread_local char s_lastError[CKGRPCONV_ERROR_STRING_MAX_LENGTH] = {'\0'};
+        static thread_local char s_lastError[CK_IMPL_ERROR_STRING_MAX_LENGTH] = {'\0'};
         return s_lastError;
     }
 };
@@ -149,50 +149,50 @@ private:
 /// codes and storing the error message in the thread-local last-error buffer.
 ///
 /// Four catch clauses matching hipDNN's pattern:
-/// 1. CKGrpConvException — preserves the specific status code
+/// 1. CkImplException — preserves the specific status code
 /// 2. std::bad_alloc — maps to ALLOC_FAILED
 /// 3. std::exception — maps to INTERNAL_ERROR with what()
 /// 4. catch-all — maps to INTERNAL_ERROR with generic message
 template <class F>
-ckgrpconv_status_t ckgrpconv_try_catch(F f)
+ck_impl_status_t ck_impl_try_catch(F f)
 {
     try
     {
         f();
     }
-    catch(const CKGrpConvException& ex)
+    catch(const CkImplException& ex)
     {
-        return CKGrpConvLastError::setLastError(ex.getStatus(), ex.what());
+        return CkImplLastError::setLastError(ex.getStatus(), ex.what());
     }
     catch(const std::bad_alloc& ex)
     {
-        return CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_ALLOC_FAILED, ex.what());
+        return CkImplLastError::setLastError(CK_IMPL_STATUS_ALLOC_FAILED, ex.what());
     }
     catch(const std::exception& ex)
     {
-        return CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_INTERNAL_ERROR, ex.what());
+        return CkImplLastError::setLastError(CK_IMPL_STATUS_INTERNAL_ERROR, ex.what());
     }
     catch(...)
     {
-        return CKGrpConvLastError::setLastError(CKGRPCONV_STATUS_INTERNAL_ERROR,
+        return CkImplLastError::setLastError(CK_IMPL_STATUS_INTERNAL_ERROR,
                                                 "Unknown exception occurred");
     }
-    return CKGRPCONV_STATUS_SUCCESS;
+    return CK_IMPL_STATUS_SUCCESS;
 }
 
 // ---------------------------------------------------------------------------
 // toString helper (follows PluginDataTypeHelpers.hpp)
 // ---------------------------------------------------------------------------
 
-inline const char* toString(ckgrpconv_status_t status)
+inline const char* toString(ck_impl_status_t status)
 {
     switch(status)
     {
-    case CKGRPCONV_STATUS_SUCCESS: return "CKGRPCONV_STATUS_SUCCESS";
-    case CKGRPCONV_STATUS_BAD_PARAM: return "CKGRPCONV_STATUS_BAD_PARAM";
-    case CKGRPCONV_STATUS_INVALID_VALUE: return "CKGRPCONV_STATUS_INVALID_VALUE";
-    case CKGRPCONV_STATUS_INTERNAL_ERROR: return "CKGRPCONV_STATUS_INTERNAL_ERROR";
-    case CKGRPCONV_STATUS_ALLOC_FAILED: return "CKGRPCONV_STATUS_ALLOC_FAILED";
-    default: return "CKGRPCONV_STATUS_UNKNOWN";
+    case CK_IMPL_STATUS_SUCCESS: return "CK_IMPL_STATUS_SUCCESS";
+    case CK_IMPL_STATUS_BAD_PARAM: return "CK_IMPL_STATUS_BAD_PARAM";
+    case CK_IMPL_STATUS_INVALID_VALUE: return "CK_IMPL_STATUS_INVALID_VALUE";
+    case CK_IMPL_STATUS_INTERNAL_ERROR: return "CK_IMPL_STATUS_INTERNAL_ERROR";
+    case CK_IMPL_STATUS_ALLOC_FAILED: return "CK_IMPL_STATUS_ALLOC_FAILED";
+    default: return "CK_IMPL_STATUS_UNKNOWN";
     }
 }

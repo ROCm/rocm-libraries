@@ -39,7 +39,7 @@
 #include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
-#include <miopen/solver/ck_grouped_conv_lib_loader.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR)
@@ -54,7 +54,7 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
     const ProblemDescription& problem)
 {
-    const auto& loader = CKGroupedConvLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -135,7 +135,7 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
     kernel_id = "None";
     split_k   = 0; // split_k is not used in this solver, but it is required by the interface
 
-    const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -281,7 +281,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::IsValidValue() const
 bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::IsValid(
     const ProblemDescription& problem) const
 {
-    const auto& loader = CKGroupedConvLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 
@@ -373,7 +373,7 @@ bool ConvHipImplicitGemm3DGroupBwdXdlops::IsApplicable(const ExecutionContext& c
     if(problem.IsLayoutDefault() && problem.HasNonPackedTensors())
         return false;
 
-    const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return false;
 
@@ -391,7 +391,7 @@ ConvSolution ConvHipImplicitGemm3DGroupBwdXdlops::GetSolution(
     const ProblemDescription& problem,
     const PerformanceConfigHipImplicitGemm3DGroupBwdXdlops& config) const
 {
-    const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 

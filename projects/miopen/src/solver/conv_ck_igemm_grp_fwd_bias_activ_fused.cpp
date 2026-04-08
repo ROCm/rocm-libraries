@@ -34,7 +34,7 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/ck_utility_common.hpp>
 #include <miopen/solver/implicitgemm_ck_util.hpp>
-#include <miopen/solver/ck_grouped_conv_lib_loader.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_CK_IGEMM_GRP_FWD_BIAS_ACTIV)
 namespace miopen {
@@ -44,7 +44,7 @@ namespace fusion {
 void PerformanceConfigConvCKIgemmGrpFwdBiasActivFused::HeuristicInit(
     const FusionDescription& fdesc_problem)
 {
-    const auto& loader = CKGroupedConvLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
     if(!loader.IsLoaded())
         return;
 
@@ -89,7 +89,7 @@ bool PerformanceConfigConvCKIgemmGrpFwdBiasActivFused::IsValidValue() const
 bool PerformanceConfigConvCKIgemmGrpFwdBiasActivFused::IsValid(
     const FusionContext&, const FusionDescription& fdesc_problem) const
 {
-    const auto& loader = CKGroupedConvLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 
@@ -182,7 +182,7 @@ bool ConvCKIgemmGrpFwdBiasActivFused::IsApplicable(const FusionContext& ctx,
     if(!conv_problem.IsLayoutNHWC() && !conv_problem.IsLayoutDefault())
         return false;
 
-    const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return false;
 
@@ -195,7 +195,7 @@ ConvSolution ConvCKIgemmGrpFwdBiasActivFused::GetSolution(
     const FusionDescription& fdesc_problem,
     const PerformanceConfigConvCKIgemmGrpFwdBiasActivFused& config) const
 {
-    const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 

@@ -7,7 +7,7 @@
 #include <miopen/tensor.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/solvers.hpp>
-#include <miopen/solver/ck_grouped_conv_lib_loader.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
 
 using Problem = miopen::conv::ProblemDescription;
 using Config  = miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupBwdXdlops;
@@ -30,7 +30,7 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops, SearchStartsAtKernelZero)
     if(device_name.empty())
         GTEST_SKIP() << "No ROCm-capable device is detected";
 
-    const auto& loader = miopen::solver::CKGroupedConvLibLoader::Get(device_name);
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
     if(!loader.IsLoaded())
         GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
 

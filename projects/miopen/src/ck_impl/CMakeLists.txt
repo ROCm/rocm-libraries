@@ -65,7 +65,7 @@ foreach(gpu_target IN LISTS GPU_TARGETS)
     )
 
     # Mark as building the DLL for dllexport on Windows
-    target_compile_definitions(${lib_name} PRIVATE CK_GROUPED_CONV_BUILDING_DLL)
+    target_compile_definitions(${lib_name} PRIVATE CK_IMPL_BUILDING_DLL)
 
     # Per-target compile definitions
     if(gpu_target MATCHES "gfx942" OR gpu_target MATCHES "gfx950")

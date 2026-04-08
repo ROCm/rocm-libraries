@@ -6,7 +6,7 @@
 #include <miopen/config.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
-#include <miopen/solver/ck_grouped_conv_status.h>
+#include <miopen/solver/ck_impl_status.h>
 
 #include <memory>
 #include <mutex>
@@ -61,11 +61,11 @@ inline std::string GetCurrentDeviceName()
 #endif
 }
 
-class CKGroupedConvLibLoader
+class CkImplLibLoader
 {
 public:
     /// Thread-safe accessor returning a cached per-device singleton.
-    MIOPEN_INTERNALS_EXPORT static const CKGroupedConvLibLoader&
+    MIOPEN_INTERNALS_EXPORT static const CkImplLibLoader&
     Get(const std::string& device_name);
 
     MIOPEN_INTERNALS_EXPORT bool IsLoaded() const { return loaded_; }
@@ -111,13 +111,13 @@ public:
     MIOPEN_INTERNALS_EXPORT std::vector<std::string>
     GetAllKernelTypeStrings(CKSolverType solver) const;
 
-    ~CKGroupedConvLibLoader();
+    ~CkImplLibLoader();
 
-    CKGroupedConvLibLoader(const CKGroupedConvLibLoader&)            = delete;
-    CKGroupedConvLibLoader& operator=(const CKGroupedConvLibLoader&) = delete;
+    CkImplLibLoader(const CkImplLibLoader&)            = delete;
+    CkImplLibLoader& operator=(const CkImplLibLoader&) = delete;
 
 private:
-    explicit CKGroupedConvLibLoader(const std::string& device_name);
+    explicit CkImplLibLoader(const std::string& device_name);
 
     void OpenRuntimeLibraryForDevice(const std::string& device_name);
     bool LoadSymbols();
@@ -130,7 +130,7 @@ private:
 
     // Singleton cache
     static std::mutex& CacheMutex();
-    static std::unordered_map<std::string, std::unique_ptr<CKGroupedConvLibLoader>>& Cache();
+    static std::unordered_map<std::string, std::unique_ptr<CkImplLibLoader>>& Cache();
 
     void* lib_handle_ = nullptr;
     bool loaded_      = false;
@@ -140,29 +140,29 @@ private:
 
     using GetApiVersionFn = int (*)();
 
-    using KernelListSizeFn = ckgrpconv_status_t (*)(const ::CKKernelListHandle*, size_t*);
-    using KernelListGetFn  = ckgrpconv_status_t (*)(const ::CKKernelListHandle*,
+    using KernelListSizeFn = ck_impl_status_t (*)(const ::CKKernelListHandle*, size_t*);
+    using KernelListGetFn  = ck_impl_status_t (*)(const ::CKKernelListHandle*,
                                                    size_t,
                                                    const char**);
     using KernelListFreeFn = void (*)(::CKKernelListHandle*);
 
     using SolutionFreeFn = void (*)(ConvSolution*);
 
-    using FillValidKernelsFn = ckgrpconv_status_t (*)(const miopen::conv::ProblemDescription*,
+    using FillValidKernelsFn = ck_impl_status_t (*)(const miopen::conv::ProblemDescription*,
                                                       miopenDataType_t,
                                                       bool,
                                                       ::CKKernelListHandle**);
-    using IsApplicableFn     = ckgrpconv_status_t (*)(const miopen::conv::ProblemDescription*,
+    using IsApplicableFn     = ck_impl_status_t (*)(const miopen::conv::ProblemDescription*,
                                                   miopenDataType_t,
                                                   bool,
                                                   bool*);
-    using IsArgsSupportedFn  = ckgrpconv_status_t (*)(
+    using IsArgsSupportedFn  = ck_impl_status_t (*)(
         const miopen::conv::ProblemDescription*, const char*, miopenDataType_t, bool, bool*);
-    using GetWorkspaceSizeFn = ckgrpconv_status_t (*)(const miopen::conv::ProblemDescription*,
+    using GetWorkspaceSizeFn = ck_impl_status_t (*)(const miopen::conv::ProblemDescription*,
                                                       miopenDataType_t,
                                                       bool,
                                                       size_t*);
-    using GetSolutionFn      = ckgrpconv_status_t (*)(const ExecutionContext*,
+    using GetSolutionFn      = ck_impl_status_t (*)(const ExecutionContext*,
                                                  const miopen::conv::ProblemDescription*,
                                                  const char*,
                                                  bool,
@@ -180,7 +180,7 @@ private:
     using GetLastErrorStringFn                     = void (*)(const char**);
     GetLastErrorStringFn get_last_error_string_fn_ = nullptr;
 
-    using GetAllKernelTypeStringsFn = ckgrpconv_status_t (*)(::CKKernelListHandle**);
+    using GetAllKernelTypeStringsFn = ck_impl_status_t (*)(::CKKernelListHandle**);
 
     struct SolverFns
     {
@@ -195,16 +195,16 @@ private:
     SolverFns solver_fns_[static_cast<int>(CKSolverType::Count)];
 
     // Check status code and throw on failure, including last-error context.
-    void CheckStatus(ckgrpconv_status_t status, const char* operation) const;
+    void CheckStatus(ck_impl_status_t status, const char* operation) const;
 
     // Helper: check status and extract kernel list from handle
-    std::vector<std::string> ExtractKernelList(ckgrpconv_status_t status,
+    std::vector<std::string> ExtractKernelList(ck_impl_status_t status,
                                                ::CKKernelListHandle* handle,
                                                const char* operation) const;
 
     // Helper: check status and extract ConvSolution from pointer
     ConvSolution
-    ExtractSolution(ckgrpconv_status_t status, ConvSolution* ptr, const char* operation) const;
+    ExtractSolution(ck_impl_status_t status, ConvSolution* ptr, const char* operation) const;
 };
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
