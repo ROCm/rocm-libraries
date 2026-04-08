@@ -64,9 +64,9 @@ void launchValidatorKernel(hipFunction_t function, int64_t totalElements, Valida
                                           nullptr,
                                           nullptr,
                                           config),
-                    "validateAllClose: hipModuleLaunchKernel failed");
+                    "launchValidatorKernel: hipModuleLaunchKernel failed");
 
-    throwOnHipError(hipDeviceSynchronize(), "validateAllClose: hipDeviceSynchronize failed");
+    throwOnHipError(hipDeviceSynchronize(), "launchValidatorKernel: hipDeviceSynchronize failed");
 }
 
 } // namespace detail
