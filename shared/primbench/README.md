@@ -12,6 +12,7 @@ primbench is a single-header HIP and CUDA benchmarking library.
 - GPU cache clearing
 - Batching and stream blocking
 - Detailed JSON output
+- Linux and Windows support
 
 ## Dependencies
 
@@ -36,7 +37,7 @@ These libraries allow primbench to keep the GPU within a stable temperature rang
 
 ## Example
 
-[`examples/copy_benchmark.cpp`](./examples/copy_benchmark.cpp) shows how to use primbench:
+The HIP benchmark [`examples/copy_benchmark.cpp`](./examples/copy_benchmark.cpp) demonstrates how primbench is used:
 
 ```cpp
 #include "primbench.hpp"
@@ -137,13 +138,18 @@ int main(int argc, char* argv[])
 }
 ```
 
-The HIP benchmark is compiled and run like so:
+It is compiled and run like so on Linux:
 
 ```bash
 hipcc -o copy_benchmark examples/hip/copy_benchmark.cpp -I. -lamd_smi && ./copy_benchmark
 ```
 
-And its equivalent CUDA benchmark is compiled and run like so:
+And like so in PowerShell on Windows:
+```bash
+hipcc -o copy_benchmark.exe examples/hip/copy_benchmark.cpp -I. -DPRIMBENCH_NO_MONITORING -std=c++17 -g --offload-arch=$(amdgpu-arch) ; ./copy_benchmark.exe
+```
+
+Its equivalent CUDA benchmark is compiled and run like so on Linux:
 
 ```bash
 nvcc -o copy_benchmark examples/cuda/copy_benchmark.cu -I. -lnvidia-ml && ./copy_benchmark
