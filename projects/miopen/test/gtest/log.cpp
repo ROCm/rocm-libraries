@@ -158,8 +158,16 @@ struct Conv
 
 struct CreateCBAFusionPlan
 {
-    miopenFusionPlanDescriptor_t fusePlanDesc;
+    miopenFusionPlanDescriptor_t fusePlanDesc = nullptr;
     miopen::OperatorArgs op_args;
+
+    ~CreateCBAFusionPlan()
+    {
+        if(fusePlanDesc != nullptr)
+        {
+            miopenDestroyFusionPlan(fusePlanDesc);
+        }
+    }
 
     void CBAPlan()
     {
@@ -181,8 +189,16 @@ struct CreateCBAFusionPlan
 template <typename T>
 struct CreateBNormFusionPlan
 {
-    miopenFusionPlanDescriptor_t fusePlanDesc;
+    miopenFusionPlanDescriptor_t fusePlanDesc = nullptr;
     miopen::OperatorArgs op_args;
+
+    ~CreateBNormFusionPlan()
+    {
+        if(fusePlanDesc != nullptr)
+        {
+            miopenDestroyFusionPlan(fusePlanDesc);
+        }
+    }
 
     miopen::TensorDescriptor bn_desc;
     miopen::ActivationDescriptor activ_desc;

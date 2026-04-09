@@ -1248,6 +1248,82 @@ void testing_matmul(const Arguments& arg)
     hipblasltSetColdIterationsValue(arg.cold_iters);
     hipblasltSetHotIterationsValue(arg.iters);
 
+    // integer_exact: skip gfx11 only for 16-bit A (fp16/bf16)—GPU vs CPU exact match unreliable there;
+    // f32/f64 (and TF32x1 f32 path) still run on Navi.
+    if(arg.initialization == hipblaslt_initialization::integer_exact)
+    {
+        const bool is_16bit = (tiA == HIP_R_16F || tiA == HIP_R_16BF);
+        if(hipblaslt_get_arch_major() == 11 && is_16bit)
+        {
+            hipblaslt_cout << "Skipping integer_exact on gfx11 for 16-bit float (fp16/bf16 A)"
+                           << std::endl;
+            return;
+        }
+        if(is_16bit)
+        {
+            // alpha=2: |2*dot|<=8K; beta=-2 adds 2*C. fp16 exact int ~2048 => K<=256 for both betas used
+            const int32_t k_limit
+                = (arg.alpha == 2.0f && (arg.beta == 0.0f || arg.beta == -2.0f)) ? 256 : 512;
+            const int32_t gemm_count = std::max(1, arg.grouped_gemm);
+            for(int32_t i = 0; i < gemm_count; i++)
+            {
+                if(arg.K[i] > k_limit)
+                {
+                    hipblaslt_cout << "Skipping integer_exact: 16-bit format with K=" << arg.K[i]
+                                   << " > " << k_limit << " (exact representability limit)" << std::endl;
+                    return;
+                }
+            }
+        }
+    }
+
+    // FP16 full-matrix accumulator probe (see hipblaslt_init_device fp16_accumulator_probe).
+    if(arg.initialization == hipblaslt_initialization::fp16_accumulator_probe)
+    {
+        if(tiA != HIP_R_16F || tiB != HIP_R_16F || to != HIP_R_16F || arg.d_type != HIP_R_16F
+           || arg.compute_type != HIPBLAS_COMPUTE_32F)
+        {
+            hipblaslt_cout << "Skipping fp16_accumulator_probe: requires f16 A/B/C/D and HIPBLAS_COMPUTE_32F"
+                           << std::endl;
+            return;
+        }
+        if(arg.transA != 'N' || arg.transB != 'N')
+        {
+            hipblaslt_cout << "Skipping fp16_accumulator_probe: only NN transposes supported" << std::endl;
+            return;
+        }
+        if(arg.grouped_gemm > 0)
+        {
+            hipblaslt_cout << "Skipping fp16_accumulator_probe: grouped_gemm not supported" << std::endl;
+            return;
+        }
+        if(arg.bias_vector || arg.activation_type != hipblaslt_activation_type::none || arg.use_e
+           || arg.gradient || arg.scaleA != hipblaslt_scaling_format::none
+           || arg.scaleB != hipblaslt_scaling_format::none || arg.scaleC || arg.scaleD || arg.scaleE
+           || arg.scaleAlpha_vector || arg.amaxScaleA || arg.amaxScaleB || arg.amaxD)
+        {
+            hipblaslt_cout << "Skipping fp16_accumulator_probe: requires default epilogue (no bias, "
+                              "activation, aux, or scaling)"
+                           << std::endl;
+            return;
+        }
+        if(arg.beta != 0.0f)
+        {
+            hipblaslt_cout << "Skipping fp16_accumulator_probe: requires beta == 0" << std::endl;
+            return;
+        }
+        const int32_t gemm_count_pe = std::max(1, arg.grouped_gemm);
+        for(int32_t i = 0; i < gemm_count_pe; i++)
+        {
+            if((arg.K[i] & 1) != 0)
+            {
+                hipblaslt_cout << "Skipping fp16_accumulator_probe: odd K not supported (K=" << arg.K[i]
+                               << ")" << std::endl;
+                return;
+            }
+        }
+    }
+
     // for all f8/bf8 cases including mix mode
     if((realDataTypeSize(tiA) == 1 || realDataTypeSize(tiB) == 1) && tc != HIP_R_32I)
     {
@@ -2042,11 +2118,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         realDataTypeSize(TiA),
                                         do_swizzle_a,
                                         stream));
+            // B is always stored as K×N in memory; use (K, N, ldb) not (B_row, B_col) to avoid row > lda when transB=T
             CHECK_HIP_ERROR(synchronize(hB[i],
                                         dB[i],
                                         num_batches[i],
-                                        B_row[i],
-                                        B_col[i],
+                                        K[i],
+                                        N[i],
                                         ldb[i],
                                         realDataTypeSize(TiB),
                                         do_swizzle_b,
@@ -3655,6 +3732,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                     tol[gemmIdx] = K[gemmIdx] * sum_error_tolerance_for_gfx11_type(Tc, TiA, To);
                 }
             }
+            if(arg.initialization == hipblaslt_initialization::integer_exact)
+            {
+                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+                    tol[gemmIdx] = 0;
+            }
+            else if(arg.initialization == hipblaslt_initialization::fp16_accumulator_probe)
+            {
+                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+                    tol[gemmIdx] = 1e-2;
+            }
 
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
@@ -4070,6 +4157,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     tol[gemmIdx] = K[gemmIdx] * sum_error_tolerance_for_gfx11_type(Tc, TiA, To);
                 }
+            }
+            if(arg.initialization == hipblaslt_initialization::integer_exact)
+            {
+                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+                    tol[gemmIdx] = 0;
+            }
+            else if(arg.initialization == hipblaslt_initialization::fp16_accumulator_probe)
+            {
+                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+                    tol[gemmIdx] = 1e-2;
             }
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {

@@ -4,6 +4,9 @@
 #pragma once
 
 #include <hipdnn_frontend/attributes/{{ op.frontend.effective_attributes_include }}.hpp>
+{% if op.data_fields_helper is defined and op.data_fields_helper %}
+#include <hipdnn_frontend/detail/{{ op.data_fields_helper.include }}.hpp>
+{% endif %}
 #include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
 
 namespace hipdnn_frontend::detail
@@ -41,6 +44,10 @@ inline Error {{ op.frontend.packer_function }}(
 {% endif %}
 {% endfor %}
 
+{% if op.data_fields_helper is defined and op.data_fields_helper %}
+    // Pack shared {{ op.data_fields_helper.label }} parameters
+    HIPDNN_CHECK_ERROR({{ op.data_fields_helper.pack_function }}(opDesc.get(), attributes, "{{ op.effective_error_label }}"));
+{% else %}
     // Set {{ op.packer_params_label }} parameters
 {% for df in op.data_fields %}
 {% if df.is_vector %}
@@ -103,6 +110,7 @@ inline Error {{ op.frontend.packer_function }}(
                                                  {{ op.compute_data_type_attr }},
                                                  attributes.compute_data_type,
                                                  "{{ op.effective_error_label }} compute data type"));
+{% endif %}
 {% endif %}
 {% for taf in op.tensor_array_fields %}
 

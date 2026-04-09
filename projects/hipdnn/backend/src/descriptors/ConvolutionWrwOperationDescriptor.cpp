@@ -22,25 +22,7 @@ void ConvolutionWrwOperationDescriptor::finalize()
     THROW_IF_NULL(_dwDesc,
                   HIPDNN_STATUS_BAD_PARAM,
                   "ConvolutionWrwOperationDescriptor::finalize() failed: DW tensor not set");
-    THROW_IF_TRUE(_data.pre_padding.empty(),
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionWrwOperationDescriptor::finalize() failed: pre_padding not set");
-    THROW_IF_TRUE(_data.post_padding.empty(),
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionWrwOperationDescriptor::finalize() failed: post_padding not set");
-    THROW_IF_TRUE(_data.stride.empty(),
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionWrwOperationDescriptor::finalize() failed: stride not set");
-    THROW_IF_TRUE(_data.dilation.empty(),
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionWrwOperationDescriptor::finalize() failed: dilation not set");
-    THROW_IF_TRUE(_computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionWrwOperationDescriptor::finalize() failed: compute data type not "
-                  "set");
-    THROW_IF_TRUE(_data.conv_mode == hipdnn_data_sdk::data_objects::ConvMode::UNSET,
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionWrwOperationDescriptor::finalize() failed: conv_mode not set");
+    validateConvolutionFinalize(_data, _computeDataType, "ConvolutionWrwOperationDescriptor");
 
     HipdnnBackendDescriptorImpl<ConvolutionWrwOperationDescriptor>::finalize();
 }
@@ -84,59 +66,16 @@ void ConvolutionWrwOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
                             arrayOfElements,
                             "ConvolutionWrwOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS:
-        setInt64Vector(_data.pre_padding,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS:
-        setInt64Vector(_data.post_padding,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES:
-        setInt64Vector(_data.stride,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_DILATIONS:
-        setInt64Vector(_data.dilation,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_CONV_MODE:
-        setConvMode(_data.conv_mode,
-                    attributeType,
-                    elementCount,
-                    arrayOfElements,
-                    "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_COMP_TYPE:
-        setDataType(_computeDataType,
-                    attributeType,
-                    elementCount,
-                    arrayOfElements,
-                    "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
-    case HIPDNN_ATTR_OPERATION_NAME_EXT:
-        setString(_name,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
     default:
-        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
-                              "ConvolutionWrwOperationDescriptor::setAttribute: attributeName not "
-                              "supported");
+        setConvolutionAttribute(_data,
+                                _computeDataType,
+                                _name,
+                                attributeName,
+                                attributeType,
+                                elementCount,
+                                arrayOfElements,
+                                "ConvolutionWrwOperationDescriptor::setAttribute()");
+        break;
     }
 }
 
@@ -180,74 +119,18 @@ void ConvolutionWrwOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
                             arrayOfElements,
                             "ConvolutionWrwOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS:
-        getInt64Vector(_data.pre_padding,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS:
-        getInt64Vector(_data.post_padding,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES:
-        getInt64Vector(_data.stride,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_DILATIONS:
-        getInt64Vector(_data.dilation,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_CONV_MODE:
-        getConvMode(_data.conv_mode,
-                    attributeType,
-                    requestedElementCount,
-                    elementCount,
-                    arrayOfElements,
-                    "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_COMP_TYPE:
-        getDataType(_computeDataType,
-                    attributeType,
-                    requestedElementCount,
-                    elementCount,
-                    arrayOfElements,
-                    "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
-    case HIPDNN_ATTR_OPERATION_NAME_EXT:
-        getString(_name,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
-    case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS_EXT,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
     default:
-        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
-                              "ConvolutionWrwOperationDescriptor::getAttribute: attributeName not "
-                              "supported");
+        getConvolutionAttribute(_data,
+                                _computeDataType,
+                                _name,
+                                HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS_EXT,
+                                attributeName,
+                                attributeType,
+                                requestedElementCount,
+                                elementCount,
+                                arrayOfElements,
+                                "ConvolutionWrwOperationDescriptor::getAttribute()");
+        break;
     }
 }
 
