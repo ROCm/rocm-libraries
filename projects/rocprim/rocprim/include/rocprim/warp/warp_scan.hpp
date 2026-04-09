@@ -84,6 +84,8 @@ struct select_warp_scan_impl
 /// one \p int value, result is returned using the same variable as for input. Hardware
 /// warp size is 64. Block (tile) size is 64.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/warp/example_warp_scan.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {

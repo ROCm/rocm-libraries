@@ -148,11 +148,16 @@ option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 if(WIN32)
     option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
-    if(ENABLE_CLANG_TIDY)
+else()
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+endif()
+
+if(ENABLE_CLANG_TIDY)
+    if(WIN32)
         message(WARNING "Clang-Tidy enabled on Windows - this significantly increases build time.")
     endif()
 else()
-    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+    message(WARNING "Clang-Tidy is disabled - some build issues may be missed.")
 endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL
