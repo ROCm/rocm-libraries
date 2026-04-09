@@ -456,9 +456,6 @@ struct MoeSortingKernel
     template <typename T, typename F, index_t wave_size_ = get_warp_size()>
     __device__ static constexpr T wave_reduce(T local, F reduce_f, number<wave_size_> = {})
     {
-        // constexpr int wave_size = 64;
-        // constexpr int reduce_stage = 6; // 1<<6=64
-        // clang-format off
         constexpr int reduce_stage = [](){
             if constexpr(wave_size_ == 2) return 1;
             else if constexpr(wave_size_ == 4) return 2;
@@ -1206,17 +1203,21 @@ CK_TILE_HOST_DEVICE index_t moe_sorting_mp_sem_smem_size()
 template <typename T, typename F, index_t wave_size_ = get_warp_size()>
 CK_TILE_DEVICE constexpr T moe_sorting_wave_reduce(T local, F reduce_f, number<wave_size_> = {})
 {
-    // constexpr int wave_size = 64;
-    // constexpr int reduce_stage = 6; // 1<<6=64
-    // clang-format off
-    constexpr int reduce_stage = [](){
-        if constexpr(wave_size_ == 2) return 1;
-        else if constexpr(wave_size_ == 4) return 2;
-        else if constexpr(wave_size_ == 8) return 3;
-        else if constexpr(wave_size_ == 16) return 4;
-        else if constexpr(wave_size_ == 32) return 5;
-        else if constexpr(wave_size_ == 64) return 6;
-        else return 0;
+    constexpr int reduce_stage = []() {
+        if constexpr(wave_size_ == 2)
+            return 1;
+        else if constexpr(wave_size_ == 4)
+            return 2;
+        else if constexpr(wave_size_ == 8)
+            return 3;
+        else if constexpr(wave_size_ == 16)
+            return 4;
+        else if constexpr(wave_size_ == 32)
+            return 5;
+        else if constexpr(wave_size_ == 64)
+            return 6;
+        else
+            return 0;
     }();
     // clang-format on
     T v_local = local;
