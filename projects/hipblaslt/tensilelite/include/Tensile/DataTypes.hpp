@@ -101,6 +101,9 @@ namespace TensileLite
         static void registerAllTypeInfo();
         static void registerAllTypeInfoOnce();
 
+        /// When TENSILE_USE_FP6/BF6/FP4 are off (no hip_ext_ocp.h path), register minimal DataTypeInfo for msgpack load.
+        static void registerThinOcpFpTypesWhenNoExtOcp();
+
         template <typename T>
         static void registerTypeInfo();
 
