@@ -33,6 +33,8 @@ public:
                        hipdnn_data_sdk::data_objects::ReductionMode mode)
     {
         validateInput(x, y);
+        // Validate mode is supported/set.
+        initAccumulator<ComputeDataType>(mode);
 
         const auto& xDims = x.dims();
         const auto& yDims = y.dims();
@@ -132,7 +134,7 @@ public:
 
         auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(reduceFunc, y.dims());
-        // Run on all available CPU treads
+        // Run on all available CPU threads
         parallelFunc(std::thread::hardware_concurrency());
 
         y.memory().markHostModified();

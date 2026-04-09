@@ -15,35 +15,6 @@
 namespace test_reduction_common
 {
 
-inline const char* reductionModeName(hipdnn_frontend::ReductionMode mode)
-{
-    switch(mode)
-    {
-    case hipdnn_frontend::ReductionMode::NOT_SET:
-        return "NOT_SET";
-    case hipdnn_frontend::ReductionMode::ADD:
-        return "ADD";
-    case hipdnn_frontend::ReductionMode::MUL:
-        return "MUL";
-    case hipdnn_frontend::ReductionMode::MIN:
-        return "MIN";
-    case hipdnn_frontend::ReductionMode::MAX:
-        return "MAX";
-    case hipdnn_frontend::ReductionMode::AMAX:
-        return "AMAX";
-    case hipdnn_frontend::ReductionMode::AVG:
-        return "AVG";
-    case hipdnn_frontend::ReductionMode::NORM1:
-        return "NORM1";
-    case hipdnn_frontend::ReductionMode::NORM2:
-        return "NORM2";
-    case hipdnn_frontend::ReductionMode::MUL_NO_ZEROS:
-        return "MUL_NO_ZEROS";
-    default:
-        return "UNKNOWN";
-    }
-}
-
 struct ReductionTestCase
 {
     std::vector<int64_t> xDims;
@@ -104,7 +75,7 @@ struct ReductionTestCase
         vecToStream(ss, tc.xDims);
         ss << " y:";
         vecToStream(ss, tc.yDims);
-        ss << " mode:" << reductionModeName(tc.mode);
+        ss << " mode:" << tc.mode;
         ss << " seed:" << tc.seed;
         ss << ")";
 
@@ -117,7 +88,7 @@ inline std::vector<ReductionTestCase> getReductionTestCases()
     using Mode = hipdnn_frontend::ReductionMode;
     unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
-    return {
+    std::vector<ReductionTestCase> cases = {
         // Mode coverage: each of the 9 modes with spatial reduction
         {{1, 16, 8, 8}, {1, 16, 1, 1}, Mode::ADD, seed},
         {{1, 16, 8, 8}, {1, 16, 1, 1}, Mode::MUL, seed},
@@ -129,18 +100,26 @@ inline std::vector<ReductionTestCase> getReductionTestCases()
         {{1, 16, 8, 8}, {1, 16, 1, 1}, Mode::NORM2, seed},
         {{1, 16, 8, 8}, {1, 16, 1, 1}, Mode::MUL_NO_ZEROS, seed},
 
-        // Shape coverage (ADD mode): various reduction patterns
-        // Batched, spatial reduction
-        {{4, 8, 4, 4}, {4, 8, 1, 1}, Mode::ADD, seed},
-        // Non-square spatial
-        {{2, 3, 16, 8}, {2, 3, 1, 1}, Mode::ADD, seed},
-        // Batch reduction (reduce dim 0)
-        {{4, 8, 4, 4}, {1, 8, 4, 4}, Mode::ADD, seed},
-        // Full reduction (all dims)
-        {{2, 3, 4, 4}, {1, 1, 1, 1}, Mode::ADD, seed},
-        // Single channel
-        {{1, 1, 32, 32}, {1, 1, 1, 1}, Mode::ADD, seed},
     };
+
+    // Shape coverage × {ADD, MAX}: various reduction patterns
+    const std::vector<Mode> shapeModes = {Mode::ADD, Mode::MAX};
+    const std::vector<std::pair<std::vector<int64_t>, std::vector<int64_t>>> shapes = {
+        {{4, 8, 4, 4}, {4, 8, 1, 1}}, // Batched, spatial reduction
+        {{2, 3, 16, 8}, {2, 3, 1, 1}}, // Non-square spatial
+        {{4, 8, 4, 4}, {1, 8, 4, 4}}, // Batch reduction (reduce dim 0)
+        {{2, 3, 4, 4}, {1, 1, 1, 1}}, // Full reduction (all dims)
+        {{1, 1, 32, 32}, {1, 1, 1, 1}}, // Single channel
+    };
+    for(const auto& [x, y] : shapes)
+    {
+        for(const auto& mode : shapeModes)
+        {
+            cases.emplace_back(std::vector<int64_t>(x), std::vector<int64_t>(y), mode, seed);
+        }
+    }
+
+    return cases;
 }
 
 } // namespace test_reduction_common

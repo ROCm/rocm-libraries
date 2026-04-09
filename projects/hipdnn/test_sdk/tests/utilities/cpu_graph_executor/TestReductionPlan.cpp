@@ -70,6 +70,28 @@ TEST_F(TestReductionPlan, ExecutePlan)
         cpuRefOutputValidation.allClose(directTensorBundle.yTensor, planTensorBundle.yTensor));
 }
 
+TEST_F(TestReductionPlan, NotSetModeThrows)
+{
+    const std::vector<int64_t> xDims = {2, 3, 4, 4};
+    const std::vector<int64_t> yDims = {2, 3, 1, 1};
+
+    const unsigned int seed = getGlobalTestSeed();
+    ReductionTensorBundle<float> tensorBundle(xDims, yDims, seed);
+
+    auto graphTuple = buildReductionGraph(
+        tensorBundle, DataType::FLOAT, DataType::FLOAT, hipdnn_frontend::ReductionMode::NOT_SET);
+
+    auto& graph = std::get<0>(graphTuple);
+    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    const GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+
+    const ReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> planBuilder;
+    auto plan = planBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+
+    auto variantPack = std::get<1>(graphTuple);
+    EXPECT_THROW(plan->execute(variantPack), std::invalid_argument);
+}
+
 TEST(TestReductionPlanBuilder, IsApplicable)
 {
     const std::vector<int64_t> xDims = {2, 3, 4, 4};
