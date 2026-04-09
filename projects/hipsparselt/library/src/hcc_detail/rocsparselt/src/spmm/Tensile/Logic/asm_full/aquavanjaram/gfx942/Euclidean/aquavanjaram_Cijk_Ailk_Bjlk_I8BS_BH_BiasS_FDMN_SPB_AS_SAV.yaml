@@ -900,7 +900,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM1_GSU1_MIWT1_1_PLR3_SU4_SUS256_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM1_GSU1_MIWT1_1_PLR1_SU4_SUS256_WG32_2_1
     LSCA: 32
     LSCB: 32
     LSCMetadata: 16
@@ -998,13 +998,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 4
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM1_GSU1_MIWT1_1_PLR3_SU4_SUS256_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM1_GSU1_MIWT1_1_PLR1_SU4_SUS256_WG32_2_1
     SourceSwap: true
     StaggerU: 4
     StaggerUMapping: 0
@@ -1096,7 +1096,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_GSU1_MIWT1_1_PLR3_SU4_SUS256_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_GSU1_MIWT1_1_PLR1_SU4_SUS256_WG32_2_1
     LSCA: 32
     LSCB: 32
     LSCMetadata: 16
@@ -1194,13 +1194,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 5
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_GSU1_MIWT1_1_PLR3_SU4_SUS256_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC1_AFEM8_GSU1_MIWT1_1_PLR1_SU4_SUS256_WG32_2_1
     SourceSwap: true
     StaggerU: 4
     StaggerUMapping: 0
@@ -1292,7 +1292,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM8_GSUM_MIWT1_1_PLR3_SU0_SUS0_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM8_GSUM_MIWT1_1_PLR1_SU0_SUS0_WG32_2_1
     LSCA: 32
     LSCB: 32
     LSCMetadata: 16
@@ -1390,13 +1390,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 6
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM8_GSU2_MIWT1_1_PLR3_SU0_SUS0_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM8_GSU2_MIWT1_1_PLR1_SU0_SUS0_WG32_2_1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -1684,7 +1684,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM8_GSUM_MIWT1_1_PLR3_SU4_SUS256_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM8_GSUM_MIWT1_1_PLR1_SU4_SUS256_WG32_2_1
     LSCA: 32
     LSCB: 32
     LSCMetadata: 16
@@ -1782,13 +1782,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 8
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM8_GSU2_MIWT1_1_PLR3_SU4_SUS256_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8BS_BH_BiasS_SPB_AS_SAV_MT32x32x128_MI32x32x1_SN_AFC0_AFEM8_GSU2_MIWT1_1_PLR1_SU4_SUS256_WG32_2_1
     SourceSwap: true
     StaggerU: 4
     StaggerUMapping: 0
