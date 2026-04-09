@@ -15,6 +15,7 @@
 #include <miopen/solver/gemm_common.hpp>
 
 #include <ranges>
+#include <set>
 
 namespace miopen {
 namespace solver {
@@ -189,6 +190,37 @@ size_t GemmBwd1x1_stride2::GetWorkspaceSize(const ExecutionContext& context,
 
     return 0;
 #endif
+}
+
+bool GemmBwd1x1_stride2::IsSlow(const ExecutionContext& context,
+                                const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                      = problem.GetGroupCount();
+    auto channels_per_group     = c / g;
+    auto spatial_work_per_group = s * channels_per_group;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        return false;
+    }
+    else if(is_mi)
+    {
+        // PRIMARY: Extreme low CPG detection
+        // SWPG < 400k: Moderate spatial-channel work
+        // CPG < 192: Low channels per group (critical discriminator)
+        if(spatial_work_per_group < 400000 && channels_per_group < 192)
+            return true;
+    }
+
+    return false;
 }
 
 bool GemmBwd1x1_stride2::IsApplicable(const ExecutionContext& context,
@@ -395,6 +427,37 @@ size_t GemmBwd1x1_stride1::GetWorkspaceSize(const ExecutionContext&,
     return 0;
 }
 
+bool GemmBwd1x1_stride1::IsSlow(const ExecutionContext& context,
+                                const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                      = problem.GetGroupCount();
+    auto channels_per_group     = c / g;
+    auto spatial_work_per_group = s * channels_per_group;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        return false;
+    }
+    else if(is_mi)
+    {
+        // PRIMARY: Memory-bound small problem detection
+        // SWPG < 200k: Low spatial-channel work (memory-bound)
+        // CPG < 640: Moderate channels (poor reuse)
+        if(spatial_work_per_group < 200000 && channels_per_group < 640)
+            return true;
+    }
+
+    return false;
+}
+
 bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
                                       const ProblemDescription& problem) const
 {
@@ -588,6 +651,55 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
 
     return 0;
 #endif
+}
+
+bool GemmBwdRest::IsSlow(const ExecutionContext& context, const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto b                      = problem.GetBatchSize();
+    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                      = problem.GetGroupCount();
+    auto spatial_per_batch      = s / b;
+    auto channels_per_group     = c / g;
+    auto spatial_work_per_group = s * channels_per_group;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        // GemmBwdRest - Multi-metric filtering
+        // Analysis: 51.6% terrible cases - significant filtering benefit
+        //
+        // PRIMARY: Memory-bound small problem detection
+        // SWPG < 1.6M: Low spatial-channel work
+        // CPG < 360: Low channels
+        if(spatial_work_per_group < 1600000 && channels_per_group < 360)
+            return true;
+
+        // SECONDARY: Batch fragmentation detection
+        // SPB < 0.8: Extreme batch fragmentation
+        if(spatial_per_batch < 0.8)
+            return true;
+    }
+    else if(is_mi)
+    {
+        // PRIMARY: Memory-bound small problem detection
+        // SWPG < 3M: Low spatial-channel work
+        // CPG < 112: Very low channels
+        if(spatial_work_per_group < 3000000 && channels_per_group < 112)
+            return true;
+
+        // SECONDARY: Batch fragmentation detection
+        // SPB < 40.0: Each batch item has < 40 pixels of spatial work
+        if(spatial_per_batch < 40.0)
+            return true;
+    }
+
+    return false;
 }
 
 bool GemmBwdRest::IsApplicable(const ExecutionContext& context,

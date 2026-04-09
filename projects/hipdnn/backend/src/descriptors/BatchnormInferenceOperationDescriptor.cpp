@@ -207,7 +207,7 @@ void BatchnormInferenceOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                   "BatchnormInferenceOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
-        getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE,
+        getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT,
                          attributeType,
                          requestedElementCount,
                          elementCount,

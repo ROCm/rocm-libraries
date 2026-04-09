@@ -36,9 +36,9 @@ namespace GEMMTests
         gemm.macM           = 256;
         gemm.macN           = 256;
         gemm.macK           = 128;
-        gemm.m              = 2 * gemm.macM;
-        gemm.n              = 2 * gemm.macN;
-        gemm.k              = 4 * gemm.macK;
+        gemm.m              = 4096;
+        gemm.n              = 4096;
+        gemm.k              = 32768;
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 

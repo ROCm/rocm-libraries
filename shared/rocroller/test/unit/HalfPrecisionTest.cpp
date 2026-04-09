@@ -569,6 +569,7 @@ namespace rocRollerTest
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
+        params->transposeMemoryAccess.set(LayoutType::None, true);
 
         auto macTileVGPR
             = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});

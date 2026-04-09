@@ -95,6 +95,10 @@
 namespace primbench
 {
 
+inline constexpr size_t KiB = 1024;
+inline constexpr size_t MiB = 1024 * KiB;
+inline constexpr size_t GiB = 1024 * MiB;
+
 // Forward declarations for the detail namespace.
 extern const size_t MiB;
 template<typename... Args>
@@ -3241,6 +3245,33 @@ public:
                           << it->second << "\"\n";
                 std::exit(EXIT_FAILURE);
             }
+
+            // When "--bytes" is specified, the number can optionally be suffixed with KiB/MiB/GiB
+            if(key == "bytes")
+            {
+                if constexpr(std::is_same_v<T, size_t>)
+                {
+                    std::string suffix;
+                    ss >> suffix;
+
+                    if(!suffix.empty())
+                    {
+                        if(suffix == "KiB")
+                            out *= KiB;
+                        else if(suffix == "MiB")
+                            out *= MiB;
+                        else if(suffix == "GiB")
+                            out *= GiB;
+                        else
+                        {
+                            std::cerr << "Error: Failed to parse --" << key << ": unknown suffix \""
+                                      << suffix << "\"\n";
+                            std::exit(EXIT_FAILURE);
+                        }
+                    }
+                }
+            }
+
             return out;
         }
     }
@@ -3432,10 +3463,6 @@ private:
 }; // class cli
 
 } // namespace detail
-
-inline constexpr size_t KiB = 1024;
-inline constexpr size_t MiB = 1024 * KiB;
-inline constexpr size_t GiB = 1024 * MiB;
 
 using json  = detail::json;
 using state = detail::state;
@@ -3800,11 +3827,13 @@ private:
         auto& cli = m_cli;
         auto& s   = m_settings;
 
-        s.size = cli.get<size_t>("size",
-                                 s.size,
-                                 "Input size. Benchmarks decide what this represents, but it is "
-                                 "commonly the number of bytes or items.");
-        if(s.size == 0)
+        s.bytes = cli.get<size_t>(
+            "bytes",
+            default_bytes,
+            "Sets the size (in bytes) of the randomly generated input array, "
+            "overriding the value provided to `primbench::executor`."
+            "Optionally supports the suffixes KiB/MiB/GiB, e.g. `--bytes 256KiB.`");
+        if(s.bytes == 0)
         {
             std::cerr << "Error: --size must be greater than 0\n";
             exit(EXIT_FAILURE);

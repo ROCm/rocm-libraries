@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -60,6 +60,9 @@ namespace traits
 /// \par Example
 /// \parblock
 /// The example below demonstrates how to implement traits for a custom floating-point type.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/example_type_traits.cpp).
+///
 /// \code{.cpp}
 /// // Your type definition
 /// struct custom_float_type
@@ -1154,15 +1157,23 @@ struct get
     /// float, double);
     constexpr bool is_build_in() const
     {
-        return std::is_same<T, bool>::value || std::is_same<T, char>::value
-               || std::is_same<T, unsigned char>::value || std::is_same<T, short>::value
-               || std::is_same<T, unsigned short>::value || std::is_same<T, int>::value
-               || std::is_same<T, unsigned int>::value || std::is_same<T, long long>::value
-               || std::is_same<T, unsigned long long>::value
-               || std::is_same<T, rocprim::int128_t>::value
-               || std::is_same<T, rocprim::uint128_t>::value
-               || std::is_same<T, rocprim::half>::value || std::is_same<T, float>::value
-               || std::is_same<T, rocprim::bfloat16>::value || std::is_same<T, double>::value;
+        return ::rocprim::detail::variadic_list<
+            bool,
+            char,
+            unsigned char,
+            short,
+            unsigned short,
+            int,
+            unsigned int,
+            long long,
+            unsigned long long,
+            float,
+            double,
+            rocprim::int128_t,
+            rocprim::uint128_t,
+            rocprim::half,
+            rocprim::bfloat16,
+            __hip_bfloat16>::any([](auto t) { return std::is_same_v<decltype(t), T>; });
     }
 
     /// \brief If `T` is fundamental type, then returns `false`.
@@ -1270,6 +1281,24 @@ struct traits::define<double>
 template<>
 struct traits::define<rocprim::bfloat16>
 {
+    /// \brief Trait `is_arithmetic` for this type
+    using is_arithmetic = traits::is_arithmetic::values<true>;
+    /// \brief Trait `number_format` for this type
+    using number_format
+        = traits::number_format::values<traits::number_format::kind::floating_point_type>;
+    /// \brief Trait `float_bit_mask` for this type
+    using float_bit_mask = traits::float_bit_mask::values<uint16_t, 0x8000, 0x7F80, 0x007F>;
+};
+
+/// \brief This is the definition of traits of `__hip_bfloat16`
+/// HIP arithmetic type
+template<>
+struct traits::define<__hip_bfloat16>
+{
+    // Note: __hip_bfloat16 is included from <hip/hip_bf16.h> whilst rocprim::bfloat16
+    // (hip_bfloat16) is included from <hip/hip_bfloat16.h>. These two types are
+    // distinctly different!
+
     /// \brief Trait `is_arithmetic` for this type
     using is_arithmetic = traits::is_arithmetic::values<true>;
     /// \brief Trait `number_format` for this type

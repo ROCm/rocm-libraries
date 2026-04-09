@@ -164,10 +164,10 @@ typedef enum
      */
 
     /** @brief Type of the knob */
-    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT = 500,
+    HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE = 500,
 
     /** @brief Selected value for the knob */
-    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT = 501,
+    HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE = 501,
 
     /** @} */
 
@@ -247,45 +247,45 @@ typedef enum
      */
 
     /** @brief Type identifier of the knob */
-    HIPDNN_ATTR_KNOB_INFO_TYPE_EXT = 900,
+    HIPDNN_ATTR_KNOB_INFO_TYPE = 900,
 
     /** @brief Maximum allowed value for the knob */
-    HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT = 901,
+    HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE = 901,
 
     /** @brief Minimum allowed value for the knob */
-    HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT = 902,
+    HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE = 902,
 
     /** @brief Step size for valid knob values */
-    HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT = 903,
+    HIPDNN_ATTR_KNOB_INFO_STRIDE = 903,
 
     /** @brief Human-readable description of the knob */
-    HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT = 904,
+    HIPDNN_ATTR_KNOB_INFO_DESCRIPTION = 904,
 
     /** @brief Default value for the knob (INT64, DOUBLE, or CHAR) */
-    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT = 905,
+    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE = 905,
 
     /** @brief Whether this knob is deprecated */
-    HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT = 906,
+    HIPDNN_ATTR_KNOB_INFO_DEPRECATED = 906,
 
     /** @brief Explicit list of valid integer values (INT64 array) */
-    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT = 907,
+    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT = 907,
 
     /** @brief Explicit list of valid string values (CHAR, flat null-separated buffer) */
-    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT = 908,
+    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING = 908,
 
     /** @brief Maximum string length for string knobs (INT32) */
-    HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT = 909,
+    HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH = 909,
 
     /**
      * @brief Type discriminator for the default value attribute (read-only, INT64)
      *
      * Returns the hipdnnBackendAttributeType_t value that should be used when
-     * calling getAttribute() for HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT.
+     * calling getAttribute() for HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE.
      * Possible values: HIPDNN_TYPE_INT64, HIPDNN_TYPE_DOUBLE, HIPDNN_TYPE_CHAR.
      * This eliminates the need to probe multiple types to discover the default
      * value type after reading a KnobDescriptor.
      */
-    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT = 910,
+    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE = 910,
 
     /** @} */
 
@@ -314,7 +314,7 @@ typedef enum
     HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE = 1005,
 
     /** @brief Target SM count for this engine */
-    HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET = 1006,
+    HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT = 1006,
 
     /** @brief Device properties for this engine */
     HIPDNN_ATTR_ENGINE_DEVICEPROP = 1007,
@@ -377,7 +377,7 @@ typedef enum
     HIPDNN_ATTR_TENSOR_VALUE_EXT = 1306,
 
     /** @brief Read-only: whether a pass-by-value scalar is set on this tensor (extension) */
-    HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT = 1307,
+    HIPDNN_ATTR_TENSOR_IS_BY_VALUE = 1307,
 
     /** @} */
 
@@ -432,30 +432,30 @@ typedef enum
      */
 
     /** @brief Input tensor for backward filter convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X = 1600,
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X = 1600,
 
     /** @brief Output gradient tensor for backward filter convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY = 1601,
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY = 1601,
 
     /** @brief Weight gradient tensor for backward filter convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW = 1602,
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW = 1602,
 
     /** @} */
 
     /**
      * @name Convolution Backward Data Operation Attributes (1700-1799)
-     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR
+     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR
      * @{
      */
 
     /** @brief Output gradient tensor for backward data convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY = 1700,
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY = 1700,
 
     /** @brief Weight tensor for backward data convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W = 1701,
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W = 1701,
 
     /** @brief Input gradient tensor for backward data convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX = 1702,
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX = 1702,
 
     /** @} */
 
@@ -651,161 +651,161 @@ typedef enum
     /** @brief Compute data type for rmsnorm.
      *  Note: intentionally omits OPERATION_ prefix to match the BatchNorm
      *  inference convention (HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT). */
-    HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT = 2407,
+    HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT = 2407,
 
     /** @} */
 
     /**
      * @name Matmul Operation Attributes (2500-2599)
-     * Attributes for HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT
+     * Attributes for HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR
      * @{
      */
 
     /** @brief Left input matrix tensor (A) for matmul */
-    HIPDNN_ATTR_OPERATION_MATMUL_A_EXT = 2500,
+    HIPDNN_ATTR_OPERATION_MATMUL_ADESC = 2500,
 
     /** @brief Right input matrix tensor (B) for matmul */
-    HIPDNN_ATTR_OPERATION_MATMUL_B_EXT = 2501,
+    HIPDNN_ATTR_OPERATION_MATMUL_BDESC = 2501,
 
     /** @brief Output matrix tensor (C) for matmul */
-    HIPDNN_ATTR_OPERATION_MATMUL_C_EXT = 2502,
+    HIPDNN_ATTR_OPERATION_MATMUL_CDESC = 2502,
 
     /** @brief Compute data type for matmul */
-    HIPDNN_ATTR_MATMUL_MATH_PREC_EXT = 2503,
+    HIPDNN_ATTR_MATMUL_COMP_TYPE = 2503,
 
     /** @} */
 
     /**
      * @name SDPA Forward Propagation Operation Attributes (2600-2699)
-     * Attributes for HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT
+     * Attributes for HIPDNN_BACKEND_OPERATION_SDPA_FWD_DESCRIPTOR
      * @{
      */
 
     /** @brief Q (query) tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT = 2600,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_QDESC = 2600,
 
     /** @brief K (key) tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT = 2601,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_KDESC = 2601,
 
     /** @brief V (value) tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT = 2602,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_VDESC = 2602,
 
     /** @brief O (output) tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT = 2603,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_ODESC = 2603,
 
     /** @brief Attention mask tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT = 2604,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_ATTN_MASK_EXT = 2604,
 
     /** @brief Scale tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT = 2605,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_SCALEDESC = 2605,
 
     /** @brief Sequence length Q tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_Q_EXT = 2606,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_SEQ_LEN_QDESC = 2606,
 
     /** @brief Sequence length KV tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_KV_EXT = 2607,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_SEQ_LEN_KVDESC = 2607,
 
     /** @brief Seed tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT = 2608,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_SEED_EXT = 2608,
 
     /** @brief Offset tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_OFFSET_EXT = 2609,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_OFFSET_EXT = 2609,
 
     /** @brief Dropout mask tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_MASK_EXT = 2610,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_DROPOUT_MASK_EXT = 2610,
 
     /** @brief Dropout scale tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_SCALE_EXT = 2611,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_DROPOUT_SCALE_EXT = 2611,
 
     /** @brief Page table K tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_K_EXT = 2612,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_PAGE_TABLE_KDESC = 2612,
 
     /** @brief Page table V tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_V_EXT = 2613,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_PAGE_TABLE_VDESC = 2613,
 
     /** @brief Block mask tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_BLOCK_MASK_EXT = 2614,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_BLOCK_MASK_DESC = 2614,
 
     /** @brief Sink token tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SINK_TOKEN_EXT = 2615,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_SINK_TOKEN_EXT = 2615,
 
     /** @brief Descale Q tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_Q_EXT = 2616,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_DESCALE_Q_EXT = 2616,
 
     /** @brief Descale K tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_K_EXT = 2617,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_DESCALE_K_EXT = 2617,
 
     /** @brief Descale V tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_V_EXT = 2618,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_DESCALE_V_EXT = 2618,
 
     /** @brief Descale S tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_S_EXT = 2619,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_DESCALE_S_EXT = 2619,
 
     /** @brief Scale S tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_S_EXT = 2620,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_SCALE_S_EXT = 2620,
 
     /** @brief Scale O tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_O_EXT = 2621,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_SCALE_O_EXT = 2621,
 
     /** @brief Stats output tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT = 2622,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_STATSDESC = 2622,
 
     /** @brief Max output tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT = 2623,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_MAX_EXT = 2623,
 
     /** @brief Sum exp output tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SUM_EXP_EXT = 2624,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_SUM_EXP_EXT = 2624,
 
     /** @brief RNG dump output tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_RNG_DUMP_EXT = 2625,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_RNG_DUMP_EXT = 2625,
 
     /** @brief Amax S output tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT = 2626,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_AMAX_S_EXT = 2626,
 
     /** @brief Amax O output tensor for SDPA forward */
-    HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT = 2627,
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_AMAX_O_EXT = 2627,
 
     /** @brief Whether to generate statistics (bool) */
-    HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT = 2628,
+    HIPDNN_ATTR_SDPA_FWD_GENERATE_STATS_EXT = 2628,
 
     /** @brief Whether to use ALiBi mask (bool) */
-    HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT = 2629,
+    HIPDNN_ATTR_SDPA_FWD_ALIBI_MASK_EXT = 2629,
 
     /** @brief Whether to use padding mask (bool) */
-    HIPDNN_ATTR_SDPA_FPROP_PADDING_MASK_EXT = 2630,
+    HIPDNN_ATTR_SDPA_FWD_PADDING_MASK_EXT = 2630,
 
     /** @brief Whether to use causal mask (bool, deprecated) */
-    HIPDNN_ATTR_SDPA_FPROP_CAUSAL_MASK_EXT = 2631,
+    HIPDNN_ATTR_SDPA_FWD_CAUSAL_MASK_EXT = 2631,
 
     /** @brief Whether to use causal mask bottom-right (bool, deprecated) */
-    HIPDNN_ATTR_SDPA_FPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT = 2632,
+    HIPDNN_ATTR_SDPA_FWD_CAUSAL_MASK_BOTTOM_RIGHT_EXT = 2632,
 
     /** @brief Dropout probability (float) */
-    HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT = 2633,
+    HIPDNN_ATTR_SDPA_FWD_DROPOUT_PROBABILITY_EXT = 2633,
 
     /** @brief Attention scale value (float) */
-    HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT = 2634,
+    HIPDNN_ATTR_SDPA_FWD_ATTN_SCALE_VALUE_EXT = 2634,
 
     /** @brief Left bound for sliding window (int64) */
-    HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT = 2635,
+    HIPDNN_ATTR_SDPA_FWD_LEFT_BOUND_EXT = 2635,
 
     /** @brief Right bound for sliding window (int64) */
-    HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT = 2636,
+    HIPDNN_ATTR_SDPA_FWD_RIGHT_BOUND_EXT = 2636,
 
     /** @brief Maximum sequence length KV (int32_t) */
-    HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT = 2637,
+    HIPDNN_ATTR_SDPA_FWD_MAX_SEQ_LEN_KV_EXT = 2637,
 
     /** @brief Diagonal alignment mode (hipdnnDiagonalAlignment_t) */
-    HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT = 2638,
+    HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT = 2638,
 
     /** @brief MMA core mode (hipdnnDataType_t) */
-    HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT = 2639,
+    HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT = 2639,
 
     /** @brief Attention implementation mode (hipdnnAttentionImplementation_t) */
-    HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT = 2640,
+    HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT = 2640,
 
     /** @brief Compute data type for SDPA forward */
-    HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT = 2641,
+    HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT = 2641,
 
     /** @} */
 
@@ -840,7 +840,7 @@ typedef enum
     HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT = 2707,
 
     /** @brief Math precision (compute data type) for layernorm */
-    HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT = 2708,
+    HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT = 2708,
 
     /** @brief Number of normalized dimensions for layernorm */
     HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT = 2709,
@@ -848,21 +848,21 @@ typedef enum
 
     /**
      * @name Block Scale Quantize Operation Attributes (2800-2899)
-     * Attributes for HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT
+     * Attributes for HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR
      * @{
      */
 
     /** @brief Input tensor (X) for block scale quantize */
-    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT = 2800,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_XDESC = 2800,
 
     /** @brief Output tensor (Y) for block scale quantize */
-    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT = 2801,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_YDESC = 2801,
 
     /** @brief Scale tensor for block scale quantize */
-    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT = 2802,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_DESC = 2802,
 
     /** @brief Block size parameter for block scale quantize */
-    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT = 2803,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE = 2803,
 
     /** @brief Axis parameter for block scale quantize (optional) */
     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT = 2804,
@@ -871,33 +871,33 @@ typedef enum
     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT = 2805,
 
     /** @brief Math precision for block scale quantize */
-    HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT = 2806,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_MATH_PREC = 2806,
 
     /** @} */
 
     /**
      * @name BlockScaleDequantize Operation Attributes (2807-2899)
-     * Attributes for HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT
+     * Attributes for HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR
      * @{
      */
 
     /** @brief Input tensor for block scale dequantize */
-    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT = 2807,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_XDESC = 2807,
 
     /** @brief Scale tensor for block scale dequantize */
-    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_EXT = 2808,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_DESC = 2808,
 
     /** @brief Output tensor for block scale dequantize */
-    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_Y_EXT = 2809,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_YDESC = 2809,
 
     /** @brief Block sizes for each dimension */
-    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT = 2810,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE = 2810,
 
     /** @brief Whether scale is negative */
-    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT = 2811,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_NEG_SCALE = 2811,
 
     /** @brief Math precision for block scale dequantize */
-    HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT = 2812,
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_MATH_PREC = 2812,
 
     /** @} */
 
@@ -944,7 +944,7 @@ typedef enum
     HIPDNN_ATTR_OPERATION_BATCHNORM_NEXT_RUNNING_VARIANCE_EXT = 2911,
 
     /** @brief Math precision (compute data type) for batchnorm training forward */
-    HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT = 2912,
+    HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT = 2912,
 
     /** @brief Peer statistics tensor array for multi-GPU batchnorm training forward */
     HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT = 2913,
@@ -976,96 +976,96 @@ typedef enum
 
     /**
      * @name SDPA Backward Propagation Operation Attributes (3100-3199)
-     * Attributes for HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT
+     * Attributes for HIPDNN_BACKEND_OPERATION_SDPA_BWD_DESCRIPTOR_EXT
      * @{
      */
 
     /** @brief Q (query) tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_Q_EXT = 3100,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT = 3100,
 
     /** @brief K (key) tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_K_EXT = 3101,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_K_EXT = 3101,
 
     /** @brief V (value) tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_V_EXT = 3102,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_V_EXT = 3102,
 
     /** @brief O (output) tensor from forward pass for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_O_EXT = 3103,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_O_EXT = 3103,
 
     /** @brief dO (output gradient) tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DO_EXT = 3104,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_DO_EXT = 3104,
 
     /** @brief Stats tensor from forward pass for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_STATS_EXT = 3105,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_STATS_EXT = 3105,
 
     /** @brief dQ (query gradient) output tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DQ_EXT = 3106,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_DQ_EXT = 3106,
 
     /** @brief dK (key gradient) output tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DK_EXT = 3107,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_DK_EXT = 3107,
 
     /** @brief dV (value gradient) output tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DV_EXT = 3108,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_DV_EXT = 3108,
 
     /** @brief Scale tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SCALE_EXT = 3109,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_SCALE_EXT = 3109,
 
     /** @brief Attention mask tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_ATTN_MASK_EXT = 3110,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_ATTN_MASK_EXT = 3110,
 
     /** @brief Sequence length Q tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_Q_EXT = 3111,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_SEQ_LEN_Q_EXT = 3111,
 
     /** @brief Sequence length KV tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_KV_EXT = 3112,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_SEQ_LEN_KV_EXT = 3112,
 
     /** @brief Seed tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEED_EXT = 3113,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_SEED_EXT = 3113,
 
     /** @brief Offset tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_OFFSET_EXT = 3114,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_OFFSET_EXT = 3114,
 
     /** @brief Dropout mask tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_MASK_EXT = 3115,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_DROPOUT_MASK_EXT = 3115,
 
     /** @brief Dropout scale tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_EXT = 3116,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_DROPOUT_SCALE_EXT = 3116,
 
     /** @brief Dropout scale inverse tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_INV_EXT = 3117,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_DROPOUT_SCALE_INV_EXT = 3117,
 
     /** @brief dBias (gradient of attention bias) output tensor for SDPA backward */
-    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DBIAS_EXT = 3118,
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_DBIAS_EXT = 3118,
 
     /** @brief Whether to use ALiBi mask (bool) */
-    HIPDNN_ATTR_SDPA_BPROP_ALIBI_MASK_EXT = 3119,
+    HIPDNN_ATTR_SDPA_BWD_ALIBI_MASK_EXT = 3119,
 
     /** @brief Whether to use padding mask (bool) */
-    HIPDNN_ATTR_SDPA_BPROP_PADDING_MASK_EXT = 3120,
+    HIPDNN_ATTR_SDPA_BWD_PADDING_MASK_EXT = 3120,
 
     /** @brief Whether to use causal mask (bool, deprecated) */
-    HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_EXT = 3121,
+    HIPDNN_ATTR_SDPA_BWD_CAUSAL_MASK_EXT = 3121,
 
     /** @brief Whether to use causal mask bottom-right (bool, deprecated) */
-    HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT = 3122,
+    HIPDNN_ATTR_SDPA_BWD_CAUSAL_MASK_BOTTOM_RIGHT_EXT = 3122,
 
     /** @brief Dropout probability (float) */
-    HIPDNN_ATTR_SDPA_BPROP_DROPOUT_PROBABILITY_EXT = 3123,
+    HIPDNN_ATTR_SDPA_BWD_DROPOUT_PROBABILITY_EXT = 3123,
 
     /** @brief Attention scale value (float) */
-    HIPDNN_ATTR_SDPA_BPROP_ATTN_SCALE_VALUE_EXT = 3124,
+    HIPDNN_ATTR_SDPA_BWD_ATTN_SCALE_VALUE_EXT = 3124,
 
     /** @brief Left bound for sliding window (int64) */
-    HIPDNN_ATTR_SDPA_BPROP_LEFT_BOUND_EXT = 3125,
+    HIPDNN_ATTR_SDPA_BWD_LEFT_BOUND_EXT = 3125,
 
     /** @brief Right bound for sliding window (int64) */
-    HIPDNN_ATTR_SDPA_BPROP_RIGHT_BOUND_EXT = 3126,
+    HIPDNN_ATTR_SDPA_BWD_RIGHT_BOUND_EXT = 3126,
 
     /** @brief Diagonal alignment mode (hipdnnDiagonalAlignment_t) */
-    HIPDNN_ATTR_SDPA_BPROP_DIAGONAL_ALIGNMENT_EXT = 3127,
+    HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT = 3127,
 
     /** @brief Compute data type for SDPA backward */
-    HIPDNN_ATTR_SDPA_BPROP_MATH_PREC_EXT = 3128,
+    HIPDNN_ATTR_SDPA_BWD_COMP_TYPE_EXT = 3128,
 
     /** @} */
 
@@ -1104,7 +1104,7 @@ typedef enum
      * Used to retrieve knob information in serialized FlatBuffer format.
      * Type: HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT
      */
-    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT = 60000,
+    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE = 60000,
 
     /**
      * @brief Serialized knob choice as FlatBuffer (extension)
@@ -1112,12 +1112,12 @@ typedef enum
      * Used to set knob values in serialized FlatBuffer format.
      * Type: HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT
      */
-    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT = 60100,
+    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE = 60100,
 
     /**
      * @brief Operation type of an operation descriptor (read-only extension)
      *
-     * Returns the hipdnnOperationType_t of an operation descriptor, enabling
+     * Returns the hipdnnOperationType_ext_t of an operation descriptor, enabling
      * type-based dispatch without trial-and-error probing.
      * Type: HIPDNN_TYPE_OPERATION_TYPE_EXT
      */
