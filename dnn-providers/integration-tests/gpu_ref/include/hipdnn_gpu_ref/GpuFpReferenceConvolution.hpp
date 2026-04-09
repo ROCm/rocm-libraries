@@ -268,6 +268,117 @@ public:
         y.memory().markDeviceModified();
     }
 
+    // --- Backward weight gradient (wgrad) ---
+    // x and gradY are non-const because MigratableMemory::deviceData() triggers
+    // lazy host-to-device synchronization, which mutates internal state.
+
+    // Overload for uniform padding
+    template <class XDataType,
+              class DwDataType = XDataType,
+              class DyDataType = XDataType,
+              class ComputeDataType = double>
+    static void wgrad(hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+                      hipdnn_data_sdk::utilities::TensorBase<DwDataType>& gradW,
+                      hipdnn_data_sdk::utilities::TensorBase<DyDataType>& gradY,
+                      const std::vector<int64_t>& convStrides,
+                      const std::vector<int64_t>& dilations,
+                      const std::vector<int64_t>& padding,
+                      double alpha = 1.0,
+                      double beta = 0.0)
+    {
+        wgrad<XDataType, DwDataType, DyDataType, ComputeDataType>(
+            x, gradW, gradY, convStrides, dilations, padding, padding, alpha, beta);
+    }
+
+    template <class XDataType,
+              class DwDataType = XDataType,
+              class DyDataType = XDataType,
+              class ComputeDataType = double>
+    static void wgrad(hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+                      hipdnn_data_sdk::utilities::TensorBase<DwDataType>& gradW,
+                      hipdnn_data_sdk::utilities::TensorBase<DyDataType>& gradY,
+                      const std::vector<int64_t>& convStrides,
+                      const std::vector<int64_t>& dilations,
+                      const std::vector<int64_t>& prePadding,
+                      const std::vector<int64_t>& postPadding,
+                      double alpha = 1.0,
+                      double beta = 0.0)
+    {
+        validateInput(x, gradW, gradY, convStrides, dilations, prePadding, postPadding);
+
+        const auto nDims = x.dims().size();
+        auto defines
+            = detail::buildConvDefines<XDataType, DwDataType, DyDataType, ComputeDataType>();
+
+        auto* xPtr = x.memory().deviceData();
+        auto* dwPtr = gradW.memory().deviceData();
+        auto* dyPtr = gradY.memory().deviceData();
+
+        // Only prePadding is passed to the kernel. Post-padding is implicitly
+        // handled by the output tensor dimensions and the kernel's bounds checks.
+        if(nDims == 3)
+        {
+            launchWgrad1d(xPtr,
+                          dwPtr,
+                          dyPtr,
+                          x.dims(),
+                          gradW.dims(),
+                          gradY.dims(),
+                          x.strides(),
+                          gradW.strides(),
+                          gradY.strides(),
+                          convStrides,
+                          dilations,
+                          prePadding,
+                          defines,
+                          alpha,
+                          beta);
+        }
+        else if(nDims == 4)
+        {
+            launchWgrad2d(xPtr,
+                          dwPtr,
+                          dyPtr,
+                          x.dims(),
+                          gradW.dims(),
+                          gradY.dims(),
+                          x.strides(),
+                          gradW.strides(),
+                          gradY.strides(),
+                          convStrides,
+                          dilations,
+                          prePadding,
+                          defines,
+                          alpha,
+                          beta);
+        }
+        else if(nDims == 5)
+        {
+            launchWgrad3d(xPtr,
+                          dwPtr,
+                          dyPtr,
+                          x.dims(),
+                          gradW.dims(),
+                          gradY.dims(),
+                          x.strides(),
+                          gradW.strides(),
+                          gradY.strides(),
+                          convStrides,
+                          dilations,
+                          prePadding,
+                          defines,
+                          alpha,
+                          beta);
+        }
+        else
+        {
+            throw std::invalid_argument("Unsupported number of dimensions: "
+                                        + std::to_string(nDims));
+        }
+
+        gradW.memory().markDeviceModified();
+    }
+
 private:
     // --- Validation ---
 
@@ -449,6 +560,165 @@ private:
         args.beta = beta;
 
         auto totalElements = xDims[0] * wDims[0] * yDims[2] * yDims[3] * yDims[4];
+        detail::launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+    }
+
+    // --- 1D wgrad kernel launcher ---
+
+    static void launchWgrad1d(const void* xPtr,
+                              void* dwPtr,
+                              const void* dyPtr,
+                              const std::vector<int64_t>& xDims,
+                              const std::vector<int64_t>& dwDims,
+                              const std::vector<int64_t>& dyDims,
+                              const std::vector<int64_t>& xTensorStrides,
+                              const std::vector<int64_t>& dwTensorStrides,
+                              const std::vector<int64_t>& dyTensorStrides,
+                              const std::vector<int64_t>& convStrides,
+                              const std::vector<int64_t>& dilations,
+                              const std::vector<int64_t>& padding,
+                              const std::vector<std::string>& defines,
+                              double alpha,
+                              double beta)
+    {
+        auto& compiler = hipdnn_gpu_ref::detail::GpuRefKernelCompiler::instance();
+        auto& kernel = compiler.getOrCompile("GpuRefConvWrw.cpp", defines, "convWrwRef1d");
+
+        auto nGroups = xDims[1] / dwDims[1];
+
+        detail::ConvWrwArgs1d args{};
+        args.x = xPtr;
+        args.dw = dwPtr;
+        args.dy = dyPtr;
+        args.xStr = detail::toStrides3(xTensorStrides);
+        args.dwStr = detail::toStrides3(dwTensorStrides);
+        args.dyStr = detail::toStrides3(dyTensorStrides);
+        args.N = static_cast<long long>(xDims[0]);
+        args.C = static_cast<long long>(xDims[1]);
+        args.Wi = static_cast<long long>(xDims[2]);
+        args.K = static_cast<long long>(dwDims[0]);
+        args.Wo = static_cast<long long>(dyDims[2]);
+        args.Kw = static_cast<long long>(dwDims[2]);
+        args.strideW = static_cast<long long>(convStrides[0]);
+        args.dilW = static_cast<long long>(dilations[0]);
+        args.padW = static_cast<long long>(padding[0]);
+        args.groups = static_cast<long long>(nGroups);
+        args.alpha = alpha;
+        args.beta = beta;
+
+        auto totalElements = dwDims[0] * dwDims[1] * dwDims[2];
+        detail::launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+    }
+
+    // --- 2D wgrad kernel launcher ---
+
+    static void launchWgrad2d(const void* xPtr,
+                              void* dwPtr,
+                              const void* dyPtr,
+                              const std::vector<int64_t>& xDims,
+                              const std::vector<int64_t>& dwDims,
+                              const std::vector<int64_t>& dyDims,
+                              const std::vector<int64_t>& xTensorStrides,
+                              const std::vector<int64_t>& dwTensorStrides,
+                              const std::vector<int64_t>& dyTensorStrides,
+                              const std::vector<int64_t>& convStrides,
+                              const std::vector<int64_t>& dilations,
+                              const std::vector<int64_t>& padding,
+                              const std::vector<std::string>& defines,
+                              double alpha,
+                              double beta)
+    {
+        auto& compiler = hipdnn_gpu_ref::detail::GpuRefKernelCompiler::instance();
+        auto& kernel = compiler.getOrCompile("GpuRefConvWrw.cpp", defines, "convWrwRef2d");
+
+        auto nGroups = xDims[1] / dwDims[1];
+
+        detail::ConvWrwArgs2d args{};
+        args.x = xPtr;
+        args.dw = dwPtr;
+        args.dy = dyPtr;
+        args.xStr = detail::toStrides4(xTensorStrides);
+        args.dwStr = detail::toStrides4(dwTensorStrides);
+        args.dyStr = detail::toStrides4(dyTensorStrides);
+        args.N = static_cast<long long>(xDims[0]);
+        args.C = static_cast<long long>(xDims[1]);
+        args.Hi = static_cast<long long>(xDims[2]);
+        args.Wi = static_cast<long long>(xDims[3]);
+        args.K = static_cast<long long>(dwDims[0]);
+        args.Ho = static_cast<long long>(dyDims[2]);
+        args.Wo = static_cast<long long>(dyDims[3]);
+        args.Kh = static_cast<long long>(dwDims[2]);
+        args.Kw = static_cast<long long>(dwDims[3]);
+        args.strideH = static_cast<long long>(convStrides[0]);
+        args.strideW = static_cast<long long>(convStrides[1]);
+        args.dilH = static_cast<long long>(dilations[0]);
+        args.dilW = static_cast<long long>(dilations[1]);
+        args.padH = static_cast<long long>(padding[0]);
+        args.padW = static_cast<long long>(padding[1]);
+        args.groups = static_cast<long long>(nGroups);
+        args.alpha = alpha;
+        args.beta = beta;
+
+        auto totalElements = dwDims[0] * dwDims[1] * dwDims[2] * dwDims[3];
+        detail::launchKernel(kernel.function(), totalElements, &args, sizeof(args));
+    }
+
+    // --- 3D wgrad kernel launcher ---
+
+    static void launchWgrad3d(const void* xPtr,
+                              void* dwPtr,
+                              const void* dyPtr,
+                              const std::vector<int64_t>& xDims,
+                              const std::vector<int64_t>& dwDims,
+                              const std::vector<int64_t>& dyDims,
+                              const std::vector<int64_t>& xTensorStrides,
+                              const std::vector<int64_t>& dwTensorStrides,
+                              const std::vector<int64_t>& dyTensorStrides,
+                              const std::vector<int64_t>& convStrides,
+                              const std::vector<int64_t>& dilations,
+                              const std::vector<int64_t>& padding,
+                              const std::vector<std::string>& defines,
+                              double alpha,
+                              double beta)
+    {
+        auto& compiler = hipdnn_gpu_ref::detail::GpuRefKernelCompiler::instance();
+        auto& kernel = compiler.getOrCompile("GpuRefConvWrw.cpp", defines, "convWrwRef3d");
+
+        auto nGroups = xDims[1] / dwDims[1];
+
+        detail::ConvWrwArgs3d args{};
+        args.x = xPtr;
+        args.dw = dwPtr;
+        args.dy = dyPtr;
+        args.xStr = detail::toStrides5(xTensorStrides);
+        args.dwStr = detail::toStrides5(dwTensorStrides);
+        args.dyStr = detail::toStrides5(dyTensorStrides);
+        args.N = static_cast<long long>(xDims[0]);
+        args.C = static_cast<long long>(xDims[1]);
+        args.Di = static_cast<long long>(xDims[2]);
+        args.Hi = static_cast<long long>(xDims[3]);
+        args.Wi = static_cast<long long>(xDims[4]);
+        args.K = static_cast<long long>(dwDims[0]);
+        args.Do = static_cast<long long>(dyDims[2]);
+        args.Ho = static_cast<long long>(dyDims[3]);
+        args.Wo = static_cast<long long>(dyDims[4]);
+        args.Kd = static_cast<long long>(dwDims[2]);
+        args.Kh = static_cast<long long>(dwDims[3]);
+        args.Kw = static_cast<long long>(dwDims[4]);
+        args.strideD = static_cast<long long>(convStrides[0]);
+        args.strideH = static_cast<long long>(convStrides[1]);
+        args.strideW = static_cast<long long>(convStrides[2]);
+        args.dilD = static_cast<long long>(dilations[0]);
+        args.dilH = static_cast<long long>(dilations[1]);
+        args.dilW = static_cast<long long>(dilations[2]);
+        args.padD = static_cast<long long>(padding[0]);
+        args.padH = static_cast<long long>(padding[1]);
+        args.padW = static_cast<long long>(padding[2]);
+        args.groups = static_cast<long long>(nGroups);
+        args.alpha = alpha;
+        args.beta = beta;
+
+        auto totalElements = dwDims[0] * dwDims[1] * dwDims[2] * dwDims[3] * dwDims[4];
         detail::launchKernel(kernel.function(), totalElements, &args, sizeof(args));
     }
 };
