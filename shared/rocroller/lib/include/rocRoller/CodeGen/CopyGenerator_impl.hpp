@@ -273,12 +273,6 @@ namespace rocRoller
                 }
             }
         }
-        // Vector -> Scalar
-        else if(dest->regType() == Register::Type::Scalar
-                && src->regType() == Register::Type::Vector)
-        {
-            co_yield_(Instruction("v_readfirstlane_b32", {dest}, {src}, {}, comment));
-        }
         // Scalar <-> VCC, or Scalar -> EXEC
         else if((src->regType() == Register::Type::Scalar && (dest->isVCC() || dest->isEXEC())
                  && src->registerCount() == context->kernel()->wavefront_size() / 32)
@@ -293,6 +287,12 @@ namespace rocRoller
             {
                 co_yield_(Instruction("s_mov_b32", {dest}, {src}, {}, comment));
             }
+        }
+        // Vector -> Scalar
+        else if(dest->regType() == Register::Type::Scalar
+                && src->regType() == Register::Type::Vector)
+        {
+            co_yield_(Instruction("v_readfirstlane_b32", {dest}, {src}, {}, comment));
         }
         // Catch unhandled copy cases
         else
