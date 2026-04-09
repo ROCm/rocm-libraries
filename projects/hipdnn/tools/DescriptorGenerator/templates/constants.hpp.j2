@@ -16,10 +16,10 @@ namespace hipdnn_tests::constants
 {% for tf in op.tensor_fields %}
 {% set uid = op.test_data.tensor_uids.get(tf.name, loop.index) %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
-constexpr int64_t K_TENSOR_{{ tf.name | upper }}_UID = {{ uid }};
+constexpr int64_t {{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_UID = {{ uid }};
 {% if tc %}
-constexpr std::array<int64_t, {{ tc.dims | length }}> K_TENSOR_{{ tf.name | upper }}_DIMS = {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }};
-constexpr std::array<int64_t, {{ tc.strides | length }}> K_TENSOR_{{ tf.name | upper }}_STRIDES = {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }};
+constexpr std::array<int64_t, {{ tc.dims | length }}> {{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_DIMS = {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }};
+constexpr std::array<int64_t, {{ tc.strides | length }}> {{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_STRIDES = {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }};
 {% endif %}
 
 {% endfor %}

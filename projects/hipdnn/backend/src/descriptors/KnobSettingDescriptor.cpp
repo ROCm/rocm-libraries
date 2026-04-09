@@ -42,7 +42,7 @@ void KnobSettingDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeN
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT:
+    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE:
         setBoundedString(_knobId,
                          attributeType,
                          elementCount,
@@ -51,7 +51,7 @@ void KnobSettingDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeN
                          MAX_KNOB_ID_LENGTH,
                          1);
         break;
-    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT:
+    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE:
         setKnobValueUnion(_value,
                           attributeType,
                           elementCount,
@@ -83,7 +83,7 @@ void KnobSettingDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeN
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT:
+    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE:
         getString(_knobId,
                   attributeType,
                   requestedElementCount,
@@ -91,7 +91,7 @@ void KnobSettingDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeN
                   arrayOfElements,
                   "KnobSettingDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT:
+    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE:
         getKnobValueUnion(_value,
                           attributeType,
                           requestedElementCount,

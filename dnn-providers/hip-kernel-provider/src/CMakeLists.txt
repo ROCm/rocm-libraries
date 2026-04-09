@@ -16,7 +16,13 @@ add_library(
     engines/plans/BatchnormFwdInferencePlan.cpp
     engines/plans/BatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/BatchnormApplicabilityChecks.cpp
+    engines/plans/RMSnorm/RMSnormPlanBuilder.cpp
+    engines/plans/RMSnorm/RMSnormFwdPlan.cpp
+    engines/plans/RMSnorm/RMSnormApplicabilityChecks.cpp
 )
+if(ENABLE_ASM_SDPA_ENGINE)
+    add_subdirectory(engines/asm_sdpa_engine)
+endif()
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_BINARY_DIR}
@@ -36,6 +42,9 @@ add_clang_tidy_custom_target()
 add_library(hip_kernel_provider_private STATIC $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_include_directories(hip_kernel_provider_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hip_kernel_provider_private PUBLIC hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
+if(ENABLE_ASM_SDPA_ENGINE)
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
+endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
