@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "../pooling_common.hpp"
+#include "pooling_common.hpp"
 
 namespace {
 
@@ -108,7 +108,7 @@ void RunPooling3dTestWithIndexType(const PoolingTestCase& test_case)
 
     // Run forward pooling
     std::vector<Index> indices;
-    verify_forward_pooling<3> forward_verifier;
+    pooling_gtest::verify_forward_pooling<3> forward_verifier;
     auto forward_result     = forward_verifier.cpu(input, filter, indices);
     auto forward_gpu_result = forward_verifier.gpu(input, filter, indices);
 
@@ -133,7 +133,7 @@ void RunPooling3dTestWithIndexType(const PoolingTestCase& test_case)
         GTEST_FAIL() << "Indices not populated for max pooling backward";
     }
 
-    verify_backward_pooling<3> backward_verifier;
+    pooling_gtest::verify_backward_pooling<3> backward_verifier;
     auto backward_result = backward_verifier.cpu(
         input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
     auto backward_gpu_result = backward_verifier.gpu(
