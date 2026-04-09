@@ -218,10 +218,6 @@ struct BlockReduce2dSync
 
         constexpr index_t idim_p_lane = NDimP - 1;
 
-        // const auto ps_idx = make_array<index_t>(get_warp_id(), get_lane_id());
-        // const auto rs_idx =
-        //     y_tensor.get_tile_distribution().calculate_rs_index_from_ps_index(ps_idx);
-
         constexpr index_t thread_buf_size = YDistributedTensor_::get_thread_buffer_size();
 
         // loop over thread data
