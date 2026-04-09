@@ -2588,19 +2588,50 @@ namespace TensileLite
             return result;
         }
 
+        // Swizzled (pre-shuffled) tensors are padded to tile boundaries,
+        // so their allocation size differs from the unswizzled descriptor.
+        // This must match the size used when allocating rotating buffer copies
+        // (see the swizzleTensor branch in the pristine allocation loop),
+        // otherwise getRotatingSize underestimates and the budget check fails.
+        size_t getSwizzledTensorAllocatedBytes(const TensorDescriptor& desc)
+        {
+            size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
+            calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
+            auto numElements = getSwizzledTensorNumAllocatedElements(desc, MiM_N, MiK, PackK);
+            return multiplyElementSize(numElements, rocisa::GetElementSize(desc.dataType()));
+        }
+
         size_t getRotatingSize(ContractionProblemGemm const& problem,
                                ContractionInputs const&      inputs)
         {
             size_t rotatingSize = 0;
             if(inputs.a != nullptr)
             {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::A].totalAllocatedBytes();
+                auto unswizzled = problem.tensors()[ContractionProblemGemm::TENSOR::A].totalAllocatedBytes();
+                if(problem.swizzleTensorA())
+                {
+                    auto swizzled = getSwizzledTensorAllocatedBytes(
+                        problem.tensors()[ContractionProblemGemm::TENSOR::A]);
+                    std::cout << "  [debug] A: unswizzled=" << unswizzled
+                              << " swizzled=" << swizzled << std::endl;
+                    rotatingSize += swizzled;
+                }
+                else
+                    rotatingSize += unswizzled;
             }
             if(inputs.b != nullptr)
             {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::B].totalAllocatedBytes();
+                auto unswizzled = problem.tensors()[ContractionProblemGemm::TENSOR::B].totalAllocatedBytes();
+                if(problem.swizzleTensorB())
+                {
+                    auto swizzled = getSwizzledTensorAllocatedBytes(
+                        problem.tensors()[ContractionProblemGemm::TENSOR::B]);
+                    std::cout << "  [debug] B: unswizzled=" << unswizzled
+                              << " swizzled=" << swizzled << std::endl;
+                    rotatingSize += swizzled;
+                }
+                else
+                    rotatingSize += unswizzled;
             }
             if(inputs.c != nullptr && problem.beta())
             {
