@@ -68,6 +68,7 @@ inline __device__ __host__ hip_bfloat16 negate(hip_bfloat16 x)
 #endif
 }
 
+#if defined(HIPBLASLT_USE_FP4)
 template <>
 inline __device__ __host__ hipblaslt_f4x2 negate(hipblaslt_f4x2 x)
 {
@@ -75,6 +76,7 @@ inline __device__ __host__ hipblaslt_f4x2 negate(hipblaslt_f4x2 x)
     x.__x ^= 0x80; // right fp4 element
     return x;
 }
+#endif
 
 #if defined(HIPBLASLT_USE_FP6)
 template <>

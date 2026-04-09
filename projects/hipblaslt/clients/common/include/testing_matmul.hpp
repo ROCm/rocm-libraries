@@ -159,7 +159,9 @@ template<typename T, std::enable_if_t<true
                                       && (!std::is_same<hipblaslt_f6x16, T>::value)
                                       && (!std::is_same<hipblaslt_bf6x16, T>::value)
 #endif
+#if defined(HIPBLASLT_USE_FP4)
                                       && (!std::is_same<hipblaslt_f4x2, T>::value)
+#endif
                                       ,bool> = true>
 float typeToFloat(T* buf, size_t idx)
 {
@@ -171,7 +173,9 @@ template<typename T, std::enable_if_t<false
                                       || std::is_same<hipblaslt_f6x16, T>::value
                                       || std::is_same<hipblaslt_bf6x16, T>::value
 #endif
+#if defined(HIPBLASLT_USE_FP4)
                                       || std::is_same<hipblaslt_f4x2, T>::value
+#endif
                                       ,bool> = true>
 float typeToFloat(T* buf, size_t idx)
 {
@@ -243,6 +247,7 @@ std::vector<float> mx_type_to_f32(hipDataType type, hipDataType stype, HipHostBu
             throw std::runtime_error("Error type in mx_type_to_f32()");
         }
 #endif
+#if defined(HIPBLASLT_USE_FP4)
     case HIP_R_4F_E2M1_EXT:
         switch(stype)
         {
@@ -256,6 +261,7 @@ std::vector<float> mx_type_to_f32(hipDataType type, hipDataType stype, HipHostBu
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
         }
+#endif
     default:
         hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
         throw std::runtime_error("Error type in mx_type_to_f32()");
