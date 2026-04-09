@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Benchmark configuration dataclass."""
+"""Benchmark configuration dataclasses."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -118,3 +118,40 @@ class ValidationConfig:
     def enabled(self) -> bool:
         """Check if validation is enabled."""
         return self.provider != "none"
+
+
+@dataclass
+class SuiteConfig:
+    """Configuration for suite execution mode.
+
+    Controls how the suite runner iterates providers/engines and validates
+    correctness for each graph.
+
+    Attributes:
+        warmup_iters: Number of warmup iterations per provider/engine.
+        benchmark_iters: Number of benchmark iterations for timing.
+        seed: Optional random seed for reproducible inputs.
+        provider_filter: If set, only iterate this provider (per D-03).
+        engine_filter: If set, only iterate this engine ID (per D-03).
+        rtol: Relative tolerance for correctness comparison (per D-15).
+        atol: Absolute tolerance for correctness comparison (per D-15).
+        gpu_backend: GPU timer backend to use.
+        reference_provider: Reference provider name for CORR-02.
+    """
+
+    warmup_iters: int = 10
+    benchmark_iters: int = 100
+    seed: Optional[int] = None
+    provider_filter: Optional[str] = None
+    engine_filter: Optional[int] = None
+    rtol: float = 1e-5
+    atol: float = 1e-8
+    gpu_backend: str = "auto"
+    reference_provider: str = "pytorch"
+
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if self.warmup_iters < 0:
+            raise ValueError("warmup_iters must be non-negative")
+        if self.benchmark_iters <= 0:
+            raise ValueError("benchmark_iters must be positive")
