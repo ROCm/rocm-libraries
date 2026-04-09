@@ -650,7 +650,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(self.defineSgpr("tdmMXSBGroup0", 4, 4))
           module.add(self.defineSgpr("tdmMXSBGroup1", 8, 4))
 
-    if kernel["enableTDMA"] and kernel["enableTDMB"]:
+    if kernel["enableTDMA"] and kernel["enableTDMB"] and prod(kernel["MIWaveGroup"]) > 1:
       module.add(self.defineSgpr("tdmABIncs", 1))
 
       if kernel["TDMSplit"]:

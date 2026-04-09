@@ -2728,7 +2728,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.graAddresses(kernel, tensorParametersB))
 
       # workgroup SGPRs no longer needed
-      if not tdmA:
+      if not (tdmA and prod(kernel["MIWaveGroup"]) > 1):
         module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
 
       # Final offsets A(MXSA)
