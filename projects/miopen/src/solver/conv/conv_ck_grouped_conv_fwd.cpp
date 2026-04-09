@@ -541,13 +541,13 @@ ConvDepthwiseFwd2D::GetSolution(const ExecutionContext&,
         {
             MIOPEN_LOG_I("Run conv : " << conv_ptr->GetTypeString());
 
-            sol.invoker_factory = [conv_ptr = std::move(conv_ptr),
-                                   ck_args  = CKArgs{problem}](const std::vector<Kernel>&) {
-                return [conv_ptr = std::move(conv_ptr),
+            sol.invoker_factory = [conv_ptr_ = std::move(conv_ptr),
+                                   ck_args   = CKArgs{problem}](const std::vector<Kernel>&) {
+                return [conv_ptr2 = std::move(conv_ptr_),
                         ck_args](const Handle& handle, const AnyInvokeParams& primitive_params) {
                     const auto& fwd_ctx = primitive_params.CastTo<miopen::conv::DataInvokeParams>();
-                    auto invoker        = conv_ptr->MakeInvoker();
-                    auto argument       = ck_args.MakeArgument(*conv_ptr.get(),
+                    auto invoker        = conv_ptr2->MakeInvoker();
+                    auto argument       = ck_args.MakeArgument(*conv_ptr2.get(),
                                                          fwd_ctx.tensors.in,
                                                          fwd_ctx.tensors.w,
                                                          fwd_ctx.tensors.out);
