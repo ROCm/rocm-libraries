@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -259,13 +259,18 @@ template <typename T, typename I>
 inline void dprint(I size_, const T* v, const char* name_ = nullptr, I short_size_ = 20)
 {
     T* p = new T[size_];
-    hipMemcpy(p, v, sizeof(T) * size_, hipMemcpyDeviceToHost);
+    rocsparse_hipMemcpy(p, v, sizeof(T) * size_, hipMemcpyDeviceToHost);
     for(I i = 0; i < rocsparse::min(size_, short_size_); ++i)
     {
         std::cout << "" << ((name_) ? name_ : "a") << "[" << i << "]" << p[i] << std::endl;
     }
     delete[] p;
 }
+
+// #define HIPLAUNCHKERNELGGL_EXTRACT_STREAM(K_,G_,B_,M_,S_,...) S_
+// 	  HIPLAUNCHKERNELGGL_EXTRACT_STREAM(__VA_ARGS__);
+
+#include "rocsparse_memory.hpp"
 
 #define THROW_IF_HIPLAUNCHKERNELGGL_ERROR(...)                                                 \
     do                                                                                         \
@@ -276,6 +281,7 @@ inline void dprint(I size_, const T* v, const char* name_ = nullptr, I short_siz
         }                                                                                      \
         else                                                                                   \
         {                                                                                      \
+            rocsparse::execution_t::instance().flag_kernel_launch();                           \
             THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL"); \
             hipLaunchKernelGGL(__VA_ARGS__);                                                   \
             THROW_IF_HIP_ERROR(hipGetLastError());                                             \
@@ -291,6 +297,7 @@ inline void dprint(I size_, const T* v, const char* name_ = nullptr, I short_siz
         }                                                                                       \
         else                                                                                    \
         {                                                                                       \
+            rocsparse::execution_t::instance().flag_kernel_launch();                            \
             RETURN_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL"); \
             hipLaunchKernelGGL(__VA_ARGS__);                                                    \
             RETURN_IF_HIP_ERROR(hipGetLastError());                                             \

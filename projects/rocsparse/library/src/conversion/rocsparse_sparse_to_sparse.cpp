@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -181,7 +181,7 @@ try
             // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
             // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
             // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-            RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
+            RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
             RETURN_IF_HIP_ERROR(rocsparse_hipFree(row));
             RETURN_IF_HIP_ERROR(rocsparse_hipFree(col));

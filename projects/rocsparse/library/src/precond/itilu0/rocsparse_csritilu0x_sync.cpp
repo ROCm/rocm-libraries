@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #include "common.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_csritilu0x_driver.hpp"
+#include "rocsparse_memory.hpp"
 #include <iomanip>
 
 namespace rocsparse
@@ -417,19 +418,19 @@ public:
             buffer_ = convergence_info.init(handle_, buffer_);
             J options;
 
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&options,
-                                               convergence_info.info.options,
-                                               sizeof(J),
-                                               hipMemcpyDeviceToHost,
-                                               handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&options,
+                                                         convergence_info.info.options,
+                                                         sizeof(J),
+                                                         hipMemcpyDeviceToHost,
+                                                         handle_->stream));
 
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(niter_,
-                                               convergence_info.info.iter,
-                                               sizeof(J),
-                                               hipMemcpyDeviceToHost,
-                                               handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(niter_,
+                                                         convergence_info.info.iter,
+                                                         sizeof(J),
+                                                         hipMemcpyDeviceToHost,
+                                                         handle_->stream));
 
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
 
             J          niter = niter_[0];
             const bool convergence_history
@@ -447,20 +448,20 @@ public:
 
             if(compute_nrm_corr)
             {
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(data_,
-                                                   convergence_info.log_mxcorr,
-                                                   sizeof(T) * niter,
-                                                   hipMemcpyDeviceToHost,
-                                                   handle_->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(data_,
+                                                             convergence_info.log_mxcorr,
+                                                             sizeof(T) * niter,
+                                                             hipMemcpyDeviceToHost,
+                                                             handle_->stream));
             }
 
             if(compute_nrm_residual)
             {
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(data_ + niter,
-                                                   convergence_info.log_mxresidual,
-                                                   sizeof(T) * niter,
-                                                   hipMemcpyDeviceToHost,
-                                                   handle_->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(data_ + niter,
+                                                             convergence_info.log_mxresidual,
+                                                             sizeof(T) * niter,
+                                                             hipMemcpyDeviceToHost,
+                                                             handle_->stream));
             }
 
             //
@@ -955,7 +956,7 @@ public:
                             rocsparse::on_host(&nrm_residual, p_nrm_residual, stream));
                     }
 
-                    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
                 }
 
                 if(compute_nrm_residual && compute_nrm_corr)
@@ -1008,7 +1009,7 @@ public:
                         converged    = false;
 
                         RETURN_IF_HIP_ERROR(rocsparse::on_device(p_iter, nmaxiter_, stream));
-                        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+                        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
                         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_zero_pivot);
                     }
                     else
@@ -1046,7 +1047,7 @@ public:
 
             RETURN_IF_HIP_ERROR(
                 rocsparse::on_device(p_iter, (converged) ? nmaxiter_ : (&nmaxiter), stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
             return rocsparse_status_success;
         }
     };

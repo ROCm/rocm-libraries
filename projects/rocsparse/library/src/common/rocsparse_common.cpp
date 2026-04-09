@@ -453,7 +453,7 @@ rocsparse_status rocsparse::copy_and_scale(
         }
         else if(on_host && *scalar_device_host == 1)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 out, in, sizeof(T) * length, hipMemcpyDeviceToDevice, handle->stream));
         }
         else

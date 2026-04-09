@@ -22,6 +22,7 @@
  *
  * ************************************************************************ */
 #pragma once
+#include "../tests/rocsparse_test.hpp"
 #include "auto_testing_bad_arg.hpp"
 #include "display.hpp"
 #include "flops.hpp"

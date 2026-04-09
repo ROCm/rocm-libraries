@@ -113,11 +113,11 @@ rocsparse_status rocsparse::position_t::copy_position_async(const position_t* th
         // m position for csrsv, csrsm, csrilu0, csric0
         const size_t J_size = rocsparse::indextype_sizeof(that->m_position_indextype);
         this->create_position_async(that->m_batch_count, this->m_position_indextype, stream);
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(this->m_position,
-                                           that->m_position,
-                                           J_size * this->m_batch_count,
-                                           hipMemcpyDeviceToDevice,
-                                           stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(this->m_position,
+                                                     that->m_position,
+                                                     J_size * this->m_batch_count,
+                                                     hipMemcpyDeviceToDevice,
+                                                     stream));
     }
     return rocsparse_status_success;
 }

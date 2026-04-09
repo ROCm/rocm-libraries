@@ -169,7 +169,7 @@ namespace rocsparse
             if(diag_type == rocsparse_diag_type_non_unit)
             {
                 const J b = (J)descr->base;
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                     zero_pivot, &b, sizeof(J), hipMemcpyHostToDevice, handle->stream));
                 return rocsparse_status_success;
             }
@@ -324,12 +324,12 @@ namespace rocsparse
                 }
             }
             J count_missing_diagonal;
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&count_missing_diagonal,
-                                               temp_buffer,
-                                               sizeof(J),
-                                               hipMemcpyDeviceToHost,
-                                               handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&count_missing_diagonal,
+                                                         temp_buffer,
+                                                         sizeof(J),
+                                                         hipMemcpyDeviceToHost,
+                                                         handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
             if(count_missing_diagonal > 0)
             {
@@ -393,12 +393,12 @@ namespace rocsparse
                                 (J*)temp_buffer);
                         }
 
-                        RETURN_IF_HIP_ERROR(hipMemcpyAsync(&count_diagonal,
-                                                           temp_buffer,
-                                                           sizeof(J),
-                                                           hipMemcpyDeviceToHost,
-                                                           handle->stream));
-                        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+                        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&count_diagonal,
+                                                                     temp_buffer,
+                                                                     sizeof(J),
+                                                                     hipMemcpyDeviceToHost,
+                                                                     handle->stream));
+                        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
                     }
 
                     if(count_diagonal > 0)

@@ -563,8 +563,8 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
 
         if((trans_B == rocsparse_operation_none && order_B == rocsparse_order_column))
         {
-            RETURN_IF_HIP_ERROR(
-                hipMemcpyAsync(B, y, m * sizeof(T), hipMemcpyDeviceToDevice, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                B, y, m * sizeof(T), hipMemcpyDeviceToDevice, handle->stream));
         }
         else
         {

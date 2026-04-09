@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -103,12 +103,12 @@ try
     const float  s_value = 1.0f;
     const double d_value = 1.0;
     THROW_IF_HIP_ERROR(
-        hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
+        rocsparse_hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
     THROW_IF_HIP_ERROR(
-        hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
+        rocsparse_hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
 
     // Wait for device transfer to finish
-    THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
     // create blas handle
     rocsparse::blas_impl blas_impl;
@@ -171,7 +171,7 @@ _rocsparse_handle::~_rocsparse_handle()
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    PRINT_IF_HIP_ERROR(hipDeviceSynchronize());
+    PRINT_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(buffer));
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));

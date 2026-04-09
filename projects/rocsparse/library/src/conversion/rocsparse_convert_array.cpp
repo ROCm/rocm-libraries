@@ -146,12 +146,12 @@ namespace rocsparse
             (const SOURCE*)source_,
             source_indexbase_,
             dnum_out_of_range_values);
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(host_num_invalid,
-                                           dnum_out_of_range_values,
-                                           sizeof(size_t),
-                                           hipMemcpyDeviceToHost,
-                                           handle_->stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(host_num_invalid,
+                                                     dnum_out_of_range_values,
+                                                     sizeof(size_t),
+                                                     hipMemcpyDeviceToHost,
+                                                     handle_->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
         if(host_num_invalid[0] > 0)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_type_mismatch);
@@ -256,12 +256,12 @@ namespace rocsparse
             (const SOURCE*)source_,
             source_inc_,
             dnum_out_of_range_values);
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(host_num_invalid,
-                                           dnum_out_of_range_values,
-                                           sizeof(size_t),
-                                           hipMemcpyDeviceToHost,
-                                           handle_->stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(host_num_invalid,
+                                                     dnum_out_of_range_values,
+                                                     sizeof(size_t),
+                                                     hipMemcpyDeviceToHost,
+                                                     handle_->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
         if(host_num_invalid[0] > 0)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_type_mismatch);
@@ -571,10 +571,10 @@ namespace rocsparse
             (TARGET*)target_,
             (const SOURCE*)source_,
             (floating_data_t<SOURCE>*)derr);
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &herr, derr, sizeof(floating_data_t<SOURCE>), hipMemcpyDeviceToHost, handle_->stream));
         host_error[0] = static_cast<double>(herr);
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
         return rocsparse_status_success;
     }
 
@@ -749,7 +749,7 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle     handle_,
         if(target_ != source_)
         {
             const size_t sizeof_data = rocsparse::indextype_sizeof(source_indextype_);
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 target_, source_, sizeof_data * nitems_, hipMemcpyDeviceToDevice, handle_->stream));
         }
     }
@@ -795,7 +795,7 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle    handle_,
         if(target_ != source_)
         {
             const size_t sizeof_data = rocsparse::indextype_sizeof(source_indextype_);
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 target_, source_, sizeof_data * nitems_, hipMemcpyDeviceToDevice, handle_->stream));
         }
     }
@@ -866,7 +866,7 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle   handle_,
         if(target_ != source_)
         {
             const size_t sizeof_data = rocsparse::datatype_sizeof(source_datatype_);
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 target_, source_, sizeof_data * nitems_, hipMemcpyDeviceToDevice, handle_->stream));
         }
         return rocsparse_status_success;

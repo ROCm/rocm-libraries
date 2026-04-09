@@ -157,11 +157,11 @@ namespace rocsparse
         if(descr->diag_type == rocsparse_diag_type_unit)
         {
             static const rocsparse_int max = std::numeric_limits<rocsparse_int>::max();
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(bsrsm_info->get_position(),
-                                               &max,
-                                               sizeof(rocsparse_int),
-                                               hipMemcpyHostToDevice,
-                                               stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(bsrsm_info->get_position(),
+                                                         &max,
+                                                         sizeof(rocsparse_int),
+                                                         hipMemcpyHostToDevice,
+                                                         stream));
         }
 
         rocsparse_fill_mode fill_mode = descr->fill_mode;

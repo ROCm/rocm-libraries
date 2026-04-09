@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -245,12 +245,12 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                                                csr_row_ptr,
                                                max_nnz);
 
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&descr->max_nnz_per_row,
-                                               max_nnz,
-                                               sizeof(I),
-                                               hipMemcpyDeviceToHost,
-                                               handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&descr->max_nnz_per_row,
+                                                         max_nnz,
+                                                         sizeof(I),
+                                                         hipMemcpyDeviceToHost,
+                                                         handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(max_nnz, handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(csr_row_ptr, handle->stream));
@@ -279,12 +279,12 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                 csr_row_ptr,
                 max_nnz);
 
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&descr->max_nnz_per_row,
-                                               max_nnz,
-                                               sizeof(int64_t),
-                                               hipMemcpyDeviceToHost,
-                                               handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&descr->max_nnz_per_row,
+                                                         max_nnz,
+                                                         sizeof(int64_t),
+                                                         hipMemcpyDeviceToHost,
+                                                         handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(max_nnz, handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(csr_row_ptr, handle->stream));
