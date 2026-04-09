@@ -1592,8 +1592,7 @@ struct GridwiseMoeGemmBlockScale
                                 tensor_operation::element_wise::Silu{}(gate, gate);
                                 c_thread_buf(cidx) = gate * up;
                             }
-                            else if constexpr(ActivationOperation ==
-                                              Activation::swiglustep_and_mul)
+                            else if constexpr(ActivationOperation == Activation::swiglustep_and_mul)
                             {
                                 float gate = c_thread_buf[cidx];
                                 float up   = c_thread_buf_up[cidx];
@@ -2138,8 +2137,7 @@ struct GridwiseMoeGemmBlockScale
                                 tensor_operation::element_wise::Silu{}(gate, gate);
                                 c_thread_buf(cidx) = gate * up;
                             }
-                            else if constexpr(ActivationOperation ==
-                                              Activation::swiglustep_and_mul)
+                            else if constexpr(ActivationOperation == Activation::swiglustep_and_mul)
                             {
                                 float gate = c_thread_buf[cidx];
                                 float up   = c_thread_buf_up[cidx];
