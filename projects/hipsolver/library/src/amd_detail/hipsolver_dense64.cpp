@@ -341,7 +341,7 @@ try
 
     // ----- GET HOST ARRAY SIZES -----
     size_t size_type = 0;
-    size_t size_hA, size_hW, size_hVL, size_hVR, size_work, size_rwork;
+    size_t size_hA, size_hW, size_hVL, size_hVR, size_rwork;
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && dataTypeVL == HIP_R_32F
        && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
     {
@@ -385,13 +385,12 @@ try
     size_t rounded_size_rwork
         = ((size_rwork + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
 
-    size_work = lworkOnHost
-                - (rounded_size_hA + rounded_size_hW + rounded_size_hVL + rounded_size_hVR
-                   + rounded_size_rwork);
-    if(size_work < 0)
+    size_t lwork_computed = (lworkOnHost
+                             - (rounded_size_hA + rounded_size_hW + rounded_size_hVL
+                                + rounded_size_hVR + rounded_size_rwork))
+                            / size_type;
+    if(lwork_computed < 0)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(size_work > INT_MAX)
-        return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
     // ----- GET HOST ARRAYS -----
     uint8_t* hA    = (uint8_t*)workOnHost;
@@ -426,7 +425,7 @@ try
                  (float*)hVR,
                  ldvr,
                  (float*)work,
-                 size_work,
+                 lwork_computed,
                  (float*)rwork,
                  &hInfo);
     }
@@ -444,7 +443,7 @@ try
                  (double*)hVR,
                  ldvr,
                  (double*)work,
-                 size_work,
+                 lwork_computed,
                  (double*)rwork,
                  &hInfo);
     }
@@ -462,7 +461,7 @@ try
                  (hipFloatComplex*)hVR,
                  ldvr,
                  (hipFloatComplex*)work,
-                 size_work,
+                 lwork_computed,
                  (float*)rwork,
                  &hInfo);
     }
@@ -480,7 +479,7 @@ try
                  (hipDoubleComplex*)hVR,
                  ldvr,
                  (hipDoubleComplex*)work,
-                 size_work,
+                 lwork_computed,
                  (double*)rwork,
                  &hInfo);
     }
