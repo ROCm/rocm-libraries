@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include <cmath>
+
 #include <hip/library_types.h>
 
 #ifdef __cplusplus
@@ -105,6 +107,12 @@ void cpu_geev(char   jobvl,
               float* rwork,
               int*   info)
 {
+    // zero out Infs and NaNs
+    for(int i = 0; i < n; i++)
+        for(int j = 0; j < n; j++)
+            if(std::isinf(A[i + j * lda]) || std::isnan(A[i + j * lda]))
+                A[i + j * lda] = 0;
+
     sgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
@@ -123,6 +131,12 @@ void cpu_geev(char    jobvl,
               double* rwork,
               int*    info)
 {
+    // zero out Infs and NaNs
+    for(int i = 0; i < n; i++)
+        for(int j = 0; j < n; j++)
+            if(std::isinf(A[i + j * lda]) || std::isnan(A[i + j * lda]))
+                A[i + j * lda] = 0;
+
     dgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
@@ -141,6 +155,21 @@ void cpu_geev(char             jobvl,
               float*           rwork,
               int*             info)
 {
+    // zero out Infs and NaNs
+    for(int i = 0; i < n; i++)
+    {
+        for(int j = 0; j < n; j++)
+        {
+            float re = hipCrealf(A[i + j * lda]);
+            float im = hipCimagf(A[i + j * lda]);
+            if(std::isinf(re) || std::isnan(re))
+                re = 0;
+            if(std::isinf(im) || std::isnan(im))
+                im = 0;
+            A[i + j * lda] = hipFloatComplex(re, im);
+        }
+    }
+
     cgeev_(&jobvl, &jobvr, &n, A, &lda, w, vl, &ldvl, vr, &ldvr, work, &lwork, rwork, info);
 }
 
@@ -159,5 +188,20 @@ void cpu_geev(char              jobvl,
               double*           rwork,
               int*              info)
 {
+    // zero out Infs and NaNs
+    for(int i = 0; i < n; i++)
+    {
+        for(int j = 0; j < n; j++)
+        {
+            double re = hipCreal(A[i + j * lda]);
+            double im = hipCimag(A[i + j * lda]);
+            if(std::isinf(re) || std::isnan(re))
+                re = 0;
+            if(std::isinf(im) || std::isnan(im))
+                im = 0;
+            A[i + j * lda] = hipDoubleComplex(re, im);
+        }
+    }
+
     zgeev_(&jobvl, &jobvr, &n, A, &lda, w, vl, &ldvl, vr, &ldvr, work, &lwork, rwork, info);
 }
