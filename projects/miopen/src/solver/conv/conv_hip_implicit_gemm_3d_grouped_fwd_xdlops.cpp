@@ -591,15 +591,16 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         default: break;
         }
 
-        auto find_kernel = [&valid_kernels = std::as_const(valid_kernels)](
+        auto find_kernel = [&valid_kernels_ = std::as_const(valid_kernels)](
                                const std::size_t& expected_index,
-                               const std::string& kernel_id) -> std::optional<std::size_t> {
-            if(expected_index < valid_kernels.size() && valid_kernels[expected_index] == kernel_id)
+                               const std::string& kernel_id_) -> std::optional<std::size_t> {
+            if(expected_index < valid_kernels_.size() &&
+               valid_kernels_[expected_index] == kernel_id_)
                 return expected_index;
-            auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_id);
-            if(it != valid_kernels.end())
-                return static_cast<std::size_t>(it - valid_kernels.begin());
-            MIOPEN_LOG_I2("Hard-coded heuristics did not find kernel: " << kernel_id);
+            auto it = std::find(valid_kernels_.begin(), valid_kernels_.end(), kernel_id_);
+            if(it != valid_kernels_.end())
+                return static_cast<std::size_t>(it - valid_kernels_.begin());
+            MIOPEN_LOG_I2("Hard-coded heuristics did not find kernel: " << kernel_id_);
             return std::nullopt;
         };
 
@@ -740,11 +741,11 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         miopen::ai::tuning::candidate_selection::CandidateSelectionResult result;
 
         auto run_ai_heuristics = [&](auto CKDataType, auto CKComputeType) {
-            using T        = decltype(CKDataType);
-            using TCompute = decltype(CKComputeType);
-            auto fill_valid_kernels =
-                [=](const ::miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
-                return FillValidKernelsByAlphaBeta<T, TCompute>(problem);
+            using T                 = decltype(CKDataType);
+            using TCompute          = decltype(CKComputeType);
+            auto fill_valid_kernels = [=](const ::miopen::conv::ProblemDescription& problem_)
+                -> std::vector<std::string> {
+                return FillValidKernelsByAlphaBeta<T, TCompute>(problem_);
             };
             // Validation lambda for AI-predicted kernel + split_k combinations
             // Note: This solver currently doesn't use split_k (always 0), but validation
