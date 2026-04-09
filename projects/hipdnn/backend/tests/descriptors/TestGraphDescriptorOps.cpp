@@ -2008,6 +2008,9 @@ TEST_F(TestGraphDescriptorOps, AppendOpsAfterSerialization)
                                        1,
                                        static_cast<const void*>(ops2.data())));
 
+    // Verify cache was invalidated by the append
+    ASSERT_THROW_HIPDNN_STATUS(desc->getSerializedGraph(), HIPDNN_STATUS_BAD_PARAM);
+
     // Verify operations count is 2
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(

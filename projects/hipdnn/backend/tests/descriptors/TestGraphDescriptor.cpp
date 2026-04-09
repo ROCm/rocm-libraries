@@ -9,6 +9,7 @@
 #include "descriptors/GraphDescriptor.hpp"
 #include "hipdnn_backend.h"
 
+#include <array>
 #include <cstring>
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
@@ -108,6 +109,35 @@ TEST_F(TestGraphDescriptor, DeserializeGraphExtractsAttributes)
                                             &count,
                                             &computeType));
     EXPECT_EQ(computeType, HIPDNN_DATA_FLOAT);
+
+    hipdnnDataType_t intermediateType{};
+    count = 0;
+    ASSERT_NO_THROW(descriptor.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_INTERMEDIATE_DATA_TYPE_EXT,
+                                            HIPDNN_TYPE_DATA_TYPE,
+                                            1,
+                                            &count,
+                                            &intermediateType));
+    EXPECT_EQ(intermediateType, HIPDNN_DATA_HALF);
+
+    hipdnnDataType_t ioType{};
+    count = 0;
+    ASSERT_NO_THROW(descriptor.getAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_IO_DATA_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &count, &ioType));
+    EXPECT_EQ(ioType, HIPDNN_DATA_BFLOAT16);
+
+    std::array<char, 64> name{};
+    count = 0;
+    ASSERT_NO_THROW(descriptor.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                                            HIPDNN_TYPE_CHAR,
+                                            static_cast<int64_t>(name.size()),
+                                            &count,
+                                            name.data()));
+    EXPECT_STREQ(name.data(), "test");
+
+    int64_t opsCount = 0;
+    ASSERT_NO_THROW(descriptor.getAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &opsCount, nullptr));
+    EXPECT_EQ(opsCount, 1);
 }
 
 TEST_F(TestGraphDescriptor, WillCorrectlySetGraph)
@@ -397,6 +427,16 @@ TEST_F(TestGraphDescriptor, JsonDeserializeEmptySize)
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST_F(TestGraphDescriptor, JsonDeserializeNonGraphJson)
+{
+    hipdnnBackendDescriptor_t desc = nullptr;
+    const std::string json = R"({"foo": "bar", "baz": 42})";
+    auto status
+        = hipdnnBackendCreateAndDeserializeJsonGraph_ext(&desc, json.c_str(), json.size() + 1);
+    EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(desc, nullptr);
+}
+
 TEST_F(TestGraphDescriptor, JsonRoundTripViaApi)
 {
     // Create a valid graph descriptor via the binary C API
@@ -616,9 +656,9 @@ TEST_F(TestGraphDescriptor, BinarySerializeInsufficientBuffer)
     hipdnnBackendDescriptor_t rawDesc = nullptr;
     auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
         &rawDesc, serializedGraph.data(), serializedGraph.size());
+    const ScopedBackendDescriptor desc(rawDesc);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(rawDesc, nullptr);
-    const ScopedBackendDescriptor desc(rawDesc);
 
     // Query the required size
     size_t requiredSize = 0;

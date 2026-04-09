@@ -287,6 +287,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     });
 }
 
+// NOTE: The JSON serialization path is slower than the binary path. Each call
+// reconstructs the JSON from the cached binary buffer (binary -> unpack -> JSON).
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     hipdnnBackendGetSerializedJsonGraph_ext(hipdnnBackendDescriptor_t descriptor,
                                             size_t requestedByteSize,
