@@ -302,6 +302,17 @@ class GroupedConvProblem:
     direction: str = "forward"
     split_k: int = 1
 
+    def __post_init__(self):
+        """Validate grouped convolution constraints."""
+        if self.C % self.G != 0:
+            raise ValueError(
+                f"C must be divisible by G for grouped convolution: C={self.C}, G={self.G}"
+            )
+        if self.K % self.G != 0:
+            raise ValueError(
+                f"K must be divisible by G for grouped convolution: K={self.K}, G={self.G}"
+            )
+
     @property
     def Ho(self) -> int:
         eff_y = (self.Y - 1) * self.dilation_h + 1
@@ -327,8 +338,11 @@ class GroupedConvProblem:
 
     @property
     def flops(self) -> float:
-        """Total FLOPs for this convolution (any direction, same count)."""
-        c_per_group = self.C // self.G
+        """Total FLOPs for this convolution (any direction, same count).
+
+        Uses float division C/G to match canonical formula (validated C % G == 0 in __post_init__).
+        """
+        c_per_group = self.C / self.G  # Float division (validated C % G == 0)
         if self.is_3d:
             return (
                 2.0
