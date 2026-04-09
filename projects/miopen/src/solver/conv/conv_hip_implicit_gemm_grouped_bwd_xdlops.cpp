@@ -470,28 +470,12 @@ std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 3
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static const std::vector<std::tuple<std::string, int>> ranked_gemm_grp_bwd_navi = {
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 128, 64, 64, Filter1x1Stride1Pad0, 8, 8, 2>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 1, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<256, 128, 64, 64, Filter1x1Stride1Pad0, 8, 8, 2>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 8, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 32, 64, 8, 8, Default, 16, 16, 4, 1, 8, 4, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Default, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 1, 1, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<256, 128, 64, 64, Default, 8, 8, 2>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<64, 64, 64, 64, Default, 8, 8, 8>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Filter1x1Stride1Pad0, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 4, 4, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<64, 32, 64, 64, Default, 8, 8, 8>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 1, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 128, 64, 64, Default, 8, 8, 2>", 1),
 std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, 128, 128, 32, 8, 8, Default, 16, 16, 8, 2, 8, 4, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, 128, 64, 64, 8, 8, Default, 16, 16, 8, 1, 8, 4, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<256, 128, 256, 64, Default, 8, 8, 8>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 4, 2, 4, 4, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 128, 64, 64, Default, 8, 8, 2>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Filter1x1Stride1Pad0, 8, 1, 1>", 1),
 std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 4, 2, 1, 1, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 8, 1, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 1, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 32, 32, 8, 8, Default, 16, 16, 4, 1, 8, 1, 1, 1>", 1)
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 1, 1, 1, 1>", 1)
 };
 // clang-format on
 
