@@ -151,8 +151,11 @@ def main():
     print("=" * 100)
     print()
 
+    # Model directory is in heuristics/models/, not validation/grouped_conv/models/
+    heuristics_dir = Path(__file__).parent.parent.parent  # Go up from validation/grouped_conv/ to heuristics/
+
     # Validate bwd_data
-    bwd_data_model = Path(__file__).parent / "models" / "grouped_conv_bwd_data_bf16_gfx950"
+    bwd_data_model = heuristics_dir / "models" / "grouped_conv_bwd_data_bf16_gfx950"
     if bwd_data_model.exists():
         validate_variant("bwd_data", BWD_DATA_TEST_PROBLEMS, bwd_data_model)
     else:
@@ -161,7 +164,7 @@ def main():
     print()
 
     # Validate bwd_weight
-    bwd_weight_model = Path(__file__).parent / "models" / "grouped_conv_bwd_weight_bf16_gfx950"
+    bwd_weight_model = heuristics_dir / "models" / "grouped_conv_bwd_weight_bf16_gfx950"
     if bwd_weight_model.exists():
         validate_variant("bwd_weight", BWD_WEIGHT_TEST_PROBLEMS, bwd_weight_model)
     else:
