@@ -347,9 +347,11 @@ class GroupedConvFeatureEngine(FeatureEngine):
         log2_filter = np.log2(np.maximum(Y * X, 1))
         log2_output = np.log2(np.maximum(Ho * Wo, 1))
 
-        # Arithmetic intensity
-        dtype = df["dtype"].iloc[0] if "dtype" in df.columns else "bf16"
-        bpe = DTYPE_BYTES.get(dtype, 2.0)
+        # Arithmetic intensity (vectorized per-row for mixed-dtype batches)
+        if "dtype" in df.columns:
+            bpe = df["dtype"].map(DTYPE_BYTES).fillna(2.0).values.astype(np.float64)
+        else:
+            bpe = np.full(n, 2.0, dtype=np.float64)  # Default to bf16 bpe=2
 
         flops = N * K * Ho * Wo * (C / np.maximum(G, 1)) * Y * X * 2
         bytes_transferred = (N * C * Hi * Wi + K * (C / np.maximum(G, 1)) * Y * X + N * K * Ho * Wo) * bpe

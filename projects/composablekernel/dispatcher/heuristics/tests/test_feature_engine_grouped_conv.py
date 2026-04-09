@@ -217,6 +217,47 @@ class TestGroupedConvFeatureEngine(unittest.TestCase):
         # Ho = (32 + 2*1 - 3) // 1 + 1 = 32
         self.assertEqual(features[0, 12], 32)
 
+    def test_extract_batch_mixed_dtype(self):
+        """Test batch extraction with mixed dtypes (vectorized bpe)."""
+        df = pd.DataFrame(
+            {
+                "N": [1, 1, 1],
+                "C": [64, 64, 64],
+                "K": [128, 128, 128],
+                "G": [1, 1, 1],
+                "Hi": [32, 32, 32],
+                "Wi": [32, 32, 32],
+                "Y": [3, 3, 3],
+                "X": [3, 3, 3],
+                "stride_h": [1, 1, 1],
+                "stride_w": [1, 1, 1],
+                "pad_h": [1, 1, 1],
+                "pad_w": [1, 1, 1],
+                "dtype": ["bf16", "fp16", "fp32"],  # Mixed dtypes
+                "block_size": [256, 256, 256],
+                "gemm_m_per_block": [64, 64, 64],
+                "gemm_n_per_block": [64, 64, 64],
+                "pipeline": ["compv3", "compv3", "compv3"],
+            }
+        )
+
+        features = self.engine.extract_batch(df)
+        self.assertEqual(features.shape, (3, 83))
+
+        # Verify arithmetic_intensity differs for different dtypes
+        feature_names = self.engine.get_feature_names()
+        ai_idx = feature_names.index("arithmetic_intensity")
+
+        ai_bf16 = features[0, ai_idx]
+        ai_fp16 = features[1, ai_idx]
+        ai_fp32 = features[2, ai_idx]
+
+        # bf16 and fp16 have same bpe=2, fp32 has bpe=4
+        self.assertAlmostEqual(ai_bf16, ai_fp16, places=2, msg="bf16 and fp16 should have same AI")
+        self.assertAlmostEqual(
+            ai_fp32, ai_bf16 / 2, places=2, msg="fp32 AI should be half of bf16 (2x bpe)"
+        )
+
     def test_depthwise_convolution_features(self):
         """Test depthwise convolution feature flags."""
         # Depthwise: G == C == K
