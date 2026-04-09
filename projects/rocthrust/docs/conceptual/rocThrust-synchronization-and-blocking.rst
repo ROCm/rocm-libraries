@@ -14,5 +14,5 @@ Operations that are asynchronous with respect to the host are operations that do
 
 rocThrust functions are synchronous with respect to the host by default. 
 
-The ``hip_rocprim::par_nosync`` policy can be used to avoid synchronization barriers. This policy communicates to the runtime that synchronization isn't necessary and that it can be skipped if the implementation allows it. This policy doesn't guarantee non-blocking calls because the operations themselves could be blocking. There is no way to guarantee asynchronization in rocThrust.
+The ``hip_rocprim::par_nosync`` policy can be used to avoid synchronization barriers. This policy communicates to the runtime that synchronization isn't necessary and that it can be skipped if the implementation allows it. This policy doesn't guarantee non-blocking calls because some operations require internal synchronization. There is no way to guarantee asynchronization in rocThrust.
 
