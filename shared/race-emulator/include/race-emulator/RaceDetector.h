@@ -5,7 +5,6 @@
 #include "CommonRegister.h"
 #include "IntervalSet.h"
 #include "Types.h"
-#include "Util.h"
 #include "WaveRaceState.h"
 #include <cstdint>
 #include <functional>
@@ -128,9 +127,10 @@ public:
                     WaveRaceState *waveRaceState, int numSourceLines,
                     std::function<std::string_view(int)> getSourceLine) const;
 
+  WaveRaceState &getWaveRaceState(int waveIndex);
+
 private:
   void setProfiler(ProfilerInterface &p);
-  WaveRaceState &getWaveRaceState(int waveIndex);
 
   static void adjustByteCounts(const IntervalSet &ivs, std::vector<int> &counts,
                                int delta);
