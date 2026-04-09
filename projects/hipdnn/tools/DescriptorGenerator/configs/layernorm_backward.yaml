@@ -1,0 +1,168 @@
+operation:
+  name: "LayernormBackward"
+  class_name: "LayernormBackwardOperationDescriptor"
+  fbs_table: "LayernormBackwardAttributes"
+  fbs_generated_header: "layernorm_backward_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD"
+
+  frontend:
+    packer_function: "createLayernormBackwardOperation"
+    unpacker_function: "unpackLayernormBackwardOperation"
+    node_class: "LayernormBackwardNode"
+    attributes_class: "LayernormBackwardAttributes"
+
+    inputs:
+      - name: "dy"
+        enum_name: "DY"
+        required: true
+        getter_name: "get_dy"
+        setter_name: "set_dy"
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+      - name: "scale"
+        enum_name: "SCALE"
+        required: true
+        getter_name: "get_scale"
+        setter_name: "set_scale"
+      - name: "mean"
+        enum_name: "MEAN"
+        required: false
+        getter_name: "get_mean"
+        setter_name: "set_mean"
+      - name: "inv_variance"
+        enum_name: "INV_VARIANCE"
+        required: false
+        getter_name: "get_inv_variance"
+        setter_name: "set_inv_variance"
+      - name: "epsilon"
+        enum_name: "EPSILON"
+        required: false
+        getter_name: "get_epsilon"
+        setter_name: "set_epsilon"
+    outputs:
+      - name: "dx"
+        enum_name: "DX"
+        required: true
+        getter_name: "get_dx"
+        setter_name: "set_dx"
+      - name: "dscale"
+        enum_name: "DSCALE"
+        required: true
+        getter_name: "get_dscale"
+        setter_name: "set_dscale"
+      - name: "dbias"
+        enum_name: "DBIAS"
+        required: true
+        getter_name: "get_dbias"
+        setter_name: "set_dbias"
+    graph_method_name: "layernorm_backward"
+    graph_method_params:
+      - name: "dy"
+        tensor_name: "dy"
+      - name: "x"
+        tensor_name: "x"
+      - name: "scale"
+        tensor_name: "scale"
+      - name: "mean"
+        tensor_name: "mean"
+      - name: "inv_variance"
+        tensor_name: "inv_variance"
+      - name: "epsilon"
+        tensor_name: "epsilon"
+    graph_return_type: "array"
+    graph_return_outputs:
+      - "dx"
+      - "dscale"
+      - "dbias"
+
+  tensor_fields:
+    - name: "dy"
+      fbs_field: "dy_tensor_uid"
+      attr_suffix: "DY"
+      required: true
+      frontend_getter: "get_dy()"
+
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X"
+      required: true
+      frontend_getter: "get_x()"
+
+    - name: "scale"
+      fbs_field: "scale_tensor_uid"
+      attr_suffix: "SCALE"
+      required: true
+      frontend_getter: "get_scale()"
+
+    - name: "mean"
+      fbs_field: "mean_tensor_uid"
+      attr_suffix: "MEAN"
+      required: false
+      frontend_getter: "get_mean()"
+
+    - name: "inv_variance"
+      fbs_field: "inv_variance_tensor_uid"
+      attr_suffix: "INV_VARIANCE"
+      required: false
+      frontend_getter: "get_inv_variance()"
+
+    - name: "epsilon"
+      fbs_field: "epsilon_tensor_uid"
+      attr_suffix: "EPSILON"
+      required: false
+      frontend_getter: "get_epsilon()"
+
+    - name: "dx"
+      fbs_field: "dx_tensor_uid"
+      attr_suffix: "DX"
+      required: true
+      frontend_getter: "get_dx()"
+
+    - name: "dscale"
+      fbs_field: "dscale_tensor_uid"
+      attr_suffix: "DSCALE"
+      required: true
+      frontend_getter: "get_dscale()"
+
+    - name: "dbias"
+      fbs_field: "dbias_tensor_uid"
+      attr_suffix: "DBIAS"
+      required: true
+      frontend_getter: "get_dbias()"
+
+  data_fields:
+    - name: "normalized_dim_count"
+      fbs_field: "normalized_dim_count"
+      attr_name: "HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT"
+      type: "scalar_int64"
+      required: true
+      frontend_getter: "get_normalized_dim_count()"
+
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT"
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_LAYERNORM_BACKWARD"
+
+  test_data:
+    tensor_uids: { dy: 10, x: 11, scale: 12, mean: 13, inv_variance: 14, epsilon: 15, dx: 16, dscale: 17, dbias: 18}
+    tensor_configs:
+      dy: { dims: [16, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      x: { dims: [16, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      scale: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      mean: { dims: [16, 1, 1, 1], strides: [1, 1, 1, 1] }
+      inv_variance: { dims: [16, 1, 1, 1], strides: [1, 1, 1, 1] }
+      epsilon: { dims: [1], strides: [1] }
+      dx: { dims: [16, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      dscale: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      dbias: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+    field_values:
+      normalized_dim_count: 3
