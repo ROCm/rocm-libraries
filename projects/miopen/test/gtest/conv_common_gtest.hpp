@@ -4,10 +4,13 @@
 #pragma once
 
 #include <array>
+#include <ios>
 #include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <sstream>
+#include <tuple>
 #include <utility>
 
 #include <miopen/algorithm.hpp>
@@ -30,6 +33,7 @@
 #include "driver.hpp"
 #include "get_handle.hpp"
 #include "gtest/gtest.h"
+#include <vector>
 #include "gpu_conv.hpp"
 #include "miopen/find_db.hpp"
 #include "random.hpp"
@@ -229,7 +233,7 @@ struct conv_base
 
     conv_base(bool preallocate_) : preallocate(preallocate_) {}
 
-    void fail(float = 0) const
+    void fail() const
     {
         ADD_FAILURE() << "Input tensor: " << input.desc.ToString() << "\n"
                       << "Weights tensor: " << weights.desc.ToString() << "\n"
@@ -955,7 +959,7 @@ struct verify_forward_conv : conv_base<T, Tout>
         return rout;
     }
 
-    void fail(float = 0) const
+    void fail() const
     {
         std::cout << "Forward convolution: " << stats->solver_name << std::endl;
         this->conv_base<T, Tout>::fail();
@@ -1312,7 +1316,7 @@ struct verify_backward_conv : conv_base<T>
         return rinput;
     }
 
-    void fail(float) const
+    void fail() const
     {
         std::cout << "Backward convolution: " << stats->solver_name << std::endl;
         this->conv_base<T>::fail();
@@ -1573,7 +1577,7 @@ struct verify_backward_weights_conv : conv_base<T>
         return rweights;
     }
 
-    void fail(float) const
+    void fail() const
     {
         std::cout << "Backward weights convolution: " << stats->solver_name << std::endl;
         this->conv_base<T>::fail();
@@ -1770,15 +1774,77 @@ struct verify_forward_conv_int8 : conv_base<T>
         return rout;
     }
 
-    void fail(float = 0) const
+    void fail() const
     {
         std::cout << "Forward convolution: " << stats->solver_name << std::endl;
         this->conv_base<T>::fail();
     }
 };
 
+template <class T>
+std::vector<T> generate_data_limited(const std::vector<T>& dims,
+                                     int limit_multiplier,
+                                     bool full_set = true,
+                                     int limit_set = 2)
+{
+    if(full_set)
+    {
+        if(limit_set > 0)
+        {
+            auto endpoint = std::min(static_cast<int>(dims.size()), limit_set * limit_multiplier);
+            std::vector<T> subvec(dims.cbegin(), dims.cbegin() + endpoint);
+            return subvec;
+        }
+        else
+        {
+            return dims;
+        }
+    }
+    else
+    {
+        return {dims.front()};
+    }
+}
+
+template <class T>
+std::vector<T> generate_data_limited(const std::vector<T>& dims,
+                                     int limit_multiplier,
+                                     T single,
+                                     bool full_set = true,
+                                     int limit_set = 2)
+{
+    if(full_set)
+    {
+        if(limit_set > 0)
+        {
+            auto endpoint = std::min(static_cast<int>(dims.size()), limit_set * limit_multiplier);
+            std::vector<T> subvec(dims.cbegin(), dims.cbegin() + endpoint);
+            return subvec;
+        }
+        else
+            return dims;
+    }
+    else
+    {
+        return {single};
+    }
+}
+
+template <typename... TParams>
+using ConvTestBaseTestCase = std::tuple<NamedParameter<std::string>,
+                                        NamedParameter<std::string>,
+                                        NamedParameter<int>,
+                                        NamedParameter<bool>,
+                                        NamedParameter<bool>,
+                                        NamedParameter<bool>,
+                                        NamedParameter<int>,
+                                        NamedParameter<bool>,
+                                        NamedParameter<bool>,
+                                        NamedParameter<bool>,
+                                        TParams...>;
+
 template <class T, ConvApi api = ConvApi::Find_1_0, class Tout = T>
-struct conv_driver : test_driver
+struct conv_test
 {
     tensor<T> input;
     tensor<T> weights;
@@ -1812,20 +1878,20 @@ struct conv_driver : test_driver
     bool deterministic       = false;
     bool preallocate         = false;
 
-    std::unordered_map<std::string, miopenConvolutionMode_t> cmode_lookup = {
+    const std::unordered_map<std::string, miopenConvolutionMode_t> cmode_lookup = {
         {"CONV", miopenConvolution},
         {"TRANS", miopenTranspose},
         {"CONVOLUTION", miopenConvolution},
         {"TRANSPOSE", miopenTranspose}};
 
-    std::unordered_map<std::string, miopenPaddingMode_t> pmode_lookup = {
+    const std::unordered_map<std::string, miopenPaddingMode_t> pmode_lookup = {
         {"SAME", miopenPaddingSame},
         {"VALID", miopenPaddingValid},
         {"DEFAULT", miopenPaddingDefault}};
 
-    std::vector<std::size_t> get_batch_sizes() { return {1, 8, 2, 64, 30, 128, 352, 512}; }
+    static std::vector<std::size_t> get_batch_sizes() { return {1, 8, 2, 64, 30, 128, 352, 512}; }
 
-    std::vector<std::vector<std::size_t>> get_2d_spatial_dims()
+    static std::vector<std::vector<std::size_t>> get_2d_spatial_dims()
     {
         return {{14, 14},
                 {28, 28},
@@ -1843,22 +1909,22 @@ struct conv_driver : test_driver
                 {7, 1}};
     }
 
-    std::vector<std::vector<std::size_t>> get_2d_filter_dims()
+    static std::vector<std::vector<std::size_t>> get_2d_filter_dims()
     {
         return {{1, 1}, {3, 3}, {1, 7}, {5, 5}, {7, 1}, {7, 7}, {11, 11}, {2, 2}, {4, 4}};
     }
 
-    std::vector<std::size_t> get_output_channels()
+    static std::vector<std::size_t> get_output_channels()
     {
         return {32, 64, 16, 128, 96, 112, 192, 256, 320, 512, 1024};
     }
 
-    std::vector<std::size_t> get_input_channels()
+    static std::vector<std::size_t> get_input_channels()
     {
         return {16, 32, 3, 128, 96, 112, 192, 256, 320, 512, 1024};
     }
 
-    std::vector<std::vector<int>> get_2d_pads_strides_dilations()
+    static std::vector<std::vector<int>> get_2d_pads_strides_dilations()
     {
         return {{0, 0, 1, 1, 1, 1},
                 {0, 0, 2, 2, 1, 1},
@@ -1873,7 +1939,7 @@ struct conv_driver : test_driver
                 {1, 1, 2, 2, 2, 1}};
     }
 
-    std::vector<std::vector<std::size_t>> get_3d_spatial_dims()
+    static std::vector<std::vector<std::size_t>> get_3d_spatial_dims()
     {
         return {{3, 4, 4},
                 {4, 9, 9},
@@ -1886,7 +1952,7 @@ struct conv_driver : test_driver
                 {1, 2, 2}};
     }
 
-    std::vector<std::vector<std::size_t>> get_3d_filter_dims()
+    static std::vector<std::vector<std::size_t>> get_3d_filter_dims()
     {
         return {{1, 1, 1},
                 {3, 3, 3},
@@ -1899,9 +1965,9 @@ struct conv_driver : test_driver
                 {3, 5, 20}};
     }
 
-    std::vector<std::vector<int>> get_2d_trans_output_pads() { return {{0, 0}}; }
+    static std::vector<std::vector<int>> get_2d_trans_output_pads() { return {{0, 0}}; }
 
-    std::vector<std::vector<int>> get_3d_pads_strides_dilations()
+    static std::vector<std::vector<int>> get_3d_pads_strides_dilations()
     {
         return {{0, 0, 0, 1, 1, 1, 1, 1, 1},
                 {0, 0, 0, 2, 2, 2, 1, 1, 1},
@@ -1918,7 +1984,7 @@ struct conv_driver : test_driver
                 {3, 3, 3, 2, 2, 2, 3, 3, 4}};
     }
 
-    std::vector<std::vector<int>> get_3d_trans_output_pads() { return {{0, 0, 0}}; }
+    static std::vector<std::vector<int>> get_3d_trans_output_pads() { return {{0, 0, 0}}; }
 
     int get_spatial_dim() const
     {
@@ -1932,7 +1998,7 @@ struct conv_driver : test_driver
         return -1;
     }
 
-    conv_driver()
+    conv_test()
     {
         // add(conv_mode, "cmode", generate_data({"conv"}));
         // add(pad_mode, "pmode", generate_data({"default", "same", "valid"}));
@@ -1950,40 +2016,37 @@ struct conv_driver : test_driver
     }
 
     template <typename... TParams>
-    auto GenTestParams(TParams... params)
+    static auto GenTestParams(TParams&&... params)
     {
-        auto enable_fdb_values =
-            MakeNamedParameterCollectionValues<bool>("enable-fdb", std::vector<bool>{false});
-        auto preallocate_values =
-            MakeNamedParameterCollectionValues<bool>("preallocate", std::vector<bool>{false});
+        std::vector<bool> enable_fdb_values{false};
+        std::vector<bool> preallocate_values{false};
 
         if constexpr(api == ConvApi::Immediate)
         {
-            enable_fdb_values = MakeNamedParameterCollectionValues<bool>(
-                "enable-fdb", std::vector<bool>{false, true});
+            enable_fdb_values.emplace_back(true);
         }
         else if constexpr(api == ConvApi::Find_2_0)
         {
-            preallocate_values = MakeNamedParameterCollectionValues<bool>(
-                "preallocate", std::vector<bool>{false, true});
+            preallocate_values.emplace_back(true);
         }
 
         return testing::Combine(
-            MakeNamedParameterValues<std::string>("cmode", "conv"),
-            MakeNamedParameterValues<std::string>("pmode", "default", "same", "valid"),
+            MakeNamedParameterValues<std::string>("cmode", std::string{"conv"}),
+            MakeNamedParameterValues<std::string>(
+                "pmode", std::string{"default"}, std::string{"same"}, std::string{"valid"}),
             MakeNamedParameterValues<int>("group-count", 1),
             MakeNamedParameterValues<bool>("enable-forward", false),
             MakeNamedParameterValues<bool>("enable-backward-data", false),
             MakeNamedParameterValues<bool>("enable-backward-weights", false),
             MakeNamedParameterValues<int>("search", 1),
             MakeNamedParameterValues<bool>("generate-float", true),
-            enable_fdb_values,
-            preallocate_values,
-            params...);
+            MakeNamedParameterCollectionValues<bool>("enable-fdb", enable_fdb_values),
+            MakeNamedParameterCollectionValues<bool>("preallocate", preallocate_values),
+            std::forward<TParams>(params)...);
     }
 
-    template <typename... TParams>
-    void GetTestParams(const auto& inputParams, TParams&... params)
+    template <typename InputParams, typename... TParams>
+    void GetTestParams(const InputParams& inputParams, TParams&... params)
     {
         std::tie(conv_mode,
                  pad_mode,
@@ -2012,8 +2075,8 @@ struct conv_driver : test_driver
             filter.spatialDim = filter_dims.size();
         bool is_int8 = (input.desc.GetType() == miopenInt8);
 
-        filter.mode             = cmode_lookup[miopen::ToUpper(conv_mode)];
-        filter.paddingMode      = pmode_lookup[miopen::ToUpper(pad_mode)];
+        filter.mode             = cmode_lookup.at(miopen::ToUpper(conv_mode));
+        filter.paddingMode      = pmode_lookup.at(miopen::ToUpper(pad_mode));
         std::size_t spatial_dim = filter.GetSpatialDimension();
         filter.group_count      = std::max(static_cast<int>(groupCount), 1);
 
@@ -2192,10 +2255,10 @@ struct conv_driver : test_driver
             FAIL() << "MIOpen doesn't support int8 type transpose convolution.";
         }
 
-        bool is_bfloat16 =
+        const bool is_bfloat16 =
             (input.desc.GetType() == miopenBFloat16 && weights.desc.GetType() == miopenBFloat16);
 
-        if(is_bfloat16 && !(filter.spatialDim == 2))
+        if(is_bfloat16 && filter.spatialDim != 2)
         {
             GTEST_SKIP() << "Skipped: bfloat16 is supported for 2D conv only";
         }
@@ -2522,7 +2585,7 @@ struct verify_backwards_bias
         return rbias;
     }
 
-    void fail(int = 0) const
+    void fail() const
     {
         ADD_FAILURE() << "Backwards bias: " << "\n"
                       << "Output tensor: " << output.desc.ToString() << "\n"

@@ -31,6 +31,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "gtest_common.hpp"
@@ -139,9 +140,9 @@ struct NamedContainer
 //      );
 //
 template <typename... T>
-[[maybe_unused]] auto MakeNamedParameterValues(const std::string& name, T... values)
+[[maybe_unused]] auto MakeNamedParameterValues(const std::string& name, T&&... values)
 {
-    return testing::Values(NamedParameter<T>{name, values}...);
+    return testing::Values(NamedParameter<T>{name, std::forward<T>(values)}...);
 }
 
 // Variadic template function that creates a GTest ValueArray of 'NamedContainer' each one with the
@@ -228,6 +229,26 @@ template <typename T>
             return std::isalnum(c) ? c : ((c == '.') ? 'p' : '_');
         });
     }
+
+    return str;
+}
+
+template <typename ParamsInfo, std::size_t... Is>
+static std::string GetParamNamesString(const ParamsInfo& inputParamsInfo,
+                                       std::index_sequence<Is...>)
+{
+    std::stringstream ss;
+    std::string str;
+
+    ((ss << (Is ? "_" : "") << std::get<Is>(inputParamsInfo.param)), ...);
+    ss << "_test_id_" << inputParamsInfo.index;
+
+    str = ss.str();
+
+    // Name format only supports letters, numbers and underscores.
+    std::transform(str.begin(), str.end(), str.begin(), [](char c) -> char {
+        return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
+    });
 
     return str;
 }

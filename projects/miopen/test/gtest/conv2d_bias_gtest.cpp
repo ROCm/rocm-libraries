@@ -8,7 +8,7 @@ namespace {
 
 using TestCase = NamedContainer<std::vector<int>>;
 
-inline auto GenCases(bool smoke_test)
+auto GenCases(bool smoke_test)
 {
     std::set<std::vector<int>> output_dims;
     std::set<std::vector<int>> dims = get_inputs();
@@ -25,13 +25,13 @@ inline auto GenCases(bool smoke_test)
     return MakeNamedParameterCollectionValues<std::vector<int>>("output_dims", output_dims, "x");
 }
 
-inline auto GetCasesFull()
+auto GetCasesFull()
 {
     static const auto cases = GenCases(false);
     return cases;
 }
 
-inline auto GetCasesSmoke()
+auto GetCasesSmoke()
 {
     static const auto cases = GenCases(true);
     return cases;
@@ -40,7 +40,7 @@ inline auto GetCasesSmoke()
 } // namespace
 
 template <class T>
-struct conv3d_bias_test : public conv_bias_test<T>, public testing::TestWithParam<TestCase>
+struct conv2d_bias_test : public conv_bias_test<T>, public testing::TestWithParam<TestCase>
 {
     void SetUp() override
     {
@@ -57,9 +57,9 @@ struct conv3d_bias_test : public conv_bias_test<T>, public testing::TestWithPara
     }
 };
 
-using GPU_Conv2d_Bias_FP32  = conv3d_bias_test<float>;
-using GPU_Conv2d_Bias_FP16  = conv3d_bias_test<half_float::half>;
-using GPU_Conv2d_Bias_BFP16 = conv3d_bias_test<bfloat16>;
+using GPU_Conv2d_Bias_FP32  = conv2d_bias_test<float>;
+using GPU_Conv2d_Bias_FP16  = conv2d_bias_test<half_float::half>;
+using GPU_Conv2d_Bias_BFP16 = conv2d_bias_test<bfloat16>;
 
 struct TestNameGenerator
 {
@@ -74,7 +74,7 @@ struct TestNameGenerator
         str = ss.str();
 
         // Name format only supports letters, numbers and underscores.
-        std::transform(str.begin(), str.end(), str.begin(), [](char c) {
+        std::transform(str.begin(), str.end(), str.begin(), [](char c) -> char {
             return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
         });
 
