@@ -931,7 +931,10 @@ class GroupedConvRegistry:
             key = (cfg.variant, cfg.ndim_spatial)
             if key in runners:
                 continue
-            runner = GpuGroupedConvRunner(lib_path=str(lib.path))
+            # Fix Bug 1: lib is already a Path object, no .path attribute
+            runner = GpuGroupedConvRunner(lib_path=str(lib))
+            # Fix Bug 2: must initialize before checking availability
+            runner._ensure_initialized()
             if runner.is_available():
                 runners[key] = runner
         return runners
