@@ -6,7 +6,7 @@
  * @brief Diagonal alignment mode enumeration for hipDNN SDPA operations
  *
  * Defines the diagonal alignment mode used when setting the
- * HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT attribute on SDPA descriptors.
+ * HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT attribute on SDPA descriptors.
  */
 
 #pragma once
@@ -18,7 +18,7 @@
  * Determines which corner of the attention matrix the causal mask diagonal
  * is aligned to.
  *
- * @see HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT
+ * @see HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT
  * @see hipdnnBackendSetAttribute()
  */
 typedef enum

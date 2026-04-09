@@ -237,7 +237,7 @@ endfunction() # add_integration_test_target
 # of the main CMakeLists.txt after all tests are registered.
 function(install_integration_tests_ctest_files)
     # Define the CTest installation directory
-    set(INTEGRATION_TESTS_CTEST_FILE_INSTALL_PATH "${CMAKE_INSTALL_BINDIR}/integration_tests")
+    set(INTEGRATION_TESTS_CTEST_FILE_INSTALL_PATH "${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests_ctest")
 
     # Generate a new CTestTestfile.cmake that references installed test executables
     set(INSTALLED_CTEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install")

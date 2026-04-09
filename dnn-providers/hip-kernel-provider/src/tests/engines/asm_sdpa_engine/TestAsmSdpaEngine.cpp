@@ -41,7 +41,7 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsFalseForNonSdpaGraph)
 TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForSdpaGraph)
 {
     // Create a SDPA forward inference graph
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
 
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
                                                                      builder.GetSize());

@@ -7,7 +7,7 @@ if(NOT Catch2_FOUND)
         FetchContent_Declare(
             Catch2
             GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-            GIT_TAG devel
+            GIT_TAG v3.13.0
         )
         FetchContent_MakeAvailable(Catch2)
     else()
@@ -88,6 +88,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/NaryExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/NodeSchedulingUtilsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/OrderMultiplyNodesTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PrefetchScaleTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RandomNumberExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RandomNumberGenerationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RegisterTagManagerTest.cpp"
