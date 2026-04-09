@@ -1694,6 +1694,7 @@ class Solution(collections.abc.Mapping):
         and ((TLUA == False or state["enableLDSTrA"] or sizeDataTypeA >= 4) and (TLUB == False or state["enableLDSTrB"] or sizeDataTypeB >= 4) )
         and (not state["ProblemType"]["Sparse"] or state["TransposeLDSMetadata"])
         and not state["TDMInst"]
+        and not isaInfoMap[isa].asmCaps["HasWMMA_V4"] # Known issue affecting gfx1200. TODO: remove this once https://amd-hub.atlassian.net/browse/AIHPBLAS-1492 is resolved. It's disabled for testing for now.
       )
 
     def _applySubIterSetting(enable):
