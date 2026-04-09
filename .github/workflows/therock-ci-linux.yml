@@ -16,8 +16,6 @@ on:
         type: string
       projects_to_test:
         type: string
-      project_name:
-        type: string
       test_type:
         type: string
       run_rocjitsu_race_check:
@@ -117,7 +115,6 @@ jobs:
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
 
       - name: Configure Projects
-        if: ${{ inputs.test_type != 'coverage' }}
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ${{ inputs.rocm_package_version }}
@@ -222,22 +219,3 @@ jobs:
       build_runs_on: ${{ inputs.build_runs_on }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
     secrets: inherit
-
-  therock-test-coverage:
-    name: Code Coverage
-    if: ${{ inputs.test_type == 'coverage' && inputs.amdgpu_families != 'gfx950-dcgpu'}}
-    needs: [therock-build-linux]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Run project coverage
-        shell: bash
-        run: |
-          BUILD_DIR="/build/TheRock/rocm-libraries/${{ inputs.project_name }}/build"
-          echo "Running coverage for ${{ inputs.project_name }} in ${BUILD_DIR}"
-          cmake --build "${BUILD_DIR}" --target coverage || make -C "${BUILD_DIR}" coverage
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: ${{ env.REPORTS }}
-          fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}

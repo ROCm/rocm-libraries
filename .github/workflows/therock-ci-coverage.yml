@@ -1,0 +1,90 @@
+name: TheRock CI Linux Coverage
+
+on:
+  workflow_call:
+    inputs:
+      cmake_options:
+        type: string
+      project_name:
+        type: string
+      amdgpu_families:
+        type: string
+      test_runs_on:
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  therock-coverage-linux:
+    name: Coverage (${{ inputs.project_name }} | ${{ inputs.amdgpu_families }})
+    runs-on: azure-linux-scale-rocm
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:4443d9d710b9471e8ef658d509358bd92602498e67161b9280474bce0bb0decd
+      options: -v /runner/config:/home/awsconfig/
+    env:
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      CACHE_DIR: ${{ github.workspace }}/.container-cache
+      CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
+      TEATIME_FORCE_INTERACTIVE: 0
+      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
+    steps:
+      - name: "Checking out repository for rocm-libraries"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          path: TheRock
+          ref: 0f3a983528f2d097d89691d9f9c05d602b3f4aba
+
+      - name: Install python deps
+        run: |
+          pip install -r TheRock/requirements.txt
+
+      - name: Adjust git config
+        run: |
+          git config --global --add safe.directory $PWD
+          git config fetch.parallel 10
+
+      - name: Setup ccache
+        run: |
+          ./TheRock/build_tools/setup_ccache.py \
+            --config-preset "github-oss-presubmit" \
+            --dir "$(dirname $CCACHE_CONFIGPATH)" \
+            --local-path "$CACHE_DIR/ccache"
+
+      - name: Runner health status
+        run: |
+          ./TheRock/build_tools/health_status.py
+
+      - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
+      - name: Fetch sources
+        timeout-minutes: 30
+        run: |
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
+
+      - name: Configure coverage build
+        env:
+          amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
+          package_version: ADHOCBUILD
+          extra_cmake_options: >-
+            -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../
+            -D${{ inputs.project_name }}_ENABLE_COVERAGE=ON
+            ${{ inputs.cmake_options }}
+          BUILD_DIR: build-coverage
+        run: |
+          python3 TheRock/build_tools/github_actions/build_configure.py
+
+      - name: Build coverage
+        run: |
+          cmake --build TheRock/build-coverage --target coverage
