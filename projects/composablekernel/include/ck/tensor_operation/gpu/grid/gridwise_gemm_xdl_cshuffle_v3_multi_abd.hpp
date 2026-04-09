@@ -1077,10 +1077,6 @@ struct GridwiseGemm_xdl_cshuffle_v3
         // BsGridPointer p_bs_grid;
         // DsGridPointer p_ds_grid;
 
-        // const auto a_grid_desc_ak0_m_ak1 = MakeAGridDescriptor_AK0_M_AK1(
-        //    problem.M, problem.MPadded, problem.K, problem.KPadded, problem.StrideA, problem.AK0);
-        // const auto b_grid_desc_bk0_n_bk1 = MakeBGridDescriptor_BK0_N_BK1(
-        //    problem.K, problem.KPadded, problem.N, problem.NPadded, problem.StrideB, problem.BK0);
         const auto as_grid_desc_ak0_m_ak1 = MakeAsGridDescriptor_AK0_M_AK1(
             problem.M, problem.MPadded, problem.K, problem.KPadded, problem.StrideAs, problem.AK0);
         const auto bs_grid_desc_bk0_n_bk1 = MakeBsGridDescriptor_BK0_N_BK1(
@@ -1098,11 +1094,6 @@ struct GridwiseGemm_xdl_cshuffle_v3
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-
-        // const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-        //    p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
-        // const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-        //    p_bs_grid[I0], b_grid_desc_bk0_n_bk1.GetElementSpaceSize());
 
         const auto as_grid_buf = generate_tuple(
             [&](auto i) {
@@ -1347,10 +1338,6 @@ struct GridwiseGemm_xdl_cshuffle_v3
                                     const BElementwiseOperation& b_element_op,
                                     const CElementwiseOperation& c_element_op)
     {
-        // const auto a_grid_desc_ak0_m_ak1 = MakeAGridDescriptor_AK0_M_AK1(
-        //    problem.M, problem.MPadded, problem.K, problem.KPadded, problem.StrideA, problem.AK0);
-        // const auto b_grid_desc_bk0_n_bk1 = MakeBGridDescriptor_BK0_N_BK1(
-        //    problem.K, problem.KPadded, problem.N, problem.NPadded, problem.StrideB, problem.BK0);
         const auto as_grid_desc_ak0_m_ak1 = MakeAsGridDescriptor_AK0_M_AK1(
             problem.M, problem.MPadded, problem.K, problem.KPadded, problem.StrideAs, problem.AK0);
         const auto bs_grid_desc_bk0_n_bk1 = MakeBsGridDescriptor_BK0_N_BK1(
@@ -1369,10 +1356,6 @@ struct GridwiseGemm_xdl_cshuffle_v3
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
 
-        // const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-        //    p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
-        // const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-        //    p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize());
         const auto as_grid_buf = generate_tuple(
             [&](auto i) {
                 return make_dynamic_buffer<AddressSpaceEnum::Global>(
