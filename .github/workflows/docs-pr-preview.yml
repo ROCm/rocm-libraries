@@ -139,7 +139,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          preview_url="https://rocm.docs.amd.com/projects/${{ steps.rtd.outputs.project_slug }}/en/${{ steps.rtd.outputs.version_slug }}/"
+          preview_url="https://rocm.docs.amd.com/projects/${{ steps.extract.outputs.project_name }}/en/${{ steps.rtd.outputs.version_slug }}/"
           gh pr comment ${{ github.event.issue.number }} \
             --repo ${{ github.repository }} \
             --body "Docs preview for **${{ steps.extract.outputs.project_name }}** is building on Read the Docs: $preview_url"
