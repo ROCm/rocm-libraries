@@ -4,4 +4,6 @@
 target_sources(${INTEGRATION_TESTS_EXE}
     PRIVATE
         IntegrationGpuConvForward.cpp
+        IntegrationGpuConvBackwardData.cpp
+        IntegrationGpuConvBackwardWeights.cpp
 )
