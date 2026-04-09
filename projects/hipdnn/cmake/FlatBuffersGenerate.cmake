@@ -56,31 +56,36 @@ function(_hipdnn_generate_secondary_version _version _flatc_flags)
 
     # Build flatc at build time via ExternalProject (separate CMake instance avoids
     # target name collisions). Guard prevents duplicate target when multiple SDKs
-    # call this function for the same version.
+    # generate headers for the same FlatBuffers version.
     if(NOT TARGET ${_ep_name})
-    ExternalProject_Add(${_ep_name}
-        SOURCE_DIR "${${_fc_name}_SOURCE_DIR}"
-        DOWNLOAD_COMMAND ""
-        UPDATE_COMMAND ""
-        CONFIGURE_HANDLED_BY_BUILD TRUE
-        BINARY_DIR ${_flatc_build_dir}
-        CMAKE_ARGS
-            -DFLATBUFFERS_BUILD_FLATC=ON
-            -DFLATBUFFERS_BUILD_FLATLIB=OFF
-            -DFLATBUFFERS_BUILD_TESTS=OFF
-            -DFLATBUFFERS_BUILD_FLATHASH=OFF
-            -DFLATBUFFERS_ENABLE_PCH=ON
-            -DCMAKE_C_COMPILER=${_c_compiler}
-            -DCMAKE_CXX_COMPILER=${_cxx_compiler}
-            -DCMAKE_RC_COMPILER=CMAKE_RC_COMPILER-NOTREQUIRED
-            -DCMAKE_BUILD_TYPE=Release
-        BUILD_COMMAND ${CMAKE_COMMAND} --build ${_flatc_build_dir} --target flatc
-        INSTALL_COMMAND ""
-        BUILD_BYPRODUCTS ${_flatc_binary}
-        LOG_CONFIGURE ON
-        LOG_BUILD ON
-        LOG_OUTPUT_ON_FAILURE ON
-    )
+        ExternalProject_Add(${_ep_name}
+            SOURCE_DIR "${${_fc_name}_SOURCE_DIR}"
+            DOWNLOAD_COMMAND ""
+            UPDATE_COMMAND ""
+            CONFIGURE_HANDLED_BY_BUILD TRUE
+            BINARY_DIR ${_flatc_build_dir}
+            CMAKE_ARGS
+                -DFLATBUFFERS_BUILD_FLATC=ON
+                -DFLATBUFFERS_BUILD_FLATLIB=OFF
+                -DFLATBUFFERS_BUILD_TESTS=OFF
+                -DFLATBUFFERS_BUILD_FLATHASH=OFF
+                -DFLATBUFFERS_ENABLE_PCH=ON
+                -DCMAKE_C_COMPILER=${_c_compiler}
+                -DCMAKE_CXX_COMPILER=${_cxx_compiler}
+                -DCMAKE_RC_COMPILER=CMAKE_RC_COMPILER-NOTREQUIRED
+                -DCMAKE_BUILD_TYPE=Release
+            BUILD_COMMAND ${CMAKE_COMMAND} --build ${_flatc_build_dir} --target flatc
+            INSTALL_COMMAND ""
+            BUILD_BYPRODUCTS ${_flatc_binary}
+            LOG_CONFIGURE ON
+            LOG_BUILD ON
+            LOG_OUTPUT_ON_FAILURE ON
+        )
+    else()
+        # Target already created by another SDK — resolve the existing build directory
+        ExternalProject_Get_Property(${_ep_name} BINARY_DIR)
+        set(_flatc_build_dir "${BINARY_DIR}")
+        set(_flatc_binary "${_flatc_build_dir}/flatc")
     endif()
 
     # Generate headers at build time using the built flatc
