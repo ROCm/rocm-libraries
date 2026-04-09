@@ -110,7 +110,7 @@ namespace
             StinkyInstruction& inst = getStinkyInst(it);
             if(isLabel(inst) || isBranch(inst))
                 continue;
-            return isWMMA(inst) || isSWMMA(inst);
+            return isMatrixInstruction(inst);
         }
         return false;
     }
@@ -570,12 +570,12 @@ namespace
             //             updating lastOverlap so the last matching WMMA is recorded.
             auto             loadDestVGPRs = collectDestVGPRs(*targetDSLoad);
             int              wmmaIdx       = 0;
-            int              lastOverlap   = -1;
+            int              lastOverlap   = 0;
             IRList::iterator wmmaEnd       = std::next(targetDSLoadIt);
             for(IRList::iterator it = regionStart; it != wmmaEnd; ++it)
             {
                 StinkyInstruction& inst = getStinkyInst(it);
-                if(!isWMMA(inst) && !isSWMMA(inst))
+                if(!isMatrixInstruction(inst))
                     continue;
                 wmmaIdx++;
                 if(srcVGPRsOverlap(inst, loadDestVGPRs))
@@ -583,8 +583,7 @@ namespace
             }
 
             // Step 4: threshold N = wmmaIdx + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1.
-            if(lastOverlap != -1)
-                barrierWmmaThresholds_[be.barrier] = lastOverlap + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1;
+            barrierWmmaThresholds_[be.barrier] = lastOverlap + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1;
         }
     }
 
@@ -648,7 +647,7 @@ namespace
                 for(IRList::iterator it = regionStart; it != regionEnd; ++it)
                 {
                     StinkyInstruction& inst = getStinkyInst(it);
-                    if(!isWMMA(inst) && !isSWMMA(inst))
+                    if(!isMatrixInstruction(inst))
                         continue;
                     wmmaIdx++;
                     if(srcVGPRsOverlap(inst, dse.destVGPRs))
@@ -818,7 +817,7 @@ namespace
     {
         // Route ready nodes into buckets. Order here does not imply schedule order; pickOne
         // implements the actual priority and min-id policy.
-        if(isWMMA(*node->inst))
+        if(isMatrixInstruction(*node->inst))
         {
             wmmaNodeCounters[node] = 0; // pickOneFromWMMA may raise before this WMMA becomes top
             wmmaQueue.push(node);
@@ -885,7 +884,7 @@ namespace
         for(IRList::iterator it = regionStart; it != regionEnd; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
-            if(isWMMA(inst) || isSWMMA(inst))
+            if(isMatrixInstruction(inst))
             {
                 wmmaIssueConfig.latency = inst.latencyCycles;
                 break;
@@ -969,7 +968,7 @@ namespace
             if(isDSRead(inst))
                 totalDSLatency += inst.latencyCycles;
 
-            if(isWMMA(inst) || isSWMMA(inst))
+            if(isMatrixInstruction(inst))
             {
                 wmmaIssueConfig.issuedCount += 1;
                 wmmaIssueConfig.totalWmmaIssuedCycles += inst.issueCycles;
