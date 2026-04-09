@@ -458,7 +458,17 @@ namespace TensileLite
                 case rocisa::DataType::Float8BFloat8:
                 case rocisa::DataType::BFloat8Float8:
                 case rocisa::DataType::Float8BFloat8_fnuz:
-                case rocisa::DataType::BFloat8Float8_fnuz:;
+                case rocisa::DataType::BFloat8Float8_fnuz:
+#ifndef TENSILE_USE_FP6
+                case rocisa::DataType::Float6:
+#endif
+#ifndef TENSILE_USE_BF6
+                case rocisa::DataType::BFloat6:
+#endif
+#ifndef TENSILE_USE_FP4
+                case rocisa::DataType::Float4:
+#endif
+                ;
                 }
             }
 
@@ -2208,12 +2218,12 @@ namespace TensileLite
         template <>
         inline Float6x16 DataInitialization::getValue<Float6x16, InitMode::BadInput>()
         {
-            throw std::runtime_error("BadInput not available for float4.");
+            throw std::runtime_error("BadInput not available for float6.");
         }
         template <>
         inline Float6x16 DataInitialization::getValue<Float6x16, InitMode::BadOutput>()
         {
-            throw std::runtime_error("BadOutput not available for float4.");
+            throw std::runtime_error("BadOutput not available for float6.");
         }
 #endif // #ifdef TENSILE_USE_FP6
 
@@ -2290,12 +2300,12 @@ namespace TensileLite
         template <>
         inline BFloat6x16 DataInitialization::getValue<BFloat6x16, InitMode::BadInput>()
         {
-            throw std::runtime_error("BadInput not available for float4.");
+            throw std::runtime_error("BadInput not available for bfloat6.");
         }
         template <>
         inline BFloat6x16 DataInitialization::getValue<BFloat6x16, InitMode::BadOutput>()
         {
-            throw std::runtime_error("BadOutput not available for float4.");
+            throw std::runtime_error("BadOutput not available for bfloat6.");
         }
 #endif // #ifdef TENSILE_USE_BF6
 

@@ -168,6 +168,7 @@ float typeToFloat(T* buf, size_t idx)
     return static_cast<float>(buf[idx]);
 }
 
+#if (defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)) || defined(HIPBLASLT_USE_FP4)
 template<typename T, std::enable_if_t<false
 #if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
                                       || std::is_same<hipblaslt_f6x16, T>::value
@@ -184,6 +185,7 @@ float typeToFloat(T* buf, size_t idx)
 
     return buf[oIdx].castElement(iIdx);
 }
+#endif
 
 template<typename T, typename S>
 std::vector<float> mx_type_to_f32(T* buf, S* sbuf, size_t row, size_t col, size_t srow, size_t scol)

@@ -89,7 +89,17 @@ namespace rocisa
             return "E8";
         case rocisa::DataType::E5M3:
             return "E5M3";
-        case rocisa::DataType::Count:;
+        case rocisa::DataType::Count:
+#ifndef TENSILE_USE_FP6
+        case rocisa::DataType::Float6:
+#endif
+#ifndef TENSILE_USE_BF6
+        case rocisa::DataType::BFloat6:
+#endif
+#ifndef TENSILE_USE_FP4
+        case rocisa::DataType::Float4:
+#endif
+        ;
         }
         return "Invalid";
     }
@@ -152,7 +162,17 @@ namespace rocisa
             return TensileLite::TypeInfo<TensileLite::E8>::ElementSize;
         case rocisa::DataType::E5M3:
             return TensileLite::TypeInfo<TensileLite::E5M3>::ElementSize;
-        case rocisa::DataType::Count:;
+        case rocisa::DataType::Count:
+#ifndef TENSILE_USE_FP6
+        case rocisa::DataType::Float6:
+#endif
+#ifndef TENSILE_USE_BF6
+        case rocisa::DataType::BFloat6:
+#endif
+#ifndef TENSILE_USE_FP4
+        case rocisa::DataType::Float4:
+#endif
+        ;
         }
         return 1;
     }

@@ -385,15 +385,9 @@ namespace TensileLite
             case rocisa::DataType::BFloat8Float8:
             case rocisa::DataType::Float8BFloat8_fnuz:
             case rocisa::DataType::BFloat8Float8_fnuz:
-#ifdef TENSILE_USE_FP6
             case rocisa::DataType::Float6:
-#endif // #ifdef TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
             case rocisa::DataType::BFloat6:
-#endif // #ifdef TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
-#endif // #ifdef TENSILE_USE_FP4
                 ;
             }
             return DataInitialization::getValue<Accumulator, InitMode::Zero>();
@@ -505,15 +499,9 @@ namespace TensileLite
             case rocisa::DataType::BFloat8Float8:
             case rocisa::DataType::Float8BFloat8_fnuz:
             case rocisa::DataType::BFloat8Float8_fnuz:
-#ifdef TENSILE_USE_FP6
             case rocisa::DataType::Float6:
-#endif // #ifdef TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
             case rocisa::DataType::BFloat6:
-#endif // #ifdef TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
-#endif // #ifdef TENSILE_USE_FP4
             case rocisa::DataType::E8:
             case rocisa::DataType::E5M3:
                 ;
@@ -564,15 +552,9 @@ namespace TensileLite
             case rocisa::DataType::BFloat8Float8:
             case rocisa::DataType::Float8BFloat8_fnuz:
             case rocisa::DataType::BFloat8Float8_fnuz:
-#ifdef TENSILE_USE_FP6
             case rocisa::DataType::Float6:
-#endif // #ifdef TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
             case rocisa::DataType::BFloat6:
-#endif // #ifdef TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
-#endif // #ifdef TENSILE_USE_FP4
             case rocisa::DataType::E8:
             case rocisa::DataType::E5M3:
                 ;
@@ -1256,6 +1238,7 @@ namespace TensileLite
             return static_cast<Accumulator>(static_cast<MultT>(static_cast<MathOpMultT>(val)));
         }
 
+#if defined(TENSILE_USE_FP6) || defined(TENSILE_USE_BF6) || defined(TENSILE_USE_FP4)
         template <typename Accumulator,
                   typename MathOpAccum,
                   typename Type,
@@ -1284,6 +1267,7 @@ namespace TensileLite
 
             return static_cast<Accumulator>(ptr[packIdx].getElement(elemIdx));
         }
+#endif
 
         template<typename Inputs, typename Accumulator, typename MathOpAccum, typename AType, typename BType, typename ComputeInputTypeA, typename ComputeInputTypeB
             , std::enable_if_t<(!std::is_same<Int8x4, AType>::value && !std::is_same<Int8x4, BType>::value), bool> = true
