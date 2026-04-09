@@ -273,44 +273,17 @@ namespace rocRoller
                 }
             }
         }
-        // Scalar -> VCC
-        else if((dest->isVCC()) && src->regType() == Register::Type::Scalar
-                && ((src->registerCount() == 2 && context->kernel()->wavefront_size() == 64)
-                    || (src->registerCount() == 1 && context->kernel()->wavefront_size() == 32)))
-        {
-            if(context->kernel()->wavefront_size() == 64)
-            {
-                co_yield_(Instruction("s_mov_b64", {dest}, {src}, {}, comment));
-            }
-            else
-            {
-                co_yield_(Instruction("s_mov_b32", {dest}, {src}, {}, comment));
-            }
-        }
-        // VCC -> Scalar
-        else if((src->isVCC()) && dest->regType() == Register::Type::Scalar
-                && ((dest->registerCount() == 2 && context->kernel()->wavefront_size() == 64)
-                    || (dest->registerCount() == 1 && context->kernel()->wavefront_size() == 32)))
-        {
-            if(context->kernel()->wavefront_size() == 64)
-            {
-                co_yield_(Instruction("s_mov_b64", {dest}, {src}, {}, comment));
-            }
-            else
-            {
-                co_yield_(Instruction("s_mov_b32", {dest}, {src}, {}, comment));
-            }
-        }
         // Vector -> Scalar
         else if(dest->regType() == Register::Type::Scalar
                 && src->regType() == Register::Type::Vector)
         {
             co_yield_(Instruction("v_readfirstlane_b32", {dest}, {src}, {}, comment));
         }
-        // Scalar -> EXEC
-        else if((src->regType() == Register::Type::Scalar && dest->isEXEC())
-                && ((src->registerCount() == 2 && context->kernel()->wavefront_size() == 64)
-                    || (src->registerCount() == 1 && context->kernel()->wavefront_size() == 32)))
+        // Scalar <-> VCC, or Scalar -> EXEC
+        else if((src->regType() == Register::Type::Scalar && (dest->isVCC() || dest->isEXEC())
+                 && src->registerCount() == context->kernel()->wavefront_size() / 32)
+                || (src->isVCC() && dest->regType() == Register::Type::Scalar
+                    && dest->registerCount() == context->kernel()->wavefront_size() / 32))
         {
             if(context->kernel()->wavefront_size() == 64)
             {

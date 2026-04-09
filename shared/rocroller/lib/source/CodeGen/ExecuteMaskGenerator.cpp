@@ -24,7 +24,7 @@ namespace rocRoller
 
         ExecuteMaskGenerator::ExecuteMaskGenerator(KernelGraphPtr graph, ContextPtr context)
             : m_context(context)
-            , m_graph(std::move(graph))
+            , m_graph(graph)
             , m_fastArith(Expression::FastArithmetic(context))
         {
         }
