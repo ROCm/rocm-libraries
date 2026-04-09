@@ -1,4 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
 """Suite runner for per-graph provider/engine iteration with granular timing.
@@ -32,6 +32,10 @@ from ..validation.reference_provider import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Known providers to attempt when dynamic discovery is unavailable.
+# The runner records skipped/error for any that fail at runtime.
+_DEFAULT_PROVIDER_NAMES = ["miopen"]
 
 # Keywords in error messages that indicate an unsupported combination
 # rather than a hard error.
@@ -85,7 +89,7 @@ def discover_providers(handle: Any) -> List[str]:
         "Could not enumerate providers via hipDNN API; "
         "falling back to default provider list"
     )
-    return ["miopen"]
+    return list(_DEFAULT_PROVIDER_NAMES)
 
 
 def discover_engines(handle: Any, provider: str) -> List[int]:

@@ -1,4 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
 """Suite result data model with JSON serialization.
@@ -143,6 +143,8 @@ class ProviderEngineResult:
         skip_reason: D-02: reason for skip.
     """
 
+    _VALID_STATUSES = {"success", "error", "skipped"}
+
     provider: str
     engine_id: int
     status: str
@@ -152,6 +154,14 @@ class ProviderEngineResult:
     correctness: Optional[CorrectnessResult] = None
     error_message: Optional[str] = None
     skip_reason: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        """Validate status field."""
+        if self.status not in self._VALID_STATUSES:
+            raise ValueError(
+                f"Invalid status '{self.status}'. "
+                f"Must be one of: {self._VALID_STATUSES}"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization.
@@ -288,7 +298,9 @@ class SuiteResult:
         Args:
             path: Output file path.
         """
-        Path(path).write_text(self.to_json())
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(self.to_json())
 
 
 def collect_environment_info() -> Dict[str, Optional[str]]:

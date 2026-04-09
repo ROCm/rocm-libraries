@@ -34,7 +34,6 @@ from ..reporting.suite_results import (
     collect_environment_info,
 )
 from ..validation import ArrayComparator, ReferenceProviderRegistry
-from ..validation.validator import Validator
 from .parser import create_parser
 
 
@@ -522,24 +521,7 @@ def run_suite(
             if n_fail > 0:
                 has_correctness_failures = True
 
-        except GraphLoadError as e:
-            reporter.print_suite_graph_error(graph_name, str(e))
-            error_result = GraphResult(
-                graph_name=graph_name,
-                graph_path=str(graph_path),
-                results=[
-                    ProviderEngineResult(
-                        provider="unknown",
-                        engine_id=0,
-                        status="error",
-                        error_message=str(e),
-                    )
-                ],
-            )
-            graph_results.append(error_result)
-            has_errors = True
-
-        except Exception as e:
+        except (GraphLoadError, ExecutionError) as e:
             reporter.print_suite_graph_error(graph_name, str(e))
             error_result = GraphResult(
                 graph_name=graph_name,
@@ -698,8 +680,8 @@ def main() -> int:
             validation_config=ab_validation_config,
         )
 
-    # Suite mode: multiple files resolved (per D-05)
-    if len(resolved_files) > 1:
+    # Suite mode: multiple files resolved (per D-05), or suite-specific flags used
+    if len(resolved_files) > 1 or args.provider is not None or args.engine is not None:
         try:
             suite_config = SuiteConfig(
                 warmup_iters=args.warmup,

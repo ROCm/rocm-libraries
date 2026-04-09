@@ -1,4 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
 """Unit tests for suite CLI argument parsing and run_suite() workflow."""

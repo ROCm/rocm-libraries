@@ -155,3 +155,7 @@ class SuiteConfig:
             raise ValueError("warmup_iters must be non-negative")
         if self.benchmark_iters <= 0:
             raise ValueError("benchmark_iters must be positive")
+        if self.rtol < 0:
+            raise ValueError("rtol must be non-negative")
+        if self.atol < 0:
+            raise ValueError("atol must be non-negative")
