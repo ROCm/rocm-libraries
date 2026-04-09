@@ -484,7 +484,7 @@ TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_16x16x32_Real)
     HIP_CHECK_ERROR(hipMemcpy(d_b, h_b.data(), BSize, hipMemcpyHostToDevice));
     HIP_CHECK_ERROR(hipMemcpy(d_c, h_c.data(), CSize, hipMemcpyHostToDevice));
 
-    const auto wave_size = getDeviceWaveSize();
+    const auto wave_size = testing::getDeviceWaveSize();
     test_accum_over_k<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>
         <<<1, wave_size>>>(d_a, d_b, d_c, d_out);
     HIP_CHECK_ERROR(hipDeviceSynchronize());
@@ -585,7 +585,7 @@ TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_112x112x128_Real)
     HIP_CHECK_ERROR(hipMemcpy(d_b, h_b.data(), BSize, hipMemcpyHostToDevice));
     HIP_CHECK_ERROR(hipMemcpy(d_c, h_c.data(), CSize, hipMemcpyHostToDevice));
 
-    const auto wave_size = getDeviceWaveSize();
+    const auto wave_size = testing::getDeviceWaveSize();
     test_accum_over_k<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>
         <<<1, wave_size>>>(d_a, d_b, d_c, d_out);
     HIP_CHECK_ERROR(hipDeviceSynchronize());
