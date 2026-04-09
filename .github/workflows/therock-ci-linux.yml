@@ -13,8 +13,6 @@ on:
         type: string
       projects_to_test:
         type: string
-      project_name:
-        type: string
       test_type:
         type: string
       amdgpu_families:
@@ -99,23 +97,13 @@ jobs:
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks ${{ contains(inputs.cmake_options, 'THEROCK_ENABLE_IREE_LIBS=ON') && '--include-iree-libs' || '' }}
 
       - name: Configure Projects
-        if: ${{ inputs.test_type != 'coverage' }}
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
           extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
-        run: python3 TheRock/build_tools/github_actions/build_configure.py
-
-      - name: Configure Projects
-        if: ${{ inputs.test_type == 'coverage' }}
-        env:
-          amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
-          package_version: ADHOCBUILD
-          extra_cmake_options: "-D${{ inputs.project_name }}_ENABLE_COVERAGE=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
-          BUILD_DIR: build
-        run: python3 TheRock/build_tools/github_actions/build_configure.py
-
+        run: |
+          python3 TheRock/build_tools/github_actions/build_configure.py
 
       - name: Build therock-archives and therock-dist
         run: cmake --build TheRock/build --target therock-archives therock-dist -- -k 0
@@ -166,7 +154,6 @@ jobs:
 
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
-    if: ${{ inputs.test_type != 'coverage' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-test-packages.yml
     with:
@@ -176,22 +163,3 @@ jobs:
       platform: "linux"
       test_type: ${{ inputs.test_type }}
     secrets: inherit
-
-  therock-test-coverage:
-    name: Code Coverage
-    if: ${{ inputs.test_type == 'coverage' && inputs.amdgpu_families != 'gfx950-dcgpu'}}
-    needs: [therock-build-linux]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Run project coverage
-        shell: bash
-        run: |
-          BUILD_DIR="/build/TheRock/rocm-libraries/${{ inputs.project_name }}/build"
-          echo "Running coverage for ${{ inputs.project_name }} in ${BUILD_DIR}"
-          cmake --build "${BUILD_DIR}" --target coverage || make -C "${BUILD_DIR}" coverage
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: ${{ env.REPORTS }}
-          fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}
