@@ -565,11 +565,11 @@ ck_impl_depthwise_fwd_get_solution(const miopen::ExecutionContext* ctx,
                 return;
 
             found         = true;
-            auto conv_ptr = std::make_shared<DeviceConvFwdInstance>();
+            auto conv_instance = std::make_shared<DeviceConvFwdInstance>();
 
-            solution.invoker_factory = [conv_ptr, ck_args = CKArgs{*problem}](
+            solution.invoker_factory = [conv_ptr_ = std::move(conv_instance), ck_args = CKArgs{*problem}](
                                            const std::vector<miopen::Kernel>&) mutable {
-                return [conv_ptr = std::move(conv_ptr),
+                return [conv_ptr = std::move(conv_ptr_),
                         ck_args](const miopen::Handle& handle,
                                  const miopen::AnyInvokeParams& primitive_params) {
                     const auto& fwd_ctx = primitive_params.CastTo<miopen::conv::DataInvokeParams>();
