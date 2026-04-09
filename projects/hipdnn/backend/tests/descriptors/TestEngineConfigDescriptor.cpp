@@ -318,7 +318,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceInvalidType)
     // Wrong attribute type
     ASSERT_THROW_HIPDNN_STATUS(
         engineConfig->setAttribute(
-            HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT, HIPDNN_TYPE_INT64, 1, &knobData),
+            HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE, HIPDNN_TYPE_INT64, 1, &knobData),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -330,24 +330,22 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceInvalidCount)
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     // Element count < 1
-    ASSERT_THROW_HIPDNN_STATUS(
-        engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
-                                   HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
-                                   0,
-                                   &knobData),
-        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
+                                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                                          0,
+                                                          &knobData),
+                               HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceNullPointer)
 {
     auto engineConfig = getEngineConfigDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
-                                   HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
-                                   1,
-                                   nullptr),
-        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    ASSERT_THROW_HIPDNN_STATUS(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
+                                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                                          1,
+                                                          nullptr),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceNullFlatbufferPointer)
@@ -356,12 +354,11 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceNullFlatbufferPointer)
 
     hipdnnBackendFlatbufferData_t knobData = {nullptr, 100};
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
-                                   HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
-                                   1,
-                                   &knobData),
-        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    ASSERT_THROW_HIPDNN_STATUS(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
+                                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                                          1,
+                                                          &knobData),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceZeroSize)
@@ -371,12 +368,11 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceZeroSize)
     auto knobBuffer = createSerializedKnobSetting("test_knob_100", 42);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), 0};
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
-                                   HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
-                                   1,
-                                   &knobData),
-        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
+                                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                                          1,
+                                                          &knobData),
+                               HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceSuccess)
@@ -394,7 +390,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceSuccess)
     auto knobBuffer = createSerializedKnobSetting("test_knob_100", 42);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
-    ASSERT_NO_THROW(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+    ASSERT_NO_THROW(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                                HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                                1,
                                                &knobData));
@@ -418,7 +414,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceMultipleKnobs)
     std::vector<hipdnnBackendFlatbufferData_t> knobDataArray
         = {{knobBuffer1.data(), knobBuffer1.size()}, {knobBuffer2.data(), knobBuffer2.size()}};
 
-    ASSERT_NO_THROW(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+    ASSERT_NO_THROW(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
                                                HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                                2,
                                                knobDataArray.data()));
@@ -432,12 +428,11 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceOnFinalizedDescriptor)
     auto knobBuffer = createSerializedKnobSetting("test_knob_100", 42);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
-                                   HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
-                                   1,
-                                   &knobData),
-        HIPDNN_STATUS_NOT_INITIALIZED);
+    ASSERT_THROW_HIPDNN_STATUS(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
+                                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                                          1,
+                                                          &knobData),
+                               HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
 // Helper to create a finalized KnobSettingDescriptor

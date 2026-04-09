@@ -46,6 +46,8 @@ namespace hipdnn_frontend::graph
 class CustomOpAttributes
 {
 public:
+    CustomOpAttributes() = default;
+
     // NOLINTBEGIN(readability-identifier-naming)
     std::string name;
     DataType compute_data_type = DataType::NOT_SET;

@@ -425,14 +425,10 @@ rocblaslt_status
                                          int                          solutionIndex,
                                          std::shared_ptr<GemmKernel>& kernel)
 {
-    // TODO: Remove once rocRoller supports swizzleA and swizzleB
-    if (kernelType.swizzleA || kernelType.swizzleB)
-        return rocblaslt_status_not_implemented;
-
     auto params = genSolutionParameters(kernelType, solutionIndexParameter);
     try
     {
-        kernel = genGemmKernel(params);
+        kernel = RocRollerGemmKernel::generate(params);
         rocroller_handle->cache.addKernel(kernelType, solutionIndexParameter, kernel);
     }
     catch(const std::exception& e)
@@ -532,8 +528,8 @@ rocblaslt_status
             }
         }
 
-        auto existingSolution
-            = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameter);
+        auto existingSolution = rocroller_handle->cache.getKernel(
+            kernelType, solutionIndexParameter, ProblemDims{prob.m, prob.n, prob.k});
         std::shared_ptr<GemmKernel> kernel;
         // If kernel doesn't already exist, generate it
         if(!existingSolution)
@@ -556,7 +552,7 @@ rocblaslt_status
         heuristicResultsArray[i].algo.max_workspace_bytes = maxWorkSpaceBytes;
         heuristicResultsArray[i].algo.fallback            = false;
         heuristicResultsArray[i].state                    = rocblaslt_status_success;
-        heuristicResultsArray[i].workspaceSize            = workspaceRequired(kernel, prob);
+        heuristicResultsArray[i].workspaceSize            = kernel->workspaceRequired(prob);
         i++;
     }
 
@@ -630,7 +626,8 @@ rocblaslt_status getKernelFromAlgo(rocblaslt_handle                   handle,
     auto             kernelType       = genKernelType(prob);
 
     auto solutionIndexParameters = indexToParameters(*solutionIndex);
-    auto existingKernel = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameters);
+    auto existingKernel          = rocroller_handle->cache.getKernel(
+        kernelType, solutionIndexParameters, ProblemDims{prob.m, prob.n, prob.k});
     if(existingKernel)
     {
         kernel = *existingKernel;
@@ -654,7 +651,7 @@ rocblaslt_status isRocRollerSolutionSupported(rocblaslt_handle             handl
     if(status != rocblaslt_status_success)
         return status;
 
-    if(!isSupportedProblem(kernel, prob))
+    if(!kernel->isSupportedProblem(prob))
     {
         return rocblaslt_status_invalid_value;
     }
@@ -732,8 +729,5 @@ rocblaslt_status runRocRollerContractionProblem(rocblaslt_handle                
                            hotIterations);
     }
 
-    if(kernel->isCustomKernel())
-        return runCustomKernel(kernel, prob);
-
-    return runGemmKernel(kernel, prob);
+    return kernel->run(prob);
 }

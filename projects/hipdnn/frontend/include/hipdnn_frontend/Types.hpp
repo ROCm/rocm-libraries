@@ -32,11 +32,13 @@
 #include <HipdnnDiagonalAlignment.h>
 #include <HipdnnNormFwdPhase.h>
 #include <HipdnnPointwiseMode.h>
+#include <HipdnnReduceTensorOp.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/types.hpp>
@@ -136,6 +138,27 @@ enum class PointwiseMode
 typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
 
 /**
+ * @enum ReductionMode
+ * @brief Specifies the reduction operation to perform
+ *
+ * Matches the cudnn-frontend ReductionMode_t enumeration for API compatibility.
+ */
+enum class ReductionMode
+{
+    NOT_SET = 0, ///< Reduction mode not specified
+    ADD = 1, ///< Sum reduction
+    MUL = 2, ///< Product reduction
+    MIN = 3, ///< Minimum reduction
+    MAX = 4, ///< Maximum reduction
+    AMAX = 5, ///< Absolute maximum reduction
+    AVG = 6, ///< Average reduction
+    NORM1 = 7, ///< L1 norm reduction
+    NORM2 = 8, ///< L2 norm reduction
+    MUL_NO_ZEROS = 9, ///< Product reduction excluding zeros
+};
+typedef ReductionMode ReductionMode_t; ///< @brief Type alias for ReductionMode
+
+/**
  * @enum DataType
  * @brief Specifies the data type for tensor elements
  *
@@ -154,6 +177,12 @@ enum class DataType
     INT8 = 7, ///< 8-bit signed integer
     FP8_E4M3 = 8, ///< 8-bit floating point (4 exponent, 3 mantissa bits)
     FP8_E5M2 = 9, ///< 8-bit floating point (5 exponent, 2 mantissa bits)
+    FP8_E8M0 = 10, ///< 8-bit floating point (8 exponent, 0 mantissa bits)
+    FP4_E2M1 = 11, ///< 4-bit floating point (2 exponent, 1 mantissa bit)
+    INT4 = 12, ///< 4-bit signed integer
+    FP6_E2M3 = 13, ///< 6-bit floating point (2 exponent, 3 mantissa bits)
+    FP6_E3M2 = 14, ///< 6-bit floating point (3 exponent, 2 mantissa bits)
+    INT64 = 15, ///< 64-bit signed integer
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -169,7 +198,7 @@ typedef DataType DataType_t; ///< @brief Type alias for DataType
  * S_q < S_kv, BOTTOM_RIGHT aligns the mask so that each query attends
  * to the most recent keys rather than the earliest.
  *
- * @see SdpaAttributes::set_diagonal_alignment()
+ * @see hipdnn_frontend::graph::SdpaAttributes::set_diagonal_alignment()
  */
 enum class DiagonalAlignment
 {
@@ -185,7 +214,7 @@ typedef DiagonalAlignment DiagonalAlignment_t; ///< @brief Type alias for Diagon
  *
  * Selects how the SDPA computation is mapped to GPU kernels.
  *
- * @see SdpaAttributes::set_implementation()
+ * @see hipdnn_frontend::graph::SdpaAttributes::set_implementation()
  */
 enum class AttentionImplementation
 {
@@ -242,7 +271,8 @@ typedef NormFwdPhase NormFwdPhase_t; ///< @brief Type alias for NormFwdPhase
  * Knobs are configuration parameters for engine execution. This enum
  * indicates what type of value a particular knob expects.
  *
- * @see Knob, KnobSetting
+ * @see hipdnn_frontend::Knob
+ * @see hipdnn_frontend::KnobSetting
  */
 enum class KnobValueType
 {
@@ -291,6 +321,10 @@ DataType getDataTypeEnumFromType()
     {
         return DataType::INT32;
     }
+    else if constexpr(std::is_same_v<T, int64_t>)
+    {
+        return DataType::INT64;
+    }
     else if constexpr(std::is_same_v<T, int8_t>)
     {
         return DataType::INT8;
@@ -337,9 +371,9 @@ inline std::optional<hipdnnConvolutionMode_t> toBackendConvMode(const Convolutio
     switch(type)
     {
     case ConvolutionMode::CROSS_CORRELATION:
-        return HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+        return HIPDNN_CROSS_CORRELATION;
     case ConvolutionMode::CONVOLUTION:
-        return HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+        return HIPDNN_CONVOLUTION;
     default:
         return std::nullopt;
     }
@@ -357,9 +391,9 @@ inline std::pair<ConvolutionMode, Error> fromHipdnnConvMode(hipdnnConvolutionMod
 {
     switch(mode)
     {
-    case HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION:
+    case HIPDNN_CROSS_CORRELATION:
         return {ConvolutionMode::CROSS_CORRELATION, {}};
-    case HIPDNN_CONVOLUTION_MODE_CONVOLUTION:
+    case HIPDNN_CONVOLUTION:
         return {ConvolutionMode::CONVOLUTION, {}};
     default:
         return {
@@ -373,7 +407,7 @@ inline std::pair<ConvolutionMode, Error> fromHipdnnConvMode(hipdnnConvolutionMod
  * @brief Convert frontend DiagonalAlignment to backend hipdnnDiagonalAlignment_t
  *
  * Maps frontend diagonal alignment enum directly to the backend C API enum type
- * for use with HIPDNN_TYPE_DIAGONAL_ALIGNMENT attributes.
+ * for use with HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT attributes.
  *
  * @param type The frontend DiagonalAlignment value
  * @return The corresponding hipdnnDiagonalAlignment_t value
@@ -395,7 +429,7 @@ inline hipdnnDiagonalAlignment_t toBackendDiagonalAlignment(const DiagonalAlignm
  * @brief Convert frontend AttentionImplementation to backend hipdnnAttentionImplementation_t
  *
  * Maps frontend attention implementation enum directly to the backend C API enum type
- * for use with HIPDNN_TYPE_ATTENTION_IMPLEMENTATION attributes.
+ * for use with HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT attributes.
  *
  * @param type The frontend AttentionImplementation value
  * @return The corresponding hipdnnAttentionImplementation_t value
@@ -417,6 +451,59 @@ inline hipdnnAttentionImplementation_t
 }
 
 /**
+ * @brief Convert backend hipdnnDiagonalAlignment_t to frontend DiagonalAlignment
+ *
+ * Maps the backend C API diagonal alignment enum to the frontend DiagonalAlignment enum.
+ *
+ * @param alignment The backend hipdnnDiagonalAlignment_t value
+ * @return A pair of DiagonalAlignment and Error; error is set for unknown values
+ */
+inline std::pair<DiagonalAlignment, Error>
+    fromHipdnnDiagonalAlignment(hipdnnDiagonalAlignment_t alignment)
+{
+    switch(alignment)
+    {
+    case HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT:
+        return {DiagonalAlignment::TOP_LEFT, {}};
+    case HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT:
+        return {DiagonalAlignment::BOTTOM_RIGHT, {}};
+    default:
+        return {DiagonalAlignment::TOP_LEFT,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnDiagonalAlignment_t value: "
+                     + std::to_string(static_cast<int>(alignment))}};
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnAttentionImplementation_t to frontend AttentionImplementation
+ *
+ * Maps the backend C API attention implementation enum to the frontend
+ * AttentionImplementation enum.
+ *
+ * @param impl The backend hipdnnAttentionImplementation_t value
+ * @return A pair of AttentionImplementation and Error; error is set for unknown values
+ */
+inline std::pair<AttentionImplementation, Error>
+    fromHipdnnAttentionImplementation(hipdnnAttentionImplementation_t impl)
+{
+    switch(impl)
+    {
+    case HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT:
+        return {AttentionImplementation::AUTO, {}};
+    case HIPDNN_ATTENTION_IMPLEMENTATION_COMPOSITE_EXT:
+        return {AttentionImplementation::COMPOSITE, {}};
+    case HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT:
+        return {AttentionImplementation::UNIFIED, {}};
+    default:
+        return {AttentionImplementation::AUTO,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnAttentionImplementation_t value: "
+                     + std::to_string(static_cast<int>(impl))}};
+    }
+}
+
+/**
  * @brief Convert frontend NormFwdPhase to backend hipdnnNormFwdPhase_t
  *
  * Maps frontend normalization forward phase to the backend C API enum type
@@ -430,11 +517,34 @@ inline std::optional<hipdnnNormFwdPhase_t> toBackendNormFwdPhase(const NormFwdPh
     switch(type)
     {
     case NormFwdPhase::INFERENCE:
-        return HIPDNN_NORM_FWD_PHASE_INFERENCE;
+        return HIPDNN_NORM_FWD_INFERENCE;
     case NormFwdPhase::TRAINING:
-        return HIPDNN_NORM_FWD_PHASE_TRAINING;
+        return HIPDNN_NORM_FWD_TRAINING;
     default:
         return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnNormFwdPhase_t to frontend NormFwdPhase
+ *
+ * Maps backend C API normalization forward phase enum to the frontend enum type.
+ *
+ * @param phase The backend hipdnnNormFwdPhase_t value
+ * @return A pair of NormFwdPhase and Error; error is set for unknown values
+ */
+inline std::pair<NormFwdPhase, Error> fromHipdnnNormFwdPhase(hipdnnNormFwdPhase_t phase)
+{
+    switch(phase)
+    {
+    case HIPDNN_NORM_FWD_INFERENCE:
+        return {NormFwdPhase::INFERENCE, {}};
+    case HIPDNN_NORM_FWD_TRAINING:
+        return {NormFwdPhase::TRAINING, {}};
+    default:
+        return {NormFwdPhase::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnNormFwdPhase_t value: " + std::to_string(static_cast<int>(phase))}};
     }
 }
 
@@ -588,6 +698,18 @@ inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
         return hipdnn_data_sdk::data_objects::DataType::FP8_E4M3;
     case DataType::FP8_E5M2:
         return hipdnn_data_sdk::data_objects::DataType::FP8_E5M2;
+    case DataType::FP8_E8M0:
+        return hipdnn_data_sdk::data_objects::DataType::FP8_E8M0;
+    case DataType::FP4_E2M1:
+        return hipdnn_data_sdk::data_objects::DataType::FP4_E2M1;
+    case DataType::INT4:
+        return hipdnn_data_sdk::data_objects::DataType::INT4;
+    case DataType::FP6_E2M3:
+        return hipdnn_data_sdk::data_objects::DataType::FP6_E2M3;
+    case DataType::FP6_E3M2:
+        return hipdnn_data_sdk::data_objects::DataType::FP6_E3M2;
+    case DataType::INT64:
+        return hipdnn_data_sdk::data_objects::DataType::INT64;
     default:
         return hipdnn_data_sdk::data_objects::DataType::UNSET;
     }
@@ -616,6 +738,18 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::FP8_E4M3;
     case hipdnn_data_sdk::data_objects::DataType::FP8_E5M2:
         return hipdnn_frontend::DataType::FP8_E5M2;
+    case hipdnn_data_sdk::data_objects::DataType::FP8_E8M0:
+        return hipdnn_frontend::DataType::FP8_E8M0;
+    case hipdnn_data_sdk::data_objects::DataType::FP4_E2M1:
+        return hipdnn_frontend::DataType::FP4_E2M1;
+    case hipdnn_data_sdk::data_objects::DataType::INT4:
+        return hipdnn_frontend::DataType::INT4;
+    case hipdnn_data_sdk::data_objects::DataType::FP6_E2M3:
+        return hipdnn_frontend::DataType::FP6_E2M3;
+    case hipdnn_data_sdk::data_objects::DataType::FP6_E3M2:
+        return hipdnn_frontend::DataType::FP6_E3M2;
+    case hipdnn_data_sdk::data_objects::DataType::INT64:
+        return hipdnn_frontend::DataType::INT64;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -684,7 +818,12 @@ inline hipdnn_frontend::AttentionImplementation
     }
 }
 
-/// @brief Convert frontend DataType to backend hipdnnDataType_t
+/**
+ * @brief Convert frontend DataType to backend hipdnnDataType_t
+ *
+ * @param type The frontend DataType value
+ * @return The corresponding hipdnnDataType_t value, or std::nullopt if not set
+ */
 inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
 {
     switch(type)
@@ -707,6 +846,18 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
         return HIPDNN_DATA_FP8_E4M3;
     case DataType::FP8_E5M2:
         return HIPDNN_DATA_FP8_E5M2;
+    case DataType::FP8_E8M0:
+        return HIPDNN_DATA_FP8_E8M0;
+    case DataType::FP4_E2M1:
+        return HIPDNN_DATA_FP4_E2M1;
+    case DataType::INT4:
+        return HIPDNN_DATA_INT4;
+    case DataType::FP6_E2M3:
+        return HIPDNN_DATA_FP6_E2M3_EXT;
+    case DataType::FP6_E3M2:
+        return HIPDNN_DATA_FP6_E3M2_EXT;
+    case DataType::INT64:
+        return HIPDNN_DATA_INT64;
     case DataType::NOT_SET:
     default:
         return std::nullopt;
@@ -743,6 +894,18 @@ inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
         return {DataType::FP8_E4M3, {}};
     case HIPDNN_DATA_FP8_E5M2:
         return {DataType::FP8_E5M2, {}};
+    case HIPDNN_DATA_FP8_E8M0:
+        return {DataType::FP8_E8M0, {}};
+    case HIPDNN_DATA_FP4_E2M1:
+        return {DataType::FP4_E2M1, {}};
+    case HIPDNN_DATA_INT4:
+        return {DataType::INT4, {}};
+    case HIPDNN_DATA_FP6_E2M3_EXT:
+        return {DataType::FP6_E2M3, {}};
+    case HIPDNN_DATA_FP6_E3M2_EXT:
+        return {DataType::FP6_E3M2, {}};
+    case HIPDNN_DATA_INT64:
+        return {DataType::INT64, {}};
     default:
         return {DataType::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -959,6 +1122,112 @@ inline hipdnn_frontend::PointwiseMode
     }
 }
 
+/// @brief Convert backend C-API hipdnnPointwiseMode_t to frontend PointwiseMode
+inline std::pair<PointwiseMode, Error> fromHipdnnPointwiseMode(hipdnnPointwiseMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_POINTWISE_ABS:
+        return {PointwiseMode::ABS, {}};
+    case HIPDNN_POINTWISE_ADD:
+        return {PointwiseMode::ADD, {}};
+    case HIPDNN_POINTWISE_ADD_SQUARE:
+        return {PointwiseMode::ADD_SQUARE, {}};
+    case HIPDNN_POINTWISE_BINARY_SELECT:
+        return {PointwiseMode::BINARY_SELECT, {}};
+    case HIPDNN_POINTWISE_CEIL:
+        return {PointwiseMode::CEIL, {}};
+    case HIPDNN_POINTWISE_CMP_EQ:
+        return {PointwiseMode::CMP_EQ, {}};
+    case HIPDNN_POINTWISE_CMP_GE:
+        return {PointwiseMode::CMP_GE, {}};
+    case HIPDNN_POINTWISE_CMP_GT:
+        return {PointwiseMode::CMP_GT, {}};
+    case HIPDNN_POINTWISE_CMP_LE:
+        return {PointwiseMode::CMP_LE, {}};
+    case HIPDNN_POINTWISE_CMP_LT:
+        return {PointwiseMode::CMP_LT, {}};
+    case HIPDNN_POINTWISE_CMP_NEQ:
+        return {PointwiseMode::CMP_NEQ, {}};
+    case HIPDNN_POINTWISE_DIV:
+        return {PointwiseMode::DIV, {}};
+    case HIPDNN_POINTWISE_ELU_BWD:
+        return {PointwiseMode::ELU_BWD, {}};
+    case HIPDNN_POINTWISE_ELU_FWD:
+        return {PointwiseMode::ELU_FWD, {}};
+    case HIPDNN_POINTWISE_ERF:
+        return {PointwiseMode::ERF, {}};
+    case HIPDNN_POINTWISE_EXP:
+        return {PointwiseMode::EXP, {}};
+    case HIPDNN_POINTWISE_FLOOR:
+        return {PointwiseMode::FLOOR, {}};
+    case HIPDNN_POINTWISE_GELU_APPROX_TANH_BWD:
+        return {PointwiseMode::GELU_APPROX_TANH_BWD, {}};
+    case HIPDNN_POINTWISE_GELU_APPROX_TANH_FWD:
+        return {PointwiseMode::GELU_APPROX_TANH_FWD, {}};
+    case HIPDNN_POINTWISE_GELU_BWD:
+        return {PointwiseMode::GELU_BWD, {}};
+    case HIPDNN_POINTWISE_GELU_FWD:
+        return {PointwiseMode::GELU_FWD, {}};
+    case HIPDNN_POINTWISE_GEN_INDEX:
+        return {PointwiseMode::GEN_INDEX, {}};
+    case HIPDNN_POINTWISE_IDENTITY:
+        return {PointwiseMode::IDENTITY, {}};
+    case HIPDNN_POINTWISE_LOG:
+        return {PointwiseMode::LOG, {}};
+    case HIPDNN_POINTWISE_LOGICAL_AND:
+        return {PointwiseMode::LOGICAL_AND, {}};
+    case HIPDNN_POINTWISE_LOGICAL_NOT:
+        return {PointwiseMode::LOGICAL_NOT, {}};
+    case HIPDNN_POINTWISE_LOGICAL_OR:
+        return {PointwiseMode::LOGICAL_OR, {}};
+    case HIPDNN_POINTWISE_MAX:
+        return {PointwiseMode::MAX, {}};
+    case HIPDNN_POINTWISE_MIN:
+        return {PointwiseMode::MIN, {}};
+    case HIPDNN_POINTWISE_MUL:
+        return {PointwiseMode::MUL, {}};
+    case HIPDNN_POINTWISE_NEG:
+        return {PointwiseMode::NEG, {}};
+    case HIPDNN_POINTWISE_RECIPROCAL:
+        return {PointwiseMode::RECIPROCAL, {}};
+    case HIPDNN_POINTWISE_RELU_BWD:
+        return {PointwiseMode::RELU_BWD, {}};
+    case HIPDNN_POINTWISE_RELU_FWD:
+        return {PointwiseMode::RELU_FWD, {}};
+    case HIPDNN_POINTWISE_RSQRT:
+        return {PointwiseMode::RSQRT, {}};
+    case HIPDNN_POINTWISE_SIGMOID_BWD:
+        return {PointwiseMode::SIGMOID_BWD, {}};
+    case HIPDNN_POINTWISE_SIGMOID_FWD:
+        return {PointwiseMode::SIGMOID_FWD, {}};
+    case HIPDNN_POINTWISE_SIN:
+        return {PointwiseMode::SIN, {}};
+    case HIPDNN_POINTWISE_SOFTPLUS_BWD:
+        return {PointwiseMode::SOFTPLUS_BWD, {}};
+    case HIPDNN_POINTWISE_SOFTPLUS_FWD:
+        return {PointwiseMode::SOFTPLUS_FWD, {}};
+    case HIPDNN_POINTWISE_SQRT:
+        return {PointwiseMode::SQRT, {}};
+    case HIPDNN_POINTWISE_SUB:
+        return {PointwiseMode::SUB, {}};
+    case HIPDNN_POINTWISE_SWISH_BWD:
+        return {PointwiseMode::SWISH_BWD, {}};
+    case HIPDNN_POINTWISE_SWISH_FWD:
+        return {PointwiseMode::SWISH_FWD, {}};
+    case HIPDNN_POINTWISE_TAN:
+        return {PointwiseMode::TAN, {}};
+    case HIPDNN_POINTWISE_TANH_BWD:
+        return {PointwiseMode::TANH_BWD, {}};
+    case HIPDNN_POINTWISE_TANH_FWD:
+        return {PointwiseMode::TANH_FWD, {}};
+    default:
+        return {PointwiseMode::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnPointwiseMode_t value: " + std::to_string(static_cast<int>(mode))}};
+    }
+}
+
 /// @brief Convert frontend HeuristicMode to backend heuristic mode
 inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
@@ -991,6 +1260,7 @@ inline const char* to_string(const ConvolutionMode& mode)
     }
 }
 
+/// @brief Stream insertion operator for ConvolutionMode
 inline std::ostream& operator<<(std::ostream& os, const ConvolutionMode& mode)
 {
     return os << to_string(mode);
@@ -1020,6 +1290,18 @@ inline const char* to_string(const DataType& type)
         return "fp8_e4m3";
     case DataType::FP8_E5M2:
         return "fp8_e5m2";
+    case DataType::FP8_E8M0:
+        return "fp8_e8m0";
+    case DataType::FP4_E2M1:
+        return "fp4_e2m1";
+    case DataType::INT4:
+        return "int4";
+    case DataType::FP6_E2M3:
+        return "fp6_e2m3";
+    case DataType::FP6_E3M2:
+        return "fp6_e3m2";
+    case DataType::INT64:
+        return "int64";
     default:
         return "unknown";
     }
@@ -1130,6 +1412,122 @@ inline hipdnn_frontend::NormFwdPhase
         return hipdnn_frontend::NormFwdPhase::TRAINING;
     default:
         return hipdnn_frontend::NormFwdPhase::NOT_SET;
+    }
+}
+
+/// @brief Convert frontend ReductionMode to SDK ReductionMode
+inline hipdnn_data_sdk::data_objects::ReductionMode toSdkType(const ReductionMode& type)
+{
+    switch(type)
+    {
+    case ReductionMode::ADD:
+        return hipdnn_data_sdk::data_objects::ReductionMode::ADD;
+    case ReductionMode::MUL:
+        return hipdnn_data_sdk::data_objects::ReductionMode::MUL;
+    case ReductionMode::MIN:
+        return hipdnn_data_sdk::data_objects::ReductionMode::MIN_OP;
+    case ReductionMode::MAX:
+        return hipdnn_data_sdk::data_objects::ReductionMode::MAX_OP;
+    case ReductionMode::AMAX:
+        return hipdnn_data_sdk::data_objects::ReductionMode::AMAX;
+    case ReductionMode::AVG:
+        return hipdnn_data_sdk::data_objects::ReductionMode::AVG;
+    case ReductionMode::NORM1:
+        return hipdnn_data_sdk::data_objects::ReductionMode::NORM1;
+    case ReductionMode::NORM2:
+        return hipdnn_data_sdk::data_objects::ReductionMode::NORM2;
+    case ReductionMode::MUL_NO_ZEROS:
+        return hipdnn_data_sdk::data_objects::ReductionMode::MUL_NO_ZEROS;
+    default:
+        return hipdnn_data_sdk::data_objects::ReductionMode::NOT_SET;
+    }
+}
+
+/// @brief Convert SDK ReductionMode to frontend ReductionMode
+inline hipdnn_frontend::ReductionMode
+    fromSdkType(const hipdnn_data_sdk::data_objects::ReductionMode& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::ReductionMode::ADD:
+        return hipdnn_frontend::ReductionMode::ADD;
+    case hipdnn_data_sdk::data_objects::ReductionMode::MUL:
+        return hipdnn_frontend::ReductionMode::MUL;
+    case hipdnn_data_sdk::data_objects::ReductionMode::MIN_OP:
+        return hipdnn_frontend::ReductionMode::MIN;
+    case hipdnn_data_sdk::data_objects::ReductionMode::MAX_OP:
+        return hipdnn_frontend::ReductionMode::MAX;
+    case hipdnn_data_sdk::data_objects::ReductionMode::AMAX:
+        return hipdnn_frontend::ReductionMode::AMAX;
+    case hipdnn_data_sdk::data_objects::ReductionMode::AVG:
+        return hipdnn_frontend::ReductionMode::AVG;
+    case hipdnn_data_sdk::data_objects::ReductionMode::NORM1:
+        return hipdnn_frontend::ReductionMode::NORM1;
+    case hipdnn_data_sdk::data_objects::ReductionMode::NORM2:
+        return hipdnn_frontend::ReductionMode::NORM2;
+    case hipdnn_data_sdk::data_objects::ReductionMode::MUL_NO_ZEROS:
+        return hipdnn_frontend::ReductionMode::MUL_NO_ZEROS;
+    default:
+        return hipdnn_frontend::ReductionMode::NOT_SET;
+    }
+}
+
+/// @brief Convert frontend ReductionMode to backend C-API hipdnnReduceTensorOp_t
+inline std::optional<hipdnnReduceTensorOp_t> toBackendReductionMode(const ReductionMode& type)
+{
+    switch(type)
+    {
+    case ReductionMode::ADD:
+        return HIPDNN_REDUCE_TENSOR_ADD;
+    case ReductionMode::MUL:
+        return HIPDNN_REDUCE_TENSOR_MUL;
+    case ReductionMode::MIN:
+        return HIPDNN_REDUCE_TENSOR_MIN;
+    case ReductionMode::MAX:
+        return HIPDNN_REDUCE_TENSOR_MAX;
+    case ReductionMode::AMAX:
+        return HIPDNN_REDUCE_TENSOR_AMAX;
+    case ReductionMode::AVG:
+        return HIPDNN_REDUCE_TENSOR_AVG;
+    case ReductionMode::NORM1:
+        return HIPDNN_REDUCE_TENSOR_NORM1;
+    case ReductionMode::NORM2:
+        return HIPDNN_REDUCE_TENSOR_NORM2;
+    case ReductionMode::MUL_NO_ZEROS:
+        return HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS;
+    default:
+        return std::nullopt;
+    }
+}
+
+/// @brief Convert backend C-API hipdnnReduceTensorOp_t to frontend ReductionMode
+inline std::pair<ReductionMode, Error> fromHipdnnReduceTensorOp(hipdnnReduceTensorOp_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_REDUCE_TENSOR_ADD:
+        return {ReductionMode::ADD, {}};
+    case HIPDNN_REDUCE_TENSOR_MUL:
+        return {ReductionMode::MUL, {}};
+    case HIPDNN_REDUCE_TENSOR_MIN:
+        return {ReductionMode::MIN, {}};
+    case HIPDNN_REDUCE_TENSOR_MAX:
+        return {ReductionMode::MAX, {}};
+    case HIPDNN_REDUCE_TENSOR_AMAX:
+        return {ReductionMode::AMAX, {}};
+    case HIPDNN_REDUCE_TENSOR_AVG:
+        return {ReductionMode::AVG, {}};
+    case HIPDNN_REDUCE_TENSOR_NORM1:
+        return {ReductionMode::NORM1, {}};
+    case HIPDNN_REDUCE_TENSOR_NORM2:
+        return {ReductionMode::NORM2, {}};
+    case HIPDNN_REDUCE_TENSOR_MUL_NO_ZEROS:
+        return {ReductionMode::MUL_NO_ZEROS, {}};
+    default:
+        return {
+            ReductionMode::NOT_SET,
+            {ErrorCode::HIPDNN_BACKEND_ERROR,
+             "Unknown hipdnnReduceTensorOp_t value: " + std::to_string(static_cast<int>(mode))}};
     }
 }
 

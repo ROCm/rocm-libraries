@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "contraction_solution.hpp"
+#include "hash.hpp"
 #include "hiptensor_options.hpp"
 
 namespace hiptensor
@@ -284,11 +285,18 @@ namespace hiptensor
 
     size_t ContractionSolution::uid() const
     {
-        // Convert CK uid string into binary.
-        std::istringstream converter(mDeviceOp->GetTypeIdHashCode());
-        size_t             value;
-        converter >> std::hex >> value;
-        return value;
+        // Platform-stable uid: hash the kernel type string (via FNV-1a in Hash{})
+        // together with the data-type / op parameters so that distinct CK template
+        // instantiations that share the same geometry (GetTypeString) but differ in
+        // data types still produce distinct uids.
+        auto const& params = mParams;
+        return Hash{}(mDeviceOp->GetTypeString(),
+                      params->typeA(),
+                      params->typeB(),
+                      params->typeC(),
+                      params->typeD(),
+                      params->typeCompute(),
+                      params->opCDE());
     }
 
     std::tuple<ck::index_t, ck::index_t, ck::index_t> ContractionSolution::problemDims() const

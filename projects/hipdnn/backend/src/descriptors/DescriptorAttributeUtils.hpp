@@ -4,6 +4,7 @@
 #pragma once
 
 #include "HipdnnAttentionImplementation.h"
+#include "HipdnnBackendAttributeName.h"
 #include "HipdnnBackendAttributeType.h"
 #include "HipdnnDataType.h"
 #include "HipdnnDiagonalAlignment.h"
@@ -11,12 +12,15 @@
 #include "HipdnnNormFwdPhase.h"
 #include "HipdnnOperationType.h"
 #include "HipdnnPointwiseMode.h"
+#include "HipdnnReduceTensorOp.h"
 #include "TensorDescriptor.hpp"
 #include <cstring>
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <memory>
 #include <string>
@@ -55,12 +59,33 @@ void setString(std::string& target,
                const void* arrayOfElements,
                const char* errorPrefix);
 
+void setBoundedString(std::string& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* errorPrefix,
+                      int64_t maxLength,
+                      int64_t minLength = 0);
+
 void getString(const std::string& source,
                hipdnnBackendAttributeType_t attributeType,
                int64_t requestedElementCount,
                int64_t* elementCount,
                void* arrayOfElements,
                const char* errorPrefix);
+
+void setByteArray(std::vector<uint8_t>& target,
+                  hipdnnBackendAttributeType_t attributeType,
+                  int64_t elementCount,
+                  const void* arrayOfElements,
+                  const char* errorPrefix);
+
+void getByteArray(const std::vector<uint8_t>& source,
+                  hipdnnBackendAttributeType_t attributeType,
+                  int64_t requestedElementCount,
+                  int64_t* elementCount,
+                  void* arrayOfElements,
+                  const char* errorPrefix);
 
 template <typename T>
 void setScalarVector(std::vector<T>& target,
@@ -189,7 +214,7 @@ void getConvMode(hipdnn_data_sdk::data_objects::ConvMode source,
                  void* arrayOfElements,
                  const char* errorPrefix);
 
-void getOperationType(hipdnnOperationType_t source,
+void getOperationType(hipdnnOperationType_ext_t source,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t requestedElementCount,
                       int64_t* elementCount,
@@ -208,6 +233,15 @@ void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
                       int64_t* elementCount,
                       void* arrayOfElements,
                       const char* errorPrefix);
+
+// setOptionalScalar/getOptionalScalar are templated on flatbuffers::Optional<T>.
+// This works with std::optional<T> members because flatbuffers aliases Optional to
+// std::optional when FLATBUFFERS_USE_STD_OPTIONAL is defined. If a FlatBuffers upgrade
+// changes this, the static_assert below will fire with a clear message.
+static_assert(std::is_same_v<flatbuffers::Optional<int>, std::optional<int>>,
+              "flatbuffers::Optional must alias std::optional for these overloads "
+              "to work with std::optional members; add explicit std::optional overloads "
+              "if this changes");
 
 template <hipdnnBackendAttributeType_t ExpectedType, typename T>
 void setOptionalScalar(flatbuffers::Optional<T>& target,
@@ -358,5 +392,245 @@ void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
                                 int64_t* elementCount,
                                 void* arrayOfElements,
                                 const char* errorPrefix);
+
+void setReductionMode(hipdnn_data_sdk::data_objects::ReductionMode& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* errorPrefix);
+
+void getReductionMode(hipdnn_data_sdk::data_objects::ReductionMode source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* errorPrefix);
+
+/// Conditionally adds a non-null tensor descriptor to a vector.
+/// Used by getTensorDescriptors() to collect optional tensors.
+inline void addIfSet(std::vector<std::shared_ptr<TensorDescriptor>>& tensors,
+                     const std::shared_ptr<TensorDescriptor>& desc)
+{
+    if(desc)
+    {
+        tensors.push_back(desc);
+    }
+}
+
+/// Looks up an optional tensor UID in a tensor map.
+/// Returns nullptr if the UID has no value or is not found in the map.
+inline std::shared_ptr<TensorDescriptor> findOptionalTensor(
+    const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap,
+    const flatbuffers::Optional<int64_t>& uid)
+{
+    if(!uid.has_value())
+    {
+        return nullptr;
+    }
+    auto it = tensorMap.find(uid.value());
+    return (it != tensorMap.end()) ? it->second : nullptr;
+}
+
+/// Converts a flatbuffers::Optional<T> to a string for toString() output.
+/// Returns "null" if the optional has no value.
+template <typename T>
+std::string optionalToString(const flatbuffers::Optional<T>& opt)
+{
+    return opt.has_value() ? std::to_string(*opt) : "null";
+}
+
+/// Specialization for Optional<bool> that produces "true"/"false"/"null".
+inline std::string optionalBoolToString(const flatbuffers::Optional<bool>& opt)
+{
+    if(!opt.has_value())
+    {
+        return "null";
+    }
+    return *opt ? "true" : "false";
+}
+
+/// Deep-copy a KnobValueUnion into another KnobValueUnion.
+/// Used by both KnobDescriptor::toKnobT() and KnobSettingDescriptor::toKnobSettingT().
+void copyKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& src,
+                        hipdnn_data_sdk::data_objects::KnobValueUnion& dst,
+                        const char* errorPrefix);
+
+/// Set a KnobValueUnion from C-API setAttribute parameters.
+/// Switches on attributeType to store an int64, double, or bounded string.
+void setKnobValueUnion(hipdnn_data_sdk::data_objects::KnobValueUnion& target,
+                       hipdnnBackendAttributeType_t attributeType,
+                       int64_t elementCount,
+                       const void* arrayOfElements,
+                       const char* errorPrefix,
+                       int64_t maxStringLength);
+
+/// Get a KnobValueUnion into C-API getAttribute output parameters.
+/// Switches on source.type to retrieve an int64, double, or string.
+void getKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& source,
+                       hipdnnBackendAttributeType_t attributeType,
+                       int64_t requestedElementCount,
+                       int64_t* elementCount,
+                       void* arrayOfElements,
+                       const char* errorPrefix);
+
+// ============================================================================
+// Convolution descriptor helpers
+//
+// The three convolution operation descriptors (Fwd, Bwd, Wrw) share identical
+// attribute handling for convolution parameters. These templates consolidate
+// the shared switch-case logic and finalize validation, leaving each descriptor
+// to handle only its tensor-specific cases.
+// ============================================================================
+
+/// Validates the shared convolution fields during finalize().
+/// Each descriptor calls this after its own tensor null-checks.
+template <typename DataT>
+void validateConvolutionFinalize(const DataT& data,
+                                 hipdnn_data_sdk::data_objects::DataType computeDataType,
+                                 const char* className)
+{
+    THROW_IF_TRUE(data.pre_padding.empty(),
+                  HIPDNN_STATUS_BAD_PARAM,
+                  std::string(className) + "::finalize() failed: pre_padding not set");
+    THROW_IF_TRUE(data.post_padding.empty(),
+                  HIPDNN_STATUS_BAD_PARAM,
+                  std::string(className) + "::finalize() failed: post_padding not set");
+    THROW_IF_TRUE(data.stride.empty(),
+                  HIPDNN_STATUS_BAD_PARAM,
+                  std::string(className) + "::finalize() failed: stride not set");
+    THROW_IF_TRUE(data.dilation.empty(),
+                  HIPDNN_STATUS_BAD_PARAM,
+                  std::string(className) + "::finalize() failed: dilation not set");
+    THROW_IF_TRUE(computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  std::string(className) + "::finalize() failed: compute data type not set");
+    THROW_IF_TRUE(data.conv_mode == hipdnn_data_sdk::data_objects::ConvMode::UNSET,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  std::string(className) + "::finalize() failed: conv_mode not set");
+}
+
+/// Handles the shared convolution setAttribute cases.
+/// Called from the default branch of each descriptor's setAttribute switch.
+template <typename DataT>
+void setConvolutionAttribute(DataT& data,
+                             hipdnn_data_sdk::data_objects::DataType& computeDataType,
+                             std::string& name,
+                             hipdnnBackendAttributeName_t attributeName,
+                             hipdnnBackendAttributeType_t attributeType,
+                             int64_t elementCount,
+                             const void* arrayOfElements,
+                             const char* errorPrefix)
+{
+    switch(attributeName)
+    {
+    case HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS:
+        setInt64Vector(data.pre_padding, attributeType, elementCount, arrayOfElements, errorPrefix);
+        break;
+    case HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS:
+        setInt64Vector(
+            data.post_padding, attributeType, elementCount, arrayOfElements, errorPrefix);
+        break;
+    case HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES:
+        setInt64Vector(data.stride, attributeType, elementCount, arrayOfElements, errorPrefix);
+        break;
+    case HIPDNN_ATTR_CONVOLUTION_DILATIONS:
+        setInt64Vector(data.dilation, attributeType, elementCount, arrayOfElements, errorPrefix);
+        break;
+    case HIPDNN_ATTR_CONVOLUTION_CONV_MODE:
+        setConvMode(data.conv_mode, attributeType, elementCount, arrayOfElements, errorPrefix);
+        break;
+    case HIPDNN_ATTR_CONVOLUTION_COMP_TYPE:
+        setDataType(computeDataType, attributeType, elementCount, arrayOfElements, errorPrefix);
+        break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        setString(name, attributeType, elementCount, arrayOfElements, errorPrefix);
+        break;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                              std::string(errorPrefix) + ": attributeName not supported");
+    }
+}
+
+/// Handles the shared convolution getAttribute cases.
+/// Called from the default branch of each descriptor's getAttribute switch.
+template <typename DataT>
+void getConvolutionAttribute(const DataT& data,
+                             hipdnn_data_sdk::data_objects::DataType computeDataType,
+                             const std::string& name,
+                             hipdnnOperationType_ext_t operationType,
+                             hipdnnBackendAttributeName_t attributeName,
+                             hipdnnBackendAttributeType_t attributeType,
+                             int64_t requestedElementCount,
+                             int64_t* elementCount,
+                             void* arrayOfElements,
+                             const char* errorPrefix)
+{
+    switch(attributeName)
+    {
+    case HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS:
+        getInt64Vector(data.pre_padding,
+                       attributeType,
+                       requestedElementCount,
+                       elementCount,
+                       arrayOfElements,
+                       errorPrefix);
+        break;
+    case HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS:
+        getInt64Vector(data.post_padding,
+                       attributeType,
+                       requestedElementCount,
+                       elementCount,
+                       arrayOfElements,
+                       errorPrefix);
+        break;
+    case HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES:
+        getInt64Vector(data.stride,
+                       attributeType,
+                       requestedElementCount,
+                       elementCount,
+                       arrayOfElements,
+                       errorPrefix);
+        break;
+    case HIPDNN_ATTR_CONVOLUTION_DILATIONS:
+        getInt64Vector(data.dilation,
+                       attributeType,
+                       requestedElementCount,
+                       elementCount,
+                       arrayOfElements,
+                       errorPrefix);
+        break;
+    case HIPDNN_ATTR_CONVOLUTION_CONV_MODE:
+        getConvMode(data.conv_mode,
+                    attributeType,
+                    requestedElementCount,
+                    elementCount,
+                    arrayOfElements,
+                    errorPrefix);
+        break;
+    case HIPDNN_ATTR_CONVOLUTION_COMP_TYPE:
+        getDataType(computeDataType,
+                    attributeType,
+                    requestedElementCount,
+                    elementCount,
+                    arrayOfElements,
+                    errorPrefix);
+        break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        getString(
+            name, attributeType, requestedElementCount, elementCount, arrayOfElements, errorPrefix);
+        break;
+    case HIPDNN_ATTR_OPERATION_TYPE_EXT:
+        getOperationType(operationType,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         errorPrefix);
+        break;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                              std::string(errorPrefix) + ": attributeName not supported");
+    }
+}
 
 } // namespace hipdnn_backend

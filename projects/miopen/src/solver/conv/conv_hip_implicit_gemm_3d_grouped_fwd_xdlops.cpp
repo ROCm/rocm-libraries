@@ -500,15 +500,12 @@ static const std::vector<std::string> ranked_gemm_3d_grp_fwd = {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static const std::vector<std::string> ranked_gemm_3d_grp_fwd_navi = {
-"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 256, 32, Default, 16, 16, 4, 4, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
-"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 128, 128, 32, Default, 16, 16, 4, 4, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
-"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 128, 32, 32, Default, 16, 16, 4, 1, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
-"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor<128, 128, 128, Default, 16, 16, 4, 4, 8, 8, 1, 1, 1>",
-"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 128, 96, 64, Default, 16, 16, 4, 3, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
-"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 256, 64, Default, 16, 16, 4, 4, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
-"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<256, 256, 128, 32, Default, 32, 32, 4, 2, 8, 8, 8, 1, 1, 1>",
-"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<256, 64, 64, 32, Default, 16, 16, 2, 2, 4, 4, 4, 1, 1, 1>",
-"DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor_WmmaPorted<64, 64, 64, 32, Default, 32, 32, 2, 2, 1, 1, 1, 1, 1>"
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<128, 128, 64, 32, Filter1x1Stride1Pad0, 32, 32, 2, 2, 8, 8, 8, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 64, 128, 32, Filter1x1Pad0, 16, 16, 4, 2, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 64, 32, 64, Filter1x1Stride1Pad0, 16, 16, 2, 1, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<256, 64, 64, 32, Filter1x1Stride1Pad0, 16, 16, 2, 2, 1, 2, 1, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 96, 64, Default, 16, 16, 2, 3, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<64, 64, 64, 32, Default, 32, 32, 2, 2, 1, 1, 1, 1, 1, 1>"
 };
 // clang-format on
 
@@ -591,15 +588,16 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         default: break;
         }
 
-        auto find_kernel = [&valid_kernels = std::as_const(valid_kernels)](
+        auto find_kernel = [&valid_kernels_ = std::as_const(valid_kernels)](
                                const std::size_t& expected_index,
-                               const std::string& kernel_id) -> std::optional<std::size_t> {
-            if(expected_index < valid_kernels.size() && valid_kernels[expected_index] == kernel_id)
+                               const std::string& kernel_id_) -> std::optional<std::size_t> {
+            if(expected_index < valid_kernels_.size() &&
+               valid_kernels_[expected_index] == kernel_id_)
                 return expected_index;
-            auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_id);
-            if(it != valid_kernels.end())
-                return static_cast<std::size_t>(it - valid_kernels.begin());
-            MIOPEN_LOG_I2("Hard-coded heuristics did not find kernel: " << kernel_id);
+            auto it = std::find(valid_kernels_.begin(), valid_kernels_.end(), kernel_id_);
+            if(it != valid_kernels_.end())
+                return static_cast<std::size_t>(it - valid_kernels_.begin());
+            MIOPEN_LOG_I2("Hard-coded heuristics did not find kernel: " << kernel_id_);
             return std::nullopt;
         };
 
@@ -740,11 +738,11 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         miopen::ai::tuning::candidate_selection::CandidateSelectionResult result;
 
         auto run_ai_heuristics = [&](auto CKDataType, auto CKComputeType) {
-            using T        = decltype(CKDataType);
-            using TCompute = decltype(CKComputeType);
-            auto fill_valid_kernels =
-                [=](const ::miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
-                return FillValidKernelsByAlphaBeta<T, TCompute>(problem);
+            using T                 = decltype(CKDataType);
+            using TCompute          = decltype(CKComputeType);
+            auto fill_valid_kernels = [=](const ::miopen::conv::ProblemDescription& problem_)
+                -> std::vector<std::string> {
+                return FillValidKernelsByAlphaBeta<T, TCompute>(problem_);
             };
             // Validation lambda for AI-predicted kernel + split_k combinations
             // Note: This solver currently doesn't use split_k (always 0), but validation
