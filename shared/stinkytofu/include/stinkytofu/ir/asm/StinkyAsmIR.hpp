@@ -533,6 +533,12 @@ namespace stinkytofu
         return inst.is(InstFlag::IF_MXWMMA);
     }
 
+    inline bool isMatrixInstruction(const StinkyInstruction& inst)
+    {
+        return isMFMA(inst) || isSMFMA(inst) || isWMMA(inst) || isSWMMA(inst)
+               || isMXWMMA(inst);
+    }
+
     inline bool isHasSideEffect(const StinkyInstruction& inst)
     {
         return inst.is(InstFlag::IF_HasSideEffect);

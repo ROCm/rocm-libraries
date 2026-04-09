@@ -62,7 +62,7 @@ namespace
     {
         bool operator()(const DAGNode* a, const DAGNode* b) const
         {
-            return a->id > b->id; // smaller id has higher priority
+            return a->id < b->id; // smaller id has higher priority
         }
     };
 
