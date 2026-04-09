@@ -384,6 +384,12 @@ TEST_F(TestGraphDescriptor, JsonDeserializeNullInput)
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
+TEST_F(TestGraphDescriptor, JsonDeserializeNullDescriptor)
+{
+    auto status = hipdnnBackendCreateAndDeserializeJsonGraph_ext(nullptr, "{}", 2);
+    EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
 TEST_F(TestGraphDescriptor, JsonDeserializeEmptySize)
 {
     hipdnnBackendDescriptor_t desc = nullptr;
