@@ -197,8 +197,7 @@ struct amdgcn_mma_base
     // Layout checks
     static_assert(kK % kABKPerLane == 0);
     static_assert(kABKPerLane % (kAKNumAccess * kCompressionRatio * APackedSize) == 0);
-    static_assert(kABKPerLane % (kAKNumAccess * BPackedSize) == 0);
-    static_assert(kABKPerLane % kBKNumAccess == 0);
+    static_assert(kABKPerLane % (kBKNumAccess * BPackedSize) == 0);
     static_assert(kCMPerLane % kCMNumAccess == 0);
 
     // Register types (derived)
