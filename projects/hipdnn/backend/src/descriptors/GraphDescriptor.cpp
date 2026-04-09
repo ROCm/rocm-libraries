@@ -434,25 +434,21 @@ void GraphDescriptor::createFromJsonGraph(GraphDescriptor& desc,
                   HIPDNN_STATUS_BAD_PARAM,
                   "GraphDescriptor::createFromJsonGraph: jsonByteSize is 0");
 
-    nlohmann::json j;
     try
     {
-        j = nlohmann::json::parse(jsonGraph, jsonGraph + jsonByteSize);
+        auto j = nlohmann::json::parse(jsonGraph, jsonGraph + jsonByteSize);
+
+        flatbuffers::FlatBufferBuilder builder;
+        builder.Finish(hipdnn_data_sdk::json::to<hipdnn_data_sdk::data_objects::Graph>(builder, j));
+
+        auto buf = builder.Release();
+        desc.deserializeGraph(buf.data(), buf.size());
     }
     catch(const nlohmann::json::parse_error& e)
     {
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                               std::string("GraphDescriptor::createFromJsonGraph: invalid JSON: ")
                                   + e.what());
-    }
-
-    try
-    {
-        flatbuffers::FlatBufferBuilder builder;
-        builder.Finish(hipdnn_data_sdk::json::to<hipdnn_data_sdk::data_objects::Graph>(builder, j));
-
-        auto buf = builder.Release();
-        desc.deserializeGraph(buf.data(), buf.size());
     }
     catch(const HipdnnException&)
     {
