@@ -91,7 +91,7 @@ using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16 =
 TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16, All) { TestConfigs(); }
 TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, All) { TestConfigs(); }
 
-TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops, SearchStartsAtKernelZero)
+TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())

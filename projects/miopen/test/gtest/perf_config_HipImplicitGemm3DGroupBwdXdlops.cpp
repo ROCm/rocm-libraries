@@ -24,7 +24,7 @@ static Problem MakeSearchProblem(group_conv::GroupConvTestConfig<3u> conv,
     return Problem(y_desc, w_desc, x_desc, conv_desc, miopen::conv::Direction::BackwardData);
 }
 
-TEST(GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops, SearchStartsAtKernelZero)
+TEST(GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
