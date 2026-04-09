@@ -78,8 +78,7 @@ void runGpuVsCpuConvBwd(const std::vector<int64_t>& xDims,
     auto dxCpu = layout != nullptr ? Tensor<DataType>(xDims, *layout) : Tensor<DataType>(xDims);
     auto dxGpu = layout != nullptr ? Tensor<DataType>(xDims, *layout) : Tensor<DataType>(xDims);
     auto wTensor = Tensor<DataType>(wDims);
-    auto dyTensor
-        = layout != nullptr ? Tensor<DataType>(yDims, *layout) : Tensor<DataType>(yDims);
+    auto dyTensor = layout != nullptr ? Tensor<DataType>(yDims, *layout) : Tensor<DataType>(yDims);
 
     compareGpuVsCpuConvBwd<DataType, DataType, DataType, ComputeDataType>(dxCpu,
                                                                           dxGpu,
@@ -270,9 +269,8 @@ TEST(TestGpuConvBwdRefValidation, ThrowsOnInvalidDimCount)
     Tensor<float> w({8, 8});
     Tensor<float> dy({8, 8});
 
-    EXPECT_THROW(
-        GpuFpReferenceConvolution::dgrad<float>(dx, w, dy, Vec{1}, Vec{1}, Vec{0}, Vec{0}),
-        std::invalid_argument);
+    EXPECT_THROW(GpuFpReferenceConvolution::dgrad<float>(dx, w, dy, Vec{1}, Vec{1}, Vec{0}, Vec{0}),
+                 std::invalid_argument);
 }
 
 TEST(TestGpuConvBwdRefValidation, ThrowsOnWeightDimMismatch)
