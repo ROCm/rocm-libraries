@@ -114,6 +114,9 @@ def getCustomKernelConfig(
             checkParametersAreValid((k, [v]), validParameters)
 
     kernelConfig["KernelLanguage"] = "Assembly"
-    kernelConfig["CustomKernel"]["name"] = kernelName
+    if "CustomKernel" in kernelConfig:
+        kernelConfig["CustomKernel"]["name"] = kernelName
+    else:
+        kernelConfig["CustomKernelName"] = kernelName
 
     return kernelConfig
