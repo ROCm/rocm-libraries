@@ -12,7 +12,10 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
@@ -20,56 +23,27 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::toVec;
 using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
 using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
+using hipdnn_tests::buildTensorMap;
+using hipdnn_tests::lowerAndDeserialize;
+using hipdnn_tests::TestableGraphLowering;
 
 namespace
 {
 
-// Exposes protected Graph methods for testing
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph_via_descriptors;
-    using Graph::get_raw_graph_descriptor;
-};
-
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
-class IntegrationBatchnormDescriptorLowering : public ::testing::Test
+class IntegrationBatchnormDescriptorLowering : public IntegrationTestFixture
 {
-protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTripAllOptionals)
 {
     // Full round-trip with all optional tensors including running stats.
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestBnFwdGraphAllOptionals")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -128,32 +102,7 @@ TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTripAllOptiona
         .set_output(true)
         .set_name("NextRunVar");
 
-    // -- Validate and lower --
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // -- Retrieve serialized graph --
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    // -- Deserialize into GraphT --
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
-    ASSERT_NE(graphFb, nullptr);
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    graphFb->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // -- Verify graph-level attributes --
     EXPECT_EQ(graphT.compute_data_type, DataTypeSdk::FLOAT);
@@ -165,11 +114,7 @@ TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTripAllOptiona
     // prevRunMean, prevRunVar, momentum, nextRunMean, nextRunVar = 12 tensors
     ASSERT_EQ(graphT.tensors.size(), 12u);
 
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
-    for(const auto& t : graphT.tensors)
-    {
-        tensorMap[t->uid] = t.get();
-    }
+    auto tensorMap = buildTensorMap(graphT);
 
     // Verify X tensor
     ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_X_UID), 0u);
@@ -294,7 +239,7 @@ TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTripAllOptiona
 
 TEST_F(IntegrationBatchnormDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidBnFwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -326,26 +271,7 @@ TEST_F(IntegrationBatchnormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     meanOut->set_output(true);
     invVarOut->set_output(true);
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Retrieve serialized graph
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // x, scale, bias, epsilon, y, mean, invVariance = 7 tensors
     ASSERT_EQ(graphT.tensors.size(), 7u);
@@ -354,7 +280,8 @@ TEST_F(IntegrationBatchnormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 7u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 7u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The batchnorm forward operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -363,24 +290,31 @@ TEST_F(IntegrationBatchnormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(bnFwd->x_tensor_uid) > 0)
-        << "X tensor UID " << bnFwd->x_tensor_uid << " not found in graph tensors";
+        << "X tensor UID " << bnFwd->x_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnFwd->scale_tensor_uid) > 0)
-        << "Scale tensor UID " << bnFwd->scale_tensor_uid << " not found in graph tensors";
+        << "Scale tensor UID " << bnFwd->scale_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnFwd->bias_tensor_uid) > 0)
-        << "Bias tensor UID " << bnFwd->bias_tensor_uid << " not found in graph tensors";
+        << "Bias tensor UID " << bnFwd->bias_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnFwd->epsilon_tensor_uid) > 0)
-        << "Epsilon tensor UID " << bnFwd->epsilon_tensor_uid << " not found in graph tensors";
+        << "Epsilon tensor UID " << bnFwd->epsilon_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnFwd->y_tensor_uid) > 0)
-        << "Y tensor UID " << bnFwd->y_tensor_uid << " not found in graph tensors";
+        << "Y tensor UID " << bnFwd->y_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // Mean and inv_variance should be set with valid UIDs
     ASSERT_TRUE(bnFwd->mean_tensor_uid.has_value());
     EXPECT_TRUE(uids.count(bnFwd->mean_tensor_uid.value()) > 0)
-        << "Mean tensor UID " << bnFwd->mean_tensor_uid.value() << " not found in graph tensors";
+        << "Mean tensor UID " << bnFwd->mean_tensor_uid.value()
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     ASSERT_TRUE(bnFwd->inv_variance_tensor_uid.has_value());
     EXPECT_TRUE(uids.count(bnFwd->inv_variance_tensor_uid.value()) > 0)
-        << "InvVariance tensor UID " << bnFwd->inv_variance_tensor_uid.value()
-        << " not found in graph tensors";
+        << "InvVariance tensor UID "
+        << bnFwd->inv_variance_tensor_uid.value() // NOLINT(readability-implicit-bool-conversion)
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All seven tensor UIDs referenced by the node should be distinct
     const std::unordered_set<int64_t> nodeUids = {bnFwd->x_tensor_uid,
@@ -390,14 +324,15 @@ TEST_F(IntegrationBatchnormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
                                                   bnFwd->y_tensor_uid,
                                                   bnFwd->mean_tensor_uid.value(),
                                                   bnFwd->inv_variance_tensor_uid.value()};
-    EXPECT_EQ(nodeUids.size(), 7u) << "Batchnorm forward node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 7u)
+        << "Batchnorm forward node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 TEST_F(IntegrationBatchnormDescriptorLowering, MinimalRequiredOnlyRoundTrip)
 {
     // Tests the absolute minimum: x, scale, bias, epsilon as inputs -> y, mean, invVar as outputs
     // No running stats, no peer stats
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("MinimalBnFwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -435,25 +370,7 @@ TEST_F(IntegrationBatchnormDescriptorLowering, MinimalRequiredOnlyRoundTrip)
         .set_output(true)
         .set_name("InvVariance");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Retrieve and verify
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto* bnFwd = graphT.nodes[0]->attributes.AsBatchnormAttributes();
