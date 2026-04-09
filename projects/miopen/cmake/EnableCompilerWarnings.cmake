@@ -67,7 +67,6 @@ set(__clang_cxx_compile_options
     -Wno-covered-switch-default
     -Wno-unsafe-buffer-usage
     -Wno-deprecated-declarations
-    -Wno-shadow-uncaptured-local
     -Wno-global-constructors
     -Wno-reserved-identifier
     -Wno-zero-as-null-pointer-constant

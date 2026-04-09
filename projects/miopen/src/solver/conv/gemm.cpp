@@ -843,8 +843,6 @@ ConvSolution GemmFwd1x1_0_1::GetSolution(const ExecutionContext& context,
                 const auto& w       = tensors.w;
                 const auto& y       = tensors.out;
 
-                MIOPEN_LOG_FUNCTION("convolution, 1x1");
-
                 // tensors.y = tensors.w * tensors.x
                 miopenStatus_t gemm_status;
                 const auto gemm_desc = [&]() {

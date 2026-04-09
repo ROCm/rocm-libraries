@@ -31,24 +31,7 @@
 
 namespace rocsparse
 {
-    template <rocsparse_int n, typename I>
-    ROCSPARSE_DEVICE_ILF void count_uncolored_reduce_device(rocsparse_int tx, I* sdata)
-    {
-        __syncthreads();
-        if(tx < n / 2)
-        {
-            sdata[tx] += sdata[tx + n / 2];
-        }
-        count_uncolored_reduce_device<n / 2>(tx, sdata);
-    }
-
-    template <>
-    __forceinline__ __device__ void count_uncolored_reduce_device<0, int32_t>(rocsparse_int tx,
-                                                                              int32_t*      sdata)
-    {
-    }
-
-    template <rocsparse_int NB_X, typename J>
+    template <uint32_t NB_X, typename J>
     ROCSPARSE_KERNEL(NB_X)
     void count_uncolored(
         J size, J m, J n, const J* __restrict__ colors, J* __restrict__ uncolored_per_sequence)
@@ -77,7 +60,14 @@ namespace rocsparse
         sdata[tx] = res;
         if(NB_X > 16 && m >= NB_X)
         {
-            count_uncolored_reduce_device<NB_X>(tx, sdata);
+            for(uint32_t active = NB_X; active > 1; active /= 2)
+            {
+                __syncthreads();
+                if(tx < active / 2)
+                {
+                    sdata[tx] += sdata[tx + active / 2];
+                }
+            }
         }
         else
         {
@@ -98,7 +88,7 @@ namespace rocsparse
         }
     }
 
-    template <rocsparse_int BLOCKSIZE, typename J>
+    template <uint32_t BLOCKSIZE, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrcolor_reordering_identity(J size, J* identity)
     {
@@ -109,7 +99,7 @@ namespace rocsparse
         }
     }
 
-    template <rocsparse_int NUMCOLUMNS_PER_BLOCK, rocsparse_int WF_SIZE, typename J>
+    template <uint32_t NUMCOLUMNS_PER_BLOCK, uint32_t WF_SIZE, typename J>
     ROCSPARSE_KERNEL(WF_SIZE* NUMCOLUMNS_PER_BLOCK)
     void csrcolor_assign_uncolored_kernel(
         J size, J m, J n, J shift_color, J* __restrict__ colors, J* __restrict__ index_sequence)
@@ -272,14 +262,13 @@ namespace rocsparse
         //
         // Now we traverse again and we use num_colored_per_sequence.
         //
-        static constexpr rocsparse_int data_ratio = sizeof(J) / sizeof(float);
+        static constexpr uint32_t DATA_RATIO = sizeof(J) / sizeof(float);
         if(handle->wavefront_size == 32)
         {
-            static constexpr rocsparse_int WF_SIZE = 32;
-            static constexpr rocsparse_int NCOLUMNS_PER_BLOCK
-                = 16 / (data_ratio > 0 ? data_ratio : 1);
-            rocsparse_int blocks = (n - 1) / NCOLUMNS_PER_BLOCK + 1;
-            dim3          k_blocks(blocks), k_threads(WF_SIZE * NCOLUMNS_PER_BLOCK);
+            static constexpr uint32_t WF_SIZE            = 32;
+            static constexpr uint32_t NCOLUMNS_PER_BLOCK = 16 / (DATA_RATIO > 0 ? DATA_RATIO : 1);
+            J                         blocks             = (n - 1) / NCOLUMNS_PER_BLOCK + 1;
+            dim3                      k_blocks(blocks), k_threads(WF_SIZE * NCOLUMNS_PER_BLOCK);
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrcolor_assign_uncolored_kernel<NCOLUMNS_PER_BLOCK, WF_SIZE>),
@@ -296,10 +285,9 @@ namespace rocsparse
         }
         else
         {
-            static constexpr rocsparse_int WF_SIZE = 64;
-            static constexpr rocsparse_int NCOLUMNS_PER_BLOCK
-                = 16 / (data_ratio > 0 ? data_ratio : 1);
-            rocsparse_int blocks = (n - 1) / NCOLUMNS_PER_BLOCK + 1;
+            static constexpr uint32_t WF_SIZE            = 64;
+            static constexpr uint32_t NCOLUMNS_PER_BLOCK = 16 / (DATA_RATIO > 0 ? DATA_RATIO : 1);
+            J                         blocks             = (n - 1) / NCOLUMNS_PER_BLOCK + 1;
 
             dim3 k_blocks(blocks), k_threads(WF_SIZE * NCOLUMNS_PER_BLOCK);
 
@@ -338,7 +326,7 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    static constexpr rocsparse_int blocksize = 256;
+    static constexpr uint32_t BLOCKSIZE = 256;
 
     hipStream_t stream = handle->stream;
     *ncolors           = -2;
@@ -351,7 +339,7 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
     //
     J* workspace;
     RETURN_IF_HIP_ERROR(
-        rocsparse_hipMallocAsync(&workspace, sizeof(J) * blocksize, handle->stream));
+        rocsparse_hipMallocAsync(&workspace, sizeof(J) * BLOCKSIZE, handle->stream));
 
     //
     // Initialize colors
@@ -368,9 +356,9 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
         //
         // Run Jones-Plassmann Luby algorithm
         //
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrcolor_kernel_jpl<blocksize, I, J>),
-                                           dim3((m - 1) / blocksize + 1),
-                                           dim3(blocksize),
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrcolor_kernel_jpl<BLOCKSIZE, I, J>),
+                                           dim3((m - 1) / BLOCKSIZE + 1),
+                                           dim3(BLOCKSIZE),
                                            0,
                                            stream,
                                            m,
@@ -384,9 +372,9 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
         // Count colored vertices
         //
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrcolor_kernel_count_uncolored<blocksize, J>),
-            dim3(blocksize),
-            dim3(blocksize),
+            (rocsparse::csrcolor_kernel_count_uncolored<BLOCKSIZE, J>),
+            dim3(BLOCKSIZE),
+            dim3(BLOCKSIZE),
             0,
             stream,
             m,
@@ -397,9 +385,9 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
         // Gather results.
         //
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrcolor_kernel_count_uncolored_finalize<blocksize, J>),
+            (rocsparse::csrcolor_kernel_count_uncolored_finalize<BLOCKSIZE, J>),
             dim3(1),
-            dim3(blocksize),
+            dim3(BLOCKSIZE),
             0,
             stream,
             workspace);
@@ -418,9 +406,9 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
     // *ncolors += 2 is not the right number of colors, sometimes yes, sometimes no.
     //
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrcolor_kernel_count_colors<blocksize, J>),
-                                           dim3(blocksize),
-                                           dim3(blocksize),
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrcolor_kernel_count_colors<BLOCKSIZE, J>),
+                                           dim3(BLOCKSIZE),
+                                           dim3(BLOCKSIZE),
                                            0,
                                            stream,
                                            m,
@@ -428,9 +416,9 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
                                            workspace);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrcolor_kernel_count_colors_finalize<blocksize, J>),
+            (rocsparse::csrcolor_kernel_count_colors_finalize<BLOCKSIZE, J>),
             dim3(1),
-            dim3(blocksize),
+            dim3(BLOCKSIZE),
             0,
             stream,
             workspace);
@@ -457,8 +445,8 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
     //
     if(nullptr != reordering)
     {
-        rocsparse_int* reordering_identity = nullptr;
-        rocsparse_int* sorted_colors       = nullptr;
+        J* reordering_identity = nullptr;
+        J* sorted_colors       = nullptr;
         //
         // Create identity.
         //
@@ -490,14 +478,13 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
             // Get required size of the temporary storage
             //
             static constexpr bool s_using_double_buffers = false;
-            RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::primitives::radix_sort_pairs_buffer_size<rocsparse_int, rocsparse_int>(
-                    handle,
-                    m,
-                    0,
-                    sizeof(rocsparse_int) * 8,
-                    &temporary_storage_size_bytes,
-                    s_using_double_buffers)));
+            RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<J, J>(
+                handle,
+                m,
+                0,
+                sizeof(J) * 8,
+                &temporary_storage_size_bytes,
+                s_using_double_buffers)));
 
             //
             // allocate temporary storage
@@ -516,7 +503,7 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
                                                         reordering,
                                                         m,
                                                         0,
-                                                        sizeof(rocsparse_int) * 8,
+                                                        sizeof(J) * 8,
                                                         temporary_storage_size_bytes,
                                                         temporary_storage_ptr));
 
