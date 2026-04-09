@@ -11,8 +11,7 @@
 
 extern "C" int ck_impl_get_api_version() { return CK_IMPL_API_VERSION; }
 
-extern "C" ck_impl_status_t ck_impl_kernel_list_size(const CKKernelListHandle* h,
-                                                         size_t* out_size)
+extern "C" ck_impl_status_t ck_impl_kernel_list_size(const CKKernelListHandle* h, size_t* out_size)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_size, CK_IMPL_STATUS_BAD_PARAM, "Null out_size");

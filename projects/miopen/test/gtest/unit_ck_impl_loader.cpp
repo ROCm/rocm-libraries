@@ -546,8 +546,7 @@ TEST(CPU_CkImplError_NONE, ThrowIfNullThrowsOnNull)
 {
     int* ptr = nullptr;
     EXPECT_THROW(
-        { CK_IMPL_THROW_IF_NULL(ptr, CK_IMPL_STATUS_BAD_PARAM, "null pointer"); },
-        CkImplException);
+        { CK_IMPL_THROW_IF_NULL(ptr, CK_IMPL_STATUS_BAD_PARAM, "null pointer"); }, CkImplException);
 
     try
     {
@@ -565,8 +564,7 @@ TEST(CPU_CkImplError_NONE, ThrowIfNullPassesOnNonNull)
 {
     int value = 42;
     int* ptr  = &value;
-    EXPECT_NO_THROW(
-        { CK_IMPL_THROW_IF_NULL(ptr, CK_IMPL_STATUS_BAD_PARAM, "should not throw"); });
+    EXPECT_NO_THROW({ CK_IMPL_THROW_IF_NULL(ptr, CK_IMPL_STATUS_BAD_PARAM, "should not throw"); });
 }
 
 TEST(CPU_CkImplError_NONE, ThrowIfFalseThrowsOnFalse)
@@ -645,8 +643,7 @@ TEST(CPU_CkImplError_NONE, ThrowIfEqThrowsOnEqual)
 
 TEST(CPU_CkImplError_NONE, ThrowIfEqPassesOnNotEqual)
 {
-    EXPECT_NO_THROW(
-        { CK_IMPL_THROW_IF_EQ(1, 2, CK_IMPL_STATUS_BAD_PARAM, "should not throw"); });
+    EXPECT_NO_THROW({ CK_IMPL_THROW_IF_EQ(1, 2, CK_IMPL_STATUS_BAD_PARAM, "should not throw"); });
 }
 
 // -- LastError additional coverage -------------------------------------------
@@ -696,8 +693,7 @@ TEST(CPU_CkImplError_NONE, TryCatchPreservesAllStatusCodes)
 
     for(auto code : codes)
     {
-        auto status =
-            ck_impl_try_catch([code]() { throw CkImplException(code, toString(code)); });
+        auto status = ck_impl_try_catch([code]() { throw CkImplException(code, toString(code)); });
         EXPECT_EQ(status, code) << "tryCatch should preserve status " << toString(code);
         EXPECT_STREQ(CkImplLastError::getLastError(), toString(code));
     }
@@ -708,9 +704,8 @@ TEST(CPU_CkImplError_NONE, TryCatchPreservesAllStatusCodes)
 TEST(CPU_CkImplError_NONE, ThrowIfNullPropagatesThroughTryCatch)
 {
     int* ptr    = nullptr;
-    auto status = ck_impl_try_catch([&]() {
-        CK_IMPL_THROW_IF_NULL(ptr, CK_IMPL_STATUS_BAD_PARAM, "null ptr in tryCatch");
-    });
+    auto status = ck_impl_try_catch(
+        [&]() { CK_IMPL_THROW_IF_NULL(ptr, CK_IMPL_STATUS_BAD_PARAM, "null ptr in tryCatch"); });
     EXPECT_EQ(status, CK_IMPL_STATUS_BAD_PARAM);
     EXPECT_STREQ(CkImplLastError::getLastError(), "null ptr in tryCatch");
 }

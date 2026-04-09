@@ -49,49 +49,49 @@ private:
 // ---------------------------------------------------------------------------
 
 // NOLINTBEGIN(bugprone-macro-parentheses) message is a string expression
-#define CK_IMPL_THROW_IF_NULL(x, failureStatus, message)    \
-    do                                                        \
-    {                                                         \
-        if((x) == nullptr)                                    \
-        {                                                     \
+#define CK_IMPL_THROW_IF_NULL(x, failureStatus, message)   \
+    do                                                     \
+    {                                                      \
+        if((x) == nullptr)                                 \
+        {                                                  \
             throw CkImplException(failureStatus, message); \
-        }                                                     \
+        }                                                  \
     } while(0)
 
-#define CK_IMPL_THROW_IF_FALSE(x, failureStatus, message)   \
-    do                                                        \
-    {                                                         \
-        if(!(x))                                              \
-        {                                                     \
+#define CK_IMPL_THROW_IF_FALSE(x, failureStatus, message)  \
+    do                                                     \
+    {                                                      \
+        if(!(x))                                           \
+        {                                                  \
             throw CkImplException(failureStatus, message); \
-        }                                                     \
+        }                                                  \
     } while(0)
 
-#define CK_IMPL_THROW_IF_TRUE(x, failureStatus, message)    \
-    do                                                        \
-    {                                                         \
-        if(x)                                                 \
-        {                                                     \
+#define CK_IMPL_THROW_IF_TRUE(x, failureStatus, message)   \
+    do                                                     \
+    {                                                      \
+        if(x)                                              \
+        {                                                  \
             throw CkImplException(failureStatus, message); \
-        }                                                     \
+        }                                                  \
     } while(0)
 
-#define CK_IMPL_THROW_IF_NE(x, y, failureStatus, message)   \
-    do                                                        \
-    {                                                         \
-        if((x) != (y))                                        \
-        {                                                     \
+#define CK_IMPL_THROW_IF_NE(x, y, failureStatus, message)  \
+    do                                                     \
+    {                                                      \
+        if((x) != (y))                                     \
+        {                                                  \
             throw CkImplException(failureStatus, message); \
-        }                                                     \
+        }                                                  \
     } while(0)
 
-#define CK_IMPL_THROW_IF_EQ(x, y, failureStatus, message)   \
-    do                                                        \
-    {                                                         \
-        if((x) == (y))                                        \
-        {                                                     \
+#define CK_IMPL_THROW_IF_EQ(x, y, failureStatus, message)  \
+    do                                                     \
+    {                                                      \
+        if((x) == (y))                                     \
+        {                                                  \
             throw CkImplException(failureStatus, message); \
-        }                                                     \
+        }                                                  \
     } while(0)
 // NOLINTEND(bugprone-macro-parentheses)
 
@@ -175,7 +175,7 @@ ck_impl_status_t ck_impl_try_catch(F f)
     catch(...)
     {
         return CkImplLastError::setLastError(CK_IMPL_STATUS_INTERNAL_ERROR,
-                                                "Unknown exception occurred");
+                                             "Unknown exception occurred");
     }
     return CK_IMPL_STATUS_SUCCESS;
 }
