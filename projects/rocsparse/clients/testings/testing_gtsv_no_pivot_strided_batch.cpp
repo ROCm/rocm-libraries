@@ -91,7 +91,7 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
 {
     rocsparse_int m            = arg.M;
     rocsparse_int batch_count  = arg.N;
-    rocsparse_int batch_stride = arg.M; //arg.denseld;
+    rocsparse_int batch_stride = arg.denseld;
 
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);

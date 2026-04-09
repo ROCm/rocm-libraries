@@ -699,6 +699,11 @@ namespace rocsparse
         }
         else
         {
+            if(level + 1 >= determine_max_recursion_levels())
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+
             RETURN_IF_ROCSPARSE_ERROR(
                 gtsv_no_pivot_strided_batch_template_dispatch(handle,
                                                               num_spikes,
@@ -754,8 +759,6 @@ namespace rocsparse
                 handle, m, dl, d, du, x, batch_count, batch_stride, buffer_data, level));
             return rocsparse_status_success;
         }
-
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
 }
 
