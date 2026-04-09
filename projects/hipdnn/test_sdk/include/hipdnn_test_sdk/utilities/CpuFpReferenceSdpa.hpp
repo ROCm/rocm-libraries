@@ -246,6 +246,422 @@ public:
             lse->memory().markHostModified();
         }
     }
+
+    /// SDPA backward: computes dQ, dK, dV from upstream gradient dO
+    ///
+    /// Implements Flash Attention backward pass algorithm. Recomputes attention
+    /// probabilities from Q, K to avoid storing the full attention matrix.
+    /// Optionally uses LSE (log-sum-exp) from forward pass for efficient softmax
+    /// recomputation.
+    ///
+    /// @param q              Query tensor [B, H_q, Sq, D]
+    /// @param k              Key tensor   [B, H_kv, Skv, D]
+    /// @param v              Value tensor [B, H_kv, Skv, Dv]
+    /// @param o              Output from forward pass [B, H_q, Sq, Dv]
+    /// @param dO             Upstream gradient [B, H_q, Sq, Dv]
+    /// @param dQ             Output: gradient w.r.t. Q [B, H_q, Sq, D]
+    /// @param dK             Output: gradient w.r.t. K [B, H_kv, Skv, D]
+    /// @param dV             Output: gradient w.r.t. V [B, H_kv, Skv, Dv]
+    /// @param attnScaleValue Optional scale factor; defaults to 1/sqrt(D)
+    /// @param lse            Optional log-sum-exp from forward [B, H_q, Sq] (FP32).
+    ///                       When provided, enables efficient softmax recomputation.
+    ///                       When nullptr, recomputes softmax from scratch.
+    /// @param attnMask       Optional additive attention mask (same as forward)
+    /// @param causalMask     When true, applies causal masking (same as forward)
+    ///
+    /// Note: For GQA (H_q > H_kv), multiple query heads accumulate gradients to
+    /// the same KV heads. This implementation is sequential to ensure correctness.
+    template <class QDataType,
+              class KDataType,
+              class VDataType,
+              class ODataType,
+              class DODataType,
+              class DQDataType,
+              class DKDataType,
+              class DVDataType,
+              class ComputeDataType = float>
+    static void backward(const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+                         const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+                         const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+                         const hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+                         const hipdnn_data_sdk::utilities::TensorBase<DODataType>& dO,
+                         hipdnn_data_sdk::utilities::TensorBase<DQDataType>& dQ,
+                         hipdnn_data_sdk::utilities::TensorBase<DKDataType>& dK,
+                         hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
+                         std::optional<float> attnScaleValue = std::nullopt,
+                         const hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+                         const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask
+                         = nullptr,
+                         bool causalMask = false)
+    {
+        // Validate input tensor ranks
+        if(q.dims().size() != 4)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: q must be rank-4 [B, H_q, Sq, D]");
+        }
+        if(k.dims().size() != 4)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: k must be rank-4 [B, H_kv, Skv, D]");
+        }
+        if(v.dims().size() != 4)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: v must be rank-4 [B, H_kv, Skv, Dv]");
+        }
+        if(o.dims().size() != 4)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: o must be rank-4 [B, H_q, Sq, Dv]");
+        }
+        if(dO.dims().size() != 4)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: dO must be rank-4 [B, H_q, Sq, Dv]");
+        }
+        if(dQ.dims().size() != 4)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: dQ must be rank-4 [B, H_q, Sq, D]");
+        }
+        if(dK.dims().size() != 4)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: dK must be rank-4 [B, H_kv, Skv, D]");
+        }
+        if(dV.dims().size() != 4)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: dV must be rank-4 [B, H_kv, Skv, Dv]");
+        }
+
+        // Extract dimensions
+        const auto batch = q.dims()[0];
+        const auto numHeadsQ = q.dims()[1];
+        const auto seqQ = q.dims()[2];
+        const auto headDim = q.dims()[3];
+        const auto numHeadsKv = k.dims()[1];
+        const auto seqKv = k.dims()[2];
+        const auto headDimV = v.dims()[3];
+
+        if(batch <= 0 || numHeadsQ <= 0 || seqQ <= 0 || headDim <= 0 || numHeadsKv <= 0
+           || seqKv <= 0 || headDimV <= 0)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: all dimensions must be positive");
+        }
+
+        // Cross-tensor dimension validation
+        if(k.dims()[0] != batch || v.dims()[0] != batch || o.dims()[0] != batch
+           || dO.dims()[0] != batch || dQ.dims()[0] != batch || dK.dims()[0] != batch
+           || dV.dims()[0] != batch)
+        {
+            throw std::invalid_argument("CpuFpReferenceSdpa::backward: batch dimension mismatch");
+        }
+        if(k.dims()[3] != headDim)
+        {
+            throw std::invalid_argument("CpuFpReferenceSdpa::backward: Q head_dim != K head_dim");
+        }
+        if(v.dims()[2] != seqKv)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: K and V sequence lengths must match");
+        }
+        if(o.dims()[1] != numHeadsQ || o.dims()[2] != seqQ || o.dims()[3] != headDimV)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: o shape must be [B, H_q, Sq, Dv]");
+        }
+        if(dO.dims()[1] != numHeadsQ || dO.dims()[2] != seqQ || dO.dims()[3] != headDimV)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: dO shape must be [B, H_q, Sq, Dv]");
+        }
+        if(dQ.dims()[1] != numHeadsQ || dQ.dims()[2] != seqQ || dQ.dims()[3] != headDim)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: dQ shape must be [B, H_q, Sq, D]");
+        }
+        if(dK.dims()[1] != numHeadsKv || dK.dims()[2] != seqKv || dK.dims()[3] != headDim)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: dK shape must be [B, H_kv, Skv, D]");
+        }
+        if(dV.dims()[1] != numHeadsKv || dV.dims()[2] != seqKv || dV.dims()[3] != headDimV)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: dV shape must be [B, H_kv, Skv, Dv]");
+        }
+        if(numHeadsQ % numHeadsKv != 0)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: numHeadsQ must be divisible by numHeadsKv (GQA)");
+        }
+
+        // Validate LSE tensor if provided
+        if(lse != nullptr)
+        {
+            if(lse->dims().size() != 3)
+            {
+                throw std::invalid_argument(
+                    "CpuFpReferenceSdpa::backward: lse must be rank-3 [B, H_q, Sq]");
+            }
+            if(lse->dims()[0] != batch || lse->dims()[1] != numHeadsQ || lse->dims()[2] != seqQ)
+            {
+                throw std::invalid_argument(
+                    "CpuFpReferenceSdpa::backward: lse shape must be [B, H_q, Sq]");
+            }
+        }
+
+        const auto headsPerHeadKv = numHeadsQ / numHeadsKv;
+        const float scale = attnScaleValue.has_value()
+                                ? attnScaleValue.value()
+                                : (1.0f / std::sqrt(static_cast<float>(headDim)));
+
+        // Initialize output gradient tensors to zero
+        dQ.fillWithValue(hipdnn_test_sdk::detail::safeConvert<DQDataType>(0.0));
+        dK.fillWithValue(hipdnn_test_sdk::detail::safeConvert<DKDataType>(0.0));
+        dV.fillWithValue(hipdnn_test_sdk::detail::safeConvert<DVDataType>(0.0));
+
+        const std::vector<int64_t> parallelDims = {batch, numHeadsQ, seqQ};
+
+        auto sdpaBwdFunc = [&](const std::vector<int64_t>& indices) {
+            const auto b = indices[0];
+            const auto hQ = indices[1];
+            const auto sq = indices[2];
+            const auto kvHeadK = hQ / headsPerHeadKv;
+            const auto kvHeadV = hQ / headsPerHeadKv;
+
+            // Allocate temporary buffers for this query position
+            std::vector<ComputeDataType> scores(static_cast<size_t>(seqKv));
+            std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
+            std::vector<ComputeDataType> dpBuffer(static_cast<size_t>(seqKv));
+
+            // Step 1: Compute D[b, hQ, sq] = sum(dO[b, hQ, sq, :] * O[b, hQ, sq, :])
+            auto dVal = static_cast<ComputeDataType>(0.0);
+            for(int64_t dv = 0; dv < headDimV; ++dv)
+            {
+                const auto doVal = static_cast<ComputeDataType>(
+                    dO.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
+                const auto oVal = static_cast<ComputeDataType>(
+                    o.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
+                dVal += doVal * oVal;
+            }
+
+            // Step 2: Recompute attention scores and probabilities
+            // Option A: Use LSE if available (efficient)
+            // Option B: Recompute softmax from scratch
+            if(lse != nullptr)
+            {
+                // Efficient recomputation using LSE from forward pass
+                const float lseVal = lse->getHostValue(std::vector<int64_t>{b, hQ, sq});
+
+                for(int64_t skv = 0; skv < seqKv; ++skv)
+                {
+                    // Apply causal mask
+                    if(causalMask && skv > sq)
+                    {
+                        scores[static_cast<size_t>(skv)]
+                            = -std::numeric_limits<ComputeDataType>::infinity();
+                        probs[static_cast<size_t>(skv)] = static_cast<ComputeDataType>(0.0);
+                        continue;
+                    }
+
+                    // Compute QK dot product
+                    auto qkDot = static_cast<ComputeDataType>(0.0);
+                    for(int64_t d = 0; d < headDim; ++d)
+                    {
+                        qkDot += static_cast<ComputeDataType>(
+                                     q.getHostValue(std::vector<int64_t>{b, hQ, sq, d}))
+                                 * static_cast<ComputeDataType>(
+                                     k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
+                    }
+                    scores[static_cast<size_t>(skv)] = qkDot * static_cast<ComputeDataType>(scale);
+
+                    // Apply additive attention mask if provided
+                    if(attnMask != nullptr)
+                    {
+                        const auto& maskDims = attnMask->dims();
+                        const auto maskRank = static_cast<int64_t>(maskDims.size());
+                        constexpr int64_t K_OUTPUT_CONTEXT_RANK = 4;
+
+                        const std::array<int64_t, K_OUTPUT_CONTEXT_RANK> ctxIdxs = {b, hQ, sq, skv};
+                        std::vector<int64_t> maskIndices(static_cast<size_t>(maskRank));
+                        for(int64_t i = 0; i < maskRank; ++i)
+                        {
+                            const auto outputDimIdx
+                                = static_cast<size_t>(K_OUTPUT_CONTEXT_RANK - maskRank + i);
+                            const auto outputIdx = ctxIdxs[outputDimIdx];
+                            maskIndices[static_cast<size_t>(i)]
+                                = (maskDims[static_cast<size_t>(i)] == 1) ? 0 : outputIdx;
+                        }
+                        scores[static_cast<size_t>(skv)]
+                            += static_cast<ComputeDataType>(attnMask->getHostValue(maskIndices));
+                    }
+
+                    // Recompute probability using LSE:
+                    // P[skv] = exp(score[skv] - lse)
+                    // where lse = maxVal + log(sumExp)
+                    probs[static_cast<size_t>(skv)] = std::exp(
+                        scores[static_cast<size_t>(skv)] - static_cast<ComputeDataType>(lseVal));
+                }
+            }
+            else
+            {
+                // Recompute softmax from scratch (no LSE available)
+                ComputeDataType maxVal = -std::numeric_limits<ComputeDataType>::infinity();
+
+                for(int64_t skv = 0; skv < seqKv; ++skv)
+                {
+                    // Apply causal mask
+                    if(causalMask && skv > sq)
+                    {
+                        scores[static_cast<size_t>(skv)]
+                            = -std::numeric_limits<ComputeDataType>::infinity();
+                        continue;
+                    }
+
+                    // Compute QK dot product
+                    auto qkDot = static_cast<ComputeDataType>(0.0);
+                    for(int64_t d = 0; d < headDim; ++d)
+                    {
+                        qkDot += static_cast<ComputeDataType>(
+                                     q.getHostValue(std::vector<int64_t>{b, hQ, sq, d}))
+                                 * static_cast<ComputeDataType>(
+                                     k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
+                    }
+                    scores[static_cast<size_t>(skv)] = qkDot * static_cast<ComputeDataType>(scale);
+
+                    // Apply additive attention mask if provided
+                    if(attnMask != nullptr)
+                    {
+                        const auto& maskDims = attnMask->dims();
+                        const auto maskRank = static_cast<int64_t>(maskDims.size());
+                        constexpr int64_t K_OUTPUT_CONTEXT_RANK = 4;
+
+                        const std::array<int64_t, K_OUTPUT_CONTEXT_RANK> ctxIdxs = {b, hQ, sq, skv};
+                        std::vector<int64_t> maskIndices(static_cast<size_t>(maskRank));
+                        for(int64_t i = 0; i < maskRank; ++i)
+                        {
+                            const auto outputDimIdx
+                                = static_cast<size_t>(K_OUTPUT_CONTEXT_RANK - maskRank + i);
+                            const auto outputIdx = ctxIdxs[outputDimIdx];
+                            maskIndices[static_cast<size_t>(i)]
+                                = (maskDims[static_cast<size_t>(i)] == 1) ? 0 : outputIdx;
+                        }
+                        scores[static_cast<size_t>(skv)]
+                            += static_cast<ComputeDataType>(attnMask->getHostValue(maskIndices));
+                    }
+
+                    maxVal = std::max(maxVal, scores[static_cast<size_t>(skv)]);
+                }
+
+                // Compute softmax probabilities
+                auto sumExp = static_cast<ComputeDataType>(0.0);
+                for(int64_t skv = 0; skv < seqKv; ++skv)
+                {
+                    if(scores[static_cast<size_t>(skv)]
+                       == -std::numeric_limits<ComputeDataType>::infinity())
+                    {
+                        probs[static_cast<size_t>(skv)] = static_cast<ComputeDataType>(0.0);
+                    }
+                    else
+                    {
+                        probs[static_cast<size_t>(skv)]
+                            = std::exp(scores[static_cast<size_t>(skv)] - maxVal);
+                        sumExp += probs[static_cast<size_t>(skv)];
+                    }
+                }
+                for(int64_t skv = 0; skv < seqKv; ++skv)
+                {
+                    probs[static_cast<size_t>(skv)]
+                        /= (sumExp + static_cast<ComputeDataType>(1e-12));
+                }
+            }
+
+            // Step 3: Compute dP = dO @ V^T
+            for(int64_t skv = 0; skv < seqKv; ++skv)
+            {
+                auto dpVal = static_cast<ComputeDataType>(0.0);
+                for(int64_t dv = 0; dv < headDimV; ++dv)
+                {
+                    const auto doVal = static_cast<ComputeDataType>(
+                        dO.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
+                    const auto vVal = static_cast<ComputeDataType>(
+                        v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv}));
+                    dpVal += doVal * vVal;
+                }
+                dpBuffer[static_cast<size_t>(skv)] = dpVal;
+            }
+
+            // Step 4: Compute dS = P * (dP - D)  [softmax backward]
+            // and accumulate gradients
+            for(int64_t skv = 0; skv < seqKv; ++skv)
+            {
+                if(causalMask && skv > sq)
+                {
+                    continue;
+                }
+
+                const ComputeDataType dsVal
+                    = probs[static_cast<size_t>(skv)] * (dpBuffer[static_cast<size_t>(skv)] - dVal);
+                const ComputeDataType dsScaled = dsVal * static_cast<ComputeDataType>(scale);
+
+                // dQ[b, hQ, sq, d] += dS[skv] * K[b, kvHeadK, skv, d] * scale
+                for(int64_t d = 0; d < headDim; ++d)
+                {
+                    const auto kVal = static_cast<ComputeDataType>(
+                        k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
+                    const auto dqContrib = dsScaled * kVal;
+
+                    const auto currentDq = dQ.getHostValue(std::vector<int64_t>{b, hQ, sq, d});
+                    dQ.setHostValue(hipdnn_test_sdk::detail::safeConvert<DQDataType>(
+                                        static_cast<ComputeDataType>(currentDq) + dqContrib),
+                                    std::vector<int64_t>{b, hQ, sq, d});
+                }
+
+                // dK[b, kvHeadK, skv, d] += dS[skv] * Q[b, hQ, sq, d] * scale
+                // Note: For GQA, multiple Q heads accumulate to same K head
+                for(int64_t d = 0; d < headDim; ++d)
+                {
+                    const auto qVal = static_cast<ComputeDataType>(
+                        q.getHostValue(std::vector<int64_t>{b, hQ, sq, d}));
+                    const auto dkContrib = dsScaled * qVal;
+
+                    const auto currentDk
+                        = dK.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d});
+                    dK.setHostValue(hipdnn_test_sdk::detail::safeConvert<DKDataType>(
+                                        static_cast<ComputeDataType>(currentDk) + dkContrib),
+                                    std::vector<int64_t>{b, kvHeadK, skv, d});
+                }
+
+                // dV[b, kvHeadV, skv, dv] += P[skv] * dO[b, hQ, sq, dv]
+                for(int64_t dv = 0; dv < headDimV; ++dv)
+                {
+                    const auto doVal = static_cast<ComputeDataType>(
+                        dO.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
+                    const auto dvContrib = probs[static_cast<size_t>(skv)] * doVal;
+
+                    const auto currentDv
+                        = dV.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv});
+                    dV.setHostValue(hipdnn_test_sdk::detail::safeConvert<DVDataType>(
+                                        static_cast<ComputeDataType>(currentDv) + dvContrib),
+                                    std::vector<int64_t>{b, kvHeadV, skv, dv});
+                }
+            }
+        };
+
+        // Execute backward pass over all [B, H_q, Sq] positions
+        // Note: Sequential execution for GQA correctness (multiple Q heads accumulate to same KV)
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(sdpaBwdFunc, parallelDims);
+        parallelFunc(std::thread::hardware_concurrency());
+
+        dQ.memory().markHostModified();
+        dK.memory().markHostModified();
+        dV.memory().markHostModified();
+    }
 };
 
 } // namespace hipdnn_test_sdk::utilities
