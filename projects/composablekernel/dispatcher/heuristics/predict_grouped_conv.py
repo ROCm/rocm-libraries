@@ -5,6 +5,9 @@
 """
 Command-line tool to predict best grouped convolution kernel for a given problem.
 
+Kernel pool is dynamically generated from grouped_config_rules.py (single source of truth)
+rather than hardcoded. This ensures consistency with codegen and instance_builder.
+
 Usage:
     python3 predict_grouped_conv.py --N 1 --C 256 --K 512 --G 1 --Hi 14 --Wi 14 --Y 1 --X 1 --stride_h 2 --stride_w 2
 
@@ -20,70 +23,59 @@ Examples:
 """
 
 import argparse
+import sys
 from pathlib import Path
+
+# Import from single source of truth
+sys.path.insert(0, str(Path(__file__).parent.parent / "codegen"))
+from grouped_config_rules import COMMON_TILES, TILE_TO_WAVE
 
 from predict import Predictor
 from feature_engine_grouped_conv import GroupedConvFeatureEngine
 
 
-# Available kernel configurations (from training data)
+# =============================================================================
+# Kernel Pool Generation (from grouped_config_rules.py single source of truth)
+# =============================================================================
+
+
+def _generate_kernel_pool(pipelines):
+    """Generate kernel pool from tile configs and pipeline variants.
+
+    Args:
+        pipelines: List of pipeline names (e.g., ['compv3', 'compv4', 'compv5'])
+
+    Returns:
+        List of kernel config dicts with keys: block_size, gemm_m_per_block,
+        gemm_n_per_block, pipeline
+    """
+    kernels = []
+    for tile_m, tile_n, tile_k in COMMON_TILES:
+        if (tile_m, tile_n, tile_k) not in TILE_TO_WAVE:
+            continue  # Skip tiles without valid wave config
+
+        wave_m, wave_n, wave_k = TILE_TO_WAVE[(tile_m, tile_n, tile_k)]
+        block_size = wave_m * wave_n * wave_k * 64  # wavefront_size=64
+
+        for pipeline in pipelines:
+            kernels.append(
+                {
+                    "block_size": block_size,
+                    "gemm_m_per_block": tile_m,
+                    "gemm_n_per_block": tile_n,
+                    "pipeline": pipeline,
+                }
+            )
+
+    return kernels
+
+
+# Available kernel configurations (generated from single source of truth)
 # Forward kernels: compv3, compv4, compv5
-FORWARD_KERNELS = [
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv4'},
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv5'},
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv4'},
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv5'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv4'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv5'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv4'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv5'},
-    {'block_size': 32, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 32, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv4'},
-    {'block_size': 32, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv5'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv4'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv5'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv4'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv5'},
-    {'block_size': 64, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 64, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv4'},
-    {'block_size': 64, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv5'},
-    {'block_size': 128, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
-    {'block_size': 128, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv4'},
-    {'block_size': 128, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv5'},
-    {'block_size': 128, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 128, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv4'},
-    {'block_size': 128, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv5'},
-]
+FORWARD_KERNELS = _generate_kernel_pool(["compv3", "compv4", "compv5"])
 
 # Backward kernels (bwd_data, bwd_weight): compv3, mem only
-BACKWARD_KERNELS = [
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
-    {'block_size': 16, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'mem'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
-    {'block_size': 32, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'mem'},
-    {'block_size': 32, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 32, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
-    {'block_size': 64, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'mem'},
-    {'block_size': 64, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 64, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
-    {'block_size': 128, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'compv3'},
-    {'block_size': 128, 'gemm_m_per_block': 64, 'gemm_n_per_block': 128, 'pipeline': 'mem'},
-    {'block_size': 128, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'compv3'},
-    {'block_size': 128, 'gemm_m_per_block': 128, 'gemm_n_per_block': 64, 'pipeline': 'mem'},
-]
+BACKWARD_KERNELS = _generate_kernel_pool(["compv3", "mem"])
 
 # Legacy name for backward compatibility
 AVAILABLE_KERNELS = FORWARD_KERNELS
