@@ -1,0 +1,57 @@
+# Clean up documentation preview versions from Read the Docs
+# ---------------------------------------------------------
+# This workflow triggers when a PR is closed (merged or abandoned).
+# It checks if a docs preview was created by parsing PR comments posted
+# by the bot, then deactivates the corresponding version on Read the Docs.
+
+name: Docs Preview Cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Get project slug from preview comment
+        id: rtd
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          comment=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+            --jq '[.[] | select(.user.login == "assistant-librarian[bot]" and (.body | contains("rocm.docs.amd.com/projects/")))] | last | .body')
+
+          if [ -z "$comment" ] || [ "$comment" = "null" ]; then
+            echo "No preview comment found, skipping cleanup."
+            exit 0
+          fi
+
+          project_alias=$(echo "$comment" | grep -oP 'projects/\K[^/]+')
+          echo "project_slug=advanced-micro-devices-${project_alias}" >> $GITHUB_OUTPUT
+
+      - name: Deactivate RTD preview version
+        if: steps.rtd.outputs.project_slug
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          branch_name="${{ github.head_ref }}"
+          version_slug="${branch_name//\//-}"
+
+          response=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
+            -H "Authorization: Token $RTD_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"active": false}' \
+            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${version_slug}/")
+          echo "RTD PATCH responded with HTTP $response"
