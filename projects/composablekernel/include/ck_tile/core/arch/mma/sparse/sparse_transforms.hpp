@@ -56,6 +56,21 @@ static CK_TILE_DEVICE int32_t compress_a_impl(AVec& a_vec)
 
     return idx;
 }
+/**
+ * @brief Extract the per-fragment sparsity index from a packed idx word.
+ * After whole-wave-tile compression, the returned idx packs 2-bit fields for
+ * every compressed output element.
+ * @return The idx word right-shifted so this fragment's 2-bit fields are at
+ *         the least-significant positions.
+ */
+template <uint32_t FragCompressedSize, uint32_t FragsK>
+static CK_TILE_DEVICE int32_t extract_fragment_idx(int32_t idx, uint32_t m, uint32_t k)
+{
+    static constexpr uint32_t IdxBitsPerFrag = FragCompressedSize * 2;
+    const auto fragLinearIdx                 = m * FragsK + k;
+    return static_cast<int32_t>(static_cast<uint32_t>(idx) >> (fragLinearIdx * IdxBitsPerFrag));
+}
+
 } // namespace sparse::detail
 
 /**
