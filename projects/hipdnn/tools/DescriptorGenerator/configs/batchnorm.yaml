@@ -130,16 +130,18 @@ operation:
       attr_name: "HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT"
       frontend_getter: "get_peer_stats()"
       required: false
-      test_uids: [100, 101]
+      test_uids: [515, 516]
       test_label: "PeerStats"
 
   has_compute_data_type: true
-  compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT"
+  compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_EXT"
 
   test_data:
-    tensor_uids: { x: 50, scale: 51, bias: 52, epsilon: 53, y: 54, prev_running_mean: 6, prev_running_variance: 7, momentum: 8, mean: 9, inv_variance: 10, next_running_mean: 11, next_running_variance: 12 }
+    constants_include: "BatchnormConstants"
+    tensor_const_prefix: "K_BATCHNORM_"
+    tensor_uids: { x: 500, scale: 501, bias: 502, epsilon: 503, y: 504, prev_running_mean: 507, prev_running_variance: 508, momentum: 509, mean: 505, inv_variance: 506, next_running_mean: 510, next_running_variance: 511 }
     tensor_configs:
       x: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
       scale: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }

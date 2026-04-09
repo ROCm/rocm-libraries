@@ -41,6 +41,9 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
+        // Fill output tensors with sentinel values
+        bundle.sentinelFillOutputTensors();
+
         bundle.tensors.at(BatchnormBwdTensorIds::X_UID)
             ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
         bundle.tensors.at(BatchnormBwdTensorIds::DY_UID)
@@ -132,6 +135,18 @@ protected:
     }
 };
 
+using IntegrationGpuBatchnormBackwardNclFp32 = BatchnormBackward<float, float>;
+
+using IntegrationGpuBatchnormBackwardNclBfp16 = BatchnormBackward<bfloat16, float>;
+
+using IntegrationGpuBatchnormBackwardNclFp16 = BatchnormBackward<half, float>;
+
+using IntegrationGpuBatchnormBackwardNlcFp32 = BatchnormBackward<float, float>;
+
+using IntegrationGpuBatchnormBackwardNlcBfp16 = BatchnormBackward<bfloat16, float>;
+
+using IntegrationGpuBatchnormBackwardNlcFp16 = BatchnormBackward<half, float>;
+
 using IntegrationGpuBatchnormBackwardNchwFp32 = BatchnormBackward<float, float>;
 
 using IntegrationGpuBatchnormBackwardNchwBfp16 = BatchnormBackward<bfloat16, float>;
@@ -155,6 +170,18 @@ using IntegrationGpuBatchnormBackwardNdhwcFp32 = BatchnormBackward<float, float>
 using IntegrationGpuBatchnormBackwardNdhwcBfp16 = BatchnormBackward<bfloat16, float>;
 
 using IntegrationGpuBatchnormBackwardNdhwcFp16 = BatchnormBackward<half, float>;
+
+using IntegrationGpuBatchnormBackwardCalcStatsNclFp32 = BatchnormBackward<float, float, true>;
+
+using IntegrationGpuBatchnormBackwardCalcStatsNclBfp16 = BatchnormBackward<bfloat16, float, true>;
+
+using IntegrationGpuBatchnormBackwardCalcStatsNclFp16 = BatchnormBackward<half, float, true>;
+
+using IntegrationGpuBatchnormBackwardCalcStatsNlcFp32 = BatchnormBackward<float, float, true>;
+
+using IntegrationGpuBatchnormBackwardCalcStatsNlcBfp16 = BatchnormBackward<bfloat16, float, true>;
+
+using IntegrationGpuBatchnormBackwardCalcStatsNlcFp16 = BatchnormBackward<half, float, true>;
 
 using IntegrationGpuBatchnormBackwardCalcStatsNchwFp32 = BatchnormBackward<float, float, true>;
 
@@ -181,6 +208,84 @@ using IntegrationGpuBatchnormBackwardCalcStatsNdhwcBfp16 = BatchnormBackward<bfl
 using IntegrationGpuBatchnormBackwardCalcStatsNdhwcFp16 = BatchnormBackward<half, float, true>;
 
 } // namespace
+
+TEST_P(IntegrationGpuBatchnormBackwardNclFp32, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardNclFp32,
+                         testing::ValuesIn(getBnBwd1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackwardNclFp32,
+                         testing::ValuesIn(getBnBwd1dFullTestCases()));
+
+TEST_P(IntegrationGpuBatchnormBackwardNclBfp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardNclBfp16,
+                         testing::ValuesIn(getBnBwd1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackwardNclBfp16,
+                         testing::ValuesIn(getBnBwd1dFullTestCases()));
+
+TEST_P(IntegrationGpuBatchnormBackwardNclFp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardNclFp16,
+                         testing::ValuesIn(getBnBwd1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackwardNclFp16,
+                         testing::ValuesIn(getBnBwd1dFullTestCases()));
+
+TEST_P(IntegrationGpuBatchnormBackwardNlcFp32, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardNlcFp32,
+                         testing::ValuesIn(getBnBwd1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackwardNlcFp32,
+                         testing::ValuesIn(getBnBwd1dFullTestCases()));
+
+TEST_P(IntegrationGpuBatchnormBackwardNlcBfp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardNlcBfp16,
+                         testing::ValuesIn(getBnBwd1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackwardNlcBfp16,
+                         testing::ValuesIn(getBnBwd1dFullTestCases()));
+
+TEST_P(IntegrationGpuBatchnormBackwardNlcFp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardNlcFp16,
+                         testing::ValuesIn(getBnBwd1dTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormBackwardNlcFp16,
+                         testing::ValuesIn(getBnBwd1dFullTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardNchwFp32, Correctness)
 {
@@ -313,6 +418,60 @@ TEST_P(IntegrationGpuBatchnormBackwardNdhwcFp16, Correctness)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormBackwardNdhwcFp16,
                          testing::ValuesIn(getBnBwd3dTestCases()));
+
+TEST_P(IntegrationGpuBatchnormBackwardCalcStatsNclFp32, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardCalcStatsNclFp32,
+                         testing::ValuesIn(getBnBwd1dTestCases()));
+
+TEST_P(IntegrationGpuBatchnormBackwardCalcStatsNclBfp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardCalcStatsNclBfp16,
+                         testing::ValuesIn(getBnBwd1dTestCases()));
+
+TEST_P(IntegrationGpuBatchnormBackwardCalcStatsNclFp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NCL);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardCalcStatsNclFp16,
+                         testing::ValuesIn(getBnBwd1dTestCases()));
+
+TEST_P(IntegrationGpuBatchnormBackwardCalcStatsNlcFp32, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardCalcStatsNlcFp32,
+                         testing::ValuesIn(getBnBwd1dTestCases()));
+
+TEST_P(IntegrationGpuBatchnormBackwardCalcStatsNlcBfp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceBackward<bfloat16>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardCalcStatsNlcBfp16,
+                         testing::ValuesIn(getBnBwd1dTestCases()));
+
+TEST_P(IntegrationGpuBatchnormBackwardCalcStatsNlcFp16, Correctness)
+{
+    runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NLC);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardCalcStatsNlcFp16,
+                         testing::ValuesIn(getBnBwd1dTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardCalcStatsNchwFp32, Correctness)
 {

@@ -38,6 +38,7 @@ import ctypes
 import json
 import copy
 import subprocess
+import traceback
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -661,7 +662,6 @@ class GpuGroupedConvRunner:
         except Exception as e:
             self._initialized = False
             self._init_error = str(e)
-            import traceback
             self._init_traceback = traceback.format_exc()
 
     def is_available(self) -> bool:
@@ -945,9 +945,7 @@ class GroupedConvRegistry:
             key = (cfg.variant, cfg.ndim_spatial)
             if key in runners:
                 continue
-            # Fix Bug 1: lib is already a Path object, no .path attribute
             runner = GpuGroupedConvRunner(lib_path=str(lib))
-            # Fix Bug 2: must initialize before checking availability
             runner._ensure_initialized()
             if runner.is_available():
                 runners[key] = runner

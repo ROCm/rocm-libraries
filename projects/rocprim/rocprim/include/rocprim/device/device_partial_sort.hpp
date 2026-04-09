@@ -495,6 +495,8 @@ hipError_t partial_sort_impl(void*              temporary_storage,
 /// In this example a device-level partial_sort_copy is performed where input keys are
 ///   represented by an array of unsigned integers.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_partial_sort.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
