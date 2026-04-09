@@ -33,13 +33,16 @@
 
 enum class hipblaslt_initialization
 {
-    rand_int   = 111,
-    trig_float = 222,
-    hpl        = 333,
-    special    = 444,
-    zero       = 555,
-    norm_dist  = 666,
-    uniform_01 = 777,
+    rand_int      = 111,
+    trig_float    = 222,
+    hpl           = 333,
+    special       = 444,
+    zero          = 555,
+    norm_dist     = 666,
+    uniform_01    = 777,
+    integer_exact = 888, // A,C in [0,1,2], B ±[0,1,2]; alpha=2, beta 0 or -2; exact when K bounded
+    // Near-FP16-max A, paired ±2 along K in B; FP32-math reference is 0 (rocBLAS-style accum probe)
+    fp16_accumulator_probe = 889,
 };
 
 typedef enum class _hipblaslt_activation_type
@@ -212,6 +215,10 @@ constexpr auto hipblaslt_initialization2string(hipblaslt_initialization init)
         return "norm_dist";
     case hipblaslt_initialization::uniform_01:
         return "uniform_01";
+    case hipblaslt_initialization::integer_exact:
+        return "integer_exact";
+    case hipblaslt_initialization::fp16_accumulator_probe:
+        return "fp16_accumulator_probe";
     }
     return "invalid";
 }
@@ -233,6 +240,8 @@ inline hipblaslt_initialization string2hipblaslt_initialization(const std::strin
         value == "zero"       ? hipblaslt_initialization::zero       :
         value == "norm_dist"  ? hipblaslt_initialization::norm_dist  :
         value == "uniform_01" ? hipblaslt_initialization::uniform_01 :
+        value == "integer_exact" ? hipblaslt_initialization::integer_exact :
+        value == "fp16_accumulator_probe" ? hipblaslt_initialization::fp16_accumulator_probe :
         static_cast<hipblaslt_initialization>(0);
 }
 // clang-format on

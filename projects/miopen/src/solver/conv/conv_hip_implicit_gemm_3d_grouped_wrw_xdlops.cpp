@@ -533,8 +533,8 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
             using T        = decltype(CKDataType);
             using TCompute = decltype(CKComputeType);
             auto fill_valid_kernels =
-                [=](const ::miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
-                return FillValidKernelsByAlphaBeta<T, TCompute>(problem);
+                [=](const miopen::conv::ProblemDescription& problem_) -> std::vector<std::string> {
+                return FillValidKernelsByAlphaBeta<T, TCompute>(problem_);
             };
 
             // Validation lambda for AI-predicted kernel + split_k combinations
