@@ -41,14 +41,12 @@ TEST(SparseMMATrait, SparseMfmaGfx950Specialization)
                                            CompilerTargetGfx950,
                                            MmaOpFamily::SPARSE>;
 
-    static_assert(std::is_same_v<typename TestSparseMfma16x16::OpType, MfmaOp> &&
-                      TestSparseMfma16x16::OpFamily == MmaOpFamily::SPARSE,
-                  "GFX950 sparse 16x16x32 should have SparseMFMAOp type");
+    EXPECT_TRUE((std::is_same_v<typename TestSparseMfma16x16::OpType, MfmaOp> &&
+                 TestSparseMfma16x16::OpFamily == MmaOpFamily::SPARSE))
+        << "GFX950 sparse 16x16x32 should have SparseMFMAOp type";
 
-    static_assert(is_mma_op_of_family_v<MmaOpFamily::SPARSE, TestSparseMfma16x16>,
-                  "GFX950 sparse 16x16x32 should be detected as Sparse");
-
-    std::cout << "GFX950 sparse MFMA specialization is correct" << std::endl;
+    EXPECT_TRUE((is_mma_op_of_family_v<MmaOpFamily::SPARSE, TestSparseMfma16x16>))
+        << "GFX950 sparse 16x16x32 should be detected as Sparse";
 }
 
 TEST(SparseMMATrait, MmaOpTraitsIntegration)
@@ -68,12 +66,10 @@ TEST(SparseMMATrait, MmaOpTraitsIntegration)
     using TestTraits = MmaOpTraits<TestSparseMmma>;
 
     // Verify trait detection
-    static_assert(TestTraits::IsSparse, "Sparse MMA should be detected as sparse");
-    static_assert(TestTraits::IsSupported, "Sparse MMA specialization should be supported");
-    static_assert(TestTraits::IsMfma, "Sparse MFMA should be detected as MFMA");
-    static_assert(!TestTraits::IsWmma, "Sparse MFMA should not be detected as WMMA");
-
-    std::cout << "MmaOpTraits correctly integrates sparse operations" << std::endl;
+    EXPECT_TRUE(TestTraits::IsSparse) << "Sparse MMA should be detected as sparse";
+    EXPECT_TRUE(TestTraits::IsSupported) << "Sparse MMA specialization should be supported";
+    EXPECT_TRUE(TestTraits::IsMfma) << "Sparse MFMA should be detected as MFMA";
+    EXPECT_FALSE(TestTraits::IsWmma) << "Sparse MFMA should not be detected as WMMA";
 }
 
 TEST(SparseMMATrait, TestConceptRequirements)
@@ -88,7 +84,7 @@ TEST(SparseMMATrait, TestConceptRequirements)
                                       DefaultSparseMfmaCtrlFlags,
                                       CompilerTargetGfx950,
                                       MmaOpFamily::SPARSE>;
-    static_assert(MmaOpI<TestSparseMmma>);
+    EXPECT_TRUE(MmaOpI<TestSparseMmma>);
 #else
     GTEST_SKIP() << "Not compiled with concepts. Skipping test.";
 #endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
@@ -119,22 +115,20 @@ TEST(SparseMMATrait, DenseVsSparseDistinction)
                                   MmaOpFamily::SPARSE>;
 
     // Verify they have different operation types
-    static_assert(std::is_same_v<typename DenseMfma::OpType, typename SparseMfma::OpType> &&
-                      DenseMfma::OpFamily != SparseMfma::OpFamily,
-                  "Dense and Sparse MFMA should have the same OpType tags and different OpFamily");
+    EXPECT_TRUE((std::is_same_v<typename DenseMfma::OpType, typename SparseMfma::OpType> &&
+                 DenseMfma::OpFamily != SparseMfma::OpFamily))
+        << "Dense and Sparse MFMA should have the same OpType tags and different OpFamily";
 
     // Verify traits correctly identify them
-    static_assert(MmaOpTraits<DenseMfma>::IsMfma && MmaOpTraits<DenseMfma>::IsDense &&
+    EXPECT_TRUE((MmaOpTraits<DenseMfma>::IsMfma && MmaOpTraits<DenseMfma>::IsDense &&
                       !MmaOpTraits<DenseMfma>::IsSparse && !MmaOpTraits<DenseMfma>::IsScale &&
-                      MmaOpTraits<DenseMfma>::IsSupported,
-                  "Dense MFMA should be identified correctly");
+                 MmaOpTraits<DenseMfma>::IsSupported))
+        << "Dense MFMA should be identified correctly";
 
-    static_assert(MmaOpTraits<SparseMfma>::IsSparse && MmaOpTraits<SparseMfma>::IsMfma &&
+    EXPECT_TRUE((MmaOpTraits<SparseMfma>::IsSparse && MmaOpTraits<SparseMfma>::IsMfma &&
                       !MmaOpTraits<SparseMfma>::IsDense && !MmaOpTraits<SparseMfma>::IsScale &&
-                      MmaOpTraits<SparseMfma>::IsSupported,
-                  "Sparse MFMA should be identified correctly");
-
-    std::cout << "Dense and sparse MMA operations are correctly distinguished" << std::endl;
+                 MmaOpTraits<SparseMfma>::IsSupported))
+        << "Sparse MFMA should be identified correctly";
 }
 
 TEST(SparseMMATrait, SparseSelector)
@@ -153,15 +147,15 @@ TEST(SparseMMATrait, SparseSelector)
         if constexpr(isValid)
         {
             // Selector should pick a sparse MFMA implementation
-            static_assert(MmaOpTraits<Selected>::IsSparse);
-            static_assert(MmaOpTraits<Selected>::IsMfma);
-            static_assert(MmaOpTraits<Selected>::IsSupported);
-            static_assert((std::is_same<typename Selected::OpType, MfmaOp>::value));
+            EXPECT_TRUE(MmaOpTraits<Selected>::IsSparse);
+            EXPECT_TRUE(MmaOpTraits<Selected>::IsMfma);
+            EXPECT_TRUE(MmaOpTraits<Selected>::IsSupported);
+            EXPECT_TRUE((std::is_same<typename Selected::OpType, MfmaOp>::value));
         }
         else
         {
             // Selector should pick the unsupported pass through
-            static_assert(!MmaOpTraits<Selected>::IsSupported);
+            EXPECT_FALSE(MmaOpTraits<Selected>::IsSupported);
         }
     });
 }
