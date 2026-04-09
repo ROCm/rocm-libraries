@@ -33,8 +33,8 @@ public:
         EXPECT_EQ(graph.compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
         EXPECT_EQ(graph.intermediate_data_type, hipdnn_data_sdk::data_objects::DataType::HALF);
         EXPECT_EQ(graph.io_data_type, hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
-        EXPECT_EQ(graph.tensors.size(), 0);
-        EXPECT_EQ(graph.nodes.size(), 0);
+        EXPECT_EQ(graph.tensors.size(), 3);
+        EXPECT_EQ(graph.nodes.size(), 1);
     }
 
     static void verifyGraphsEquivalent(const hipdnn_data_sdk::data_objects::GraphT& graph1,
@@ -66,6 +66,31 @@ public:
     }
 };
 
+TEST_F(TestGraphDescriptor, SerializeDeserializeGraph)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+    descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                            HIPDNN_TYPE_HANDLE,
+                            1,
+                            static_cast<const void*>(&handle));
+    descriptor.finalize();
+
+    auto output = descriptor.getSerializedGraph();
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(output.ptr), output.size);
+    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>());
+
+    auto graph
+        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(output.ptr));
+    ASSERT_NE(graph, nullptr);
+    verifyGraph(*graph);
+}
+
 TEST_F(TestGraphDescriptor, DeserializeGraphExtractsAttributes)
 {
     auto builder = createValidGraph();
@@ -93,8 +118,7 @@ TEST_F(TestGraphDescriptor, WillCorrectlySetGraph)
     GraphDescriptor descriptor;
     ASSERT_NO_THROW(descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size()));
 
-    // Finalize requires both handle and non-empty operations.
-    // The valid graph has zero nodes, so operations are empty.
+    // Finalize requires a handle
     ASSERT_THROW_HIPDNN_STATUS(descriptor.finalize(), HIPDNN_STATUS_BAD_PARAM);
 
     auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
@@ -103,8 +127,7 @@ TEST_F(TestGraphDescriptor, WillCorrectlySetGraph)
                                             1,
                                             static_cast<const void*>(&handle)));
 
-    // Still fails because there are zero operations
-    ASSERT_THROW_HIPDNN_STATUS(descriptor.finalize(), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_NO_THROW(descriptor.finalize());
 }
 
 TEST_F(TestGraphDescriptor, WillCorrectlySetGraphReverseOrder)
@@ -121,9 +144,8 @@ TEST_F(TestGraphDescriptor, WillCorrectlySetGraphReverseOrder)
 
     ASSERT_THROW_HIPDNN_STATUS(descriptor.finalize(), HIPDNN_STATUS_BAD_PARAM);
 
-    // Deserializing a zero-node graph still leaves _operations empty
     ASSERT_NO_THROW(descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size()));
-    ASSERT_THROW_HIPDNN_STATUS(descriptor.finalize(), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_NO_THROW(descriptor.finalize());
 }
 
 TEST_F(TestGraphDescriptor, WillFailToSetInvalidGraph)
@@ -147,12 +169,11 @@ TEST_F(TestGraphDescriptor, GetAttributeWorksOnDeserializedUnfinalizedGraph)
     GraphDescriptor descriptor;
     descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
 
-    // Querying OPS on a deserialized graph with no nodes returns count 0
-    // (deserializeGraph eagerly unpacked zero nodes into _operations)
+    // Querying OPS on a deserialized graph returns the number of unpacked nodes
     int64_t elementCount = -1;
     ASSERT_NO_THROW(descriptor.getAttribute(
         HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &elementCount, nullptr));
-    EXPECT_EQ(elementCount, 0);
+    EXPECT_EQ(elementCount, 1);
 
     // Query compute data type without finalization - should succeed
     int64_t computeCount = 0;
@@ -187,6 +208,30 @@ TEST_F(TestGraphDescriptor, SetAttributeReturnsNotSupported)
     ASSERT_THROW_HIPDNN_STATUS(
         descriptor.setAttribute(HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_DATA_TYPE, 0, nullptr),
         HIPDNN_STATUS_NOT_SUPPORTED);
+}
+
+TEST_F(TestGraphDescriptor, EmptyGraphDeserializesButFailsToFinalize)
+{
+    auto builder = test_utilities::createEmptyGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    ASSERT_NO_THROW(descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size()));
+
+    auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+    ASSERT_NO_THROW(descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                            HIPDNN_TYPE_HANDLE,
+                                            1,
+                                            static_cast<const void*>(&handle)));
+
+    // Finalize fails because the empty graph has no operations
+    ASSERT_THROW_HIPDNN_STATUS(descriptor.finalize(), HIPDNN_STATUS_BAD_PARAM);
+
+    // Serialization still works (not gated by finalize)
+    descriptor.buildSerializedGraph();
+    auto data = descriptor.getSerializedGraph();
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(data.ptr), data.size);
+    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>());
 }
 
 TEST_F(TestGraphDescriptor, GetSerializedGraphWithoutPopulationThrows)

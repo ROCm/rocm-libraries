@@ -412,6 +412,9 @@ hipdnnPluginConstData_t GraphDescriptor::getSerializedGraph() const
 
 std::string GraphDescriptor::getSerializedJsonGraph() const
 {
+    // JSON is reconstructed from the cached binary buffer on each call
+    // (binary -> FlatBuffer unpack -> JSON serialize). The JSON representation
+    // is not cached because this path is not performance-critical.
     auto data = getSerializedGraph();
 
     auto* graph = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Graph>(

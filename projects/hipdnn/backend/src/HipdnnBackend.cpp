@@ -305,6 +305,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
         throwIfNull(graphByteSize);
 
         auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        // buildSerializedGraph() populates the cached binary buffer (no-op if already cached).
+        // getSerializedJsonGraph() then converts binary -> JSON on each call (not cached).
         graphDesc->buildSerializedGraph();
         auto jsonStr = graphDesc->getSerializedJsonGraph();
 
