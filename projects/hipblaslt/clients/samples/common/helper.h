@@ -79,7 +79,10 @@ struct Runner
         CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
 
         if constexpr(
-            std::is_same_v<InTypeA, hipblaslt_f4x2>
+            false
+#if defined(HIPBLASLT_USE_FP4)
+            || std::is_same_v<InTypeA, hipblaslt_f4x2>
+#endif
 #if defined(HIPBLASLT_USE_FP6)
             || std::is_same_v<InTypeA, hipblaslt_f6x16>
 #endif
@@ -97,7 +100,10 @@ struct Runner
         }
 
         if constexpr(
-            std::is_same_v<InTypeB, hipblaslt_f4x2>
+            false
+#if defined(HIPBLASLT_USE_FP4)
+            || std::is_same_v<InTypeB, hipblaslt_f4x2>
+#endif
 #if defined(HIPBLASLT_USE_FP6)
             || std::is_same_v<InTypeB, hipblaslt_f6x16>
 #endif
