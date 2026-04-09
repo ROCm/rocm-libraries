@@ -149,10 +149,14 @@ class GroupedConvFeatureEngine(FeatureEngine):
         stride_w = int(problem.get("stride_w", 1))
         pad_h = int(problem.get("pad_h", 0))
         pad_w = int(problem.get("pad_w", 0))
+        dilation_h = int(problem.get("dilation_h", 1))
+        dilation_w = int(problem.get("dilation_w", 1))
 
-        # Compute output dimensions
-        Ho = (Hi + 2 * pad_h - Y) // stride_h + 1
-        Wo = (Wi + 2 * pad_w - X) // stride_w + 1
+        # Compute output dimensions (match GroupedConvProblem.Ho formula)
+        eff_y = (Y - 1) * dilation_h + 1
+        eff_x = (X - 1) * dilation_w + 1
+        Ho = (Hi + 2 * pad_h - eff_y) // stride_h + 1
+        Wo = (Wi + 2 * pad_w - eff_x) // stride_w + 1
 
         # Log features
         log2_N = math.log2(max(N, 1))
@@ -316,10 +320,21 @@ class GroupedConvFeatureEngine(FeatureEngine):
         stride_w = df["stride_w"].values.astype(np.float64)
         pad_h = df["pad_h"].values.astype(np.float64)
         pad_w = df["pad_w"].values.astype(np.float64)
+        # Dilation defaults to 1 if not present (standard convolution)
+        if "dilation_h" in df.columns:
+            dilation_h = df["dilation_h"].values.astype(np.float64)
+        else:
+            dilation_h = 1.0
+        if "dilation_w" in df.columns:
+            dilation_w = df["dilation_w"].values.astype(np.float64)
+        else:
+            dilation_w = 1.0
 
-        # Compute output dimensions
-        Ho = (Hi + 2 * pad_h - Y) // stride_h + 1
-        Wo = (Wi + 2 * pad_w - X) // stride_w + 1
+        # Compute output dimensions (match GroupedConvProblem.Ho formula)
+        eff_y = (Y - 1) * dilation_h + 1
+        eff_x = (X - 1) * dilation_w + 1
+        Ho = (Hi + 2 * pad_h - eff_y) // stride_h + 1
+        Wo = (Wi + 2 * pad_w - eff_x) // stride_w + 1
 
         # Log features
         log2_N = np.log2(np.maximum(N, 1))
