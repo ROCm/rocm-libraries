@@ -14,10 +14,10 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace asm_sdpa_engine
 {
-
-// NOLINTBEGIN(readability-identifier-naming)
 
 // SGPR-aligned padding inserted between kernel arguments to satisfy the AMD GPU
 // SGPR allocation ABI.  Each SGPR is 32 bits; pointers occupy 2 SGPRs (64 bits)
@@ -29,17 +29,12 @@ namespace asm_sdpa_engine
 
 struct SgprPad2
 {
-    unsigned int _p0;
-    unsigned int _p1;
+    uint32_t pad[2]; // NOLINT(readability-identifier-naming)
 };
 
 struct SgprPad3
 {
-    unsigned int _p0;
-    unsigned int _p1;
-    unsigned int _p2;
+    uint32_t pad[3]; // NOLINT(readability-identifier-naming)
 };
-
-// NOLINTEND(readability-identifier-naming)
 
 } // namespace asm_sdpa_engine

@@ -64,25 +64,25 @@ struct __attribute__((packed)) fmha_bwd_odo_args
     SgprPad2 _p2;
 
     // ---- O/dO tensor strides (in bytes) ------------------------------------
-    unsigned int Hs_odo; // co:Hs_odo  Head stride for O/dO tensors
+    uint32_t Hs_odo; // co:Hs_odo  Head stride for O/dO tensors
     SgprPad3 _p3;
-    unsigned int BAs_odo; // co:BAs_odo  Batch stride for O/dO tensors
+    uint32_t BAs_odo; // co:BAs_odo  Batch stride for O/dO tensors
     SgprPad3 _p4;
-    unsigned int Seqs_odo; // co:Seqs_odo  Sequence stride for O/dO tensors
+    uint32_t Seqs_odo; // co:Seqs_odo  Sequence stride for O/dO tensors
     SgprPad3 _p5;
 
     // ---- D buffer strides (in bytes, FP32) ---------------------------------
-    unsigned int Hs_d; // co:Hs_d  Head stride for D buffer
+    uint32_t Hs_d; // co:Hs_d  Head stride for D buffer
     SgprPad3 _p6;
-    unsigned int BAs_d; // co:BAs_d  Batch stride for D buffer
+    uint32_t BAs_d; // co:BAs_d  Batch stride for D buffer
     SgprPad3 _p7;
-    unsigned int Seqs_d; // co:Seqs_d  Sequence stride for D (always 4 bytes)
+    uint32_t Seqs_d; // co:Seqs_d  Sequence stride for D (always 4 bytes)
     SgprPad3 _p8;
 
     // ---- Dimensions --------------------------------------------------------
-    unsigned int seqlen_q; // co:seqlen_q  Query sequence length
+    uint32_t seqlen_q; // co:seqlen_q  Query sequence length
     SgprPad3 _p9;
-    unsigned int head_dim; // co:head_dim  Head dimension (D_v)
+    uint32_t head_dim; // co:head_dim  Head dimension (D_v)
     SgprPad3 _p10;
 
     // ---- Group mode sequence pointers (nullptr for batch mode) -------------
@@ -141,77 +141,77 @@ struct __attribute__((packed)) fmha_bwd_dqdkdv_args
     SgprPad3 _p10;
 
     // ---- Q dimensions ------------------------------------------------------
-    unsigned int seqlen_q; // co:seqlen_q  Query sequence length
+    uint32_t seqlen_q; // co:seqlen_q  Query sequence length
     SgprPad3 _p11;
-    unsigned int Ts; // co:Ts  Tile size × Seqs_k × 2 (bytes)
+    uint32_t Ts; // co:Ts  Tile size × Seqs_k × 2 (bytes)
     SgprPad3 _p12;
 
     // ---- Q tensor strides (in bytes) ---------------------------------------
-    unsigned int Hs_q; // co:Hs_q  Q head stride
+    uint32_t Hs_q; // co:Hs_q  Q head stride
     SgprPad3 _p13;
-    unsigned int BAs_q; // co:BAs_q  Q batch stride
+    uint32_t BAs_q; // co:BAs_q  Q batch stride
     SgprPad3 _p14;
-    unsigned int Seqs_q; // co:Seqs_q  Q sequence stride
+    uint32_t Seqs_q; // co:Seqs_q  Q sequence stride
     SgprPad3 _p15;
 
     // ---- GQA ratio ---------------------------------------------------------
-    unsigned int ratio; // co:ratio  Grouped-Query Attention ratio (H_q / H_kv)
+    uint32_t ratio; // co:ratio  Grouped-Query Attention ratio (H_q / H_kv)
     SgprPad3 _p16;
 
     // ---- K tensor strides (in bytes) ---------------------------------------
-    unsigned int Hs_k; // co:Hs_k  K head stride
+    uint32_t Hs_k; // co:Hs_k  K head stride
     SgprPad3 _p17;
-    unsigned int BAs_k; // co:BAs_k  K batch stride
+    uint32_t BAs_k; // co:BAs_k  K batch stride
     SgprPad3 _p18;
-    unsigned int Seqs_k; // co:Seqs_k  K sequence stride
+    uint32_t Seqs_k; // co:Seqs_k  K sequence stride
     SgprPad3 _p19;
 
     // ---- dK tensor strides (in bytes) --------------------------------------
-    unsigned int Seqs_dk; // co:Seqs_dk  dK sequence stride
+    uint32_t Seqs_dk; // co:Seqs_dk  dK sequence stride
     SgprPad3 _p20;
 
     // ---- K/V dimensions ----------------------------------------------------
-    unsigned int seqlen_k; // co:seqlen_k  Key/Value sequence length
+    uint32_t seqlen_k; // co:seqlen_k  Key/Value sequence length
     SgprPad3 _p21;
-    unsigned int head_dim_q; // co:head_dim_q  QK head dimension (D_qk)
+    uint32_t head_dim_q; // co:head_dim_q  QK head dimension (D_qk)
     SgprPad3 _p22;
-    unsigned int head_dim_v; // co:head_dim_v  V head dimension (D_v)
+    uint32_t head_dim_v; // co:head_dim_v  V head dimension (D_v)
     SgprPad3 _p23;
-    unsigned int nhead_q; // co:nhead_q  Number of Q heads (H_q)
+    uint32_t nhead_q; // co:nhead_q  Number of Q heads (H_q)
     SgprPad3 _p24;
 
     // ---- V tensor strides (in bytes) ---------------------------------------
-    unsigned int Hs_v; // co:Hs_v  V head stride
+    uint32_t Hs_v; // co:Hs_v  V head stride
     SgprPad3 _p25;
-    unsigned int BAs_v; // co:BAs_v  V batch stride
+    uint32_t BAs_v; // co:BAs_v  V batch stride
     SgprPad3 _p26;
-    unsigned int Seqs_v; // co:Seqs_v  V sequence stride
+    uint32_t Seqs_v; // co:Seqs_v  V sequence stride
     SgprPad3 _p27;
 
     // ---- dO tensor strides (in bytes) --------------------------------------
-    unsigned int Hs_do; // co:Hs_do  dO head stride
+    uint32_t Hs_do; // co:Hs_do  dO head stride
     SgprPad3 _p28;
-    unsigned int BAs_do; // co:BAs_do  dO batch stride
+    uint32_t BAs_do; // co:BAs_do  dO batch stride
     SgprPad3 _p29;
-    unsigned int Seqs_do; // co:Seqs_do  dO sequence stride
+    uint32_t Seqs_do; // co:Seqs_do  dO sequence stride
     SgprPad3 _p30;
 
     // ---- dK tensor strides (in bytes) --------------------------------------
-    unsigned int Hs_dk; // co:Hs_dk  dK head stride
+    uint32_t Hs_dk; // co:Hs_dk  dK head stride
     SgprPad3 _p31;
-    unsigned int BAs_dk; // co:BAs_dk  dK batch stride
+    uint32_t BAs_dk; // co:BAs_dk  dK batch stride
     SgprPad3 _p32;
 
     // ---- dV tensor strides (in bytes) --------------------------------------
-    unsigned int Hs_dv; // co:Hs_dv  dV head stride
+    uint32_t Hs_dv; // co:Hs_dv  dV head stride
     SgprPad3 _p33;
-    unsigned int BAs_dv; // co:BAs_dv  dV batch stride
+    uint32_t BAs_dv; // co:BAs_dv  dV batch stride
     SgprPad3 _p34;
-    unsigned int Seqs_dv; // co:Seqs_dv  dV sequence stride
+    uint32_t Seqs_dv; // co:Seqs_dv  dV sequence stride
     SgprPad3 _p35;
 
     // ---- LSE tensor strides (in bytes) -------------------------------------
-    unsigned int Hs_lsed; // co:Hs_lsed  LSE head stride (group mode)
+    uint32_t Hs_lsed; // co:Hs_lsed  LSE head stride (group mode)
     SgprPad3 _p36;
 
     // ---- Group mode sequence pointers (nullptr for batch mode) -------------
@@ -225,13 +225,13 @@ struct __attribute__((packed)) fmha_bwd_dqdkdv_args
     SgprPad2 _p40;
 
     // ---- dq_acc buffer configuration ---------------------------------------
-    unsigned int max_seqlen_dq; // co:max_seqlen_dq  Max Q seqlen (for a16)
+    uint32_t max_seqlen_dq; // co:max_seqlen_dq  Max Q seqlen (for a16)
     SgprPad3 _p41;
 
     // ---- Window attention mask coordinates ---------------------------------
-    int mask_x; // co:mask_x  Window mask X coordinate (-1 if disabled)
+    int32_t mask_x; // co:mask_x  Window mask X coordinate (-1 if disabled)
     SgprPad3 _p42;
-    int mask_y; // co:mask_y  Window mask Y coordinate (-1 if disabled)
+    int32_t mask_y; // co:mask_y  Window mask Y coordinate (-1 if disabled)
     SgprPad3 _p43;
 };
 
@@ -257,25 +257,25 @@ struct __attribute__((packed)) fmha_bwd_post_kernel_args
     SgprPad2 _p1;
 
     // ---- dq_acc tensor strides (in bytes, FP32) ----------------------------
-    unsigned int Hs_dq_acc; // co:Hs_dq_acc  dq_acc head stride
+    uint32_t Hs_dq_acc; // co:Hs_dq_acc  dq_acc head stride
     SgprPad3 _p2;
-    unsigned int BAs_dq_acc; // co:BAs_dq_acc  dq_acc batch stride
+    uint32_t BAs_dq_acc; // co:BAs_dq_acc  dq_acc batch stride
     SgprPad3 _p3;
-    unsigned int Seqs_dq_acc; // co:Seqs_dq_acc  dq_acc sequence stride
+    uint32_t Seqs_dq_acc; // co:Seqs_dq_acc  dq_acc sequence stride
     SgprPad3 _p4;
 
     // ---- dQ tensor strides (in bytes, BF16) --------------------------------
-    unsigned int Hs_dq; // co:Hs_dq  dQ head stride
+    uint32_t Hs_dq; // co:Hs_dq  dQ head stride
     SgprPad3 _p5;
-    unsigned int BAs_dq; // co:BAs_dq  dQ batch stride
+    uint32_t BAs_dq; // co:BAs_dq  dQ batch stride
     SgprPad3 _p6;
-    unsigned int Seqs_dq; // co:Seqs_dq  dQ sequence stride
+    uint32_t Seqs_dq; // co:Seqs_dq  dQ sequence stride
     SgprPad3 _p7;
 
     // ---- Dimensions --------------------------------------------------------
-    unsigned int seqlen_q; // co:seqlen_q  Query sequence length
+    uint32_t seqlen_q; // co:seqlen_q  Query sequence length
     SgprPad3 _p8;
-    unsigned int head_dim; // co:head_dim  Head dimension (D_qk)
+    uint32_t head_dim; // co:head_dim  Head dimension (D_qk)
     SgprPad3 _p9;
 
     // ---- Group mode sequence pointers (nullptr for batch mode) -------------
