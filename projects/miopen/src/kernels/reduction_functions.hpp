@@ -297,28 +297,66 @@ __forceinline__ __device__ void dpp_interleaved_reduction_welford(volatile Float
     // clang-format on
 }
 
-template <typename FloatAccum, unsigned int SizeLclData>
-__forceinline__ __device__ void gcn_reduce2_welford(FloatAccum& mean,
-                                                    FloatAccum& variance,
-                                                    FloatAccum& count,
-                                                    FloatAccum scale,
-                                                    FloatAccum (&lcl_data_mean)[SizeLclData],
-                                                    FloatAccum (&lcl_data_variance)[SizeLclData],
-                                                    FloatAccum (&lcl_data_count)[SizeLclData],
-                                                    unsigned int lid)
+template <typename FloatAccum>
+__forceinline__ __device__ void shfl_interleaved_reduction_welford(volatile FloatAccum& temp_mean,
+                                                                   volatile FloatAccum& temp_var,
+                                                                   volatile FloatAccum& temp_count)
 {
-    const unsigned int ldsidx = lid >> 6;
-
-    dpp_interleaved_reduction_welford<FloatAccum>(mean, variance, count);
-
-    // Last thread
-    if((lid % 64) == 63)
+#pragma unroll
+    for(unsigned int offset = warpSize >> 1; offset >= 1; offset >>= 1)
     {
-        lcl_data_mean[ldsidx]     = mean;
-        lcl_data_variance[ldsidx] = variance;
-        lcl_data_count[ldsidx]    = count;
+        FloatAccum otherMean = __shfl_down_sync(detail::FULL_MASK, temp_mean, offset);
+        FloatAccum delta     = otherMean - temp_mean;
+        FloatAccum n_a       = temp_count;
+        FloatAccum n_b       = __shfl_down_sync(detail::FULL_MASK, temp_count, offset);
+        FloatAccum n_new     = n_a + n_b;
+        FloatAccum n_rcp     = n_new != 0.0f ? (__builtin_amdgcn_rcpf(n_new)) : 0.0f;
+        temp_mean            = (temp_mean * n_a + otherMean * n_b) * (n_rcp);
+        temp_var             = temp_var + __shfl_down_sync(detail::FULL_MASK, temp_var, offset) +
+                   (delta * delta * (n_a * n_b)) * n_rcp;
+        temp_count = n_new;
     }
+}
 
+template <typename FloatAccum, unsigned int SizeLclData>
+__forceinline__ __device__ void reduce2_welford(FloatAccum& mean,
+                                                FloatAccum& variance,
+                                                FloatAccum& count,
+                                                FloatAccum scale,
+                                                FloatAccum (&lcl_data_mean)[SizeLclData],
+                                                FloatAccum (&lcl_data_variance)[SizeLclData],
+                                                FloatAccum (&lcl_data_count)[SizeLclData],
+                                                unsigned int lid)
+{
+    const unsigned int ldsidx =
+        lid >> (warpSize == 32 ? 5 : 6); // warpSize is either 32 or 64 on AMD hardware.
+
+    if constexpr(!miopen::batchnorm::config::use_amdgcn)
+    {
+        shfl_interleaved_reduction_welford<FloatAccum>(mean, variance, count);
+        __builtin_amdgcn_sched_barrier(0);
+
+        // Last thread
+        if((lid % warpSize) == 0)
+        {
+            lcl_data_mean[ldsidx]     = mean;
+            lcl_data_variance[ldsidx] = variance;
+            lcl_data_count[ldsidx]    = count;
+        }
+    }
+    else
+    {
+        dpp_interleaved_reduction_welford<FloatAccum>(mean, variance, count);
+        __builtin_amdgcn_sched_barrier(0);
+
+        // Last thread
+        if((lid % 64) == 63)
+        {
+            lcl_data_mean[ldsidx]     = mean;
+            lcl_data_variance[ldsidx] = variance;
+            lcl_data_count[ldsidx]    = count;
+        }
+    }
     __syncthreads();
 
     // The reduction here merges partitions together in a tree-like fashion. Otherwise,
