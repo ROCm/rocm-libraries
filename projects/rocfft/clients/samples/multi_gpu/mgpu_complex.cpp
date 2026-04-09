@@ -249,13 +249,14 @@ int main(int argc, char* argv[])
     std::vector<void*>    work_bufs(nDevices);
     for(int device = 0; device < nDevices; ++device)
     {
+        (void)hipSetDevice(device);
         size_t work_buf_size = 0;
         if(rocfft_plan_get_work_buffer_size(gpu_plan, &work_buf_size) != rocfft_status_success)
             throw std::runtime_error("rocfft_plan_get_work_buffer_size failed.");
 
         if(work_buf_size)
         {
-            if(rocfft_execution_info_create(&planinfo) != rocfft_status_success)
+            if(!planinfo && rocfft_execution_info_create(&planinfo) != rocfft_status_success)
                 throw std::runtime_error("failed to create execution info");
             if(hipMalloc(&work_bufs[device], work_buf_size) != hipSuccess)
                 throw std::runtime_error("hipMalloc failed");
@@ -264,6 +265,9 @@ int main(int argc, char* argv[])
                 throw std::runtime_error("rocfft_execution_info_set_work_buffer failed.");
         }
     }
+
+    // Reset the device back to where the plan was created before execution
+    (void)hipSetDevice(devices[0]);
 
     // Execute plan:
     fftrc = rocfft_execute(gpu_plan, (void**)gpu_in.data(), (void**)gpu_out.data(), planinfo);
@@ -314,18 +318,18 @@ int main(int argc, char* argv[])
     if(rocfft_cleanup() != rocfft_status_success)
         throw std::runtime_error("rocfft_cleanup failed.");
 
-    for(auto buf : work_bufs)
+    for(int device = 0; device < nDevices; ++device)
     {
-        if(buf)
-            (void)hipFree(buf);
+        (void)hipSetDevice(device);
+        if(work_bufs[device])
+            (void)hipFree(work_bufs[device]);
     }
-    for(auto buf : gpu_in)
+
+    for(const auto device : devices)
     {
-        (void)hipFree(buf);
-    }
-    for(auto buf : gpu_out)
-    {
-        (void)hipFree(buf);
+        (void)hipSetDevice(device);
+        (void)hipFree(gpu_in[device]);
+        (void)hipFree(gpu_out[device]);
     }
 
     return 0;

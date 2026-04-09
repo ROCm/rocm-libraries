@@ -79,7 +79,7 @@ Example
            // Create HIP device buffer
            float2 *x;
            hipMalloc(&x, Nbytes);
-   
+
            // Initialize data
            std::vector<float2> cx(N);
            for (size_t i = 0; i < N; i++)
@@ -87,10 +87,10 @@ Example
                    cx[i].x = 1;
                    cx[i].y = -1;
            }
-   
+
            //  Copy data to device
            hipMemcpy(x, cx.data(), Nbytes, hipMemcpyHostToDevice);
-   
+
            // Create rocFFT plan
            rocfft_plan plan = nullptr;
            size_t length = N;
@@ -98,18 +98,18 @@ Example
                 rocfft_transform_type_complex_forward, rocfft_precision_single,
                 1, &length, 1, nullptr);
 
-	   // Check if the plan requires a work buffer
-	   size_t work_buf_size = 0;
+           // Check if the plan requires a work buffer
+           size_t work_buf_size = 0;
            // This is a single-device plan that uses the current HIP device,
            // so any work buffer would be on that device.
-	   rocfft_plan_get_work_buffer_size(plan, &work_buf_size);
-	   void* work_buf = nullptr;
-	   rocfft_execution_info info = nullptr;
-	   if(work_buf_size)
+           rocfft_plan_get_work_buffer_size(plan, &work_buf_size);
+           void* work_buf = nullptr;
+           rocfft_execution_info info = nullptr;
+           if(work_buf_size)
            {
                    rocfft_execution_info_create(&info);
-		   hipMalloc(&work_buf, work_buf_size);
-		   rocfft_execution_info_set_work_buffer(info, work_buf, work_buf_size);
+                   hipMalloc(&work_buf, work_buf_size);
+                   rocfft_execution_info_set_work_buffer(info, work_buf, work_buf_size);
            }
    
            // Execute plan
@@ -118,12 +118,12 @@ Example
            // Wait for execution to finish
            hipDeviceSynchronize();
 
-	   // Clean up work buffer
-	   if(work_buf_size)
-	   {
-	           hipFree(work_buf);
-		   rocfft_execution_info_destroy(info);
-	   }
+           // Clean up work buffer
+           if(work_buf_size)
+           {
+                   hipFree(work_buf);
+                   rocfft_execution_info_destroy(info);
+           }
 
            // Destroy plan
            rocfft_plan_destroy(plan);
@@ -192,23 +192,28 @@ The :cpp:func:`rocfft_plan_get_work_buffer_size` and
 set work buffers for the current HIP device.  By default, rocFFT
 plans run on the HIP device that is current when
 :cpp:func:`rocfft_plan_create` is called, and work buffers may only
-be required on the same device.
+be required on the same device.  Any supplied work buffer for a device must be accessible 
 
 .. _multi_device_work_mem:
 
 If the plan uses multiple HIP devices by decomposing the input or
 output into :ref:`fields<input_output_fields>`, work memory may be
-required on any of the devices used by the input or output fields.
-In this case, the steps to query and set work buffers need to be
-repeated for each HIP device, as illustrated by the following code fragment:
+required on any of the devices used by the input or output fields as
+well as the current HIP device when the plan was created.  In this
+case, the steps to query and set work buffers need to be repeated for
+each HIP device, as illustrated by the following code fragment:
 
 .. code-block:: c++
 
   rocfft_plan plan = nullptr;
   rocfft_execution_info info = nullptr;
 
-  // For brevity, the steps to create the plan and execution info have been omitted
+  // For brevity, error checking and the steps to create the plan and
+  // execution info have been omitted
 
+  // Start on device 0
+  hipSetDevice(0);
+  
   // Get the number of HIP devices
   int ndevices = 0;
   hipGetDeviceCount(&ndevices);
@@ -229,6 +234,9 @@ repeated for each HIP device, as illustrated by the following code fragment:
       }
   }
 
+  // Return to device 0
+  hipSetDevice(0);
+  
   // Execution of the plan with the execution info would happen here
 
   // Free the work buffers that were allocated
@@ -240,6 +248,9 @@ repeated for each HIP device, as illustrated by the following code fragment:
           hipFree(workbufs[device]);
       }
   }
+
+  // Return to device 0
+  hipSetDevice(0);
 
 Transform and array types 
 =========================
