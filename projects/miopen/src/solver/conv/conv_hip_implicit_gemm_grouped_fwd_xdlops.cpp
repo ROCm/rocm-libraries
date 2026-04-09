@@ -33,7 +33,6 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
-#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
@@ -55,7 +54,7 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDs(cons
         if(valid_kernels[i].find(type) != std::string::npos)
         {
             heuristic_indexes.push_back(i);
-            heuristic_kernels[i] = GetKernelAsTokens(valid_kernels[i]);
+            heuristic_kernels[i] = GetKernelAsTokens2D(valid_kernels[i]);
         }
     }
 }

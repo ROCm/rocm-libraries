@@ -8,6 +8,7 @@
 #include <miopen/miopen.h>
 #include <miopen/solver/ck_impl_status.h>
 
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -204,6 +205,26 @@ private:
     ConvSolution
     ExtractSolution(ck_impl_status_t status, ConvSolution* ptr, const char* operation) const;
 };
+
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+/// Tokenize a 2D CK kernel string by extracting parameters between < and >.
+/// Unlike the 3D GetKernelAsTokens, this does NOT include the type name prefix
+/// as a token — token[0] is the first numeric parameter.
+inline std::vector<std::string> GetKernelAsTokens2D(const std::string& kernel)
+{
+    std::vector<std::string> tokens;
+    std::string token;
+    std::istringstream tokenStream(
+        kernel.substr(kernel.find('<') + 1, kernel.find('>') - kernel.find('<') - 1));
+    while(std::getline(tokenStream, token, ','))
+    {
+        token.erase(std::remove_if(token.begin(), token.end(), isspace),
+                    token.end()); // strip whitespace
+        tokens.push_back(token);
+    }
+    return tokens;
+}
+#endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
 
 /// Check whether a kernel_id with embedded split_k is valid for deterministic
 /// execution.  Returns false (invalid) if deterministic is requested and
