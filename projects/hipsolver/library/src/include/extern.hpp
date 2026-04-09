@@ -111,7 +111,7 @@ void cpu_geev(char   jobvl,
     for(int i = 0; i < n; i++)
         for(int j = 0; j < n; j++)
             if(std::isinf(A[i + j * lda]) || std::isnan(A[i + j * lda]))
-                A[i + j * lda] = 0;
+                throw HIPSOLVER_STATUS_INTERNAL_ERROR;
 
     sgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
@@ -135,7 +135,7 @@ void cpu_geev(char    jobvl,
     for(int i = 0; i < n; i++)
         for(int j = 0; j < n; j++)
             if(std::isinf(A[i + j * lda]) || std::isnan(A[i + j * lda]))
-                A[i + j * lda] = 0;
+                throw HIPSOLVER_STATUS_INTERNAL_ERROR;
 
     dgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
@@ -163,10 +163,9 @@ void cpu_geev(char             jobvl,
             float re = hipCrealf(A[i + j * lda]);
             float im = hipCimagf(A[i + j * lda]);
             if(std::isinf(re) || std::isnan(re))
-                re = 0;
+                throw HIPSOLVER_STATUS_INTERNAL_ERROR;
             if(std::isinf(im) || std::isnan(im))
-                im = 0;
-            A[i + j * lda] = hipFloatComplex(re, im);
+                throw HIPSOLVER_STATUS_INTERNAL_ERROR;
         }
     }
 
@@ -196,10 +195,9 @@ void cpu_geev(char              jobvl,
             double re = hipCreal(A[i + j * lda]);
             double im = hipCimag(A[i + j * lda]);
             if(std::isinf(re) || std::isnan(re))
-                re = 0;
+                throw HIPSOLVER_STATUS_INTERNAL_ERROR;
             if(std::isinf(im) || std::isnan(im))
-                im = 0;
-            A[i + j * lda] = hipDoubleComplex(re, im);
+                throw HIPSOLVER_STATUS_INTERNAL_ERROR;
         }
     }
 
