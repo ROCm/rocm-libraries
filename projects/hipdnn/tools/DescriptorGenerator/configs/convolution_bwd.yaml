@@ -126,6 +126,12 @@ operation:
 
   tensor_array_fields: []
 
+  data_fields_helper:
+    pack_function: "packConvolutionParams"
+    unpack_function: "unpackConvolutionParams"
+    include: "ConvolutionPackerHelpers"
+    label: "convolution"
+
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_CONVOLUTION_COMP_TYPE"
   compute_data_type_shared: true

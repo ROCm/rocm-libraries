@@ -373,12 +373,12 @@ template <class SolverInfo>
 const auto& GetSolverNames()
 {
     static const auto names = [] {
-        std::vector<std::string> names;
+        std::vector<std::string> names_;
         const auto& sinfo = GetSolversInfo<SolverInfo>();
-        names.reserve(sinfo.size());
+        names_.reserve(sinfo.size());
         for(const auto& s : sinfo)
-            names.push_back(s.first);
-        return names;
+            names_.push_back(s.first);
+        return names_;
     }();
     return names;
 }

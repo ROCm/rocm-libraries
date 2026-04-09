@@ -322,18 +322,8 @@ public:
             if(hip_status != hipSuccess)
             {
                 std::ostringstream oss;
-                oss << "work buffer allocation failed (" << workbuffersize << " requested)";
-                size_t mem_free  = 0;
-                size_t mem_total = 0;
-                hip_status       = hipMemGetInfo(&mem_free, &mem_total);
-                if(hip_status == hipSuccess)
-                {
-                    oss << "free vram: " << mem_free << " total vram: " << mem_total;
-                }
-                else
-                {
-                    oss << "hipMemGetInfo also failed";
-                }
+                oss << "work buffer allocation failed (" << byte_size_to_str(workbuffersize)
+                    << " requested)";
                 throw work_buffer_alloc_failure(oss.str(), workbuffersize);
             }
 
