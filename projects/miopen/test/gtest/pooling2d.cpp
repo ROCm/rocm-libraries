@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "../pooling_common.hpp"
+#include "pooling_common.hpp"
 
 // Configuration define matching the original ctest behavior
 // These can be overridden at compile time via -D flags
