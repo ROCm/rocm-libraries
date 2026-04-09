@@ -220,8 +220,6 @@ def getDockerImageName(dockerArgs)
     return image
 }
 
-// Builds rocm/miopen:therock-<shortHash> from source; returns {image, fullHash, shortHash, skip}.
-// Skips if :therock already carries this hash; reuses the hash-tagged image if it exists.
 def buildTheRockDockerImage(Map conf=[:])
 {
     env.DOCKER_BUILDKIT=1
@@ -242,89 +240,52 @@ def buildTheRockDockerImage(Map conf=[:])
         returnStdout: true
     ).trim()
 
-    def shortHash   = theRockHash.take(7)
-    def hashedImage = "${env.MIOPEN_DOCKER_IMAGE_URL}:therock-${shortHash}"
+    def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
+                     "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
+                     "--build-arg THEROCK_ASIC=\"${gpu_arch}\" " +
+                     "--target update_therock " +
+                     " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
 
-    // Check whether this hash is already live on :therock via its baked-in label.
-    // Pull and inspect are separated so that docker pull stdout does not contaminate the captured label.
-    def lastPromotedHash = ""
+    if (params.USE_SCCACHE_DOCKER && check_host() && "${env.MIOPEN_SCCACHE}" != "null")
+    {
+        dockerArgs = dockerArgs + " --build-arg MIOPEN_SCCACHE=${env.MIOPEN_SCCACHE} --build-arg COMPILER_LAUNCHER=sccache "
+    }
+
+    echo "Docker Args: ${dockerArgs}"
+
+    def image = "${env.MIOPEN_DOCKER_IMAGE_URL}:therock"
+
+    def dockerImage
+    
+    echo "Building image..."
+    def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+    def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=min " +
+                            "--cache-from type=registry,ref=${cacheRef} "
+
     try {
         withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
-            lastPromotedHash = sh(
-                script: """
-                    docker inspect \
-                        --format '{{ index .Config.Labels "therock.git.hash" }}' \
-                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
-                """.stripIndent(),
-                returnStdout: true
-            ).trim()
+            sh """
+                docker buildx inspect ci-builder >/dev/null 2>&1 || \
+                docker buildx create --name ci-builder --driver docker-container --use
+                docker buildx use ci-builder
+                docker buildx inspect --bootstrap
+            """.stripIndent()
+        
+            sh """
+                DOCKER_BUILDKIT=1 docker buildx build \
+                --push \
+                --tag ${image} \
+                ${dockerCacheArgs} \
+                ${dockerArgs} \
+                ${buildContext}
+            """.stripIndent()
         }
-    } catch (Exception e) {
-        echo "Could not read label from existing :therock image (first-time run?): ${e.message}"
-    }
-
-    if (lastPromotedHash == theRockHash) {
-        echo "TheRock hash ${shortHash} is already promoted to :therock - skipping build."
-        return [image: null, fullHash: theRockHash, shortHash: shortHash, skip: true]
-    }
-    echo "New TheRock hash detected: ${theRockHash} (previously promoted: '${lastPromotedHash ?: 'none'}')"
-
-    // Reuse the hash-tagged image if a previous nightly already built it.
-    def imageAlreadyBuilt = false
-    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-        def rc = sh(script: "docker manifest inspect ${hashedImage} > /dev/null 2>&1", returnStatus: true)
-        imageAlreadyBuilt = (rc == 0)
-    }
-    if (imageAlreadyBuilt) {
-        echo "Hash-tagged image ${hashedImage} already exists - reusing without rebuild."
-    } else {
-        echo "Hash-tagged image ${hashedImage} not found - will build now."
-    }
-
-    if (!imageAlreadyBuilt) {
-        def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
-                         "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
-                         "--build-arg THEROCK_ASIC=\"${gpu_arch}\" " +
-                         "--build-arg BUILD_TYPE=build " +
-                         "--label therock.git.hash=${theRockHash} " +
-                         "--target update_therock " +
-                         " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
-
-        if (params.USE_SCCACHE_DOCKER && check_host() && "${env.MIOPEN_SCCACHE}" != "null") {
-            dockerArgs = dockerArgs + " --build-arg MIOPEN_SCCACHE=${env.MIOPEN_SCCACHE} --build-arg COMPILER_LAUNCHER=sccache "
-        }
-
-        echo "Building ${hashedImage} with args: ${dockerArgs}"
-
-        def buildContext    = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=min " +
-                              "--cache-from type=registry,ref=${cacheRef} "
-
-        try {
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                sh """
-                    docker buildx inspect ci-builder >/dev/null 2>&1 || \
-                    docker buildx create --name ci-builder --driver docker-container --use
-                    docker buildx use ci-builder
-                    docker buildx inspect --bootstrap
-                """.stripIndent()
-
-                sh """
-                    DOCKER_BUILDKIT=1 docker buildx build \
-                    --push \
-                    --tag ${hashedImage} \
-                    ${dockerCacheArgs} \
-                    ${dockerArgs} \
-                    ${buildContext}
-                """.stripIndent()
-            }
-        } catch (Exception bex) {
-            echo "Buildx not available or failed, falling back to docker.build"
-            def dockerImage = docker.build("${hashedImage}", "${dockerArgs} ${buildContext}")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                dockerImage.push()
-            }
+        dockerImage = docker.image("${image}")
+    } catch (Exception bex) {
+        echo "Buildx not available or failed, falling back to docker.build"
+        dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            dockerImage.push()
         }
     }
 
@@ -415,11 +376,6 @@ def getDockerImage(Map conf=[:])
 
     def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
                      "--target miopen "
-
-    // Build the CI image FROM the candidate TheRock base when one is staged.
-    if (env.THEROCK_CANDIDATE_IMAGE) {
-        dockerArgs = dockerArgs + "--build-arg THEROCK_BASE_IMAGE=${env.THEROCK_CANDIDATE_IMAGE} "
-    }
 
     if(env.CCACHE_HOST)
     {
