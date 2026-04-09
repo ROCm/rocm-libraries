@@ -56,7 +56,7 @@ namespace rocRoller
                 , m_loadStoreTileGenerator(
                       m_graph, kernel->context(), kernel->max_flat_workgroup_size())
                 , m_exchangeGenerator(m_graph, kernel->context())
-                , m_execMaskGenerator(m_graph, kernel->context())
+                , m_execMaskGenerator(kernel->context())
                 , m_argumentTracer(std::move(argTracer))
             {
             }
@@ -407,14 +407,26 @@ namespace rocRoller
                 }
                 case OpMode::Exec:
                 {
-                    auto genFn = [this](std::set<int> nodes) { return generate(nodes); };
-                    co_yield m_execMaskGenerator.genExec(tag, op, genFn);
+                    auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                    auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
+                    auto trueBodyFn = [this, trueBody]() { return generate(trueBody); };
+                    std::function<Generator<Instruction>()> elseBodyFn;
+                    if(!elseBody.empty())
+                        elseBodyFn = [this, elseBody]() { return generate(elseBody); };
+                    co_yield m_execMaskGenerator.genExec(
+                        op.condition, op.conditionName, trueBodyFn, elseBodyFn);
                     break;
                 }
                 case OpMode::BranchAndExec:
                 {
-                    auto genFn = [this](std::set<int> nodes) { return generate(nodes); };
-                    co_yield m_execMaskGenerator.genBranchAndExec(tag, op, genFn);
+                    auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                    auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
+                    auto trueBodyFn = [this, trueBody]() { return generate(trueBody); };
+                    std::function<Generator<Instruction>()> elseBodyFn;
+                    if(!elseBody.empty())
+                        elseBodyFn = [this, elseBody]() { return generate(elseBody); };
+                    co_yield m_execMaskGenerator.genBranchAndExec(
+                        op.condition, op.conditionName, trueBodyFn, elseBodyFn);
                     break;
                 }
                 default:

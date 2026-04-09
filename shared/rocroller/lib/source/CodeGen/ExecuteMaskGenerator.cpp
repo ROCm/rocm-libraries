@@ -10,9 +10,9 @@
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
-#include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
+#include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
@@ -20,24 +20,24 @@ namespace rocRoller
     namespace KernelGraph
     {
         namespace Expression = rocRoller::Expression;
-        using namespace ControlGraph;
 
-        ExecuteMaskGenerator::ExecuteMaskGenerator(KernelGraphPtr graph, ContextPtr context)
+        ExecuteMaskGenerator::ExecuteMaskGenerator(ContextPtr context)
             : m_context(context)
-            , m_graph(graph)
             , m_fastArith(Expression::FastArithmetic(context))
         {
         }
 
-        Generator<Instruction> ExecuteMaskGenerator::genExec(
-            int                                                  tag,
-            ConditionalOp const&                                 op,
-            std::function<Generator<Instruction>(std::set<int>)> generateFn)
+        Generator<Instruction>
+            ExecuteMaskGenerator::genExec(Expression::ExpressionPtr               condition,
+                                          std::string const&                      conditionName,
+                                          std::function<Generator<Instruction>()> trueBodyFn,
+                                          std::function<Generator<Instruction>()> elseBodyFn)
         {
+            Log::debug("ExecuteMaskGenerator::genExec({})", conditionName);
             auto const wavefrontSize = m_context->kernel()->wavefront_size();
             AssertFatal(wavefrontSize == 32 || wavefrontSize == 64, ShowValue(wavefrontSize));
 
-            auto expr = m_fastArith(op.condition);
+            auto expr = m_fastArith(condition);
             auto vcc  = m_context->brancher()->resultRegister(expr);
 
             auto regType = vcc->regType();
@@ -83,13 +83,11 @@ namespace rocRoller
                 co_yield_(Instruction("s_and_saveexec_b32", {sgpr}, {vcc}, {}, ""));
             }
 
-            auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
-
             // If there is an else body, save VCC into an SGPR now, before generating the
             // true body.  Nested conditionals inside the true body may overwrite VCC, making
             // the original condition unavailable for the s_andn1_saveexec transition.
             Register::ValuePtr savedVcc;
-            if(!elseBody.empty())
+            if(elseBodyFn)
             {
                 if(wavefrontSize == 64)
                 {
@@ -113,10 +111,9 @@ namespace rocRoller
                     savedVcc, vcc, "Save condition for else transition");
             }
 
-            auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
-            co_yield generateFn(trueBody);
+            co_yield trueBodyFn();
 
-            if(!elseBody.empty())
+            if(elseBodyFn)
             {
                 // restore the original EXEC mask from the scalar destination register.
                 auto EXEC = m_context->getEXEC();
@@ -137,7 +134,7 @@ namespace rocRoller
                 {
                     co_yield_(Instruction("s_andn1_saveexec_b32", {sgpr}, {savedVcc}, {}, ""));
                 }
-                co_yield generateFn(elseBody);
+                co_yield elseBodyFn();
             }
 
             // restore the original EXEC mask from the scalar destination register.
@@ -147,14 +144,16 @@ namespace rocRoller
         }
 
         Generator<Instruction> ExecuteMaskGenerator::genBranchAndExec(
-            int                                                  tag,
-            ConditionalOp const&                                 op,
-            std::function<Generator<Instruction>(std::set<int>)> generateFn)
+            Expression::ExpressionPtr               condition,
+            std::string const&                      conditionName,
+            std::function<Generator<Instruction>()> trueBodyFn,
+            std::function<Generator<Instruction>()> elseBodyFn)
         {
+            Log::debug("ExecuteMaskGenerator::genBranchAndExec({})", conditionName);
             auto const wavefrontSize = m_context->kernel()->wavefront_size();
             AssertFatal(wavefrontSize == 32 || wavefrontSize == 64, ShowValue(wavefrontSize));
 
-            auto expr = m_fastArith(op.condition);
+            auto expr = m_fastArith(condition);
             auto vcc  = m_context->brancher()->resultRegister(expr);
 
             auto regType = vcc->regType();
@@ -168,9 +167,9 @@ namespace rocRoller
                         ShowValue(wavefrontSize));
 
             auto elseLabel = m_context->labelAllocator()->label(
-                fmt::format("ELSE_Conditional_EXECZ_{}", op.conditionName, tag));
+                fmt::format("ELSE_Conditional_EXECZ_{}", conditionName));
             auto exitLabel = m_context->labelAllocator()->label(
-                fmt::format("EXIT_Conditional_EXECZ_{}", op.conditionName, tag));
+                fmt::format("EXIT_Conditional_EXECZ_{}", conditionName));
 
             co_yield Instruction::Lock(Scheduling::Dependency::Branch,
                                        "Lock for Conditional EXECZ");
@@ -213,15 +212,12 @@ namespace rocRoller
                 elseLabel,
                 EXECZ,
                 concatenate("If EXECZ is set(1), jump to ", elseLabel->toString()));
-            auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
-
-            auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
 
             // If there is an else body, save VCC into an SGPR now, before generating the
             // true body.  Nested conditionals inside the true body may overwrite VCC, making
             // the original condition unavailable for the s_andn1_saveexec transition.
             Register::ValuePtr savedVcc;
-            if(!elseBody.empty())
+            if(elseBodyFn)
             {
                 if(wavefrontSize == 64)
                 {
@@ -245,12 +241,12 @@ namespace rocRoller
                     savedVcc, vcc, "Save condition for else transition");
             }
 
-            co_yield generateFn(trueBody);
+            co_yield trueBodyFn();
             co_yield m_context->brancher()->branch(
                 exitLabel, concatenate("THEN: Done, jump to ", exitLabel->toString()));
 
             co_yield Instruction::Label(elseLabel);
-            if(!elseBody.empty())
+            if(elseBodyFn)
             {
                 // restore the original EXEC mask from the scalar destination register.
                 auto EXEC = m_context->getEXEC();
@@ -279,7 +275,7 @@ namespace rocRoller
                     exitLabel,
                     EXECZ,
                     concatenate("If EXECZ is set(1), jump to ", exitLabel->toString()));
-                co_yield generateFn(elseBody);
+                co_yield elseBodyFn();
             }
 
             co_yield Instruction::Label(exitLabel);
