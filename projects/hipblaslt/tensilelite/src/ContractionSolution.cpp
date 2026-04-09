@@ -2015,7 +2015,10 @@ namespace TensileLite
                     rv.args.template append<void const*>("AddressWorkspace", inputs.ws);
                     break;
                 case CustomArgSemantic::AddressFlags:
-                    rv.args.template append<void const*>("AddressFlags", inputs.Synchronizer);
+                    if(sk.reduction == origami::reduction_t::parallel)
+                        rv.args.template append<void*>("AddressFlags", nullptr);
+                    else
+                        rv.args.template append<void*>("AddressFlags", inputs.Synchronizer);
                     break;
                 case CustomArgSemantic::AddressSynchronizer:
                     rv.args.template append<void const*>("AddressSynchronizer", inputs.Synchronizer);
