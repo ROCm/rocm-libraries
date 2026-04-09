@@ -750,9 +750,13 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     params.multi_gpu_prepare(
         reference_results.get_buffers<fft_io::fft_io_in>(), ibuffer, pibuffer, pobuffer);
 
-    if(verbose > 3)
-        reference_results.print_data<fft_io::fft_io_out>();
-    auto cpu_output_norm = reference_results.get_norm<fft_io::fft_io_out>(params.nbatch);
+    std::shared_future<VectorNorms> cpu_output_norm;
+    if(fftw_compare)
+    {
+        if(verbose > 3)
+            reference_results.print_data<fft_io::fft_io_out>();
+        cpu_output_norm = reference_results.get_norm<fft_io::fft_io_out>(params.nbatch);
+    }
 
     // execute GPU transform
     std::vector<hostbuf> gpu_output
