@@ -595,7 +595,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializeOnlyFinalize)
                                                  static_cast<const uint8_t*>(serialized.ptr)
                                                      + serialized.size);
 
-    // Deserialize-only finalize should reuse cached bytes without rebuilding
+    // Re-serializing from unpacked operations should produce identical bytes
     ASSERT_EQ(originalBytes.size(), reSerializedBytes.size());
     EXPECT_EQ(originalBytes, reSerializedBytes);
 }

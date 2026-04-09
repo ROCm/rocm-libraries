@@ -551,7 +551,6 @@ TEST_F(TestGraphDescriptor, BinaryDeserializeCorruptedData)
         &rawDesc, garbageData.data(), garbageData.size());
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(rawDesc, nullptr);
-    const ScopedBackendDescriptor desc(rawDesc);
 }
 
 // ============================================================================

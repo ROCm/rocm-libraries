@@ -31,17 +31,8 @@ void GraphDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "GraphDescriptor::finalize: no operations set");
 
-    auto graph = buildGraphFromOperations();
-    THROW_IF_NULL(graph, HIPDNN_STATUS_BAD_PARAM, "GraphDescriptor::finalize: graph is null");
-
-    flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(hipdnn_data_sdk::data_objects::Graph::Pack(builder, graph.get()));
-    _graphSerializedBuffer = builder.Release();
-
-    flatbuffers::Verifier verifier(_graphSerializedBuffer.data(), _graphSerializedBuffer.size());
-    THROW_IF_FALSE(hipdnn_data_sdk::data_objects::VerifyGraphBuffer(verifier),
-                   HIPDNN_STATUS_INTERNAL_ERROR,
-                   "GraphDescriptor::finalize: serialized graph failed verification");
+    invalidateCache();
+    buildSerializedGraph();
 
     HipdnnBackendDescriptorImpl<GraphDescriptor>::finalize();
 
@@ -459,6 +450,10 @@ void GraphDescriptor::createFromJsonGraph(GraphDescriptor& desc,
 
         auto buf = builder.Release();
         desc.deserializeGraph(buf.data(), buf.size());
+    }
+    catch(const HipdnnException&)
+    {
+        throw;
     }
     catch(const std::exception& e)
     {

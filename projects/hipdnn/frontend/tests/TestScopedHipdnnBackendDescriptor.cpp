@@ -55,6 +55,13 @@ TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithRawDescriptorIsValid)
     EXPECT_EQ(desc.get(), fakeDesc);
 }
 
+TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithNullRawDescriptorIsInvalid)
+{
+    auto desc = ScopedHipdnnBackendDescriptor(static_cast<hipdnnBackendDescriptor_t>(nullptr));
+    EXPECT_FALSE(desc.valid());
+    EXPECT_EQ(desc.get(), nullptr);
+}
+
 TEST_F(TestScopedHipdnnBackendDescriptor, ConstructWithTypeSuccess)
 {
     auto fakeDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
