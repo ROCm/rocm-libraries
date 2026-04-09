@@ -1232,7 +1232,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM1_GRVWA4_GSU1_LPA4_LPB8_LPMn1_MIWT1_1_PLR3_SU0_SUS0_SVW4_TLDS1_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM1_GRVWA4_GSU1_LPA4_LPB8_LPMn1_MIWT1_1_PLR1_SU0_SUS0_SVW4_TLDS1_VWA1_VWB1_WG32_2_1
     LSCA: 32
     LSCB: 64
     LSPA: 8
@@ -1321,13 +1321,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 6
-    SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM1_GRVWA4_GSU1_LPA4_LPB8_LPMn1_MIWT1_1_PLR3_SU0_SUS0_SVW4_TLDS1_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM1_GRVWA4_GSU1_LPA4_LPB8_LPMn1_MIWT1_1_PLR1_SU0_SUS0_SVW4_TLDS1_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 0
     StaggerUMapping: 0

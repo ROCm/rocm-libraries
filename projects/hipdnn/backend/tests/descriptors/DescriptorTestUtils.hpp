@@ -50,9 +50,9 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        1,
                        static_cast<const void*>(&yDesc));
 
-    auto padding = hipdnn_tests::toVec(hipdnn_tests::constants::K_CONV_PADDING);
-    auto stride = hipdnn_tests::toVec(hipdnn_tests::constants::K_CONV_STRIDE);
-    auto dilation = hipdnn_tests::toVec(hipdnn_tests::constants::K_CONV_DILATION);
+    auto padding = hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_CONV_PADDING);
+    auto stride = hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_CONV_STRIDE);
+    auto dilation = hipdnn_tests::toVec(hipdnn_tests::constants::K_FPROP_CONV_DILATION);
 
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, HIPDNN_TYPE_INT64, 2, padding.data());
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS, HIPDNN_TYPE_INT64, 2, padding.data());

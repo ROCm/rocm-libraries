@@ -99,6 +99,16 @@ const auto& GetTestParams()
     return params;
 }
 
+Gpu GetDeterministicSupportedDevices()
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    return Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X | Gpu::gfx115X |
+           Gpu::gfx120X;
+#else
+    return Gpu::None;
+#endif
+}
+
 } // namespace
 
 // For I8 datatype we get "Empty code object path", so it requires additional
@@ -222,5 +232,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     CPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlopsDeterministicApplicability_NONE,
-    testing::Combine(testing::Values(GetTestParams<TestDataType::FP16>()),
+    testing::Combine(testing::Values(GetDeterministicSupportedDevices()),
                      testing::Values(GetDeterministicConvCase())));
