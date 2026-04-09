@@ -32,6 +32,7 @@ struct LayernormBackwardAttributesT : public ::flatbuffers::NativeTable {
   int64_t scale_tensor_uid = 0;
   ::flatbuffers::Optional<int64_t> mean_tensor_uid = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<int64_t> inv_variance_tensor_uid = ::flatbuffers::nullopt;
+  ::flatbuffers::Optional<int64_t> epsilon_tensor_uid = ::flatbuffers::nullopt;
   int64_t dx_tensor_uid = 0;
   int64_t dscale_tensor_uid = 0;
   int64_t dbias_tensor_uid = 0;
@@ -47,10 +48,11 @@ struct LayernormBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
     VT_SCALE_TENSOR_UID = 8,
     VT_MEAN_TENSOR_UID = 10,
     VT_INV_VARIANCE_TENSOR_UID = 12,
-    VT_DX_TENSOR_UID = 14,
-    VT_DSCALE_TENSOR_UID = 16,
-    VT_DBIAS_TENSOR_UID = 18,
-    VT_NORMALIZED_DIM_COUNT = 20
+    VT_EPSILON_TENSOR_UID = 14,
+    VT_DX_TENSOR_UID = 16,
+    VT_DSCALE_TENSOR_UID = 18,
+    VT_DBIAS_TENSOR_UID = 20,
+    VT_NORMALIZED_DIM_COUNT = 22
   };
   int64_t dy_tensor_uid() const {
     return GetField<int64_t>(VT_DY_TENSOR_UID, 0);
@@ -81,6 +83,12 @@ struct LayernormBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
   }
   bool mutate_inv_variance_tensor_uid(int64_t _inv_variance_tensor_uid) {
     return SetField<int64_t>(VT_INV_VARIANCE_TENSOR_UID, _inv_variance_tensor_uid);
+  }
+  ::flatbuffers::Optional<int64_t> epsilon_tensor_uid() const {
+    return GetOptional<int64_t, int64_t>(VT_EPSILON_TENSOR_UID);
+  }
+  bool mutate_epsilon_tensor_uid(int64_t _epsilon_tensor_uid) {
+    return SetField<int64_t>(VT_EPSILON_TENSOR_UID, _epsilon_tensor_uid);
   }
   int64_t dx_tensor_uid() const {
     return GetField<int64_t>(VT_DX_TENSOR_UID, 0);
@@ -113,6 +121,7 @@ struct LayernormBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
            VerifyField<int64_t>(verifier, VT_SCALE_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_MEAN_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_INV_VARIANCE_TENSOR_UID, 8) &&
+           VerifyField<int64_t>(verifier, VT_EPSILON_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_DX_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_DSCALE_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_DBIAS_TENSOR_UID, 8) &&
@@ -142,6 +151,9 @@ struct LayernormBackwardAttributesBuilder {
   }
   void add_inv_variance_tensor_uid(int64_t inv_variance_tensor_uid) {
     fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_INV_VARIANCE_TENSOR_UID, inv_variance_tensor_uid);
+  }
+  void add_epsilon_tensor_uid(int64_t epsilon_tensor_uid) {
+    fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_EPSILON_TENSOR_UID, epsilon_tensor_uid);
   }
   void add_dx_tensor_uid(int64_t dx_tensor_uid) {
     fbb_.AddElement<int64_t>(LayernormBackwardAttributes::VT_DX_TENSOR_UID, dx_tensor_uid, 0);
@@ -173,6 +185,7 @@ inline ::flatbuffers::Offset<LayernormBackwardAttributes> CreateLayernormBackwar
     int64_t scale_tensor_uid = 0,
     ::flatbuffers::Optional<int64_t> mean_tensor_uid = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<int64_t> inv_variance_tensor_uid = ::flatbuffers::nullopt,
+    ::flatbuffers::Optional<int64_t> epsilon_tensor_uid = ::flatbuffers::nullopt,
     int64_t dx_tensor_uid = 0,
     int64_t dscale_tensor_uid = 0,
     int64_t dbias_tensor_uid = 0,
@@ -182,6 +195,7 @@ inline ::flatbuffers::Offset<LayernormBackwardAttributes> CreateLayernormBackwar
   builder_.add_dbias_tensor_uid(dbias_tensor_uid);
   builder_.add_dscale_tensor_uid(dscale_tensor_uid);
   builder_.add_dx_tensor_uid(dx_tensor_uid);
+  if(epsilon_tensor_uid) { builder_.add_epsilon_tensor_uid(*epsilon_tensor_uid); }
   if(inv_variance_tensor_uid) { builder_.add_inv_variance_tensor_uid(*inv_variance_tensor_uid); }
   if(mean_tensor_uid) { builder_.add_mean_tensor_uid(*mean_tensor_uid); }
   builder_.add_scale_tensor_uid(scale_tensor_uid);
@@ -200,6 +214,7 @@ inline bool operator==(const LayernormBackwardAttributesT &lhs, const LayernormB
       (lhs.scale_tensor_uid == rhs.scale_tensor_uid) &&
       (lhs.mean_tensor_uid == rhs.mean_tensor_uid) &&
       (lhs.inv_variance_tensor_uid == rhs.inv_variance_tensor_uid) &&
+      (lhs.epsilon_tensor_uid == rhs.epsilon_tensor_uid) &&
       (lhs.dx_tensor_uid == rhs.dx_tensor_uid) &&
       (lhs.dscale_tensor_uid == rhs.dscale_tensor_uid) &&
       (lhs.dbias_tensor_uid == rhs.dbias_tensor_uid) &&
@@ -225,6 +240,7 @@ inline void LayernormBackwardAttributes::UnPackTo(LayernormBackwardAttributesT *
   { auto _e = scale_tensor_uid(); _o->scale_tensor_uid = _e; }
   { auto _e = mean_tensor_uid(); _o->mean_tensor_uid = _e; }
   { auto _e = inv_variance_tensor_uid(); _o->inv_variance_tensor_uid = _e; }
+  { auto _e = epsilon_tensor_uid(); _o->epsilon_tensor_uid = _e; }
   { auto _e = dx_tensor_uid(); _o->dx_tensor_uid = _e; }
   { auto _e = dscale_tensor_uid(); _o->dscale_tensor_uid = _e; }
   { auto _e = dbias_tensor_uid(); _o->dbias_tensor_uid = _e; }
@@ -244,6 +260,7 @@ inline ::flatbuffers::Offset<LayernormBackwardAttributes> CreateLayernormBackwar
   auto _scale_tensor_uid = _o->scale_tensor_uid;
   auto _mean_tensor_uid = _o->mean_tensor_uid;
   auto _inv_variance_tensor_uid = _o->inv_variance_tensor_uid;
+  auto _epsilon_tensor_uid = _o->epsilon_tensor_uid;
   auto _dx_tensor_uid = _o->dx_tensor_uid;
   auto _dscale_tensor_uid = _o->dscale_tensor_uid;
   auto _dbias_tensor_uid = _o->dbias_tensor_uid;
@@ -255,6 +272,7 @@ inline ::flatbuffers::Offset<LayernormBackwardAttributes> CreateLayernormBackwar
       _scale_tensor_uid,
       _mean_tensor_uid,
       _inv_variance_tensor_uid,
+      _epsilon_tensor_uid,
       _dx_tensor_uid,
       _dscale_tensor_uid,
       _dbias_tensor_uid,

@@ -11,6 +11,7 @@ table LayernormBackwardAttributes {
     scale_tensor_uid:        long;
     mean_tensor_uid:         long = null;
     inv_variance_tensor_uid: long = null;
+    epsilon_tensor_uid:      long = null;
     dx_tensor_uid:           long;
     dscale_tensor_uid:       long;
     dbias_tensor_uid:        long;
