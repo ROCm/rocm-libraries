@@ -272,4 +272,254 @@ void compute_reference_batched_contraction(
     make_ParallelTensorFunctor(f_gm, G_total, M_total)(std::thread::hardware_concurrency());
 }
 
+/// @brief Host reference for batched contraction with multiple A and B tensors.
+///
+/// Each A tensor has layout [G0,G1,...,M0,M1,...,K0,K1,...] with potentially different strides.
+/// Each B tensor has layout [G0,G1,...,N0,N1,...,K0,K1,...] with potentially different strides.
+/// D/E tensors have layout [G0,G1,...,M0,M1,...,N0,N1,...].
+///
+/// Computation:
+///   fused_a(g,m,k) = a_element_op(A0(g,m,k), A1(g,m,k), ...)
+///   fused_b(g,n,k) = b_element_op(B0(g,n,k), B1(g,n,k), ...)
+///   C(g,m,n) = sum_k fused_a(g,m,k) * fused_b(g,n,k)
+///   E(g,m,n) = cde_element_op(C(g,m,n), D0(g,m,n), D1(g,m,n), ...)
+template <typename AsDataType,
+          typename BsDataType,
+          typename DsDataType,
+          typename AccDataType,
+          typename EDataType,
+          typename AElementWise,
+          typename BElementWise,
+          typename CDEElementWise,
+          ck_tile::index_t NumATensor = AsDataType::size(),
+          ck_tile::index_t NumBTensor = BsDataType::size(),
+          ck_tile::index_t NumDTensor = DsDataType::size(),
+          typename ADataType = ck_tile::remove_cvref_t<std::tuple_element_t<0, AsDataType>>,
+          typename BDataType = ck_tile::remove_cvref_t<std::tuple_element_t<0, BsDataType>>,
+          typename DDataType = ck_tile::remove_cvref_t<std::tuple_element_t<0, DsDataType>>>
+void compute_reference_batched_contraction_multi_abd(
+    const std::array<ck_tile::HostTensor<ADataType>, NumATensor>& as_tensors,
+    const std::array<ck_tile::HostTensor<BDataType>, NumBTensor>& bs_tensors,
+    const std::array<ck_tile::HostTensor<DDataType>, NumDTensor>& ds_tensors,
+    ck_tile::HostTensor<EDataType>& e_tensor,
+    ck_tile::index_t G_total,
+    ck_tile::index_t M_total,
+    ck_tile::index_t N_total,
+    ck_tile::index_t K_total,
+    const AElementWise& a_elementwise,
+    const BElementWise& b_elementwise,
+    const CDEElementWise& cde_elementwise,
+    const std::vector<ck_tile::index_t>& G_dims,
+    const std::vector<ck_tile::index_t>& M_dims,
+    const std::vector<ck_tile::index_t>& N_dims,
+    const std::vector<ck_tile::index_t>& K_dims)
+{
+    std::cout << "Calculating multi-ABD contraction reference..." << std::endl;
+
+    // Collect per-tensor strides
+    std::array<std::vector<std::size_t>, NumATensor> as_strides;
+    for(ck_tile::index_t a = 0; a < NumATensor; ++a)
+        as_strides[a] = as_tensors[a].get_strides();
+
+    std::array<std::vector<std::size_t>, NumBTensor> bs_strides;
+    for(ck_tile::index_t b = 0; b < NumBTensor; ++b)
+        bs_strides[b] = bs_tensors[b].get_strides();
+
+    std::array<std::vector<std::size_t>, NumDTensor> ds_strides;
+    for(ck_tile::index_t d = 0; d < NumDTensor; ++d)
+        ds_strides[d] = ds_tensors[d].get_strides();
+
+    const auto e_strides = e_tensor.get_strides();
+
+    const ck_tile::index_t num_g_dims = G_dims.size();
+    const ck_tile::index_t num_m_dims = M_dims.size();
+    const ck_tile::index_t num_n_dims = N_dims.size();
+    const ck_tile::index_t num_k_dims = K_dims.size();
+
+    // Offset computation for A tensor (layout: [G, M, K])
+    auto compute_a_offset = [&](ck_tile::index_t tensor_idx,
+                                ck_tile::index_t g_flat,
+                                ck_tile::index_t m_flat,
+                                ck_tile::index_t k_flat) -> std::size_t {
+        std::size_t offset    = 0;
+        const auto& strides   = as_strides[tensor_idx];
+        ck_tile::index_t temp = g_flat;
+        for(int i = num_g_dims - 1; i >= 0; --i)
+        {
+            offset += (temp % G_dims[i]) * strides[i];
+            temp /= G_dims[i];
+        }
+        temp = m_flat;
+        for(int i = num_m_dims - 1; i >= 0; --i)
+        {
+            offset += (temp % M_dims[i]) * strides[num_g_dims + i];
+            temp /= M_dims[i];
+        }
+        temp = k_flat;
+        for(int i = num_k_dims - 1; i >= 0; --i)
+        {
+            offset += (temp % K_dims[i]) * strides[num_g_dims + num_m_dims + i];
+            temp /= K_dims[i];
+        }
+        return offset;
+    };
+
+    // Offset computation for B tensor (layout: [G, N, K])
+    auto compute_b_offset = [&](ck_tile::index_t tensor_idx,
+                                ck_tile::index_t g_flat,
+                                ck_tile::index_t n_flat,
+                                ck_tile::index_t k_flat) -> std::size_t {
+        std::size_t offset    = 0;
+        const auto& strides   = bs_strides[tensor_idx];
+        ck_tile::index_t temp = g_flat;
+        for(int i = num_g_dims - 1; i >= 0; --i)
+        {
+            offset += (temp % G_dims[i]) * strides[i];
+            temp /= G_dims[i];
+        }
+        temp = n_flat;
+        for(int i = num_n_dims - 1; i >= 0; --i)
+        {
+            offset += (temp % N_dims[i]) * strides[num_g_dims + i];
+            temp /= N_dims[i];
+        }
+        temp = k_flat;
+        for(int i = num_k_dims - 1; i >= 0; --i)
+        {
+            offset += (temp % K_dims[i]) * strides[num_g_dims + num_n_dims + i];
+            temp /= K_dims[i];
+        }
+        return offset;
+    };
+
+    // Offset computation for E/D tensor (layout: [G, M, N])
+    auto compute_e_offset = [&](const std::vector<std::size_t>& strides,
+                                ck_tile::index_t g_flat,
+                                ck_tile::index_t m_flat,
+                                ck_tile::index_t n_flat) -> std::size_t {
+        std::size_t offset    = 0;
+        ck_tile::index_t temp = g_flat;
+        for(int i = num_g_dims - 1; i >= 0; --i)
+        {
+            offset += (temp % G_dims[i]) * strides[i];
+            temp /= G_dims[i];
+        }
+        temp = m_flat;
+        for(int i = num_m_dims - 1; i >= 0; --i)
+        {
+            offset += (temp % M_dims[i]) * strides[num_g_dims + i];
+            temp /= M_dims[i];
+        }
+        temp = n_flat;
+        for(int i = num_n_dims - 1; i >= 0; --i)
+        {
+            offset += (temp % N_dims[i]) * strides[num_g_dims + num_m_dims + i];
+            temp /= N_dims[i];
+        }
+        return offset;
+    };
+
+    auto f_gm = [&](auto g_flat, auto m_flat) {
+        for(ck_tile::index_t n_flat = 0; n_flat < N_total; ++n_flat)
+        {
+            AccDataType sum = 0;
+
+            for(ck_tile::index_t k_flat = 0; k_flat < K_total; ++k_flat)
+            {
+                // Fuse all A tensors via a_elementwise
+                ADataType fused_a{};
+                if constexpr(NumATensor == 1)
+                {
+                    const auto a_off = compute_a_offset(0, g_flat, m_flat, k_flat);
+                    a_elementwise(fused_a, as_tensors[0].mData[a_off]);
+                }
+                else if constexpr(NumATensor == 2)
+                {
+                    const auto a0_off = compute_a_offset(0, g_flat, m_flat, k_flat);
+                    const auto a1_off = compute_a_offset(1, g_flat, m_flat, k_flat);
+                    a_elementwise(
+                        fused_a, as_tensors[0].mData[a0_off], as_tensors[1].mData[a1_off]);
+                }
+                else if constexpr(NumATensor == 3)
+                {
+                    const auto a0_off = compute_a_offset(0, g_flat, m_flat, k_flat);
+                    const auto a1_off = compute_a_offset(1, g_flat, m_flat, k_flat);
+                    const auto a2_off = compute_a_offset(2, g_flat, m_flat, k_flat);
+                    a_elementwise(fused_a,
+                                  as_tensors[0].mData[a0_off],
+                                  as_tensors[1].mData[a1_off],
+                                  as_tensors[2].mData[a2_off]);
+                }
+
+                // Fuse all B tensors via b_elementwise
+                BDataType fused_b{};
+                if constexpr(NumBTensor == 1)
+                {
+                    const auto b_off = compute_b_offset(0, g_flat, n_flat, k_flat);
+                    b_elementwise(fused_b, bs_tensors[0].mData[b_off]);
+                }
+                else if constexpr(NumBTensor == 2)
+                {
+                    const auto b0_off = compute_b_offset(0, g_flat, n_flat, k_flat);
+                    const auto b1_off = compute_b_offset(1, g_flat, n_flat, k_flat);
+                    b_elementwise(
+                        fused_b, bs_tensors[0].mData[b0_off], bs_tensors[1].mData[b1_off]);
+                }
+                else if constexpr(NumBTensor == 3)
+                {
+                    const auto b0_off = compute_b_offset(0, g_flat, n_flat, k_flat);
+                    const auto b1_off = compute_b_offset(1, g_flat, n_flat, k_flat);
+                    const auto b2_off = compute_b_offset(2, g_flat, n_flat, k_flat);
+                    b_elementwise(fused_b,
+                                  bs_tensors[0].mData[b0_off],
+                                  bs_tensors[1].mData[b1_off],
+                                  bs_tensors[2].mData[b2_off]);
+                }
+
+                sum += static_cast<AccDataType>(fused_a) * static_cast<AccDataType>(fused_b);
+            }
+
+            const std::size_t e_offset = compute_e_offset(e_strides, g_flat, m_flat, n_flat);
+
+            // Apply CDE elementwise with D tensors
+            EDataType result{};
+            if constexpr(NumDTensor == 0)
+            {
+                result = static_cast<EDataType>(sum);
+            }
+            else if constexpr(NumDTensor == 1)
+            {
+                const auto d0_off = compute_e_offset(ds_strides[0], g_flat, m_flat, n_flat);
+                cde_elementwise(result,
+                                ck_tile::type_convert<float>(sum),
+                                ck_tile::type_convert<float>(ds_tensors[0].mData[d0_off]));
+            }
+            else if constexpr(NumDTensor == 2)
+            {
+                const auto d0_off = compute_e_offset(ds_strides[0], g_flat, m_flat, n_flat);
+                const auto d1_off = compute_e_offset(ds_strides[1], g_flat, m_flat, n_flat);
+                cde_elementwise(result,
+                                ck_tile::type_convert<float>(sum),
+                                ck_tile::type_convert<float>(ds_tensors[0].mData[d0_off]),
+                                ck_tile::type_convert<float>(ds_tensors[1].mData[d1_off]));
+            }
+            else if constexpr(NumDTensor == 3)
+            {
+                const auto d0_off = compute_e_offset(ds_strides[0], g_flat, m_flat, n_flat);
+                const auto d1_off = compute_e_offset(ds_strides[1], g_flat, m_flat, n_flat);
+                const auto d2_off = compute_e_offset(ds_strides[2], g_flat, m_flat, n_flat);
+                cde_elementwise(result,
+                                ck_tile::type_convert<float>(sum),
+                                ck_tile::type_convert<float>(ds_tensors[0].mData[d0_off]),
+                                ck_tile::type_convert<float>(ds_tensors[1].mData[d1_off]),
+                                ck_tile::type_convert<float>(ds_tensors[2].mData[d2_off]));
+            }
+
+            e_tensor.mData[e_offset] = result;
+        }
+    };
+
+    make_ParallelTensorFunctor(f_gm, G_total, M_total)(std::thread::hardware_concurrency());
+}
+
 } // namespace ck_tile
