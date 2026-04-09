@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include "ConvFwdPlanBuilder.hpp"
@@ -89,10 +89,16 @@ size_t ConvFwdPlanBuilder::getMaxWorkspaceSize(
 void ConvFwdPlanBuilder::initializeExecutionSettings(
     const ExampleProviderHandle& /*handle*/,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
-    ExampleProviderSettings& /*executionSettings*/) const
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    ExampleProviderSettings& executionSettings) const
 {
-    // No execution settings to initialize for ConvFwd
+    // Read block size knob from engine config if present
+    if(engineConfig.hasKnobSetting("BLOCK_SIZE"))
+    {
+        const auto& knobSetting = engineConfig.getKnobSettingByName("BLOCK_SIZE");
+        const auto& intVal = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>();
+        executionSettings.blockSize = intVal.value();
+    }
 }
 
 void ConvFwdPlanBuilder::buildPlan(
@@ -114,14 +120,9 @@ void ConvFwdPlanBuilder::buildPlan(
     auto weightUid = attrs->w_tensor_uid();
     auto outputUid = attrs->y_tensor_uid();
 
-    // Read BLOCK_SIZE knob from engine config (default 256)
-    int64_t blockSize = kDefaultBlockSize;
-    if(engineConfig.hasKnobSetting("BLOCK_SIZE"))
-    {
-        const auto& knobSetting = engineConfig.getKnobSettingByName("BLOCK_SIZE");
-        const auto& intVal = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>();
-        blockSize = intVal.value();
-    }
+    // Get block size from execution settings
+    const auto& settings = executionContext.executionSettings();
+    int64_t blockSize = settings.blockSize;
 
     // Extract tensor dimensions from the graph tensor map
     const auto& tensorMap = opGraph.getTensorMap();

@@ -1,4 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
 # TEMPLATE ADAPTATION: Update the source file list below with your plugin's .cpp files. The
@@ -58,7 +58,7 @@ endif()
 
 set_target_properties(example_provider_plugin PROPERTIES
     CXX_VISIBILITY_PRESET hidden
-    INSTALL_RPATH "$ORIGIN;$ORIGIN/../../lib"
+    INSTALL_RPATH "$ORIGIN;$ORIGIN/../.."
     INSTALL_RPATH_USE_LINK_PATH TRUE
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
