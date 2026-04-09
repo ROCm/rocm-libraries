@@ -20,6 +20,7 @@
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -72,6 +73,23 @@ hipDnnPointwiseModeToFusilliMode(
   default:
     return error(fusilli::ErrorCode::NotImplemented,
                  "Unsupported pointwise mode.");
+  }
+}
+
+// Convert from hipDNN ReductionMode to fusilli ReductionAttr::Mode.
+inline fusilli::ErrorOr<fusilli::ReductionAttr::Mode>
+hipDnnReductionModeToFusilliMode(
+    hipdnn_data_sdk::data_objects::ReductionMode hipdnnMode) {
+  switch (hipdnnMode) {
+  case hipdnn_data_sdk::data_objects::ReductionMode::ADD:
+    return ok(fusilli::ReductionAttr::Mode::SUM);
+  case hipdnn_data_sdk::data_objects::ReductionMode::MIN_OP:
+    return ok(fusilli::ReductionAttr::Mode::MIN);
+  case hipdnn_data_sdk::data_objects::ReductionMode::MAX_OP:
+    return ok(fusilli::ReductionAttr::Mode::MAX);
+  default:
+    return error(fusilli::ErrorCode::NotImplemented,
+                 "Unsupported reduction mode.");
   }
 }
 
@@ -176,6 +194,10 @@ private:
       break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
       FUSILLI_CHECK_ERROR(importSdpaAttr(node.attributes_as_SdpaAttributes()));
+      break;
+    case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
+      FUSILLI_CHECK_ERROR(
+          importReductionAttr(node.attributes_as_ReductionAttributes()));
       break;
     default:
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
@@ -430,6 +452,30 @@ private:
     // flatbuffer tensor attributes.
     FUSILLI_CHECK_ERROR(
         importNodeOutput(hipDnnSdpaAttr->o_tensor_uid(), "o", outs[0]));
+
+    return fusilli::ok();
+  }
+
+  fusilli::ErrorObject importReductionAttr(
+      const hipdnn_data_sdk::data_objects::ReductionAttributes *hipDnnRedAttr) {
+    // Import node input.
+    FUSILLI_ASSIGN_OR_RETURN(
+        std::shared_ptr<fusilli::TensorAttr> x,
+        importNodeInput(hipDnnRedAttr->in_tensor_uid(), "x"));
+
+    // Convert reduction mode.
+    FUSILLI_ASSIGN_OR_RETURN(
+        fusilli::ReductionAttr::Mode mode,
+        hipDnnReductionModeToFusilliMode(hipDnnRedAttr->mode()));
+
+    // Import node.
+    auto fusilliRedAttr = fusilli::ReductionAttr().setMode(mode);
+    std::shared_ptr<fusilli::TensorAttr> y =
+        fusilliGraph.reduction(x, fusilliRedAttr);
+
+    // Import node output.
+    FUSILLI_CHECK_ERROR(
+        importNodeOutput(hipDnnRedAttr->out_tensor_uid(), "y", y));
 
     return fusilli::ok();
   }

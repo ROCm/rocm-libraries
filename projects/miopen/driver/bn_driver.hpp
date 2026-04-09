@@ -374,6 +374,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AddCmdLineArgs()
                          "0",
                          "MIOpen tuning policy (Default=0, or no tuning policy set)",
                          "int");
+    AddHipGraphFlag(inflags);
     inflags.AddInputFlag("inverse_variance",
                          'I',
                          "0",
@@ -1238,23 +1239,33 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
 
     float alpha = static_cast<float>(1), beta = static_cast<float>(0);
     Tref epsilon = static_cast<Tref>(EPSILON);
-    Tref eAF     = static_cast<Tref>(1.0);
+    Tref eAF     = static_cast<Tref>(0.1); // will be changed
 
     Timer t;
-    double fulltime = 0.;
-    auto iters      = inflags.GetValueInt("iter");
-    float lowtime   = 100000000.0;
-    float avgtime   = 0.;
+    double fulltime    = 0.;
+    auto iters         = inflags.GetValueInt("iter");
+    float lowtime      = 100000000.0;
+    float avgtime      = 0.;
+    bool use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
 
-    for(int i = 0; i < iters; i++)
-    {
-
-        START_TIME
-
+    // Capture the graph for the first iteration (or if not using HIP graph, just execute)
+    int iteration   = 0; // for the case of not using HIP graph, will be captured by reference.
+    int return_code = CaptureKernel([&]() -> int {
         // if run fwd train
         if(forw == 1)
         { // training only
-            eAF = static_cast<Tref>(1.0) / (static_cast<Tref>(i) + static_cast<Tref>(1.0));
+            if(use_hip_graph)
+            {
+                eAF = static_cast<Tref>(0.1);
+                // This is the standard value used in PyTorch, TensorFlow, etc.
+                // eAF = 1 / (iteration + 1) is Cumulative Moving Average (CMA),
+                // cannot be used because current HIP graph wrapper need a constant
+            }
+            else
+            {
+                eAF = static_cast<Tref>(1.0) /
+                      (static_cast<Tref>(iteration) + static_cast<Tref>(1.0));
+            }
             if(activ_mode == 0)
             {
                 runGPUFwdTrain(epsilon, eAF, alpha, beta);
@@ -1284,6 +1295,18 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
             printf("Batch normalization mode forward GPU selection out of range, skipping.\n");
             return miopenStatusNotImplemented;
         }
+        return miopenStatusSuccess;
+    }); // end of the CaptureKernel
+
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < iters; i++)
+    {
+        START_TIME
+
+        iteration = i; // Modifies the captured reference for the case of not using HIP graph
+        ExecuteKernel();
 
         miopen::deref(GetHandle()).Finish();
         STOP_TIME
@@ -1299,12 +1322,21 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
         if(inflags.GetValueStr("time") == "1")
         {
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             lowtime = (time < lowtime) ? time : lowtime;
             if(iters > 1 && i > 0)
                 avgtime += time;
         }
     }
+
+    FinalizeKernel();
 
     if(WALL_CLOCK)
     {
@@ -1531,10 +1563,10 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
                                   inflags.GetValueDouble("activ_beta"),
                                   static_cast<double>(0.0));
 
-    for(int i = 0; i < iters; i++)
-    {
-        START_TIME
+    bool use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
 
+    // Capture the graph for the first iteration (or if not using HIP graph, just execute)
+    int return_code = CaptureKernel([&]() -> int {
         if(saveMeanVar)
         {
             if(activ_mode == 0)
@@ -1645,6 +1677,20 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
                                                   activ_desc);
             }
         }
+        return miopenStatusSuccess;
+    });
+
+    if(return_code != miopenStatusSuccess)
+    {
+        miopenDestroyActivationDescriptor(activ_desc);
+        return return_code;
+    }
+
+    for(int i = 0; i < iters; i++)
+    {
+        START_TIME
+
+        ExecuteKernel();
 
         miopen::deref(GetHandle()).Finish();
         STOP_TIME
@@ -1659,7 +1705,14 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
         if(inflags.GetValueStr("time") == "1")
         {
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             lowtime = (time < lowtime) ? time : lowtime;
             if(iters > 1 && i > 0)
                 avgtime += time;
@@ -1678,6 +1731,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
                    lowtime);
         }
     }
+
+    FinalizeKernel();
 
     if(WALL_CLOCK)
     {

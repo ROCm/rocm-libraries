@@ -597,7 +597,7 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsSdpa) {
                                            1};
 
   // Basic SDPA (Q, K, V -> O) should be supported.
-  auto builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph(
+  auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
       qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims,
       qkvStrides);
   hipdnnPluginConstData_t opGraph;
@@ -611,7 +611,7 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsSdpa) {
   ASSERT_EQ(engineIDs[0], hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID);
 
   // SDPA with attn_mask should be supported.
-  builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph(
+  builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
       qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims,
       qkvStrides, hipdnn_data_sdk::data_objects::DataType::HALF,
       /*withAttnMask=*/true);
@@ -624,7 +624,7 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsSdpa) {
   ASSERT_EQ(numEngines, 1);
 
   // SDPA with stats output is NOT supported (yet).
-  builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph(
+  builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
       qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims,
       qkvStrides, hipdnn_data_sdk::data_objects::DataType::HALF,
       /*withAttnMask=*/false, /*withScale=*/false, /*withStats=*/true);
