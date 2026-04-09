@@ -369,6 +369,20 @@ const auto& GetSolverConfigs<BatchNormSolverConfig>()
     return configs;
 }
 
+template <class SolverInfo>
+const auto& GetSolverNames()
+{
+    static const auto names = [] {
+        std::vector<std::string> names_;
+        const auto& sinfo = GetSolversInfo<SolverInfo>();
+        names_.reserve(sinfo.size());
+        for(const auto& s : sinfo)
+            names_.push_back(s.first);
+        return names_;
+    }();
+    return names;
+}
+
 template <class TestCase>
 const auto GetTestCases()
 {

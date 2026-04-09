@@ -358,11 +358,11 @@ class TestPreviewFilesConstants:
 
     def test_constants_in_lift_only_when_not_set(self, load_test_config):
         """Config without constants_include gets a constants file in lift-only preview."""
-        config = load_test_config("convolution_bwd.yaml")
+        config = load_test_config("batchnorm_backward.yaml")
         files = _preview_files(config, MODE_LIFT_ONLY)
         constants_files = [f for f in files if "constants/" in f]
         assert len(constants_files) == 1
-        assert "ConvolutionBwdConstants.hpp" in constants_files[0]
+        assert "BatchnormBackwardConstants.hpp" in constants_files[0]
 
     def test_no_constants_in_frontend_mode(self, convolution_fwd_config):
         """Frontend mode never generates constants file."""

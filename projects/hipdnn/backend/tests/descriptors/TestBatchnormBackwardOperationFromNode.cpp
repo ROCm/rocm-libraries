@@ -431,12 +431,12 @@ TEST_F(TestBatchnormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
     EXPECT_EQ(computeType, HIPDNN_DATA_FLOAT);
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD_EXT);
 
     // Verify name
     int64_t nameCount = 0;

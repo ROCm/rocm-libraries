@@ -27,14 +27,14 @@
 #pragma once
 
 #include <cstdio>
+#include <memory>
 #include <mutex>
 
 #include "platform.hpp"
-#include "singleton.hpp"
 
 namespace hiptensor
 {
-    class HIPTENSOR_EXPORT Logger : public LazySingleton<Logger>
+    class HIPTENSOR_EXPORT Logger
     {
     private:
         using Callback_t = void (*)(int32_t logLevel, const char* funcName, const char* msg);
@@ -63,6 +63,12 @@ namespace hiptensor
 
         // For static initialization
         friend std::unique_ptr<Logger> std::make_unique<Logger>();
+
+        // Defined in logger.cpp (not a template) so that exactly one static instance exists
+        // across all modules. A template function (e.g. via LazySingleton<Logger>) would produce
+        // a separate static per module on Windows, giving distinct Logger objects in the DLL and
+        // in any binary that includes this header directly.
+        static std::unique_ptr<Logger> const& instance();
 
         ~Logger();
 
