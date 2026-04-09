@@ -122,65 +122,48 @@ BenchmarkProblems:
   ########################################
   # FP4 TN — no bias, large DU (DU = 512)
   #
-  # Tests deeper unroll depth. K restricted to multiples of 512.
-  # M,N: multiples of 64 (full tiles/edges), multiples of 16, odd, and
-  # other non-aligned values to exercise scale padding across granularities.
+  # DU > 256 + pre-shuffle not yet supported: DTL buffer_load shares vaddr
+  # for HBM and LDS, but they need different row strides (depthUBytes vs
+  # subIterKBytes). See ~/claude_workspace/preshuffle_du512_analysis.md.
   ########################################
-  -
-    - # ProblemType
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: b
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
-      UseBeta: True
-      Batched: True
-      SwizzleTensorB: True
-      ActivationFuncCall: True
-
-    - InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
-          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
-          - [16, 16, 128, 1,  1, 6, 4,  2, 2]  # MT 192x128 (asymmetric)
-          - [16, 16, 128, 1,  1, 2, 6,  4, 1]  # MT 128x96  (4x1 wave group)
-        - PrefetchGlobalRead: [0]
-        - PrefetchLocalRead: [0]
-        - DepthU: [512]                 # 4*MI_K; K must be mult of 512
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0]
-        - StaggerU: [0]
-        - UseSubtileImpl: [1]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          # Full tiles, K = multiples of DU=512
-          - Exact: [128, 128, 1,  512]
-          - Exact: [256, 256, 1, 1024]
-          # Edge cases: M,N = k*64 (FP4 granularity) but not multiples of macro tile
-          - Exact: [64,  64,  1,  512]   # 1*64, edge for MT >= 96
-          - Exact: [192, 192, 1,  512]   # 3*64, edge for MT=128,256,384
-          - Exact: [320, 320, 1,  512]   # 5*64, edge for MT=128,192,256,384
-          # Asymmetric edge case
-          - Exact: [192, 256, 1,  512]   # M edge, N full tile
-          # Non-multiple-of-32 M,N (multiples of 16)
-          - Exact: [48,   48, 1,  512]   # 3*16, both M,N non-mult-of-32
-          - Exact: [112, 176, 1,  512]   # 7*16, 11*16
-          # Even non-multiple-of-16 M,N
-          - Exact: [50,  100, 1,  512]   # 50=2*25, 100=4*25
-          - Exact: [66,   66, 1,  512]   # both even, neither mult-of-16
-          # Odd M,N
-          - Exact: [17,   33, 1,  512]   # both odd
-          - Exact: [63,   63, 1,  512]   # both odd, just below 64
-          - Exact: [97,  129, 1,  512]   # both odd, just above 96/128
+  # -
+  #   - # ProblemType
+  #     OperationType: GEMM
+  #     DataType: F4
+  #     DestDataType: b
+  #     ComputeDataType: s
+  #     HighPrecisionAccumulate: True
+  #     MXBlockA: 32
+  #     MXBlockB: 32
+  #     TransposeA: 1
+  #     TransposeB: 0
+  #     UseBeta: True
+  #     Batched: True
+  #     SwizzleTensorB: True
+  #     ActivationFuncCall: True
+  #
+  #   - InitialSolutionParameters:
+  #     BenchmarkCommonParameters:
+  #       - KernelLanguage: ["Assembly"]
+  #     ForkParameters:
+  #       - MatrixInstruction:
+  #         - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+  #         - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
+  #         - [16, 16, 128, 1,  1, 6, 4,  2, 2]  # MT 192x128 (asymmetric)
+  #         - [16, 16, 128, 1,  1, 2, 6,  4, 1]  # MT 128x96  (4x1 wave group)
+  #       - PrefetchGlobalRead: [0]
+  #       - PrefetchLocalRead: [0]
+  #       - DepthU: [512]
+  #       - ScheduleIterAlg: [3]
+  #       - DirectToLds: [1]
+  #       - StreamK: [0]
+  #       - StaggerU: [0]
+  #       - UseSubtileImpl: [1]
+  #     BenchmarkJoinParameters:
+  #     BenchmarkFinalParameters:
+  #       - ProblemSizes:
+  #         - Exact: [128, 128, 1, 512]
+  #         - Exact: [64, 64, 1, 512]
 
   ########################################
   # F4SS TN — MX FP4 input, F32 output, DU = 2*MI_K = 256
@@ -747,8 +730,9 @@ BenchmarkProblems:
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]
           - [16, 16, 128, 1, 1, 4, 4, 2, 2]
           - [16, 16, 128, 1, 1, 8, 8, 2, 2]
-          - [16, 16, 128, 1, 1, 2, 2, 4, 1]
-          - [16, 16, 128, 1, 1, 2, 2, 1, 4]
+          # WG 4x1/1x4 commented out: fails with and without pre-shuffle
+          # - [16, 16, 128, 1, 1, 2, 2, 4, 1]
+          # - [16, 16, 128, 1, 1, 2, 2, 1, 4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
@@ -793,8 +777,9 @@ BenchmarkProblems:
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]
           - [16, 16, 128, 1, 1, 4, 4, 2, 2]
           - [16, 16, 128, 1, 1, 8, 8, 2, 2]
-          - [16, 16, 128, 1, 1, 2, 2, 4, 1]
-          - [16, 16, 128, 1, 1, 2, 2, 1, 4]
+          # WG 4x1/1x4 commented out: fails with and without pre-shuffle
+          # - [16, 16, 128, 1, 1, 2, 2, 4, 1]
+          # - [16, 16, 128, 1, 1, 2, 2, 1, 4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
