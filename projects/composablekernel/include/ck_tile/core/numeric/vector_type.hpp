@@ -88,142 +88,97 @@ using int32x16_t = int32_t __attribute__((ext_vector_type(16)));
 using int32x32_t = int32_t __attribute__((ext_vector_type(32)));
 using int32x64_t = int32_t __attribute__((ext_vector_type(64)));
 
-struct int8x12_tt // for int8_t x12
+struct int32x3_tt
 {
     int32_t data[3];
 };
 
-// TODO: Unclear what the point of this ext vector implementation override is. Clang can handle this
-// type and size just fine without the override.
 template <>
 struct impl::ext_vector<int8_t, 12>
 {
     static constexpr index_t N = 12;
-    using value_type           = int8x12_tt;
-    using type                 = int8x12_tt;
+    using value_type           = int32x3_tt;
+    using type                 = int32x3_tt;
 };
 
-template <f6_kind kind>
-struct int32x3_tt // for fp6x16 and bf6x16
+template <int N, f6_kind kind>
+struct f6x16xN_tt // Underlying type for ext_vector_t<fp6x16, N> and ext_vector_t<bf6x16, N> impls
 {
-    int32_t data[3];
-
-    CK_TILE_HOST_DEVICE int32x3_tt() = default;
-
-    CK_TILE_HOST_DEVICE int32x3_tt(const pk_f6_legacy_t<16, kind>& val)
-    {
-        data[0] = val.data_[0];
-        data[1] = val.data_[1];
-        data[2] = val.data_[2];
-    }
-
-    CK_TILE_HOST_DEVICE operator pk_f6_legacy_t<16, kind>() const
-    {
-        pk_f6_legacy_t<16, kind> result;
-        result.data_[0] = data[0];
-        result.data_[1] = data[1];
-        result.data_[2] = data[2];
-        return result;
-    }
-
-    CK_TILE_HOST_DEVICE int32x3_tt& operator[](index_t i)
-    {
-        (void)i;
-        return *this;
-    }
-
-    CK_TILE_HOST_DEVICE const int32x3_tt& operator[](index_t i) const
-    {
-        (void)i;
-        return *this;
-    }
-};
-
-template <f6_kind kind>
-struct int32x6_tt // for fp6x32 and bf6x32
-{
-    int32_t data[6];
+    int32_t data[N * 3];
 
     // Proxy reference structure is necessary for setting values by subscript.
     struct reference
     {
-        int32x6_tt& vec;
+        f6x16xN_tt& vec;
         index_t i;
 
-        CK_TILE_HOST_DEVICE reference& operator=(const int32x3_tt<kind>& val)
+        CK_TILE_HOST_DEVICE reference& operator=(const pk_f6_legacy_t<16, kind>& val)
         {
-            vec.data[i * 3]     = val.data[0];
-            vec.data[i * 3 + 1] = val.data[1];
-            vec.data[i * 3 + 2] = val.data[2];
+            vec.data[i * 3]     = val[0];
+            vec.data[i * 3 + 1] = val[1];
+            vec.data[i * 3 + 2] = val[2];
             return *this;
         }
 
-        CK_TILE_HOST_DEVICE operator int32x3_tt<kind>() const
+        CK_TILE_HOST_DEVICE operator pk_f6_legacy_t<16, kind>() const
         {
-            int32x3_tt<kind> result;
-            result.data[0] = vec.data[i * 3];
-            result.data[1] = vec.data[i * 3 + 1];
-            result.data[2] = vec.data[i * 3 + 2];
+            pk_f6_legacy_t<16, kind> result;
+            result.data_[0] = vec.data[i * 3];
+            result.data_[1] = vec.data[i * 3 + 1];
+            result.data_[2] = vec.data[i * 3 + 2];
             return result;
         }
     };
 
     CK_TILE_HOST_DEVICE reference operator[](index_t i) { return {*this, i}; }
 
-    CK_TILE_HOST_DEVICE int32x3_tt<kind> operator[](index_t i) const
+    CK_TILE_HOST_DEVICE pk_f6_legacy_t<16, kind> operator[](index_t i) const
     {
-        int32x3_tt<kind> result;
-        result.data[0] = data[i * 3];
-        result.data[1] = data[i * 3 + 1];
-        result.data[2] = data[i * 3 + 2];
+        pk_f6_legacy_t<16, kind> result;
+        result.data_[0] = data[i * 3];
+        result.data_[1] = data[i * 3 + 1];
+        result.data_[2] = data[i * 3 + 2];
         return result;
     }
 };
 
-template <f6_kind kind>
-struct vector_traits<int32x3_tt<kind>>
+template <int N, f6_kind kind>
+struct vector_traits<f6x16xN_tt<N, kind>>
 {
     using scalar_type                    = pk_f6_legacy_t<16, kind>;
-    static constexpr index_t vector_size = 1;
-};
-
-template <f6_kind kind>
-struct vector_traits<int32x6_tt<kind>>
-{
-    using scalar_type                    = pk_f6_legacy_t<32, kind>;
-    static constexpr index_t vector_size = 2;
+    static constexpr index_t vector_size = N;
 };
 
 template <>
 struct impl::ext_vector<pk_fp6x16_t, 1>
 {
     static constexpr index_t N = 1;
-    using value_type           = int32x3_tt<f6_kind::fp6>;
-    using type                 = int32x3_tt<f6_kind::fp6>;
+    using value_type           = f6x16xN_tt<1, f6_kind::fp6>;
+    using type                 = f6x16xN_tt<1, f6_kind::fp6>;
 };
 
 template <>
 struct impl::ext_vector<pk_fp6x16_t, 2>
 {
     static constexpr index_t N = 2;
-    using value_type           = int32x6_tt<f6_kind::fp6>;
-    using type                 = int32x6_tt<f6_kind::fp6>;
+    using value_type           = f6x16xN_tt<2, f6_kind::fp6>;
+    using type                 = f6x16xN_tt<2, f6_kind::fp6>;
 };
 
 template <>
 struct impl::ext_vector<pk_bf6x16_t, 1>
 {
     static constexpr index_t N = 1;
-    using value_type           = int32x3_tt<f6_kind::bf6>;
-    using type                 = int32x3_tt<f6_kind::bf6>;
+    using value_type           = f6x16xN_tt<1, f6_kind::bf6>;
+    using type                 = f6x16xN_tt<1, f6_kind::bf6>;
 };
 
 template <>
 struct impl::ext_vector<pk_bf6x16_t, 2>
 {
     static constexpr index_t N = 2;
-    using value_type           = int32x6_tt<f6_kind::bf6>;
-    using type                 = int32x6_tt<f6_kind::bf6>;
+    using value_type           = f6x16xN_tt<2, f6_kind::bf6>;
+    using type                 = f6x16xN_tt<2, f6_kind::bf6>;
 };
 
 // u32
