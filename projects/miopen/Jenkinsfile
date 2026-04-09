@@ -148,7 +148,7 @@ def runDockerBuild(String gpuFamily) {
 }
 
 def runTheRockDockerBuild() {
-    node(rocmnode("gfx90a")) {
+    node(rocmnode("docker")) {
         try {
             withWorkingDir {
                 utils.buildTheRockDockerImage()
