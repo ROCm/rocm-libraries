@@ -131,6 +131,8 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::match>
 /// three \p float values, which are ranked according to bits 10 through 14. The results are
 /// written back in a separate array of three <tt>unsigned int</tt> values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/block_radix_rank.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {

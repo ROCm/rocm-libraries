@@ -293,12 +293,12 @@ TEST_F(TestReductionOperationFromNode, GetAttributeWorksAfterFromNode)
         yScoped.get(), K_REDUCTION_TENSOR_Y_UID, HIPDNN_DATA_FLOAT, {2, 3, 1, 1}, {3, 1, 1, 1});
 
     // Verify operation type
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t opTypeCount = 0;
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
-    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_REDUCTION);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_REDUCTION_EXT);
 }
 
 TEST_F(TestReductionOperationFromNode, NamePreservedFromNode)
