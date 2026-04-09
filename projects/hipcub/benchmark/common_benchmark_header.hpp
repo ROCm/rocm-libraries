@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,9 @@
 #include <utility>
 #include <vector>
 
+// Primbench
+#include "primbench.hpp"
+
 // Google Benchmark
 #include "benchmark/benchmark.h"
 
@@ -49,12 +52,24 @@
 #define BENCHMARK_UTILS_INCLUDE_GUARD
 #include "benchmark_utils.hpp"
 
-#define HIP_CHECK(condition)         \
-  {                                  \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-  }
+#define HIP_CHECK(condition)                                                           \
+    {                                                                                  \
+        hipError_t error = condition;                                                  \
+        if(error != hipSuccess)                                                        \
+        {                                                                              \
+            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+            exit(error);                                                               \
+        }                                                                              \
+    }
 
+PRIMBENCH_REGISTER_TYPE(int8_t, "i8")
+PRIMBENCH_REGISTER_TYPE(int16_t, "i16")
+PRIMBENCH_REGISTER_TYPE(int32_t, "i32")
+PRIMBENCH_REGISTER_TYPE(int64_t, "i64")
+PRIMBENCH_REGISTER_TYPE(uint8_t, "u8")
+PRIMBENCH_REGISTER_TYPE(uint16_t, "u16")
+PRIMBENCH_REGISTER_TYPE(uint32_t, "u32")
+PRIMBENCH_REGISTER_TYPE(uint64_t, "u64")
+PRIMBENCH_REGISTER_TYPE(float, "f32")
+PRIMBENCH_REGISTER_TYPE(double, "f64")
+PRIMBENCH_REGISTER_TYPE(long long, "i64")
